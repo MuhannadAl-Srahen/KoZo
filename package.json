@@ -1,0 +1,52 @@
+{
+  "name": "kozo",
+  "productName": "KoZo",
+  "version": "1.0.0",
+  "description": "KoZo — Desktop Game Tracker for Windows",
+  "author": "KoZo",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k -n VITE,ELECTRON -c cyan,magenta \"vite\" \"wait-on tcp:5173 && electron .\"",
+    "geticon": "node scripts/gen-icon.js",
+    "build": "node scripts/gen-icon.js && vite build && electron-builder",
+    "rebuild": "cd node_modules/better-sqlite3 && npx prebuild-install --runtime electron --target 41.7.1 --arch x64 --tag-prefix v",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "build": {
+    "appId": "com.kozo.gametracker",
+    "productName": "KoZo",
+    "icon": "build/icon.png",
+    "files": [
+      "electron/**/*",
+      "dist/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "executableName": "KoZo",
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "shortcutName": "KoZo"
+    }
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.2",
+    "concurrently": "^10.0.3",
+    "electron": "^41.7.1",
+    "electron-builder": "^26.8.1",
+    "vite": "^8.0.16",
+    "wait-on": "^9.0.10"
+  },
+  "dependencies": {
+    "@fontsource/dm-sans": "^5.2.8",
+    "@tabler/icons-react": "^3.44.0",
+    "axios": "^1.17.0",
+    "better-sqlite3": "^12.10.0",
+    "chokidar": "^5.0.0",
+    "ps-list": "^9.0.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-router-dom": "^7.17.0"
+  }
+}
