@@ -1,0 +1,121 @@
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.message {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+.list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.list li {
+  list-style: disc;
+}
+
+.list li::marker {
+  color: var(--a);
+}
+
+.headerBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.success { background: rgba(74,222,128,0.12); color: #4ade80; }
+.error   { background: rgba(248,113,113,0.12); color: #f87171; }
+.warning { background: rgba(251,191,36,0.12); color: #fbbf24; }
+.info    { background: var(--ad);              color: var(--a); }
+
+.helpBox {
+  margin-top: 4px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.helpTitle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--status-upcoming);
+}
+
+.helpText {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+.helpText strong {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.helpSteps {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.helpSteps li::marker {
+  color: var(--a);
+  font-weight: 500;
+}
+
+.helpSteps strong {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.helpBtn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  background: var(--surface-3);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.helpBtn:hover {
+  border-color: var(--a);
+  color: var(--a);
+  background: var(--ad);
+}
