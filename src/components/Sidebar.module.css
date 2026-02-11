@@ -1,0 +1,335 @@
+.sidebar {
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
+  background: var(--surface-1);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* ── Logo area ──────────────────────────────────────────────── */
+.logoArea {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 16px 15px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.logoText {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.appName {
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--text-primary);
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.appSub {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--a);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  opacity: 0.85;
+}
+
+/* ── Nav ────────────────────────────────────────────────────── */
+.nav {
+  flex: 1;
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+}
+
+.sectionLabel {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  padding: 8px 8px 4px;
+}
+
+.navItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: var(--r-input);
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 13.5px;
+  text-decoration: none;
+  transition: background 0.12s ease, color 0.12s ease;
+  position: relative;
+}
+
+.navItem:hover {
+  background: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.navItemActive {
+  background: var(--ad);
+  color: var(--a);
+}
+
+.navItemActive::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: var(--a);
+  border-radius: 0 2px 2px 0;
+}
+
+.navIcon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.navItemActive .navIcon {
+  opacity: 1;
+}
+
+/* ── Bottom area ────────────────────────────────────────────── */
+.bottomArea {
+  padding: 8px 8px 12px;
+  border-top: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── Profile chip ───────────────────────────────────────────── */
+.profileChip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: var(--r-input);
+  text-decoration: none;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  transition: background 0.12s, border-color 0.12s;
+}
+.profileChip:hover { border-color: var(--ab); }
+.profileChipActive { border-color: var(--a); background: var(--ad); }
+
+.profileAvatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--a), var(--ab));
+}
+.profileAvatar img { width: 100%; height: 100%; object-fit: cover; }
+.profileInitials { font-size: 13px; font-weight: 600; color: #0a0a12; }
+
+.profileMeta { min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.profileName {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.profileLink { font-size: 11px; color: var(--text-muted); }
+.profileChipActive .profileLink { color: var(--a); }
+
+.settingsLink {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--r-input);
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: background 0.12s, color 0.12s;
+}
+
+.settingsLink:hover {
+  background: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.settingsLinkActive {
+  background: var(--ad);
+  color: var(--a);
+}
+
+.settingsLinkActive .navIcon {
+  opacity: 1;
+}
+
+/* ── Now playing card ───────────────────────────────────────── */
+.nowPlaying {
+  background: var(--surface-2);
+  border: 1px solid var(--ab);
+  border-radius: var(--r-card);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nowPlayingHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--a);
+}
+
+.liveDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-playing);
+  flex-shrink: 0;
+  animation: livePulse 1.4s ease-in-out infinite;
+}
+
+@keyframes livePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+.nowPlayingName {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nowPlayingTime {
+  font-size: 11px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── AFK / Away state ───────────────────────────────────────── */
+.nowPlayingIdle {
+  border-color: var(--border);
+}
+.nowPlayingIdle .nowPlayingHeader {
+  color: var(--text-muted);
+}
+.liveDotIdle {
+  background: var(--text-muted);
+  animation: none;
+}
+.nowPlayingAfk {
+  font-size: 9.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #fb923c;
+  background: rgba(251,146,60,0.12);
+  border: 1px solid rgba(251,146,60,0.25);
+  border-radius: var(--r-pill);
+  padding: 1px 7px;
+}
+
+/* ── Accent color picker ────────────────────────────────────── */
+.accentSection {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.accentLabel {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  padding: 0 2px;
+}
+
+.accentDots {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px;
+  flex-wrap: wrap;
+}
+
+.dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+  flex-shrink: 0;
+}
+
+.dot:hover {
+  transform: scale(1.15);
+}
+
+.dotActive {
+  border-color: rgba(255, 255, 255, 0.6);
+  transform: scale(1.1);
+}
+
+.customColorWrapper {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.customColorSwatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  cursor: pointer;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.colorInput {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  width: 100%;
+  height: 100%;
+  border: none;
+  padding: 0;
+}
