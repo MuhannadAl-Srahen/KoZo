@@ -1,0 +1,548 @@
+/* ── Portrait card ──────────────────────────────────────────── */
+.card {
+  background: var(--surface-2);
+  border-radius: var(--r-card);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.12s;
+}
+
+.card:hover { border-color: var(--ab); transform: translateY(-2px); }
+.cardDimmed { opacity: 0.55; }
+.cardSelected { border-color: var(--a) !important; box-shadow: 0 0 0 2px var(--ab); transform: none !important; }
+
+/* ── Banner ─────────────────────────────────────────────────── */
+.banner {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 2 / 3;
+}
+
+/* Foreground cover — `contain` shows the WHOLE image. True 2:3 posters fill the
+   card exactly; landscape art (e.g. a header for a game with no portrait) is
+   shown in full and centered, with the blurred layer filling the gaps. */
+.bannerImg {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+/* Blurred, zoomed copy behind the cover so landscape art fills the 2:3 frame
+   nicely instead of leaving empty bars. Invisible for true portrait covers. */
+.bannerBlur {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  filter: blur(16px) brightness(0.55) saturate(1.1);
+  transform: scale(1.18);
+}
+
+.bannerIcon { color: rgba(255,255,255,0.10); position: relative; z-index: 1; }
+
+/* Name gradient overlay */
+.bannerName {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  padding: 40px 10px 10px;
+  background: linear-gradient(to bottom, transparent, rgba(0,0,0,0.9));
+  color: #fff;
+  font-size: 16px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  z-index: 2;
+}
+
+.bannerNameSmall {
+  font-size: 13px;
+  padding: 24px 7px 7px;
+}
+
+/* ── Badges ─────────────────────────────────────────────────── */
+.sourceBadge {
+  position: absolute;
+  top: 7px; left: 7px;
+  z-index: 3;
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+  font-size: 10px;
+  font-weight: 500;
+  border: 1px solid;
+  background: rgba(0,0,0,0.72);
+}
+
+.completionTag {
+  position: absolute;
+  top: 30px; left: 7px;
+  z-index: 3;
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+  font-size: 10px;
+  font-weight: 600;
+  border: 1px solid;
+  background: rgba(0,0,0,0.72);
+}
+
+/* Top-left, stacked UNDER the source badge (Steam/Cracked) so it never collides
+   with the play/favorite buttons in the top-right corner. */
+.liveBadge {
+  position: absolute;
+  top: 32px; left: 7px;
+  z-index: 3;
+  display: flex; align-items: center; gap: 5px;
+  background: rgba(0,0,0,0.82);
+  padding: 3px 8px 3px 6px;
+  border-radius: var(--r-pill);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--status-playing);
+  border: 1px solid rgba(74,222,128,0.25);
+}
+
+.liveDot {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--status-playing);
+  animation: livePulse 1.4s ease-in-out infinite;
+}
+
+@keyframes livePulse { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+.notInstalledBadge {
+  position: absolute;
+  top: 7px; right: 7px;
+  z-index: 3;
+  background: rgba(0,0,0,0.82);
+  padding: 3px 8px;
+  border-radius: var(--r-pill);
+  font-size: 10px;
+  color: #fb923c;
+  border: 1px solid rgba(251,146,60,0.25);
+}
+
+/* Finished badge — bottom-left of the banner, above the name overlay */
+.finishedBadge {
+  position: absolute;
+  left: 7px;
+  bottom: 30px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 6px;
+  border-radius: var(--r-pill);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--a);
+  background: rgba(9,9,15,0.78);
+  border: 1px solid var(--ab);
+}
+
+/* ── Selection ──────────────────────────────────────────────── */
+.selectedOverlay {
+  position: absolute; inset: 0;
+  background: var(--ad);
+  z-index: 2; pointer-events: none;
+}
+
+.checkbox {
+  position: absolute;
+  top: 8px; right: 8px; z-index: 5;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.55);
+  background: rgba(0,0,0,0.72);
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.checkboxSelected { border-color: var(--a); background: var(--a); color: #09090f; }
+
+/* ── Info strip below banner ─────────────────────────────────── */
+.gameInfo {
+  padding: 8px 10px 9px;
+  display: flex; align-items: center;
+}
+
+.gameInfoSmall { padding: 5px 7px 7px; }
+
+.meta {
+  display: flex; align-items: center; gap: 7px;
+  flex-wrap: wrap; width: 100%;
+}
+
+.playtime {
+  display: flex; align-items: center; gap: 3px;
+  color: var(--a);
+  font-weight: 500;
+  font-size: 13px;
+  margin-left: auto;
+}
+
+.gameInfoSmall .playtime { font-size: 11.5px; }
+
+.trophies {
+  display: flex; align-items: center; gap: 3px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.gameInfoSmall .trophies { font-size: 11.5px; }
+
+.cardSourceBadge {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  border: 1px solid;
+}
+
+.lastPlayed {
+  color: var(--text-muted);
+  font-size: 11px;
+  flex: 1;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ════════════════════════════════════════════════════════════
+   LIST CARD — individual cards (same family as portrait cards)
+═══════════════════════════════════════════════════════════ */
+
+.listCard {
+  display: flex;
+  align-items: center;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  overflow: hidden;
+  cursor: pointer;
+  min-height: 88px;
+  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
+}
+
+.listCard:hover {
+  border-color: var(--ab);
+  box-shadow: inset 3px 0 0 var(--a);
+  background: var(--surface-3);
+}
+
+.listCardSelected {
+  border-color: var(--a) !important;
+  box-shadow: 0 0 0 2px var(--ab), inset 3px 0 0 var(--a) !important;
+}
+
+/* Portrait thumbnail — flush to card left edge */
+.listThumb {
+  width: 58px;
+  height: 78px;
+  flex-shrink: 0;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-3);
+  margin: 8px 0 8px 8px;
+  border-radius: 6px;
+}
+
+/* Contained foreground cover — shows full image without cropping */
+.listThumbImg {
+  width: 100%; height: 100%;
+  object-fit: contain;
+  position: absolute; inset: 0;
+  z-index: 1;
+}
+
+/* Blurred fill behind the cover for landscape art */
+.listThumbBlur {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  position: absolute; inset: 0;
+  z-index: 0;
+  filter: blur(12px) brightness(0.5) saturate(1.1);
+  transform: scale(1.2);
+}
+
+/* Green bar on left edge of thumbnail when LIVE */
+.listLiveBar {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--status-playing);
+  border-radius: 0 2px 2px 0;
+}
+
+/* Selection overlay sits on top of thumbnail */
+.listSelOverlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s;
+}
+
+.listSelOverlaySelected {
+  background: var(--ab);
+}
+
+.listCheckbox {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.65);
+  background: rgba(0,0,0,0.45);
+  backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.listCheckboxSelected { border-color: var(--a); background: var(--a); color: #09090f; }
+
+/* Center info */
+.listInfo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 10px 12px;
+}
+
+.listName {
+  font-size: 14.5px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.listSub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.listSourceBadge {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  border: 1px solid;
+}
+
+.listLivePill {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--status-playing);
+}
+
+.listNotInstalledTag {
+  font-size: 11px;
+  color: #fb923c;
+}
+
+.listFinishedTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--a);
+}
+
+.listCompletionTag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  border: 1px solid;
+}
+
+/* Achievement mini-bar */
+.listAchRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.listAchBar {
+  width: 52px;
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.listAchFill {
+  height: 100%;
+  background: var(--a);
+  border-radius: 2px;
+}
+
+.listAchText {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* Right stats — simple inline, no column headers */
+.listStats {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-shrink: 0;
+  padding-right: 24px;
+  margin-left: 16px;
+}
+
+.listStatItem {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.listStatItem svg { color: var(--a); }
+.listStatItemDim svg { color: var(--text-muted); }
+.listStatItemDim { color: var(--text-muted); }
+
+.listDot {
+  width: 3px; height: 3px;
+  border-radius: 50%;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+.listDate {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  min-width: 64px;
+  text-align: right;
+}
+
+/* ── Play button ─────────────────────────────────────────────── */
+.playBtn {
+  position: absolute;
+  top: 7px; right: 7px;
+  z-index: 4;
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0,0,0,0.75);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 0.12s, background 0.12s, transform 0.12s;
+}
+.card:hover .playBtn {
+  opacity: 1;
+  transform: translateY(0);
+}
+.playBtn:hover {
+  background: var(--a);
+  color: #09090f;
+}
+
+/* Favorite star on the portrait cover — hidden until hover, but always shown
+   (gold) once starred so favorites read at a glance. */
+.favBtn {
+  position: absolute;
+  top: 7px;
+  z-index: 4;
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0,0,0,0.75);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 0.12s, background 0.12s, transform 0.12s, color 0.12s;
+}
+.card:hover .favBtn { opacity: 1; transform: translateY(0); }
+.favBtn:hover { background: rgba(0,0,0,0.9); color: #fbbf24; }
+.favBtnActive {
+  opacity: 1;
+  transform: translateY(0);
+  color: #fbbf24;
+  background: rgba(0,0,0,0.78);
+}
+
+/* Favorite star in the list row */
+.listFavBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px; height: 30px;
+  border-radius: var(--r-input);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.listFavBtn:hover { color: #fbbf24; border-color: rgba(251,191,36,0.4); }
+.listFavBtnActive { color: #fbbf24; border-color: rgba(251,191,36,0.4); background: rgba(251,191,36,0.1); }
+
+/* Star "pop" when a game is favorited — runs once as the active class is added.
+   Applied to the icon so it doesn't fight the button's own positioning transform. */
+@keyframes starPop {
+  0%   { transform: scale(1); }
+  45%  { transform: scale(1.4); }
+  100% { transform: scale(1); }
+}
+.favBtnActive svg,
+.listFavBtnActive svg { animation: starPop 0.3s ease; }
+
+/* Tactile press feedback on click — subtle scale-down, snappier than the hover. */
+.card:active   { transform: scale(0.985); transition: transform 0.07s ease; }
+.listCard:active { transform: scale(0.992); transition: transform 0.07s ease; }
+
+.listPlayBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 11px;
+  border-radius: var(--r-input);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.listPlayBtn:hover {
+  background: var(--a);
+  color: #09090f;
+  border-color: var(--a);
+}
