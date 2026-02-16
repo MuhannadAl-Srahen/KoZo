@@ -1,0 +1,392 @@
+.searchRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-input);
+  padding: 0 12px;
+  transition: border-color 0.12s;
+}
+
+.searchRow:focus-within {
+  border-color: var(--ab);
+}
+
+.searchIcon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.searchInput {
+  flex: 1;
+  padding: 10px 0;
+  background: transparent;
+  font-size: 13.5px;
+  color: var(--text-primary);
+}
+
+.searchInput::placeholder {
+  color: var(--text-muted);
+}
+
+/* ── Results ──────────────────────────────────────────────── */
+.resultsList {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.resultItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: var(--r-input);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.resultItem:hover {
+  background: var(--surface-3);
+}
+
+.resultItemSelected {
+  background: var(--ad);
+  border-color: var(--ab);
+}
+
+/* Landscape capsule thumbnail — large enough to actually see the game */
+.resultIcon {
+  width: 120px;
+  height: 68px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.resultIcon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+.resultInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.resultName {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resultMeta {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
+.resultCheck {
+  color: var(--a);
+  flex-shrink: 0;
+}
+
+.manualOption {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--r-input);
+  cursor: pointer;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  margin-top: 4px;
+  transition: background 0.1s, color 0.1s;
+}
+
+.manualOption:hover {
+  background: var(--surface-3);
+  color: var(--text-primary);
+}
+
+.manualOptionSelected {
+  background: var(--ad);
+  border-color: var(--ab);
+  color: var(--a);
+}
+
+.searchHint {
+  text-align: center;
+  padding: 20px 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.searching {
+  text-align: center;
+  padding: 16px 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+/* ── Selected game chip ───────────────────────────────────── */
+.selectedChip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--ab);
+  border-radius: var(--r-input);
+  padding: 7px 10px;
+}
+
+.selectedThumb {
+  width: 32px;
+  height: 22px;
+  border-radius: 4px;
+  overflow: hidden;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.selectedThumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.selectedChipName {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.selectedChipMeta {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.selectedChipClear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.1s, background 0.1s;
+}
+
+.selectedChipClear:hover {
+  color: var(--text-secondary);
+  background: var(--surface-3);
+}
+
+/* ── Form fields ──────────────────────────────────────────── */
+.divider {
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  margin: 16px 0;
+}
+
+/* ── Local file picker ────────────────────────────────────── */
+.fileRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.fileBtn {
+  padding: 7px 14px;
+  border-radius: var(--r-input);
+  border: 1px solid var(--border);
+  background: var(--surface-3);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.12s, color 0.12s;
+  flex-shrink: 0;
+}
+
+.fileBtn:hover {
+  border-color: var(--ab);
+  color: var(--text-primary);
+}
+
+.fileName {
+  font-size: 12px;
+  color: var(--a);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileHint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.field {
+  margin-bottom: 14px;
+}
+
+.field:last-child {
+  margin-bottom: 0;
+}
+
+.label {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.labelRequired::after {
+  content: ' *';
+  color: var(--status-dropped);
+}
+
+/* Exe row — input + pick-running button side by side */
+.exeRow {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.exeRow .input {
+  flex: 1;
+}
+
+.pickBtn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 12px;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-input);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+  flex-shrink: 0;
+}
+
+.pickBtn:hover {
+  border-color: var(--ab);
+  color: var(--a);
+  background: var(--ad);
+}
+
+.pickerWrap {
+  margin-top: 8px;
+}
+
+.input {
+  width: 100%;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-input);
+  padding: 9px 12px;
+  font-size: 13.5px;
+  color: var(--text-primary);
+  transition: border-color 0.12s;
+}
+
+.input:focus {
+  border-color: var(--ab);
+  outline: none;
+}
+
+.input::placeholder {
+  color: var(--text-muted);
+}
+
+.inputHint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 5px;
+  line-height: 1.5;
+}
+
+.inputError {
+  border-color: var(--status-dropped) !important;
+}
+
+.errorText {
+  font-size: 11px;
+  color: var(--status-dropped);
+  margin-top: 4px;
+}
+
+/* ── Source pills ─────────────────────────────────────────── */
+.pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pill {
+  padding: 5px 12px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s, color 0.1s;
+}
+
+.pill:hover {
+  background: var(--surface-3);
+  color: var(--text-primary);
+}
+
+.pillActive {
+  background: var(--ad);
+  border-color: var(--ab);
+  color: var(--a);
+}
+
+/* ── Warning ──────────────────────────────────────────────── */
+.warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: rgba(251, 146, 60, 0.08);
+  border: 1px solid rgba(251, 146, 60, 0.2);
+  border-radius: var(--r-input);
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #fb923c;
+  margin-top: 8px;
+  line-height: 1.5;
+}
