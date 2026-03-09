@@ -1,0 +1,273 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px 12px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+}
+
+.pageTitle {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 120px;
+}
+
+.filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dateInput {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-input);
+  padding: 6px 10px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  transition: border-color 0.12s;
+  color-scheme: dark;
+}
+
+.dateInput:focus {
+  outline: none;
+  border-color: var(--ab);
+  color: var(--text-primary);
+}
+
+.dateSep {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* ── Content ───────────────────────────────────────────────── */
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px 24px;
+  transform: translateZ(0);
+}
+
+/* ── Summary strip ─────────────────────────────────────────── */
+.summaryStrip {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  padding: 14px 20px;
+  margin-bottom: 20px;
+}
+
+.summaryItem {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.summaryValue {
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--a);
+  line-height: 1;
+}
+
+.summaryLabel {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.summaryDivider {
+  width: 1px;
+  height: 28px;
+  background: var(--border);
+}
+
+/* ── Empty ─────────────────────────────────────────────────── */
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: 300px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.emptyTitle {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.emptyHint {
+  font-size: 12.5px;
+  text-align: center;
+  max-width: 280px;
+  line-height: 1.6;
+}
+
+/* ── Day group ─────────────────────────────────────────────── */
+.dayGroup {
+  margin-bottom: 20px;
+}
+
+.dayHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2px 8px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.dayLabel {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.dayTotal {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ── Session rows ──────────────────────────────────────────── */
+.dayRows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sessionRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  padding: 10px 16px 10px 10px;
+  transition: border-color 0.1s, background 0.1s;
+}
+
+.sessionRow:hover {
+  border-color: var(--ab);
+  background: var(--surface-3);
+}
+
+/* Thumbnail */
+.thumb {
+  width: 42px;
+  height: 56px;
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Game info */
+.sessionInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.sessionGame {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 3px;
+}
+
+.sessionTime {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Duration */
+.sessionDur {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  min-width: 56px;
+  justify-content: flex-end;
+}
+
+.sessionDur svg {
+  color: var(--text-muted);
+}
+
+/* Achievement count */
+.sessionAch {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-disabled);
+  flex-shrink: 0;
+  min-width: 32px;
+  justify-content: flex-end;
+}
+
+.sessionAch svg {
+  color: var(--text-disabled);
+}
+
+.sessionAchHas {
+  color: var(--a);
+}
+
+.sessionAchHas svg {
+  color: var(--a);
+}
+
+/* ── Load more ─────────────────────────────────────────────── */
+.loadMore {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0;
+}
+
+.loadMoreBtn {
+  padding: 8px 20px;
+  border-radius: var(--r-input);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.loadMoreBtn:hover {
+  border-color: var(--ab);
+  color: var(--text-primary);
+}
