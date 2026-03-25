@@ -1,0 +1,140 @@
+/* Anchored to bottom-right, above any modal overlays */
+.stack {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 10px;
+  z-index: 99999;
+  pointer-events: none;
+}
+
+/* ── Toast card ── */
+.toast {
+  width: 320px;
+  background: #1a1a2e;
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6), 0 1px 0 rgba(255,255,255,0.05) inset;
+  pointer-events: all;
+  transform-origin: bottom right;
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(20px) scale(0.96); }
+  to   { opacity: 1; transform: translateX(0) scale(1); }
+}
+
+@keyframes slideOut {
+  from { opacity: 1; transform: translateX(0) scale(1); }
+  to   { opacity: 0; transform: translateX(24px) scale(0.94); }
+}
+
+.toastIn  { animation: slideIn 0.28s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.toastOut { animation: slideOut 0.32s ease-in both; }
+
+.stacked { opacity: 0.75; transform: scale(0.97); }
+
+/* ── Header bar ── */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px 6px;
+  background: rgba(255,255,255,0.04);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.headerIcon { color: var(--a); flex-shrink: 0; }
+
+.headerText {
+  flex: 1;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--a);
+}
+
+.close {
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 3px;
+  color: rgba(255,255,255,0.3);
+  cursor: pointer;
+  transition: color 0.1s, background 0.1s;
+}
+.close:hover { color: rgba(255,255,255,0.7); background: rgba(255,255,255,0.08); }
+
+/* ── Body ── */
+.body {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px 10px;
+}
+
+.iconWrap {
+  width: 52px;
+  height: 52px;
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 1px solid rgba(255,255,255,0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.iconFallback {
+  background: var(--ad);
+  color: var(--a);
+}
+
+.achIcon { width: 100%; height: 100%; object-fit: cover; }
+
+.info { flex: 1; min-width: 0; }
+
+.achName {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: #e0e0f0;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.achDesc {
+  font-size: 11px;
+  color: rgba(255,255,255,0.45);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gameName {
+  font-size: 11px;
+  color: var(--a);
+  margin-top: 4px;
+  opacity: 0.8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Progress bar ── */
+.progressBar {
+  height: 2px;
+  background: rgba(255,255,255,0.06);
+}
+
+.progressFill {
+  height: 100%;
+  background: var(--a);
+  transition: width 0.1s linear;
+}
