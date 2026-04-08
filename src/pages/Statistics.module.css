@@ -1,0 +1,499 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px 12px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.pageTitle {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.periodBtns {
+  display: flex;
+  gap: 4px;
+}
+
+.periodBtn {
+  padding: 5px 14px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+
+.periodBtn:hover { color: var(--text-secondary); border-color: var(--ab); }
+.periodBtnActive { background: var(--ad); color: var(--a); border-color: var(--ab); }
+
+/* ── First-load placeholder ────────────────────────────────── */
+.firstLoad {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── Content ───────────────────────────────────────────────── */
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px 24px;
+  transform: translateZ(0);
+}
+
+/* ── Highlight cards ───────────────────────────────────────── */
+.highlights {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.hlCard {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  transition: border-color 0.12s;
+}
+
+.hlCard:hover { border-color: var(--ab); }
+
+.hlIcon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.hlBody {
+  min-width: 0;
+}
+
+.hlValue {
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--text-primary);
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hlLabel {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 1px;
+  white-space: nowrap;
+}
+
+/* ── Sections ──────────────────────────────────────────────── */
+.section {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  padding: 16px 18px;
+  margin-bottom: 12px;
+}
+
+.sectionTitle {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-secondary);
+  margin-bottom: 14px;
+}
+
+/* Header row for the chart section (title + day pill / hint) */
+.sectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.sectionHead .sectionTitle { margin-bottom: 0; }
+.sectionHint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.dayPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--a);
+  background: var(--ad);
+  border: 1px solid var(--ab);
+  border-radius: var(--r-pill);
+  padding: 3px 8px 3px 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.dayPill:hover { background: var(--ab); }
+
+.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 56px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* ── Activity chart ────────────────────────────────────────── */
+.chartWrap {
+  overflow: hidden;
+  padding-top: 4px;
+}
+
+.chart {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  height: 140px;
+  width: 100%;
+}
+
+/* Each bar is a clickable button — reset native chrome. The column itself stays
+   transparent; hover/selection act on the BAR so it never looks like a box. */
+.chartCol {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  padding: 4px 0 0;
+  cursor: pointer;
+}
+.chartColStatic { cursor: default; }
+
+/* The plotting area each bar grows inside — keeps bars slim + centred regardless
+   of how wide the column is (fixes the giant-block look with few days). */
+.chartBarArea {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.chartBar {
+  width: 100%;
+  max-width: 26px;
+  min-height: 4px;
+  background: linear-gradient(180deg, var(--a) 0%, var(--ab) 100%);
+  border-radius: 4px 4px 2px 2px;
+  transition: height 0.25s, filter 0.15s, transform 0.12s, box-shadow 0.15s;
+  transform-origin: bottom center;
+}
+/* Hover lifts + brightens the bar itself (not a surrounding box) */
+.chartCol:not(.chartColStatic):hover .chartBar { filter: brightness(1.22); transform: scaleX(1.12); }
+
+/* Empty days: a faint stub so the column still reads on the timeline */
+.chartBarEmpty {
+  height: 4px;
+  background: var(--surface-3);
+}
+
+.chartBarToday {
+  box-shadow: 0 0 0 1.5px var(--a), 0 0 8px -2px var(--a);
+}
+
+/* Selected day → solid, brighter bar with a ring; clearly the bar, not a box */
+.chartBarSel {
+  background: var(--a);
+  filter: brightness(1.12);
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--a);
+}
+
+.chartLabel {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  line-height: 1;
+  height: 11px;
+  flex-shrink: 0;
+}
+.chartLabelToday { color: var(--a); font-weight: 500; }
+.chartLabelSel   { color: var(--text-secondary); font-weight: 500; }
+
+/* ── Day drill-down panel ──────────────────────────────────── */
+.dayDetail {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.dayDetailHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.dayDetailTitle {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.dayDetailTotal {
+  font-size: 12px;
+  color: var(--a);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.dayDetailSub {
+  color: var(--text-secondary);
+  font-weight: 400;
+  margin-left: 6px;
+}
+.dayDetailEmpty {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 10px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* Scrolls when a day has many games / unlocks — never blows out the card height */
+.dayDetailScroll {
+  max-height: 240px;
+  overflow-y: auto;
+  transform: translateZ(0);
+}
+.dayDetailSubhead {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin: 10px 0 2px;
+}
+.daySession, .dayAch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.daySession:last-child, .dayAch:last-child { border-bottom: none; }
+.daySessionName {
+  font-size: 13px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.daySessionMeta {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-left: auto;
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding-left: 8px;
+}
+.daySessionTime {
+  font-size: 12px;
+  color: var(--text-primary);
+  font-weight: 500;
+  flex-shrink: 0;
+  min-width: 48px;
+  text-align: right;
+}
+.dayAchThumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-3);
+  flex-shrink: 0;
+}
+.dayAchThumb img { width: 100%; height: 100%; object-fit: cover; }
+
+/* ── Mid grid ──────────────────────────────────────────────── */
+/* ── Horizontal bars ───────────────────────────────────────── */
+.hbars {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hbar {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.hbarMeta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.hbarRank {
+  font-size: 11px;
+  color: var(--text-muted);
+  width: 16px;
+  flex-shrink: 0;
+}
+
+.hbarName {
+  font-size: 13px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.hbarTime {
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.hbarTrack {
+  height: 5px;
+  background: var(--surface-3);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.hbarFill {
+  height: 100%;
+  background: var(--a);
+  border-radius: 3px;
+  min-width: 3px;
+  opacity: 0.75;
+  transition: width 0.3s;
+}
+
+/* ── Achievement list ──────────────────────────────────────── */
+.achList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.achRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.achRow:last-child { border-bottom: none; }
+
+.achThumb {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: var(--ad);
+  border: 1px solid var(--ab);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.achThumb img { width: 100%; height: 100%; object-fit: cover; }
+
+.achBody { flex: 1; min-width: 0; }
+
+.achName {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.achGame {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Bottom grid ───────────────────────────────────────────── */
+.bottomGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.bottomGrid .section { margin-bottom: 0; min-width: 0; overflow: hidden; }
+
+/* ── Rank rows ─────────────────────────────────────────────── */
+.rankRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.rankRow:last-child { border-bottom: none; }
+
+.rankNum {
+  font-size: 12px;
+  color: var(--text-muted);
+  width: 18px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.rankName {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rankVal {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
