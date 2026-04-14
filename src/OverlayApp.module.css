@@ -1,0 +1,259 @@
+/* ── Overlay window must be fully transparent ──────────────── */
+:global(html),
+:global(body),
+:global(#root) {
+  background: transparent !important;
+  overflow: hidden;
+}
+
+/* ── Container — toasts stack from the bottom ──────────────── */
+.container {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: flex-end;
+  width: 100vw;
+  height: 100vh;
+  padding: 0 12px 12px 0;
+  gap: 8px;
+  pointer-events: none;
+}
+
+/* ── Toast card ─────────────────────────────────────────────── */
+.toast {
+  position: relative;
+  width: 340px;
+  background: rgba(18, 18, 28, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 8px;
+  overflow: hidden;
+  /* The container is click-through (pointer-events:none); the toast opts back in
+     so it can be hovered/clicked to dismiss. The window-level click-through is
+     toggled per-hover from JS (overlay.setInteractive). */
+  pointer-events: auto;
+  cursor: pointer;
+  /* Promote to its own compositing layer for smooth animation */
+  will-change: transform, opacity;
+  transition: border-color 0.15s;
+}
+
+.toast:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+/* ── Close (X) button — appears on hover ────────────────────── */
+.closeBtn {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  z-index: 3;
+  width: 19px;
+  height: 19px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+
+.toast:hover .closeBtn { opacity: 1; }
+
+.closeBtn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+@keyframes slideIn {
+  from { transform: translateX(110%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+@keyframes slideOut {
+  from { transform: translateX(0);    opacity: 1; }
+  to   { transform: translateX(110%); opacity: 0; }
+}
+
+.toastIn  { animation: slideIn  0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.toastOut { animation: slideOut 0.3s cubic-bezier(0.7, 0, 0.84, 0) forwards; }
+
+/* ── Header strip ───────────────────────────────────────────── */
+.toastHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.toastHeaderText {
+  font-size: 10.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: rgba(255, 255, 255, 0.55);
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+/* ── Body ───────────────────────────────────────────────────── */
+.toastBody {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px 10px;
+}
+
+.toastIcon {
+  width: 52px;
+  height: 52px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.toastIcon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.toastInfo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.toastName {
+  font-size: 14px;
+  font-weight: 500;
+  color: #e8e8f0;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+.toastDesc {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.45);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-height: 1.4;
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+.toastGame {
+  font-size: 11px;
+  color: var(--a, #a78bfa);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+/* ── Session toast variant ──────────────────────────────────── */
+.sessionToast .toastHeader {
+  background: rgba(74, 222, 128, 0.08);
+  border-bottom-color: rgba(74, 222, 128, 0.15);
+}
+
+.liveDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4ade80;
+  flex-shrink: 0;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+.sessionIcon {
+  background: rgba(74, 222, 128, 0.10) !important;
+  border-color: rgba(74, 222, 128, 0.20) !important;
+}
+
+/* ── Status flash (global hotkey) ───────────────────────────── */
+.statusToast .toastHeader {
+  background: var(--ad);
+  border-bottom-color: var(--ab);
+}
+
+.statusTime {
+  font-size: 22px;
+  font-weight: 600;
+  color: #ececf8;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+.statusTimeLabel {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.40);
+  letter-spacing: 0;
+}
+
+.statusAchRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 7px;
+}
+
+.statusAchBar {
+  flex: 1;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.10);
+  overflow: hidden;
+}
+
+.statusAchFill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--a);
+}
+
+.statusAchText {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--a);
+  flex-shrink: 0;
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+/* ── Progress bar ───────────────────────────────────────────── */
+.progressTrack {
+  height: 2px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.progressFill {
+  height: 100%;
+  background: var(--a, #a78bfa);
+  transition: width 0.1s linear;
+  opacity: 0.8;
+}
