@@ -78,8 +78,9 @@ function resumeOrStartSession(gameId) {
   ).get(gameId)
   if (orphan) return orphan
 
-  // Recently-ended session within the merge window.
-  const cutoff = new Date(Date.now() - 3 * 60 * 1000).toISOString()
+  // Recently-ended session within the 3-minute merge window.
+  const MERGE_WINDOW_SEC = 3 * 60
+  const cutoff = new Date(Date.now() - MERGE_WINDOW_SEC * 1000).toISOString()
   const recent = db.prepare(
     `SELECT * FROM sessions WHERE game_id = ? AND ended_at >= ? ORDER BY ended_at DESC LIMIT 1`
   ).get(gameId, cutoff)
