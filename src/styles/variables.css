@@ -11,9 +11,11 @@
   --surface-3: #13131f;   /* inputs */
 
   /* ── Text ────────────────────────────────────────────────────────── */
+  /* Raised contrast across the board — the old secondary/muted were close to
+     invisible on the near-black surfaces. */
   --text-primary:   #ececf8;
-  --text-secondary: #6b6b8a;
-  --text-muted:     #55556e;
+  --text-secondary: #a6a6cc;
+  --text-muted:     #7878a0;
   --text-disabled:  #4a4a66;
 
   /* ── Status (never change with accent) ───────────────────────────── */
