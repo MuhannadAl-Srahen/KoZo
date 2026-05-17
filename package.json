@@ -3,7 +3,7 @@
   "productName": "KoZo",
   "version": "1.0.0",
   "description": "KoZo — Desktop Game Tracker for Windows",
-  "author": "KoZo",
+  "author": "Muhannad Al-Srahen",
   "main": "electron/main.js",
   "scripts": {
     "dev": "concurrently -k -n VITE,ELECTRON -c cyan,magenta \"vite\" \"wait-on tcp:5173 && electron .\"",
