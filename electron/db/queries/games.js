@@ -32,7 +32,7 @@ function addGame(data) {
 }
 
 function updateGame(id, data) {
-  const allowed = ['name', 'exe_name', 'install_path', 'banner_url', 'banner_local_path', 'source', 'steam_app_id', 'is_installed', 'is_cracked', 'is_favorite', 'completion_status', 'manual_appid', 'total_playtime_seconds', 'first_played_at', 'last_played_at']
+  const allowed = ['name', 'exe_name', 'install_path', 'banner_url', 'banner_local_path', 'source', 'steam_app_id', 'is_installed', 'is_cracked', 'is_favorite', 'is_hidden', 'completion_status', 'completion_status_at', 'manual_appid', 'total_playtime_seconds', 'first_played_at', 'last_played_at', 'genres']
   const sets = Object.keys(data)
     .filter(k => allowed.includes(k))
     .map(k => `${k} = @${k}`)

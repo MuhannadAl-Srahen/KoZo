@@ -71,6 +71,25 @@ CREATE TABLE IF NOT EXISTS game_list (
   FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
 );
 
+-- Spotify-playlist-style user lists; a game_list item can belong to many lists.
+CREATE TABLE IF NOT EXISTS custom_lists (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  emoji TEXT,
+  color TEXT,
+  display_order INTEGER DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS custom_list_games (
+  list_id INTEGER NOT NULL,
+  item_id INTEGER NOT NULL,
+  added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (list_id, item_id),
+  FOREIGN KEY (list_id) REFERENCES custom_lists(id) ON DELETE CASCADE,
+  FOREIGN KEY (item_id) REFERENCES game_list(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT

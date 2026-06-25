@@ -19,23 +19,7 @@ const DEFAULT_SETTINGS = [
   ['auto_detect_gog', 'false'],
   ['steam_api_key', ''],
   ['steam_user_id', ''],
-]
-
-const DEFAULT_CATEGORIES = [
-  ['Souls-like', '⚔️', 0],
-  ['Fast action', '⚡', 1],
-  ['FPS', '🔫', 2],
-  ['Horror', '😨', 3],
-  ['Story', '📖', 4],
-  ['Open world', '🌍', 5],
-  ['Stealth', '🕵️', 6],
-  ['Sandbox', '🧱', 7],
-  ['Indie', '🕹️', 8],
-  ['Chill', '🧘', 9],
-  ['Racing', '🏎️', 10],
-  ['RPG', '🏰', 11],
-  ['Strategy', '🧠', 12],
-  ['Crime', '🏙️', 13],
+  ['idle_pause_min', '5'],
 ]
 
 function getDb() {
@@ -67,7 +51,15 @@ function initDatabase() {
     // achievement-list import (so foreign-launcher games can show + hand-tick achievements).
     try { db.exec('ALTER TABLE games ADD COLUMN completion_status TEXT') } catch (_) {}
     try { db.exec('ALTER TABLE games ADD COLUMN manual_appid INTEGER') } catch (_) {}
+    // Hidden-from-library flag (playtime/achievements/XP still count) + timestamp of the
+    // last status change (feeds the Recent XP history for finished games).
+    try { db.exec('ALTER TABLE games ADD COLUMN is_hidden INTEGER DEFAULT 0') } catch (_) {}
+    try { db.exec('ALTER TABLE games ADD COLUMN completion_status_at TIMESTAMP') } catch (_) {}
+    // Steam store genres, stored as a JSON array string ('["Roguelike","Action"]').
+    try { db.exec('ALTER TABLE games ADD COLUMN genres TEXT') } catch (_) {}
+    try { db.exec('ALTER TABLE game_list ADD COLUMN genres TEXT') } catch (_) {}
 
+    migrateCategoriesToCustomLists()
     seedDefaults()
     fixOrphanedSessions()
 
@@ -99,16 +91,42 @@ function seedDefaults() {
     }
   })
   seedSettings()
+}
 
-  const insertCategory = db.prepare(
-    'INSERT OR IGNORE INTO categories (name, emoji, display_order) VALUES (?, ?, ?)'
-  )
-  const seedCategories = db.transaction(() => {
-    for (const [name, emoji, order] of DEFAULT_CATEGORIES) {
-      insertCategory.run(name, emoji, order)
+// One-time migration: categories were replaced by Steam genres + custom lists.
+// Every category that actually has games assigned becomes a custom list with the
+// same games; empty categories (including the old seeded defaults) are dropped
+// silently. Guarded by a settings flag so it never runs twice.
+function migrateCategoriesToCustomLists() {
+  const done = db.prepare("SELECT value FROM settings WHERE key = 'categories_migrated_v1'").get()
+  if (done) return
+
+  const migrate = db.transaction(() => {
+    const cats = db.prepare(`
+      SELECT c.id, c.name, c.emoji, c.display_order
+      FROM categories c
+      WHERE EXISTS (SELECT 1 FROM game_list gl WHERE gl.category_id = c.id)
+      ORDER BY c.display_order
+    `).all()
+
+    const insertList = db.prepare(
+      'INSERT INTO custom_lists (name, emoji, display_order) VALUES (?, ?, ?)'
+    )
+    const insertJunction = db.prepare(
+      'INSERT OR IGNORE INTO custom_list_games (list_id, item_id) VALUES (?, ?)'
+    )
+    const itemsForCat = db.prepare('SELECT id FROM game_list WHERE category_id = ?')
+
+    for (const cat of cats) {
+      const listId = insertList.run(cat.name, cat.emoji, cat.display_order).lastInsertRowid
+      for (const item of itemsForCat.all(cat.id)) {
+        insertJunction.run(listId, item.id)
+      }
     }
+
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('categories_migrated_v1', 'true')").run()
   })
-  seedCategories()
+  migrate()
 }
 
 // Close sessions left open from a previous crash. We don't know exactly when
