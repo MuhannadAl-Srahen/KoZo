@@ -183,7 +183,11 @@ async function getStoreArt(appId) {
     // header_image is the sharp 460×215 cover (correct hash); capsule_image is
     // the 231×87 fallback. Larger sizes live under different hashes we can't
     // derive, so these two are the reliable authoritative URLs.
-    return { header_image: d.header_image || null, capsule_image: d.capsule_image || null }
+    return {
+      header_image: d.header_image || null,
+      capsule_image: d.capsule_image || null,
+      genres: (d.genres || []).map(g => g.description).filter(Boolean),
+    }
   } catch (e) {
     logger.warn(`getStoreArt failed for ${appId}`, { message: e.message })
     return null
@@ -286,6 +290,16 @@ async function refreshGameData(gameId) {
     logger.info(`Hero banner downloaded for game ${gameId}`)
   } catch (e) {
     logger.warn(`Hero banner download failed for game ${gameId}`, { message: e.message })
+  }
+
+  // Steam store genres (auto-grouping) — refresh fills them for older rows too.
+  try {
+    const art = await getStoreArt(game.steam_app_id)
+    if (art?.genres?.length) {
+      getDb().prepare('UPDATE games SET genres = ? WHERE id = ?').run(JSON.stringify(art.genres), gameId)
+    }
+  } catch (e) {
+    logger.warn(`Genre fetch failed for game ${gameId}`, { message: e.message })
   }
 
   logger.info(`Refreshed game ${gameId}: ${achievements.length} achievements`)

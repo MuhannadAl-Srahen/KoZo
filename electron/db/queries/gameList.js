@@ -14,6 +14,18 @@ function listGameListItems(filters = {}) {
     params.push(filters.categoryId)
   }
 
+  // Genre filter — genres is a JSON array string, LIKE match is fine at this scale.
+  if (filters.genre) {
+    query += " AND gl.genres LIKE ?"
+    params.push(`%"${filters.genre}"%`)
+  }
+
+  // Custom-list filter — only items that belong to the given list.
+  if (filters.listId) {
+    query += ' AND gl.id IN (SELECT item_id FROM custom_list_games WHERE list_id = ?)'
+    params.push(filters.listId)
+  }
+
   if (filters.status) {
     query += ' AND gl.status = ?'
     params.push(filters.status)
@@ -51,14 +63,14 @@ function addGameListItem(data) {
     if (existing) throw new Error('This game is already in your list.')
   }
   const result = getDb().prepare(`
-    INSERT INTO game_list (game_id, steam_app_id, name, banner_url, category_id, status, rating)
-    VALUES (@game_id, @steam_app_id, @name, @banner_url, @category_id, @status, @rating)
-  `).run(data)
+    INSERT INTO game_list (game_id, steam_app_id, name, banner_url, category_id, status, rating, genres)
+    VALUES (@game_id, @steam_app_id, @name, @banner_url, @category_id, @status, @rating, @genres)
+  `).run({ category_id: null, genres: null, ...data })
   return getGameListItem(result.lastInsertRowid)
 }
 
 function updateGameListItem(id, data) {
-  const allowed = ['game_id', 'steam_app_id', 'name', 'banner_url', 'category_id', 'status', 'rating', 'is_favorite']
+  const allowed = ['game_id', 'steam_app_id', 'name', 'banner_url', 'category_id', 'status', 'rating', 'is_favorite', 'genres']
   const sets = Object.keys(data)
     .filter(k => allowed.includes(k))
     .map(k => `${k} = @${k}`)
@@ -73,4 +85,14 @@ function deleteGameListItem(id) {
   getDb().prepare('DELETE FROM game_list WHERE id = ?').run(id)
 }
 
-module.exports = { listGameListItems, getGameListItem, addGameListItem, updateGameListItem, deleteGameListItem }
+// Distinct genre names across the game_list, for filter chips.
+function distinctGenres() {
+  const rows = getDb().prepare('SELECT genres FROM game_list WHERE genres IS NOT NULL').all()
+  const set = new Set()
+  for (const r of rows) {
+    try { for (const g of JSON.parse(r.genres)) set.add(g) } catch {}
+  }
+  return [...set].sort()
+}
+
+module.exports = { listGameListItems, getGameListItem, addGameListItem, updateGameListItem, deleteGameListItem, distinctGenres }

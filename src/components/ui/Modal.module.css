@@ -17,6 +17,7 @@
 }
 
 .modal {
+  position: relative;   /* anchors consumer confirm-close overlays */
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 14px;

@@ -390,3 +390,39 @@
   margin-top: 8px;
   line-height: 1.5;
 }
+
+/* ── Confirm-close layer (unsaved changes / discard adds) ────────────────── */
+.confirmOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+}
+
+.confirmBox {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  max-width: 320px;
+  text-align: center;
+  box-shadow: var(--shadow-modal);
+}
+
+.confirmTitle {
+  font-size: 13.5px;
+  color: var(--text);
+  line-height: 1.5;
+  margin-bottom: 14px;
+}
+
+.confirmBtns {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
