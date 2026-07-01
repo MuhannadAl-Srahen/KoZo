@@ -1,10 +1,18 @@
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
-import { IconTrophy, IconCheck, IconClock, IconPlayerPlayFilled, IconStar, IconCircleCheckFilled } from '@tabler/icons-react'
+import { IconTrophy, IconCheck, IconClock, IconPlayerPlayFilled, IconStar, IconCircleCheckFilled, IconPlayerPauseFilled, IconX, IconEyeOff } from '@tabler/icons-react'
 import { getBannerBg, getBannerIcon, formatPlaytime, formatDate, fileUrl, LAUNCHERS } from '../lib/utils'
 import s from './GameCard.module.css'
 
 export { formatPlaytime }
+
+// Unified game statuses — shared vocabulary with the Game List page.
+export const STATUS_META = {
+  playing:  { label: 'Playing',  color: 'var(--status-playing)',  Icon: IconPlayerPlayFilled },
+  finished: { label: 'Finished', color: 'var(--status-finished)', Icon: IconCircleCheckFilled },
+  dropped:  { label: 'Dropped',  color: 'var(--status-dropped)',  Icon: IconX },
+  on_hold:  { label: 'On hold',  color: 'var(--status-onhold)',   Icon: IconPlayerPauseFilled },
+}
 
 // A game can be a Steam/Epic/Xbox… game (has steam_app_id for art/achievements)
 // AND a cracked copy at the same time. `is_cracked` takes priority for the badge
@@ -26,7 +34,7 @@ function toggleFavorite(e, game, onFavorite) {
 
 // ── Portrait card (big / small) ───────────────────────────────────────────────
 
-function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavorite }) {
+function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavorite, onContextMenu }) {
   const navigate = useNavigate()
   const Icon     = getBannerIcon(game.name)
   const bg       = getBannerBg(game.id)
@@ -45,8 +53,9 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
 
   return (
     <div
-      className={`${s.card} ${!game.is_installed && !selectionMode ? s.cardDimmed : ''} ${selected ? s.cardSelected : ''}`}
+      className={`${s.card} ${(!game.is_installed || game.is_hidden) && !selectionMode ? s.cardDimmed : ''} ${selected ? s.cardSelected : ''}`}
       onClick={handleClick}
+      onContextMenu={onContextMenu ? (e) => { e.preventDefault(); onContextMenu(e, game) } : undefined}
     >
       <div className={s.banner} style={{ background: bg }}>
         {/* Icon is the base layer; a blurred fill + the contained cover overlay
@@ -87,16 +96,28 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
           <div className={s.liveBadge}><span className={s.liveDot} />LIVE</div>
         )}
 
-        {/* Finished badge — bottom-left, above the name */}
-        {!selectionMode && game.completion_status === 'finished' && (
-          <div className={s.finishedBadge} title="You marked this game finished">
-            <IconCircleCheckFilled size={variant === 'small' ? 11 : 12} />
-            Finished
-          </div>
-        )}
+        {/* Status badge (Playing/Finished/Dropped/On hold) — bottom-left, above the name */}
+        {!selectionMode && STATUS_META[game.completion_status] && (() => {
+          const st = STATUS_META[game.completion_status]
+          return (
+            <div
+              className={`${s.statusBadge} ${variant === 'small' ? s.statusBadgeSmall : ''}`}
+              style={{ color: st.color, borderColor: st.color + '44' }}
+              title={`Status: ${st.label}`}
+            >
+              <st.Icon size={variant === 'small' ? 10 : 12} />
+              {st.label}
+            </div>
+          )
+        })()}
 
         {!selectionMode && !game.is_installed && (
           <div className={s.notInstalledBadge}>Not installed</div>
+        )}
+
+        {/* Hidden tag — only visible when the "Show hidden" filter reveals the card */}
+        {!selectionMode && !!game.is_hidden && (
+          <div className={s.hiddenBadge}><IconEyeOff size={10} stroke={1.8} />Hidden</div>
         )}
 
         {/* Favorite star — alongside the play button; stays visible when starred */}
@@ -150,7 +171,7 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
 
 // ── Library list card ────────────────────────────────────────────────────────
 
-function ListCard({ game, selectionMode, selected, onToggle, onFavorite }) {
+function ListCard({ game, selectionMode, selected, onToggle, onFavorite, onContextMenu }) {
   const navigate = useNavigate()
   const Icon     = getBannerIcon(game.name)
   const bg       = getBannerBg(game.id)
@@ -171,8 +192,9 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite }) {
 
   return (
     <div
-      className={`${s.listCard} ${!game.is_installed && !selectionMode ? s.cardDimmed : ''} ${selected ? s.listCardSelected : ''}`}
+      className={`${s.listCard} ${(!game.is_installed || game.is_hidden) && !selectionMode ? s.cardDimmed : ''} ${selected ? s.listCardSelected : ''}`}
       onClick={handleClick}
+      onContextMenu={onContextMenu ? (e) => { e.preventDefault(); onContextMenu(e, game) } : undefined}
     >
       {/* Portrait thumbnail — blurred fill + contain cover, selection overlay */}
       <div className={s.listThumb} style={{ background: bg }}>
@@ -214,8 +236,16 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite }) {
           {!game.is_installed && !selectionMode && (
             <span className={s.listNotInstalledTag}>Not installed</span>
           )}
-          {game.completion_status === 'finished' && !selectionMode && (
-            <span className={s.listFinishedTag}><IconCircleCheckFilled size={11} />Finished</span>
+          {STATUS_META[game.completion_status] && !selectionMode && (() => {
+            const st = STATUS_META[game.completion_status]
+            return (
+              <span className={s.listStatusTag} style={{ color: st.color }}>
+                <st.Icon size={11} />{st.label}
+              </span>
+            )
+          })()}
+          {!!game.is_hidden && !selectionMode && (
+            <span className={s.listHiddenTag}>Hidden</span>
           )}
         </div>
         {total > 0 && (
@@ -228,8 +258,8 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite }) {
         )}
       </div>
 
-      {/* Favorite star */}
-      {!selectionMode && (
+      {/* Favorite star — empty span keeps the grid track occupied when hidden */}
+      {!selectionMode ? (
         <button
           className={`${s.listFavBtn} ${game.is_favorite ? s.listFavBtnActive : ''}`}
           onClick={(e) => toggleFavorite(e, game, onFavorite)}
@@ -237,28 +267,26 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite }) {
         >
           <IconStar size={15} stroke={1.8} fill={game.is_favorite === 1 ? 'currentColor' : 'none'} />
         </button>
-      )}
+      ) : <span aria-hidden="true" />}
 
-      {/* Play button */}
-      {!selectionMode && !!game.is_installed && (
+      {/* Play button — placeholder keeps its column when not installed */}
+      {!selectionMode && !!game.is_installed ? (
         <button className={s.listPlayBtn} onClick={handlePlay} title={`Launch ${game.name}`}>
           <IconPlayerPlayFilled size={13} />
           Play
         </button>
-      )}
+      ) : <span aria-hidden="true" />}
 
-      {/* Right stats — inline, no column headers */}
+      {/* Right stats — fixed sub-columns (playtime | achievements | date) */}
       <div className={s.listStats}>
         <span className={`${s.listStatItem} ${game.total_playtime_seconds ? '' : s.listStatItemDim}`}>
           <IconClock size={11} stroke={1.5} />
           {formatPlaytime(game.total_playtime_seconds) || '—'}
         </span>
-        <span className={s.listDot} />
         <span className={s.listStatItem}>
           <IconTrophy size={11} stroke={1.5} />
           {unlocked}/{total || '—'}
         </span>
-        <span className={s.listDot} />
         <span className={s.listDate}>{formatDate(game.last_played_at)}</span>
       </div>
     </div>
@@ -267,8 +295,8 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite }) {
 
 // ── Exports ───────────────────────────────────────────────────────────────────
 
-export default function GameCard({ game, view = 'big', selectionMode = false, selected = false, onToggle, onFavorite }) {
-  if (view === 'list') return <ListCard game={game} selectionMode={selectionMode} selected={selected} onToggle={onToggle} onFavorite={onFavorite} />
+export default function GameCard({ game, view = 'big', selectionMode = false, selected = false, onToggle, onFavorite, onContextMenu }) {
+  if (view === 'list') return <ListCard game={game} selectionMode={selectionMode} selected={selected} onToggle={onToggle} onFavorite={onFavorite} onContextMenu={onContextMenu} />
   const variant = view === 'small' ? 'small' : 'big'
-  return <PortraitCard game={game} variant={variant} selectionMode={selectionMode} selected={selected} onToggle={onToggle} onFavorite={onFavorite} />
+  return <PortraitCard game={game} variant={variant} selectionMode={selectionMode} selected={selected} onToggle={onToggle} onFavorite={onFavorite} onContextMenu={onContextMenu} />
 }

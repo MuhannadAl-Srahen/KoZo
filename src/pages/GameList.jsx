@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import {
   IconPlus, IconLayoutGrid, IconList, IconLayoutColumns,
-  IconDeviceGamepad2, IconSettings,
+  IconDeviceGamepad2, IconPencil, IconSparkles,
   IconCheckbox, IconSquare, IconTrash, IconX, IconCheck, IconStar,
 } from '@tabler/icons-react'
 import { getBannerBg } from '../lib/utils'
 import AddGameToListModal from '../components/modals/AddGameToListModal'
-import ManageCategoriesModal from '../components/modals/ManageCategoriesModal'
+import CreateEditListModal from '../components/modals/CreateEditListModal'
 import EditGameListModal from '../components/modals/EditGameListModal'
 import SearchableSelect from '../components/ui/SearchableSelect'
 import s from './GameList.module.css'
@@ -15,6 +15,7 @@ const STATUS_CONFIG = {
   want_to_play: { label: 'Want to play', color: 'var(--a)' },
   playing:      { label: 'Playing',      color: 'var(--status-playing)' },
   finished:     { label: 'Finished',     color: 'var(--status-finished)' },
+  on_hold:      { label: 'On hold',      color: 'var(--status-onhold)' },
   dropped:      { label: 'Dropped',      color: 'var(--status-dropped)' },
   upcoming:     { label: 'Upcoming',     color: 'var(--status-upcoming)' },
 }
@@ -26,7 +27,11 @@ const VIEW_OPTIONS = [
   { key: 'list', Icon: IconList,          title: 'List' },
 ]
 
-// ── Card components ─────────────────────────────────────────────────────────
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+function parseGenres(item) {
+  try { return JSON.parse(item.genres || '[]') } catch { return [] }
+}
 
 // Append a cache-busting param so a re-resolved remote cover reloads even when
 // the URL is unchanged (the browser would otherwise serve the stale image).
@@ -46,10 +51,13 @@ function bannerOnError(e) {
   }
 }
 
+// ── Card components ─────────────────────────────────────────────────────────
+
 function GridCard({ item, onClick, selectionMode, selected, onToggle, onToggleFav }) {
   const cfg = STATUS_CONFIG[item.status] || { label: item.status, color: 'var(--text-muted)' }
   const bg  = getBannerBg(item.id)
   const src = withBust(item.banner_url, item._imgBust)
+  const genres = parseGenres(item)
 
   function handleClick() {
     if (selectionMode) { onToggle?.(item.id) } else { onClick(item) }
@@ -96,8 +104,8 @@ function GridCard({ item, onClick, selectionMode, selected, onToggle, onToggleFa
       </div>
       <div className={s.cardInfo}>
         <div className={s.cardName}>{item.name}</div>
-        {item.category_name && (
-          <div className={s.cardCategory}>{item.category_emoji} {item.category_name}</div>
+        {genres.length > 0 && (
+          <div className={s.cardCategory}>{genres.slice(0, 2).join(' · ')}</div>
         )}
       </div>
     </div>
@@ -108,6 +116,7 @@ function ListRow({ item, onClick, selectionMode, selected, onToggle, onToggleFav
   const cfg = STATUS_CONFIG[item.status] || { label: item.status, color: 'var(--text-muted)' }
   const bg  = getBannerBg(item.id)
   const src = withBust(item.banner_url, item._imgBust)
+  const genres = parseGenres(item)
 
   function handleClick() {
     if (selectionMode) { onToggle?.(item.id) } else { onClick(item) }
@@ -136,12 +145,12 @@ function ListRow({ item, onClick, selectionMode, selected, onToggle, onToggleFav
         )}
       </div>
 
-      {/* Name + category */}
+      {/* Name + genres */}
       <div className={s.listInfo}>
         <div className={s.listName}>{item.name}</div>
         <div className={s.listSub}>
-          {item.category_name && (
-            <div className={s.listCategory}>{item.category_emoji} {item.category_name}</div>
+          {genres.length > 0 && (
+            <div className={s.listCategory}>{genres.slice(0, 3).join(' · ')}</div>
           )}
         </div>
       </div>
@@ -177,15 +186,18 @@ export default function GameList() {
   const [items, setItems]       = useState([])
   const [total, setTotal]       = useState(0)
   const [page, setPage]         = useState(1)
-  const [statusFilter, setStatusFilter]     = useState('')
-  const [categoryFilter, setCategoryFilter] = useState('')
-  const [categories, setCategories]         = useState([])
+  const [statusFilter, setStatusFilter] = useState('')
+  const [genreFilter, setGenreFilter]   = useState('')
+  const [genreOptions, setGenreOptions] = useState([])
+  const [customLists, setCustomLists]   = useState([])
+  const [activeListId, setActiveListId] = useState(null)   // null = All
   const [view, setView]         = useState(() => localStorage.getItem('kozo:view:gamelist') || 'big')
   const [loading, setLoading]   = useState(true)
+  const [backfilling, setBackfilling] = useState(false)
 
-  const [showAdd, setShowAdd]               = useState(false)
-  const [showManage, setShowManage]         = useState(false)
-  const [editItem, setEditItem]             = useState(null)
+  const [showAdd, setShowAdd]   = useState(false)
+  const [listModal, setListModal] = useState(null)   // 'new' | list object | null
+  const [editItem, setEditItem] = useState(null)
 
   // ── Selection mode ──────────────────────────────────────────────────────────
   const [selectionMode, setSelectionMode] = useState(false)
@@ -209,14 +221,12 @@ export default function GameList() {
   const allSelected = items.length > 0 && selectedIds.size === items.length
 
   // Toggle favorite (pins to top). Optimistic: flip local state immediately so
-  // the star fills with no reload flash, then persist + silently re-fetch (so
-  // the server-side favorites-first ordering settles in without the grid
-  // unmounting and reloading every cover image).
+  // the star fills with no reload flash, then persist + silently re-fetch.
   async function toggleFav(item) {
     const next = item.is_favorite ? 0 : 1
     setItems(prev => prev.map(i => i.id === item.id ? { ...i, is_favorite: next } : i))
     await window.kozo?.api?.gameList?.update?.(item.id, { is_favorite: next })
-    loadItems(page, statusFilter, categoryFilter, { silent: true })
+    loadItems(page, { silent: true })
   }
 
   async function handleBulkDelete() {
@@ -225,61 +235,86 @@ export default function GameList() {
     for (const id of selectedIds) {
       await window.kozo?.api?.gameList?.delete(id)
     }
-    await loadItems(1, statusFilter, categoryFilter)
+    await loadItems(1)
     setPage(1)
     setDeleting(false)
     exitSelection()
   }
 
-  const loadCategories = useCallback(async () => {
-    if (!window.kozo?.api) return
-    const res = await window.kozo.api.categories.list()
-    if (res?.ok) setCategories(res.data ?? [])
+  const loadLists = useCallback(async () => {
+    const res = await window.kozo?.api?.customLists?.list()
+    if (res?.ok) setCustomLists(res.data ?? [])
   }, [])
 
-  const loadItems = useCallback(async (pg = 1, status = statusFilter, cat = categoryFilter, { silent = false } = {}) => {
+  const loadGenres = useCallback(async () => {
+    const res = await window.kozo?.api?.genres?.distinct()
+    if (res?.ok) setGenreOptions(res.data ?? [])
+  }, [])
+
+  const loadItems = useCallback(async (pg = 1, { silent = false, status = statusFilter, genre = genreFilter, listId = activeListId } = {}) => {
     if (!window.kozo?.api) return
     if (!silent) setLoading(true)
     const filters = { limit: PAGE_SIZE, offset: (pg - 1) * PAGE_SIZE }
-    if (status)  filters.status = status
-    if (cat)     filters.categoryId = Number(cat)
+    if (status) filters.status = status
+    if (genre)  filters.genre = genre
+    if (listId) filters.listId = listId
     const res = await window.kozo.api.gameList.list(filters)
     if (res?.ok) {
       setItems(res.data?.items ?? [])
       setTotal(res.data?.total ?? 0)
     }
     if (!silent) setLoading(false)
-  }, [statusFilter, categoryFilter])
+  }, [statusFilter, genreFilter, activeListId])
 
   useEffect(() => {
-    loadCategories()
-    loadItems(1, '', '')
+    loadLists()
+    loadGenres()
+    loadItems(1, { status: '', genre: '', listId: null })
   }, [])
 
   function handleStatusChange(v) {
     setStatusFilter(v)
     setPage(1)
-    loadItems(1, v, categoryFilter)
+    loadItems(1, { status: v })
   }
 
-  function handleCategoryChange(v) {
-    setCategoryFilter(v)
+  function handleGenreChange(v) {
+    const next = v === genreFilter ? '' : v
+    setGenreFilter(next)
     setPage(1)
-    loadItems(1, statusFilter, v)
+    loadItems(1, { genre: next })
+  }
+
+  function handleListChange(listId) {
+    setActiveListId(listId)
+    setPage(1)
+    loadItems(1, { listId })
   }
 
   function handlePage(p) {
     setPage(p)
-    loadItems(p, statusFilter, categoryFilter)
+    loadItems(p)
   }
 
   function afterSave() {
     setShowAdd(false)
     setEditItem(null)
-    loadItems(page, statusFilter, categoryFilter)
+    loadItems(page)
+    loadLists()
+    loadGenres()
+  }
+
+  // One-time genre backfill for rows added before genres existed.
+  async function handleBackfillGenres() {
+    setBackfilling(true)
+    await window.kozo?.api?.genres?.backfill()
+    await Promise.all([loadGenres(), loadItems(page, { silent: true })])
+    setBackfilling(false)
   }
 
   const totalPages = Math.ceil(total / PAGE_SIZE)
+  const activeList = customLists.find(l => l.id === activeListId)
+  const hasMissingGenres = items.some(i => i.steam_app_id && !i.genres)
 
   return (
     <div className={s.page}>
@@ -306,23 +341,7 @@ export default function GameList() {
                 { value: 'upcoming',     label: 'Upcoming' },
               ]}
             />
-
-            <SearchableSelect
-              value={categoryFilter}
-              onChange={handleCategoryChange}
-              placeholder="All categories"
-              width={160}
-              options={categories.map(c => ({
-                value: String(c.id),
-                label: (c.emoji ? `${c.emoji} ` : '') + c.name,
-              }))}
-            />
           </div>
-
-          <button className={s.btnSecondary} onClick={() => setShowManage(true)}>
-            <IconSettings size={14} stroke={1.6} />
-            Categories
-          </button>
 
           {items.length > 0 && (
             <button className={s.btnSecondary} onClick={enterSelection}>
@@ -390,6 +409,67 @@ export default function GameList() {
         </div>
       )}
 
+      {/* Custom lists rail — your playlists */}
+      {!selectionMode && (
+        <div className={s.listsRail}>
+          <button
+            className={`${s.listChip} ${activeListId == null ? s.listChipActive : ''}`}
+            onClick={() => handleListChange(null)}
+          >
+            All
+          </button>
+          {customLists.map(l => (
+            <button
+              key={l.id}
+              className={`${s.listChip} ${activeListId === l.id ? s.listChipActive : ''}`}
+              onClick={() => handleListChange(l.id)}
+            >
+              {l.emoji ? `${l.emoji} ` : ''}{l.name}
+              <span className={s.listChipCount}>{l.game_count}</span>
+              {activeListId === l.id && (
+                <span
+                  className={s.listChipEdit}
+                  title="Edit list"
+                  onClick={(e) => { e.stopPropagation(); setListModal(l) }}
+                >
+                  <IconPencil size={12} stroke={1.8} />
+                </span>
+              )}
+            </button>
+          ))}
+          <button className={s.listChipNew} onClick={() => setListModal('new')}>
+            <IconPlus size={13} stroke={2} />
+            New list
+          </button>
+        </div>
+      )}
+
+      {/* Genre chips — auto-grouping from Steam store genres */}
+      {!selectionMode && (genreOptions.length > 0 || hasMissingGenres) && (
+        <div className={s.genreBar}>
+          {genreOptions.map(g => (
+            <button
+              key={g}
+              className={`${s.genreChip} ${genreFilter === g ? s.genreChipActive : ''}`}
+              onClick={() => handleGenreChange(g)}
+            >
+              {g}
+            </button>
+          ))}
+          {hasMissingGenres && (
+            <button
+              className={s.genreChipFetch}
+              onClick={handleBackfillGenres}
+              disabled={backfilling}
+              title="Fetch Steam genres for games that don't have them yet"
+            >
+              <IconSparkles size={12} stroke={1.8} />
+              {backfilling ? 'Fetching genres…' : 'Fetch genres'}
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Content */}
       <div className={s.content}>
         {loading && (
@@ -401,9 +481,13 @@ export default function GameList() {
         {!loading && items.length === 0 && (
           <div className={s.emptyState}>
             <IconDeviceGamepad2 size={48} stroke={1.2} />
-            <div className={s.emptyTitle}>No games here yet</div>
+            <div className={s.emptyTitle}>
+              {activeList ? `Nothing in "${activeList.name}" yet` : 'No games here yet'}
+            </div>
             <div className={s.emptyDesc}>
-              Add games to your backlog, wishlist, or track what you're playing.
+              {activeList
+                ? 'Open any game and tick this list to add it here.'
+                : 'Add games to your backlog, wishlist, or track what you\'re playing.'}
             </div>
           </div>
         )}
@@ -469,8 +553,7 @@ export default function GameList() {
 
       {showAdd && (
         <AddGameToListModal
-          categories={categories}
-          onClose={() => { setShowAdd(false); loadCategories() }}
+          onClose={() => setShowAdd(false)}
           onSaved={afterSave}
         />
       )}
@@ -478,16 +561,22 @@ export default function GameList() {
       {editItem && !selectionMode && (
         <EditGameListModal
           item={editItem}
-          categories={categories}
           onClose={() => setEditItem(null)}
           onSaved={afterSave}
           onDeleted={afterSave}
         />
       )}
 
-      {showManage && (
-        <ManageCategoriesModal
-          onClose={() => { setShowManage(false); loadCategories() }}
+      {listModal && (
+        <CreateEditListModal
+          list={listModal === 'new' ? null : listModal}
+          onClose={() => setListModal(null)}
+          onSaved={() => { setListModal(null); loadLists() }}
+          onDeleted={() => {
+            setListModal(null)
+            if (listModal !== 'new' && activeListId === listModal.id) handleListChange(null)
+            loadLists()
+          }}
         />
       )}
     </div>

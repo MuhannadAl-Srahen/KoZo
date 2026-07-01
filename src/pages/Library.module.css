@@ -282,19 +282,19 @@
   line-height: 1.6;
 }
 
-/* Main grid — 5 portrait columns */
+/* Main grid — 4 portrait columns */
 .bigGrid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
   contain: layout style;
 }
 
-/* Small grid — 7 compact portrait columns */
+/* Small grid — 6 compact portrait columns */
 .smallGrid {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
   contain: layout style;
 }
 

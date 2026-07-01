@@ -23,6 +23,7 @@
   --status-finished:     #60a5fa;
   --status-dropped:      #f87171;
   --status-upcoming:     #fbbf24;
+  --status-onhold:       #fb923c;
   /* want-to-play uses var(--a) */
 
   /* ── Borders ─────────────────────────────────────────────────────── */

@@ -1,38 +1,67 @@
 import React, { useState, useEffect } from 'react'
-import { IconEdit, IconTrash, IconStar, IconBrandSteam } from '@tabler/icons-react'
+import { IconEdit, IconTrash, IconStar, IconBrandSteam, IconCheck } from '@tabler/icons-react'
 import Modal, { modalStyles as ms } from '../ui/Modal'
-import SearchableSelect from '../ui/SearchableSelect'
 import s from './AddGameModal.module.css'
 
 const STATUS_OPTIONS = [
   { value: 'want_to_play', label: 'Want to play' },
   { value: 'playing',      label: 'Playing' },
   { value: 'finished',     label: 'Finished' },
+  { value: 'on_hold',      label: 'On hold' },
   { value: 'dropped',      label: 'Dropped' },
   { value: 'upcoming',     label: 'Upcoming' },
 ]
 
-export default function EditGameListModal({ item, categories: initialCategories, onClose, onSaved, onDeleted }) {
+export default function EditGameListModal({ item, onClose, onSaved, onDeleted }) {
   const [name, setName]             = useState(item.name)
   const [status, setStatus]         = useState(item.status)
-  const [categoryId, setCategoryId] = useState(item.category_id ? String(item.category_id) : '')
   const [rating, setRating]         = useState(item.rating != null ? String(item.rating) : '')
   const [saving, setSaving]         = useState(false)
   const [deleting, setDeleting]     = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [errors, setErrors]         = useState({})
-  const [localCategories, setLocalCategories] = useState(initialCategories || [])
+  const [confirmingClose, setConfirmingClose] = useState(false)
+
+  // Custom-list membership (Spotify-playlist style, many-to-many).
+  const [lists, setLists]           = useState([])
+  const [memberIds, setMemberIds]   = useState(new Set())
+  const [initialMemberIds, setInitialMemberIds] = useState(new Set())
 
   useEffect(() => {
-    window.kozo?.api?.categories?.list().then(res => {
-      if (res?.ok) setLocalCategories(res.data ?? [])
-    })
-  }, [])
+    (async () => {
+      const [listsRes, memberRes] = await Promise.all([
+        window.kozo?.api?.customLists?.list(),
+        window.kozo?.api?.customLists?.listsForItem(item.id),
+      ])
+      if (listsRes?.ok) setLists(listsRes.data ?? [])
+      if (memberRes?.ok) {
+        const ids = new Set(memberRes.data ?? [])
+        setMemberIds(ids)
+        setInitialMemberIds(new Set(ids))
+      }
+    })()
+  }, [item.id])
 
-  const categoryOptions = localCategories.map(c => ({
-    value: String(c.id),
-    label: (c.emoji ? `${c.emoji} ` : '') + c.name,
-  }))
+  function toggleList(listId) {
+    setMemberIds(prev => {
+      const next = new Set(prev)
+      next.has(listId) ? next.delete(listId) : next.add(listId)
+      return next
+    })
+  }
+
+  const dirty =
+    name !== item.name ||
+    status !== item.status ||
+    rating !== (item.rating != null ? String(item.rating) : '') ||
+    memberIds.size !== initialMemberIds.size ||
+    [...memberIds].some(id => !initialMemberIds.has(id))
+
+  // Backdrop / Escape / X — confirm before dropping unsaved edits.
+  function requestClose() {
+    if (dirty) setConfirmingClose(true)
+    else onClose()
+  }
 
   function clampRating(val) {
     const n = parseFloat(val)
@@ -53,9 +82,15 @@ export default function EditGameListModal({ item, categories: initialCategories,
     const res = await window.kozo?.api?.gameList?.update(item.id, {
       name: name.trim(),
       status,
-      category_id: categoryId ? Number(categoryId) : null,
       rating: status === 'finished' && rating !== '' ? Number(rating) : null,
     })
+    // Apply list-membership diff.
+    for (const l of lists) {
+      const now = memberIds.has(l.id)
+      const was = initialMemberIds.has(l.id)
+      if (now && !was) await window.kozo?.api?.customLists?.addGame(l.id, item.id)
+      if (!now && was) await window.kozo?.api?.customLists?.removeGame(l.id, item.id)
+    }
     setSaving(false)
     if (res?.ok) {
       onSaved?.()
@@ -78,11 +113,15 @@ export default function EditGameListModal({ item, categories: initialCategories,
     }
   }
 
+  let genres = []
+  try { genres = JSON.parse(item.genres || '[]') } catch {}
+
   return (
     <Modal
       title="Edit Game"
       icon={<IconEdit size={17} stroke={1.6} />}
       onClose={onClose}
+      onRequestClose={requestClose}
       width={460}
       footer={
         <div style={{ display: 'flex', gap: 8, width: '100%', alignItems: 'center' }}>
@@ -110,7 +149,7 @@ export default function EditGameListModal({ item, categories: initialCategories,
                   View on Steam
                 </button>
               )}
-              <button className={ms.btnCancel} onClick={onClose}>Cancel</button>
+              <button className={ms.btnCancel} onClick={requestClose}>Cancel</button>
               <button className={ms.btnPrimary} onClick={handleSave} disabled={saving}>
                 {saving ? 'Saving…' : 'Save'}
               </button>
@@ -128,6 +167,17 @@ export default function EditGameListModal({ item, categories: initialCategories,
         />
         {errors.name && <div className={s.errorText}>{errors.name}</div>}
       </div>
+
+      {genres.length > 0 && (
+        <div className={s.field}>
+          <label className={s.label}>Genres <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(from Steam)</span></label>
+          <div className={s.pills}>
+            {genres.map(g => (
+              <span key={g} className={s.pill} style={{ cursor: 'default' }}>{g}</span>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className={s.field}>
         <label className={s.label}>Status</label>
@@ -168,18 +218,44 @@ export default function EditGameListModal({ item, categories: initialCategories,
         </div>
       )}
 
-      <div className={s.field}>
-        <label className={s.label}>Category</label>
-        <SearchableSelect
-          value={categoryId}
-          onChange={setCategoryId}
-          options={categoryOptions}
-          placeholder="No category"
-          width="100%"
-        />
-      </div>
+      {lists.length > 0 && (
+        <div className={s.field}>
+          <label className={s.label}>Lists <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(a game can be in several)</span></label>
+          <div className={s.pills}>
+            {lists.map(l => {
+              const on = memberIds.has(l.id)
+              return (
+                <button
+                  key={l.id}
+                  className={`${s.pill} ${on ? s.pillActive : ''}`}
+                  onClick={() => toggleList(l.id)}
+                >
+                  {on && <IconCheck size={11} stroke={2.5} style={{ marginRight: 3, verticalAlign: 'middle' }} />}
+                  {l.emoji ? `${l.emoji} ` : ''}{l.name}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {errors.save && <div className={s.errorText} style={{ marginTop: 6 }}>{errors.save}</div>}
+
+      {confirmingClose && (
+        <div className={s.confirmOverlay} onMouseDown={e => e.stopPropagation()}>
+          <div className={s.confirmBox}>
+            <div className={s.confirmTitle}>Discard unsaved changes?</div>
+            <div className={s.confirmBtns}>
+              <button className={ms.btnPrimary} onClick={() => setConfirmingClose(false)}>
+                Keep editing
+              </button>
+              <button className={ms.btnDanger} onClick={onClose}>
+                Discard
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </Modal>
   )
 }

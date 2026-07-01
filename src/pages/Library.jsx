@@ -3,12 +3,13 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import {
   IconPlus, IconLayoutGrid, IconList, IconLayoutColumns,
   IconDeviceGamepad2, IconScan, IconLoader2, IconCheckbox, IconSquare,
-  IconTrash, IconX, IconCheck, IconSearch,
+  IconTrash, IconX, IconCheck, IconSearch, IconEye, IconEyeOff,
 } from '@tabler/icons-react'
 import GameCard, { formatPlaytime } from '../components/GameCard'
 import AddGameModal from '../components/modals/AddGameModal'
 import ScanResultModal from '../components/modals/ScanResultModal'
 import SearchableSelect from '../components/ui/SearchableSelect'
+import CardContextMenu from '../components/ui/CardContextMenu'
 import s from './Library.module.css'
 
 const VIEW_OPTIONS = [
@@ -85,6 +86,8 @@ export default function Library() {
     const saved = localStorage.getItem('kozo:sort:library')
     return SORT_VALUES.has(saved) ? saved : 'last_played'
   })
+  const [showHidden, setShowHidden] = useState(() => localStorage.getItem('kozo:show-hidden') === '1')
+  const [ctxMenu, setCtxMenu]       = useState(null)  // null | { x, y, game }
 
   // Auto-open Add Game modal when navigated with ?add=1 (e.g. from unknown-process prompt)
   useEffect(() => {
@@ -227,7 +230,9 @@ export default function Library() {
   }, [loadGames, loadActiveSessions])
 
   const allGamesWithLive = games.map(g => ({ ...g, _isLive: liveIds.has(g.id) }))
+  const hiddenCount = games.reduce((n, g) => n + (g.is_hidden ? 1 : 0), 0)
   const filtered = allGamesWithLive.filter(g => {
+    if (g.is_hidden && !showHidden) return false
     if (search.trim()) {
       const q = search.trim().toLowerCase()
       if (!g.name.toLowerCase().includes(q) && !(g.exe_name || '').toLowerCase().includes(q)) return false
@@ -235,7 +240,10 @@ export default function Library() {
     return true
   })
   const gamesWithLive = sortGames(filtered, sortBy)
-  const stats = computeStats(games)
+  // Header stats exclude hidden games — the numbers should match the grid the
+  // user sees (hidden games still track time/achievements/XP everywhere else).
+  const visibleGames = games.filter(g => !g.is_hidden)
+  const stats = computeStats(visibleGames)
   const gridClass = view === 'big' ? s.bigGrid : view === 'small' ? s.smallGrid : s.listGrid
 
   return (
@@ -244,7 +252,7 @@ export default function Library() {
       <div className={s.statsBar}>
         <div className={s.statCard}>
           <span className={s.statLabel}>Games</span>
-          <span className={s.statValue}>{games.length}</span>
+          <span className={s.statValue}>{visibleGames.length}</span>
         </div>
         <div className={s.statCard}>
           <span className={s.statLabel}>Playtime</span>
@@ -307,6 +315,21 @@ export default function Library() {
               : <IconScan size={15} stroke={1.6} />}
             {scanning ? 'Scanning…' : 'Scan PC'}
           </button>
+
+          {hiddenCount > 0 && (
+            <button
+              className={s.btnSecondary}
+              title={showHidden ? 'Hide hidden games again' : `Show ${hiddenCount} hidden game${hiddenCount !== 1 ? 's' : ''}`}
+              onClick={() => {
+                const next = !showHidden
+                setShowHidden(next)
+                localStorage.setItem('kozo:show-hidden', next ? '1' : '0')
+              }}
+            >
+              {showHidden ? <IconEye size={15} stroke={1.6} /> : <IconEyeOff size={15} stroke={1.6} />}
+              Hidden ({hiddenCount})
+            </button>
+          )}
 
           {games.length > 0 && (
             <button className={s.btnSecondary} onClick={enterSelection}>
@@ -417,6 +440,7 @@ export default function Library() {
                 selected={selectedIds.has(game.id)}
                 onToggle={toggleGame}
                 onFavorite={handleFavorite}
+                onContextMenu={(e, g) => setCtxMenu({ x: e.clientX, y: e.clientY, game: g })}
               />
             ))}
           </div>
@@ -437,6 +461,26 @@ export default function Library() {
           results={scanModal}
           onClose={() => setScanModal(null)}
           onAdd={() => { setScanModal(null); loadGames() }}
+        />
+      )}
+
+      {ctxMenu && (
+        <CardContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          game={ctxMenu.game}
+          onClose={() => setCtxMenu(null)}
+          onSetStatus={(game, status) => {
+            // Optimistic badge update; game:updated reconciles from the DB.
+            setGames(prev => { const u = prev.map(g => g.id === game.id ? { ...g, completion_status: status } : g); libraryCache = u; return u })
+            window.kozo?.api?.games?.update(game.id, { completion_status: status })
+          }}
+          onToggleHidden={(game) => {
+            const next = game.is_hidden ? 0 : 1
+            setGames(prev => { const u = prev.map(g => g.id === game.id ? { ...g, is_hidden: next } : g); libraryCache = u; return u })
+            window.kozo?.api?.games?.update(game.id, { is_hidden: next })
+          }}
+          onToggleFavorite={handleFavorite}
         />
       )}
     </div>

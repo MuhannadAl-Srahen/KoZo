@@ -3,15 +3,13 @@ import {
   IconSearch, IconPlus, IconCheck, IconDeviceGamepad2, IconStar, IconX,
 } from '@tabler/icons-react'
 import Modal, { modalStyles as ms } from '../ui/Modal'
-import SearchableSelect from '../ui/SearchableSelect'
-import ManageCategoriesModal from './ManageCategoriesModal'
 import s from './AddGameModal.module.css'
-import ls from './GameListFormModal.module.css'
 
 const STATUS_OPTIONS = [
   { value: 'want_to_play', label: 'Want to play' },
   { value: 'playing',      label: 'Playing' },
   { value: 'finished',     label: 'Finished' },
+  { value: 'on_hold',      label: 'On hold' },
   { value: 'dropped',      label: 'Dropped' },
   { value: 'upcoming',     label: 'Upcoming' },
 ]
@@ -31,26 +29,7 @@ function debounce(fn, ms) {
   return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms) }
 }
 
-export default function AddGameToListModal({ categories: initialCategories, onClose, onSaved }) {
-  const [categories, setCategories] = useState(initialCategories || [])
-  const [showManageInline, setShowManageInline] = useState(false)
-
-  // Keep the local copy in sync with the parent's list — covers the case
-  // where the modal mounts before categories finish loading. Without this the
-  // dropdown stays empty even after the parent's fetch completes.
-  useEffect(() => { setCategories(initialCategories || []) }, [initialCategories])
-
-  // Always pull a fresh list when the modal opens so the dropdown reflects
-  // categories the user added in this session via Manage Categories.
-  useEffect(() => { reloadCategories() }, [])
-
-  // Refresh categories in place after the user manages them, without losing
-  // the search state in this dialog.
-  async function reloadCategories() {
-    const res = await window.kozo?.api?.categories?.list()
-    if (res?.ok) setCategories(res.data ?? [])
-  }
-
+export default function AddGameToListModal({ onClose, onSaved }) {
   const [query, setQuery]         = useState('')
   const [results, setResults]     = useState([])
   const [searching, setSearching] = useState(false)
@@ -59,15 +38,16 @@ export default function AddGameToListModal({ categories: initialCategories, onCl
 
   const [name, setName]           = useState('')
   const [status, setStatus]       = useState('want_to_play')
-  const [categoryId, setCategoryId] = useState('')
   const [rating, setRating]       = useState('')
   const [saving, setSaving]       = useState(false)
   const [errors, setErrors]       = useState({})
   // IDs of game-list rows created during THIS modal session, so Cancel can roll them back.
   const [addedIds, setAddedIds]   = useState([])
+  // Set when a dismissal (backdrop / Escape / X) would silently discard adds.
+  const [confirmingClose, setConfirmingClose] = useState(false)
   const savedCount = addedIds.length
 
-  // Cancel / X / Escape / overlay click → discard everything added this session.
+  // Cancel → discard everything added this session.
   async function handleCancel() {
     if (addedIds.length) {
       for (const id of addedIds) {
@@ -75,6 +55,12 @@ export default function AddGameToListModal({ categories: initialCategories, onCl
       }
     }
     onClose()
+  }
+
+  // Backdrop / Escape / X — with pending adds, confirm before discarding them.
+  function requestClose() {
+    if (addedIds.length) setConfirmingClose(true)
+    else onClose()
   }
 
   // Done → keep the added games and refresh the parent list.
@@ -132,7 +118,6 @@ export default function AddGameToListModal({ categories: initialCategories, onCl
       banner_url: selected?.steam_app_id
         ? `https://cdn.akamai.steamstatic.com/steam/apps/${selected.steam_app_id}/library_600x900_2x.jpg`
         : null,
-      category_id: categoryId ? Number(categoryId) : null,
       status,
       rating: status === 'finished' && rating !== '' ? Number(rating) : null,
       game_id: null,
@@ -149,7 +134,6 @@ export default function AddGameToListModal({ categories: initialCategories, onCl
       setName('')
       setStatus('want_to_play')
       setRating('')
-      setCategoryId('')
       setErrors({})
     } else {
       setErrors({ save: res?.error || 'Failed to add game' })
@@ -163,6 +147,7 @@ export default function AddGameToListModal({ categories: initialCategories, onCl
       title="Add to Game List"
       icon={<IconPlus size={17} stroke={1.6} />}
       onClose={handleCancel}
+      onRequestClose={requestClose}
       width={580}
       footer={
         <>
@@ -304,35 +289,28 @@ export default function AddGameToListModal({ categories: initialCategories, onCl
             </div>
           )}
 
-          <div className={s.field}>
-            <label className={s.label}>Category <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional)</span></label>
-            <SearchableSelect
-              value={categoryId}
-              onChange={setCategoryId}
-              options={categories.map(c => ({
-                value: String(c.id),
-                label: (c.emoji ? `${c.emoji} ` : '') + c.name,
-              }))}
-              placeholder="No category"
-              width="100%"
-            />
-            <button
-              className={ls.manageCatLink}
-              onClick={() => setShowManageInline(true)}
-              type="button"
-            >
-              + Manage categories
-            </button>
-          </div>
-
           {errors.save && <div className={s.errorText} style={{ marginTop: 6 }}>{errors.save}</div>}
         </>
       )}
 
-      {showManageInline && (
-        <ManageCategoriesModal
-          onClose={() => { setShowManageInline(false); reloadCategories() }}
-        />
+      {/* Confirm-discard layer: shown when a backdrop/Escape/X dismissal would
+          silently delete the games added in this session. */}
+      {confirmingClose && (
+        <div className={s.confirmOverlay} onMouseDown={e => e.stopPropagation()}>
+          <div className={s.confirmBox}>
+            <div className={s.confirmTitle}>
+              Discard the {savedCount} game{savedCount === 1 ? '' : 's'} you just added?
+            </div>
+            <div className={s.confirmBtns}>
+              <button className={ms.btnPrimary} onClick={() => setConfirmingClose(false)}>
+                Keep editing
+              </button>
+              <button className={ms.btnDanger} onClick={handleCancel}>
+                Discard
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </Modal>
   )

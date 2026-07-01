@@ -4,9 +4,10 @@ import {
   IconChevronLeft, IconTrophy, IconLock, IconCheck, IconHistory,
   IconDotsVertical, IconTrash, IconRefresh, IconEdit, IconPlayerPlayFilled,
   IconStethoscope, IconFolderSearch, IconDeviceFloppy, IconDownload, IconLoader2,
-  IconCircleCheck, IconCircleCheckFilled,
+  IconCircleCheck, IconCircleOff, IconEye, IconEyeOff, IconChevronDown,
 } from '@tabler/icons-react'
 import { getBannerBg, getBannerIcon, formatPlaytime, formatDate, formatDateTime, fileUrl, isSteamTracked, launcherLabel } from '../lib/utils'
+import { STATUS_META } from '../components/GameCard'
 import AchievementModal from '../components/modals/AchievementModal'
 import EditGameModal from '../components/modals/EditGameModal'
 import SaveManagerModal from '../components/modals/SaveManagerModal'
@@ -58,7 +59,7 @@ function WeekChart({ sessions }) {
 }
 
 // ── Achievement card (88px fixed) ──────────────────────────────────────────
-function AchCard({ ach, maxUnlockSec, onClick }) {
+function AchCard({ ach, maxUnlockSec, onClick, onQuickToggle }) {
   const unlocked = !!ach.unlocked_at
 
   return (
@@ -85,12 +86,16 @@ function AchCard({ ach, maxUnlockSec, onClick }) {
         )}
       </div>
 
-      <div className={s.achStatus}>
+      <button
+        className={s.achStatus}
+        title={unlocked ? 'Mark as locked' : 'Mark as unlocked (manual)'}
+        onClick={(e) => { e.stopPropagation(); onQuickToggle?.(ach) }}
+      >
         {unlocked
           ? <IconCheck size={16} stroke={2.5} style={{ color: 'var(--a)' }} />
           : <IconLock  size={15} stroke={1.6} style={{ color: 'var(--text-muted)' }} />
         }
-      </div>
+      </button>
     </div>
   )
 }
@@ -144,6 +149,8 @@ export default function GameDetail() {
   const [info, setInfo]                 = useState(null)
   const [crackScanInfo, setCrackScanInfo] = useState(null)
   const menuRef                     = useRef(null)
+  const [statusMenuOpen, setStatusMenuOpen] = useState(false)
+  const statusMenuRef               = useRef(null)
 
   const load = useCallback(async () => {
     if (!window.kozo?.api || !id) return
@@ -205,6 +212,9 @@ export default function GameDetail() {
         setMenuOpen(false)
         setConfirmDelete(false)
       }
+      if (statusMenuRef.current && !statusMenuRef.current.contains(e.target)) {
+        setStatusMenuOpen(false)
+      }
     }
     document.addEventListener('mousedown', onClickOutside)
     return () => document.removeEventListener('mousedown', onClickOutside)
@@ -242,20 +252,26 @@ export default function GameDetail() {
     }
   }
 
-  // Mark this game finished (or un-finish it). Finishing awards XP via the
-  // 'finished games' pillar in stats:xp. games:update broadcasts game:updated.
-  async function toggleFinished() {
+  // Set the game's status (Playing/Finished/Dropped/On hold, or null to clear).
+  // Finishing awards XP via the 'finished games' pillar in stats:xp; the change
+  // is mirrored onto any linked Game List entry by statusSync in the backend.
+  async function setStatus(status) {
     if (!game) return
-    const finishing = game.completion_status !== 'finished'
-    setMenuOpen(false)
-    await window.kozo?.api?.games?.update(Number(id), {
-      completion_status: finishing ? 'finished' : null,
-    })
+    setStatusMenuOpen(false)
+    await window.kozo?.api?.games?.update(Number(id), { completion_status: status })
     await load()
-    if (finishing) {
+    if (status === 'finished' && game.completion_status !== 'finished') {
       setInfo({ variant: 'success', title: 'Marked as finished',
         message: `Nice — ${game.name} counts toward your XP now. Find it on your Profile.` })
     }
+  }
+
+  // Hide/unhide from the Library grid. Time, achievements, and XP keep counting.
+  async function toggleHidden() {
+    if (!game) return
+    setMenuOpen(false)
+    await window.kozo?.api?.games?.update(Number(id), { is_hidden: game.is_hidden ? 0 : 1 })
+    await load()
   }
 
   async function handleLaunch() {
@@ -334,6 +350,8 @@ export default function GameDetail() {
     else await handleCrackFiles()
   }
 
+  // "Check achievements" — scan crack files, then explain in plain language what
+  // was found (emulator, appids, per-file unlock counts) and what to do about it.
   async function handleCrackFiles() {
     setCrackScanning(true)
     const [scanRes, diagRes] = await Promise.all([
@@ -352,14 +370,13 @@ export default function GameDetail() {
     }
 
     const lines = []
-    const found = diag.found || []
-
-    if (found.length > 0) {
-      lines.push(...found.map(f => `${f.source}: ${f.path}`))
+    if (diag.emulator)      lines.push(`Emulator detected: ${diag.emulator}`)
+    if (diag.storedAppId)   lines.push(`AppID KoZo uses: ${diag.storedAppId}`)
+    if (diag.configAppIds?.length && diag.mismatch) {
+      lines.push(`⚠ AppID in the game's own config: ${diag.configAppIds.join(', ')}`)
     }
-
-    if (diag.appidMismatch) {
-      lines.push(`⚠ AppID mismatch — KoZo: ${diag.appid} · Game folder: ${diag.detectedAppid}`)
+    for (const c of (diag.candidates || [])) {
+      lines.push(`${c.source}: ${c.path} — ${c.parsedUnlockCount} unlock${c.parsedUnlockCount === 1 ? '' : 's'} readable`)
     }
 
     if (scan.added > 0) {
@@ -368,24 +385,75 @@ export default function GameDetail() {
         title: `${scan.added} new achievement${scan.added === 1 ? '' : 's'} imported`,
         lines,
       })
-    } else if (found.length > 0) {
-      setInfo({
-        variant: 'info',
-        title: 'Achievement files found — already up to date',
-        lines,
-      })
-    } else {
-      // Nothing found — give actionable guidance
-      const goldbergPath = `%APPDATA%\\Goldberg SteamEmu Saves\\${diag.appid || '?'}\\achievements.json`
-      setInfo({
-        variant: 'warning',
-        title: 'No crack achievement files found yet',
-        message: diag.installPath
-          ? `Checked ${diag.totalChecked || 0} locations. For ZIP-extracted games, Goldberg creates the file below only after your first unlock in-game:`
-          : 'No install path set. Edit the game → Browse to the .exe — the install path is needed to find crack files.',
-        lines: diag.installPath ? [goldbergPath] : [],
-      })
+      return
     }
+
+    switch (diag.verdict) {
+      case 'ok':
+        setInfo({
+          variant: 'info',
+          title: 'Achievement files found — already up to date',
+          lines,
+        })
+        break
+
+      case 'emu-not-persisting': {
+        const emu = diag.emulator || 'This crack\'s emulator'
+        setInfo({
+          variant: 'warning',
+          title: 'Your crack never saves achievements to disk',
+          message: `${emu} created its achievements file but has never written a single unlock to it — even though the game shows popups. KoZo can't read what the crack doesn't save. You can mark achievements manually (click any achievement below → "Mark as Unlocked"), or replace the emulator with Goldberg/GSE, which does save unlocks.`,
+          lines,
+        })
+        break
+      }
+
+      case 'appid-mismatch': {
+        const suggested = diag.configAppIds?.[0]
+        setInfo({
+          variant: 'warning',
+          title: 'AppID mismatch — KoZo may be watching the wrong folder',
+          message: `The game's own config says AppID ${diag.configAppIds.join(', ')}, but KoZo is using ${diag.storedAppId ?? 'none'}. Emulator save folders are named after the config AppID.`,
+          lines,
+          actions: suggested ? [
+            {
+              label: `Use AppID ${suggested} and rescan`,
+              variant: 'primary',
+              onClick: async () => {
+                setInfo(null)
+                await window.kozo?.api?.games?.update(Number(id), { manual_appid: Number(suggested) })
+                await load()
+                handleCrackFiles()
+              },
+            },
+            { label: 'Close', variant: 'secondary', onClick: () => setInfo(null) },
+          ] : undefined,
+        })
+        break
+      }
+
+      default:   // 'no-files'
+        setInfo({
+          variant: 'warning',
+          title: 'No crack achievement files found yet',
+          message: diag.installPath
+            ? 'Most emulators create their achievements file only after your first unlock in-game. Play a bit, unlock something, then check again. If the game shows popups but nothing ever appears here, the crack may not save unlocks at all — you can always mark achievements manually (click one below).'
+            : 'No install path set. Edit the game → Browse to the .exe — the install path is needed to detect the crack\'s emulator and its save files.',
+          lines,
+        })
+    }
+  }
+
+  // One-click manual unlock toggle on an achievement row (checkmark/lock icon).
+  // Routes through toggleManual so unlocking fires the toast/notification/XP flow.
+  async function quickToggleAch(ach) {
+    const res = await window.kozo?.api?.achievements?.toggleManual?.(ach.id)
+    if (!res?.ok) return
+    setAch(prev => prev.map(a => a.id === ach.id
+      ? { ...a,
+          unlocked_at: res.data.unlocked ? res.data.unlocked_at : null,
+          unlock_source: res.data.unlocked ? 'manual' : null }
+      : a))
   }
 
   async function handleDiagnose() {
@@ -495,17 +563,45 @@ export default function GameDetail() {
             </button>
           )}
 
-          {/* Finished toggle — awards XP and shows a badge when set */}
-          <button
-            onClick={toggleFinished}
-            title={game.completion_status === 'finished' ? 'Marked finished — click to undo' : 'Mark this game as finished (earns XP)'}
-            className={`${s.bannerSyncBtn} ${game.completion_status === 'finished' ? s.bannerFinishedBtn : ''}`}
-          >
-            {game.completion_status === 'finished'
-              ? <IconCircleCheckFilled size={14} />
-              : <IconCircleCheck size={14} />}
-            {game.completion_status === 'finished' ? 'Finished' : 'Mark finished'}
-          </button>
+          {/* Status picker — Playing / Finished / Dropped / On hold, synced with the Game List */}
+          <div className={s.statusWrap} ref={statusMenuRef}>
+            {(() => {
+              const st = STATUS_META[game.completion_status]
+              return (
+                <button
+                  onClick={() => setStatusMenuOpen(v => !v)}
+                  title={st ? `Status: ${st.label} — click to change` : 'Set a status for this game (finishing earns XP)'}
+                  className={`${s.bannerSyncBtn} ${game.completion_status === 'finished' ? s.bannerFinishedBtn : ''}`}
+                  style={st && game.completion_status !== 'finished' ? { color: st.color, borderColor: st.color + '55' } : undefined}
+                >
+                  {st ? <st.Icon size={14} /> : <IconCircleCheck size={14} />}
+                  {st ? st.label : 'Set status'}
+                  <IconChevronDown size={12} stroke={2} />
+                </button>
+              )
+            })()}
+            {statusMenuOpen && (
+              <div className={s.statusDropdown}>
+                {Object.entries(STATUS_META).map(([key, st]) => (
+                  <button
+                    key={key}
+                    className={s.gameMenuItem}
+                    onClick={() => setStatus(game.completion_status === key ? null : key)}
+                  >
+                    <st.Icon size={14} style={{ color: st.color }} />
+                    {st.label}
+                    {game.completion_status === key && <IconCheck size={13} stroke={2} style={{ marginLeft: 'auto' }} />}
+                  </button>
+                ))}
+                {game.completion_status && (
+                  <button className={s.gameMenuItem} onClick={() => setStatus(null)}>
+                    <IconCircleOff size={14} />
+                    Clear status
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
           {steamTracked && (
             <button
               onClick={handleRefresh}
@@ -533,6 +629,19 @@ export default function GameDetail() {
                 : <IconRefresh size={13} />
               }
               {(crackScanning || refreshing) ? 'Syncing…' : 'Sync'}
+            </button>
+          )}
+
+          {/* Check achievements — scan + plain-language diagnosis for cracked games */}
+          {!!game.is_cracked && (
+            <button
+              onClick={handleCrackFiles}
+              disabled={crackScanning || refreshing}
+              title="Check crack achievement files and explain why unlocks may be missing"
+              className={s.bannerSyncBtn}
+            >
+              <IconStethoscope size={13} />
+              Check achievements
             </button>
           )}
 
@@ -613,14 +722,20 @@ export default function GameDetail() {
                   onClick={() => { setMenuOpen(false); handleCrackFiles() }}
                   disabled={crackScanning}
                 >
-                  <IconFolderSearch size={14} stroke={1.6} />
-                  Find crack files
+                  <IconStethoscope size={14} stroke={1.6} />
+                  Check achievements
                 </button>
               )}
 
               <button className={s.gameMenuItem} onClick={() => { setMenuOpen(false); setShowSaveManager(true) }}>
                 <IconDeviceFloppy size={14} stroke={1.6} />
                 Save files &amp; backup
+              </button>
+
+              <button className={s.gameMenuItem} onClick={toggleHidden}
+                title="Hidden games leave the Library grid but keep tracking time, achievements and XP">
+                {game.is_hidden ? <IconEye size={14} stroke={1.6} /> : <IconEyeOff size={14} stroke={1.6} />}
+                {game.is_hidden ? 'Unhide from library' : 'Hide from library'}
               </button>
 
               {!confirmDelete ? (
@@ -660,6 +775,18 @@ export default function GameDetail() {
               </div>
             )}
           </div>
+          {(() => {
+            let genres = []
+            try { genres = JSON.parse(game.genres || '[]') } catch {}
+            if (!genres.length) return null
+            return (
+              <div className={s.genreChips}>
+                {genres.slice(0, 5).map(g => (
+                  <span key={g} className={s.genreChip}>{g}</span>
+                ))}
+              </div>
+            )
+          })()}
           <div className={s.bannerMeta}>
             <div className={s.metaItem}>
               <span>Playtime</span>
@@ -736,6 +863,7 @@ export default function GameDetail() {
                     key={a.id}
                     ach={a}
                     onClick={setSelectedAch}
+                    onQuickToggle={quickToggleAch}
                   />
                 ))}
               </div>

@@ -273,6 +273,25 @@
   letter-spacing: -0.01em;
 }
 
+/* Steam store genre chips under the game title */
+.genreChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.genreChip {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.75);
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 999px;
+  padding: 2px 9px;
+  white-space: nowrap;
+}
+
 .crackBadge {
   flex-shrink: 0;
   font-size: 10px;
@@ -528,10 +547,24 @@
   margin-top: 1px;
 }
 
+/* Also a click target: quick manual unlock/lock toggle (routes through toggleManual) */
 .achStatus {
   flex-shrink: 0;
   display: flex;
   align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-input);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.achStatus:hover {
+  border-color: var(--ab);
+  background: var(--surface-3);
 }
 
 /* ── Sessions tab ───────────────────────────────────────────── */
@@ -718,6 +751,23 @@
 }
 .bannerSyncBtn:disabled { opacity: 0.65; cursor: progress; }
 .bannerSyncBtn:active { transform: scale(0.97); }
+
+/* Status picker — wraps the pill button + its dropdown */
+.statusWrap { position: relative; }
+
+.statusDropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 6;
+  min-width: 170px;
+  background: var(--surface-2);
+  border: 1px solid var(--ab);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-modal);
+  overflow: hidden;
+  animation: menuIn 0.1s ease;
+}
 
 /* Finished state — solid accent so it reads as an achieved milestone */
 .bannerFinishedBtn {
