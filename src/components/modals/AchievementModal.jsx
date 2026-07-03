@@ -12,17 +12,23 @@ export default function AchievementModal({ achievement: initialAch, game, onClos
 
   async function toggle() {
     setBusy(true)
+    // toggleManual routes an unlock through the same flow as a real detected one
+    // (overlay toast, notification, XP check) — with a legacy fallback.
     let updated
-    if (unlocked) {
+    const res = await (window.kozo.api.achievements.toggleManual
+      ? window.kozo.api.achievements.toggleManual(ach.id)
+      : Promise.resolve(null))
+    if (res?.ok) {
+      updated = res.data.unlocked
+        ? { ...ach, unlocked_at: res.data.unlocked_at, unlock_source: 'manual' }
+        : { ...ach, unlocked_at: null, unlock_source: null }
+    } else if (unlocked) {
       await window.kozo.api.achievements.removeUnlock(ach.id)
       updated = { ...ach, unlocked_at: null, unlock_source: null }
     } else {
       const now = new Date().toISOString()
       await window.kozo.api.achievements.addUnlock({
-        achievement_id: ach.id,
-        session_id: null,
-        unlocked_at: now,
-        source: 'manual',
+        achievement_id: ach.id, session_id: null, unlocked_at: now, source: 'manual',
       })
       updated = { ...ach, unlocked_at: now, unlock_source: 'manual' }
     }

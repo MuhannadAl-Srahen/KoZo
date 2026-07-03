@@ -169,7 +169,9 @@ function buildCandidates(game) {
   } catch {}
   if (!mydocs) mydocs = path.join(home, 'Documents')
 
-  const id  = String(game.steam_app_id || 0)
+  // Unzipped/cracked games without a detected steam_app_id fall back to the
+  // name-matched manual_appid — emulator folders are keyed by that same appid.
+  const id  = String(game.steam_app_id || game.manual_appid || 0)
   const ip  = game.install_path || ''
   const cands = []
 
@@ -254,6 +256,65 @@ function buildCandidates(game) {
   return cands
 }
 
+// ── Emulator config detection ────────────────────────────────────────────────
+// Cracks ship their own appid config; when it differs from the appid KoZo
+// stored (common with repacks) every fixed candidate path points at the wrong
+// emulator folder. Read every appid the install folder declares.
+
+function readEmuConfigAppIds(installPath) {
+  const ids = new Set()
+  if (!installPath || !exists(installPath)) return []
+
+  const tryTxt = (p) => {
+    const raw = safeRead(p)
+    if (raw && /^\d+$/.test(raw.trim())) ids.add(raw.trim())
+  }
+  const tryIni = (p) => {
+    const raw = safeRead(p)
+    const m = raw && raw.match(/^\s*AppId\s*=\s*(\d+)/im)
+    if (m) ids.add(m[1])
+  }
+
+  const roots = [installPath]
+  // One level of subdirs — repacks often keep the emu config beside the exe in Bin/.
+  try {
+    for (const ent of fs.readdirSync(installPath, { withFileTypes: true })) {
+      if (ent.isDirectory() && !SKIP_DIRS.has(ent.name.toLowerCase())) {
+        roots.push(path.join(installPath, ent.name))
+      }
+      if (roots.length > 25) break
+    }
+  } catch {}
+
+  for (const root of roots) {
+    tryTxt(path.join(root, 'steam_appid.txt'))
+    tryTxt(path.join(root, 'appid.txt'))
+    tryTxt(path.join(root, 'steam_settings', 'steam_appid.txt'))
+    tryIni(path.join(root, 'steam_emu.ini'))       // CODEX / RUNE / PLAZA family
+    tryIni(path.join(root, 'OnlineFix.ini'))
+    tryIni(path.join(root, 'SmartSteamEmu.ini'))
+    tryIni(path.join(root, 'ColdClientLoader.ini')) // Goldberg loader
+  }
+  return [...ids]
+}
+
+// Best-effort emulator family name from the install folder's config files.
+function detectEmulator(installPath) {
+  if (!installPath || !exists(installPath)) return null
+  const emuIni = safeRead(path.join(installPath, 'steam_emu.ini'))
+  if (emuIni) {
+    if (/RUNE/i.test(emuIni))  return 'RUNE'
+    if (/CODEX/i.test(emuIni)) return 'CODEX'
+    if (/PLAZA/i.test(emuIni)) return 'PLAZA'
+    return 'CODEX/RUNE-family (steam_emu.ini)'
+  }
+  if (exists(path.join(installPath, 'steam_settings')) ||
+      exists(path.join(installPath, 'ColdClientLoader.ini'))) return 'Goldberg'
+  if (exists(path.join(installPath, 'OnlineFix.ini')))        return 'online-fix'
+  if (exists(path.join(installPath, 'SmartSteamEmu.ini')))    return 'SmartSteamEmu'
+  return null
+}
+
 // ── Recursive walk of install folder ─────────────────────────────────────────
 
 const MAX_DEPTH   = 4
@@ -304,7 +365,6 @@ async function scanGameForCrackAchievements(gameId) {
   const { getDb }     = require('../db/database')
   const achievementsQ = require('../db/queries/achievements')
   const gamesQ        = require('../db/queries/games')
-  const { BrowserWindow } = require('electron')
 
   const game = gamesQ.getGame(gameId)
   if (!game) return { added: 0, hits: [], scannedPaths: [], candidatesTried: 0 }
@@ -318,7 +378,21 @@ async function scanGameForCrackAchievements(gameId) {
 
   // Build candidate list
   const fixed     = buildCandidates(game)
-  const recursive = recursiveScan(game.install_path, game.steam_app_id)
+  const gameAppid = game.steam_app_id || game.manual_appid
+  const recursive = recursiveScan(game.install_path, gameAppid)
+
+  // The install folder's own emu config may declare a DIFFERENT appid than the
+  // one KoZo stored (repacks do this) — emulator save folders are keyed by the
+  // config appid, so build candidates for those too, tagged so a hit can
+  // auto-correct manual_appid below.
+  const configIds = readEmuConfigAppIds(game.install_path)
+  const configCandidates = []
+  for (const cid of configIds) {
+    if (String(cid) === String(gameAppid)) continue
+    for (const c of buildCandidates({ ...game, steam_app_id: Number(cid), manual_appid: null })) {
+      configCandidates.push({ ...c, appid: cid })
+    }
+  }
 
   // If install_path ends in a binary subfolder (e.g. \Binaries\Win64, \Bin\x64),
   // also scan the parent directories since achievement files live at the game root.
@@ -333,14 +407,14 @@ async function scanGameForCrackAchievements(gameId) {
     const parent2 = path.dirname(parent1)
     const root    = path.parse(game.install_path).root
     if (parent1 !== game.install_path && parent1 !== root) {
-      extraRecursive = [...extraRecursive, ...recursiveScan(parent1, game.steam_app_id)]
+      extraRecursive = [...extraRecursive, ...recursiveScan(parent1, gameAppid)]
     }
     if (parent2 !== parent1 && parent2 !== root) {
-      extraRecursive = [...extraRecursive, ...recursiveScan(parent2, game.steam_app_id)]
+      extraRecursive = [...extraRecursive, ...recursiveScan(parent2, gameAppid)]
     }
   }
 
-  const all = [...fixed, ...recursive, ...extraRecursive]
+  const all = [...fixed, ...configCandidates, ...recursive, ...extraRecursive]
 
   // Deduplicate by lowercase path
   const seen = new Set()
@@ -378,7 +452,7 @@ async function scanGameForCrackAchievements(gameId) {
     }
 
     if (unlocks.length > 0) {
-      hits.push({ path: c.path, source: c.source, count: unlocks.length })
+      hits.push({ path: c.path, source: c.source, count: unlocks.length, appid: c.appid || null })
       for (const u of unlocks) allUnlocks.push(u)
     }
   }
@@ -420,24 +494,84 @@ async function scanGameForCrackAchievements(gameId) {
 
   if (added > 0) {
     logger.info(`crackWatcher: ${added} new unlocks for "${game.name}" via [${hits.map(h => h.source).join(', ')}]`)
-    try { require('./autoBackup').markDirty() } catch {}
-    for (const w of BrowserWindow.getAllWindows()) {
-      if (!w.isDestroyed()) w.webContents.send('game:updated', gameId)
+    // A hit under a config-declared appid means KoZo's stored appid was wrong —
+    // remember the working one so future scans/watchers key off it directly.
+    const hitAppid = hits.find(h => h.appid)?.appid
+    if (hitAppid && !game.steam_app_id) {
+      try { gamesQ.updateGame(gameId, { manual_appid: Number(hitAppid) }) } catch {}
     }
-    const payload = { gameId, achievements: newUnlocks, gameName: game.name }
-    if (!global.__kozoSilenceAchNotify) {
-      for (const w of BrowserWindow.getAllWindows()) {
-        if (!w.isDestroyed()) w.webContents.send('achievement:unlocked', payload)
-      }
-      // Show over the running game in the overlay window, same as Steam unlocks.
-      try { require('../overlayWindow').sendAchievements(payload) } catch {}
-      try {
-        require('./notifications').notifyAchievements({ gameName: game.name, achievements: newUnlocks })
-      } catch {}
-    }
+    require('./achievementSync').emitNewUnlocks(game, newUnlocks)
   }
 
   return { added, hits, scannedPaths, candidatesTried: unique.length }
+}
+
+// ── Structured diagnosis (powers the "Check achievements" panel) ─────────────
+
+async function diagnoseGame(gameId) {
+  const gamesQ        = require('../db/queries/games')
+  const achievementsQ = require('../db/queries/achievements')
+
+  const game = gamesQ.getGame(gameId)
+  if (!game) return { error: 'game_not_found' }
+
+  const storedAppId  = game.steam_app_id || game.manual_appid || null
+  const configAppIds = readEmuConfigAppIds(game.install_path)
+  const emulator     = detectEmulator(game.install_path)
+  const mismatch     = !!(storedAppId && configAppIds.length &&
+                          !configAppIds.includes(String(storedAppId)))
+
+  // Candidate files for the stored appid AND every config-declared appid.
+  const cands = [...buildCandidates(game)]
+  for (const cid of configAppIds) {
+    if (String(cid) === String(storedAppId)) continue
+    for (const c of buildCandidates({ ...game, steam_app_id: Number(cid), manual_appid: null })) {
+      cands.push({ ...c, appid: cid })
+    }
+  }
+  const seen = new Set()
+  const schemaNames = achievementsQ.listAchievementsForGame(gameId)
+    .map(a => a.steam_api_name).filter(Boolean)
+
+  const candidates = []
+  for (const c of cands) {
+    const k = c.path.toLowerCase()
+    if (seen.has(k)) continue
+    seen.add(k)
+    if (!exists(c.path)) continue
+
+    let parsedUnlockCount = 0
+    let stat = null
+    try { stat = fs.statSync(c.path) } catch {}
+    if (c.parse === 'sse') {
+      const buf = safeReadBuf(c.path)
+      if (buf) parsedUnlockCount = parseSseBinary(buf, schemaNames).length
+    } else {
+      const text = safeRead(c.path)
+      if (text) parsedUnlockCount = c.parse(text).length
+    }
+    candidates.push({
+      path: c.path,
+      source: c.source,
+      appid: c.appid || String(storedAppId || ''),
+      parsedUnlockCount,
+      mtime: stat ? stat.mtime.toISOString() : null,
+      neverModified: stat ? Math.abs(stat.mtimeMs - stat.birthtimeMs) < 2000 : false,
+    })
+  }
+
+  // Plain-language verdict for the UI.
+  let verdict
+  if (candidates.some(c => c.parsedUnlockCount > 0)) verdict = 'ok'
+  else if (!candidates.length)                       verdict = mismatch ? 'appid-mismatch' : 'no-files'
+  else if (mismatch)                                 verdict = 'appid-mismatch'
+  else                                               verdict = 'emu-not-persisting'
+
+  return {
+    emulator, storedAppId, configAppIds, mismatch, candidates, verdict,
+    installPath: game.install_path || null,
+    schemaCount: schemaNames.length,
+  }
 }
 
 // ── Bulk scans ────────────────────────────────────────────────────────────────
@@ -445,8 +579,9 @@ async function scanGameForCrackAchievements(gameId) {
 async function scanAllCrackedGames() {
   const gamesQ = require('../db/queries/games')
   const db     = require('../db/database').getDb()
-  // Only scan cracked games that have a Steam appid (need schema for name matching)
-  const games  = db.prepare(`SELECT * FROM games WHERE is_cracked = 1 AND steam_app_id IS NOT NULL`).all()
+  // Only scan cracked games with some appid — steam_app_id or the name-matched
+  // manual_appid (needed for the schema so unlock names can be matched).
+  const games  = db.prepare(`SELECT * FROM games WHERE is_cracked = 1 AND (steam_app_id IS NOT NULL OR manual_appid IS NOT NULL)`).all()
   let totalAdded = 0
   const perGame  = []
   for (const g of games) {
@@ -573,5 +708,5 @@ module.exports = {
   startWatching, stopWatching,
   scanGameForCrackAchievements, scanAllCrackedGames, scanActiveSessions,
   watchGame, unwatchGame,
-  buildCandidates,
+  buildCandidates, readEmuConfigAppIds, detectEmulator, diagnoseGame,
 }

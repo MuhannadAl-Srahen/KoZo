@@ -13,6 +13,24 @@ function broadcastToRenderers(channel, payload) {
   } catch {}
 }
 
+// One shared "new unlocks landed" pipeline: backup flag, renderer broadcasts,
+// overlay toast, OS notification (no-op), XP check. Every unlock source (Steam
+// Web API, crack files, local Steam stats) funnels through this so behavior
+// stays identical — this block used to be copy-pasted per source.
+function emitNewUnlocks(game, newUnlocks) {
+  if (!game || !newUnlocks?.length) return
+  try { require('./autoBackup').markDirty() } catch {}
+  broadcastToRenderers('game:updated', game.id)
+  if (global.__kozoSilenceAchNotify) return
+  const payload = { gameId: game.id, achievements: newUnlocks, gameName: game.name }
+  broadcastToRenderers('achievement:unlocked', payload)
+  // Show over the running game in the overlay window
+  try { require('../overlayWindow').sendAchievements(payload) } catch {}
+  try { require('./notifications').notifyAchievements({ gameName: game.name, achievements: newUnlocks }) } catch {}
+  // Unlocks earn XP — check for a level-up right away.
+  try { require('./xpTracker').check({ reason: 'achievement', gameName: game.name }) } catch {}
+}
+
 // Foreign-launcher games (Xbox/Epic/GOG/EA/Ubisoft) have no Steam-readable
 // achievements. Even if one carries a stray steam_app_id, we must never hit the
 // Steam API for it — that produced confusing 400/403 errors. Cracked games are
@@ -35,15 +53,18 @@ async function ensureSchema(gameId) {
   if (local.length > 0) return local
 
   const game = getDb().prepare('SELECT * FROM games WHERE id = ?').get(gameId)
-  if (!game?.steam_app_id || isForeignLauncher(game)) return local
+  // Cracked/unzipped games often carry only a name-matched manual_appid — use it
+  // so their schema still auto-loads (otherwise no unlock can ever be recorded).
+  const appid = game?.steam_app_id || game?.manual_appid
+  if (!appid || isForeignLauncher(game)) return local
   const apiKey = settingsQ.getSetting('steam_api_key')
   if (!apiKey) return local
 
   try {
     const { getSchemaForGame, getGlobalAchievementPercentages } = require('./steamApi')
     const [schema, pcts] = await Promise.all([
-      getSchemaForGame(game.steam_app_id, apiKey),
-      getGlobalAchievementPercentages(game.steam_app_id).catch(() => ({})),
+      getSchemaForGame(appid, apiKey),
+      getGlobalAchievementPercentages(appid).catch(() => ({})),
     ])
     const achievements = (schema || []).map(a => ({
       steam_api_name: a.name,
@@ -234,17 +255,7 @@ async function syncAfterSession(gameId, sessionId) {
       logger.info(`Achievement unlocked: ${ach.display_name} for ${game.name}`)
     }
 
-    if (newUnlocks.length > 0) {
-      try { require('./autoBackup').markDirty() } catch {}
-      const payload = { gameId, achievements: newUnlocks, gameName: game.name }
-      broadcastToRenderers('achievement:unlocked', payload)
-      broadcastToRenderers('game:updated', gameId)
-      // Also send to the game overlay window so it shows over the running game
-      try { require('../overlayWindow').sendAchievements(payload) } catch {}
-      try {
-        require('./notifications').notifyAchievements({ gameName: game.name, achievements: newUnlocks })
-      } catch {}
-    }
+    emitNewUnlocks(game, newUnlocks)
 
   } catch (e) {
     logger.warn(`achievementSync: syncAfterSession failed for game ${gameId}`, { message: e.message })
@@ -302,20 +313,8 @@ async function syncPlayerUnlocks(gameId) {
     added++
   }
 
-  if (added > 0) {
-    try { require('./autoBackup').markDirty() } catch {}
-    broadcastToRenderers('game:updated', gameId)
-    if (!global.__kozoSilenceAchNotify) {
-      const payload = { gameId, achievements: newUnlocks, gameName: game.name }
-      broadcastToRenderers('achievement:unlocked', payload)
-      // Show over the running game in the overlay window
-      try { require('../overlayWindow').sendAchievements(payload) } catch {}
-      try {
-        require('./notifications').notifyAchievements({ gameName: game.name, achievements: newUnlocks })
-      } catch {}
-    }
-  }
+  if (added > 0) emitNewUnlocks(game, newUnlocks)
   return { added, total: steamUnlocks.length, newUnlocks }
 }
 
-module.exports = { fetchAndStoreAchievements, syncAfterSession, syncPlayerUnlocks, ensureSchema, importSchemaFromAppId, autoImportSchemaByName }
+module.exports = { fetchAndStoreAchievements, syncAfterSession, syncPlayerUnlocks, ensureSchema, importSchemaFromAppId, autoImportSchemaByName, emitNewUnlocks, isForeignLauncher }

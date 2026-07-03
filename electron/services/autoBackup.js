@@ -14,7 +14,7 @@ const fs   = require('fs')
 const path = require('path')
 const logger = require('../logger')
 
-const TABLES = ['games', 'sessions', 'achievements', 'achievement_unlocks', 'game_list', 'categories', 'settings']
+const TABLES = ['games', 'sessions', 'achievements', 'achievement_unlocks', 'game_list', 'categories', 'custom_lists', 'custom_list_games', 'settings']
 
 let debounceTimer = null
 let periodicTimer = null
