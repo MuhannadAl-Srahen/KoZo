@@ -22,7 +22,7 @@ import s from './Settings.module.css'
 let generalTabCache = null
 
 function GeneralTab() {
-  const [idlePause, setIdlePause]     = useState(generalTabCache?.idlePause ?? '0')      // minutes, 0 = off
+  const [idlePause, setIdlePause]     = useState(generalTabCache?.idlePause ?? '5')      // minutes, 0 = off
   const [saved, setSaved]             = useState(false)
   const [openAtLogin, setOpenAtLogin]     = useState(generalTabCache?.openAtLogin ?? false)
   const [startMinimized, setStartMinimized] = useState(generalTabCache?.startMinimized ?? false)
@@ -36,7 +36,7 @@ function GeneralTab() {
       const res = await window.kozo.api.settings.getAll()
       const c = generalTabCache || {}
       if (res?.ok) {
-        c.idlePause   = res.data?.idle_pause_min || '0'
+        c.idlePause   = res.data?.idle_pause_min || '5'
         setIdlePause(c.idlePause)
       }
       const startup = await window.kozo.api.app?.getStartup?.()

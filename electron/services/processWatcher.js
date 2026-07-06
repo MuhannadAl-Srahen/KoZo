@@ -87,6 +87,13 @@ function effectiveIdleSeconds() {
 // gameId → last achievement sync timestamp
 const midSessionSyncAt = new Map()
 
+// gameId → last in-session XP check timestamp. Playtime XP accrues while
+// playing (computeXp counts live session seconds), so checking every few
+// minutes lets the level-up toast pop DURING the session instead of only
+// at session end.
+const xpCheckAt = new Map()
+const XP_CHECK_MS = 5 * 60_000
+
 let pollTimer       = null
 let lastTickAt      = Date.now()
 let paused          = false
@@ -296,7 +303,16 @@ async function tick() {
         logger.info('Session started', { gameId: game.id, name: game.name })
         sendToRenderer('session:started', enriched)
         try { require('./notifications').notifySessionStarted({ gameName: game.name }) } catch {}
-        try { require('../overlayWindow').sendSessionStarted({ gameName: game.name, gameId: game.id }) } catch {}
+        try {
+          require('../overlayWindow').sendSessionStarted({
+            gameName: game.name,
+            gameId: game.id,
+            artPath: game.banner_local_path || game.hero_local_path || null,
+            artUrl: game.banner_url || null,
+          })
+        } catch {}
+        // Auto-mark 'playing' (only from no-status/on-hold — never un-finishes).
+        try { require('./statusSync').onSessionStarted(game.id) } catch {}
         emitter.emit('change')
 
         // Sync achievements right away so anything unlocked before/at launch shows
@@ -308,6 +324,10 @@ async function tick() {
         // (crack files hit disk the moment you unlock; no Steam API cache lag).
         if (game.is_cracked === 1) {
           try { require('./crackWatcher').watchGame(game.id) } catch {}
+        } else if (game.steam_app_id) {
+          // Steam game → watch the Steam client's local stats file so unlocks
+          // show instantly instead of waiting out the Web API's server cache.
+          try { require('./steamStatsWatcher').watchGame(game.id, session.id) } catch {}
         }
       }
 
@@ -325,12 +345,18 @@ async function tick() {
       if (isIdleNow) {
         s.idle_seconds = (s.idle_seconds || 0) + Math.round(gapMs / 1000)
       }
-      // Broadcast idle transitions so the "Now Playing" UI can show "Away" the
-      // moment AFK kicks in (the time is excluded live, not just at session end).
-      if (!!s.idle !== isIdleNow) {
+      // Broadcast idle state EVERY tick while idle (not just on transitions):
+      // the renderer computes the live timer as now − started_at − idle_seconds,
+      // so a stale idle_seconds would keep the visible counter climbing during
+      // AFK even though the recorded time is correct. Fresh values each tick
+      // make the timer visibly freeze. One transition event fires on wake too.
+      const wasIdle = !!s.idle
+      if (wasIdle !== isIdleNow) {
         s.idle = isIdleNow
-        sendToRenderer('session:idle', { gameId: game.id, idle: isIdleNow, idle_seconds: s.idle_seconds || 0 })
         logger.info(`Session ${isIdleNow ? 'idle (AFK) — pausing playtime' : 'active again'}`, { gameId: game.id })
+      }
+      if (isIdleNow || wasIdle !== isIdleNow) {
+        sendToRenderer('session:idle', { gameId: game.id, idle: isIdleNow, idle_seconds: s.idle_seconds || 0 })
       }
 
       try {
@@ -344,6 +370,13 @@ async function tick() {
       if (now - lastSync >= getAchievementSyncMs()) {
         midSessionSyncAt.set(game.id, now)
         runAchievementSync(game.id, game.name)
+      }
+
+      // Periodic XP check — level-ups from accumulated playtime toast mid-session.
+      const lastXp = xpCheckAt.get(game.id) || 0
+      if (now - lastXp >= XP_CHECK_MS) {
+        xpCheckAt.set(game.id, now)
+        try { require('./xpTracker').check({ reason: 'session_tick', gameName: game.name }) } catch {}
       }
 
     } else if (!isRunning && hasSession) {
@@ -419,7 +452,9 @@ function endSession(gameId, session, forcedEndAt) {
   activeSessions.delete(gameId)
   detectionBuffer.delete(gameId)
   midSessionSyncAt.delete(gameId)
+  xpCheckAt.delete(gameId)
   try { require('./crackWatcher').unwatchGame(gameId) } catch {}
+  try { require('./steamStatsWatcher').unwatchGame(gameId) } catch {}
 
   // Idle/AFK seconds accumulated during the session are NOT playtime.
   const idleSec = Math.max(0, Math.floor(session.idle_seconds || 0))
@@ -483,6 +518,26 @@ function endSession(gameId, session, forcedEndAt) {
     })
   } catch {}
   emitter.emit('change')
+
+  // XP check: award the session's XP visibly. Shows a "+N XP" summary in the
+  // overlay (with a near-level nudge when close), and fires the level-up toast
+  // from inside xpTracker if this session pushed the player over a boundary.
+  try {
+    const xp = require('./xpTracker').check({ reason: 'session_end', gameName: game?.name })
+    if (xp && xp.gained > 0) {
+      require('../overlayWindow').sendSessionEnded({
+        gameName: game?.name || 'Game',
+        artPath: game?.banner_local_path || game?.hero_local_path || null,
+        artUrl: game?.banner_url || null,
+        durationSeconds: ended?.duration_seconds || 0,
+        gainedXp: xp.gained,
+        level: xp.level,
+        leveledUp: xp.leveledUp,
+        // Nudge only when the next level is genuinely close — not spam.
+        toNextLevel: xp.toNextLevel <= 100 ? xp.toNextLevel : null,
+      })
+    }
+  } catch {}
 
   // Trigger post-session achievement sync for Steam games. Steam's Web API caches
   // recently-unlocked achievements server-side, so an unlock from the final minutes
@@ -550,6 +605,7 @@ async function resolveOrphanSessions() {
       })
       midSessionSyncAt.set(orphan.game_id, now)
       try { require('./crackWatcher').watchGame(orphan.game_id) } catch {}
+      try { require('./steamStatsWatcher').watchGame(orphan.game_id, orphan.id) } catch {}
       logger.info(`Resumed open session for "${orphan.game_name}" — still running after KoZo restart`)
     } else {
       // Not running → cap at the last heartbeat (the game closed while KoZo was off).
@@ -573,6 +629,7 @@ async function resolveOrphanSessions() {
 function stop() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
   try { require('./controllerInput').stop() } catch {}
+  try { require('./steamStatsWatcher').unwatchAll() } catch {}
   // Leave active sessions OPEN in the DB (do NOT finalize). On next start,
   // resolveOrphanSessions() resumes them if the game is still running, or caps
   // them at the last heartbeat if it isn't. This is what keeps "quit KoZo while
