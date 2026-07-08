@@ -127,6 +127,16 @@
   object-fit: cover;
 }
 
+/* Game cover art in session toasts — portrait crop, similar footprint to toastIcon */
+.toastArt {
+  width: 40px;
+  height: 54px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
 .toastInfo {
   flex: 1;
   min-width: 0;
@@ -242,6 +252,43 @@
   font-weight: 500;
   color: var(--a);
   flex-shrink: 0;
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+/* ── Level-up toast ─────────────────────────────────────────── */
+.levelUpToast {
+  border-color: var(--ab, rgba(167, 139, 250, 0.35));
+}
+
+.levelUpToast .toastHeader {
+  background: var(--ad, rgba(167, 139, 250, 0.12));
+  border-bottom-color: var(--ab, rgba(167, 139, 250, 0.25));
+}
+
+.levelUpIcon {
+  background: var(--ad, rgba(167, 139, 250, 0.12)) !important;
+  border-color: var(--ab, rgba(167, 139, 250, 0.3)) !important;
+}
+
+.levelUpNumber {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--a, #a78bfa);
+  font-family: 'DM Sans', system-ui, sans-serif;
+  animation: levelPop 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes levelPop {
+  0%   { transform: scale(0.4); opacity: 0; }
+  60%  { transform: scale(1.25); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+/* ── Session-end XP summary ─────────────────────────────────── */
+.xpGain {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--a, #a78bfa);
   font-family: 'DM Sans', system-ui, sans-serif;
 }
 

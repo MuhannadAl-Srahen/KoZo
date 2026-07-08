@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('kozo', {
       listUnlocksForGame: (gameId) => ipcRenderer.invoke('achievements:listUnlocksForGame', gameId),
       addUnlock: (data) => ipcRenderer.invoke('achievements:addUnlock', data),
       removeUnlock: (achievementId) => ipcRenderer.invoke('achievements:removeUnlock', achievementId),
+      toggleManual: (achievementId) => ipcRenderer.invoke('achievements:toggleManual', achievementId),
       autoImport: (gameId) => ipcRenderer.invoke('achievements:autoImport', gameId),
     },
     gameList: {
@@ -32,11 +33,18 @@ contextBridge.exposeInMainWorld('kozo', {
       delete: (id) => ipcRenderer.invoke('gameList:delete', id),
       refreshBanners: () => ipcRenderer.invoke('gameList:refreshBanners'),
     },
-    categories: {
-      list: () => ipcRenderer.invoke('categories:list'),
-      add: (data) => ipcRenderer.invoke('categories:add', data),
-      update: (id, data) => ipcRenderer.invoke('categories:update', id, data),
-      delete: (id) => ipcRenderer.invoke('categories:delete', id),
+    customLists: {
+      list: () => ipcRenderer.invoke('customLists:list'),
+      create: (data) => ipcRenderer.invoke('customLists:create', data),
+      update: (id, data) => ipcRenderer.invoke('customLists:update', id, data),
+      delete: (id) => ipcRenderer.invoke('customLists:delete', id),
+      addGame: (listId, itemId) => ipcRenderer.invoke('customLists:addGame', listId, itemId),
+      removeGame: (listId, itemId) => ipcRenderer.invoke('customLists:removeGame', listId, itemId),
+      listsForItem: (itemId) => ipcRenderer.invoke('customLists:listsForItem', itemId),
+    },
+    genres: {
+      distinct: () => ipcRenderer.invoke('genres:distinct'),
+      backfill: () => ipcRenderer.invoke('genres:backfill'),
     },
     settings: {
       get: (key) => ipcRenderer.invoke('settings:get', key),
@@ -84,6 +92,7 @@ contextBridge.exposeInMainWorld('kozo', {
       dayActivity: (day) => ipcRenderer.invoke('stats:dayActivity', day),
       hourActivity: (hour) => ipcRenderer.invoke('stats:hourActivity', hour),
       xp: () => ipcRenderer.invoke('stats:xp'),
+      xpHistory: (limit) => ipcRenderer.invoke('stats:xpHistory', limit),
     },
     watcher: {
       pause:  () => ipcRenderer.invoke('watcher:pause'),
@@ -149,6 +158,15 @@ contextBridge.exposeInMainWorld('kozo', {
     },
     onStatusOverlay: (cb) => {
       ipcRenderer.on('status:overlay', (_, data) => cb(data))
+    },
+    onXpOverlay: (cb) => {
+      ipcRenderer.on('xp:overlay', (_, data) => cb(data))
+    },
+    onSessionEndOverlay: (cb) => {
+      ipcRenderer.on('sessionEnd:overlay', (_, data) => cb(data))
+    },
+    onXpLevelUp: (cb) => {
+      ipcRenderer.on('xp:levelup', (_, data) => cb(data))
     },
     onAccentChanged: (cb) => {
       ipcRenderer.on('accent:changed', (_, hex) => cb(hex))

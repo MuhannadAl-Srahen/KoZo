@@ -42,6 +42,28 @@ function parseIds(raw) {
   try { const a = JSON.parse(raw || '[]'); return Array.isArray(a) ? a.map(String) : [] } catch { return [] }
 }
 
+// Compact "when" for XP history rows: "2m ago", "3h ago", "Yesterday", "Jun 12".
+function timeAgo(iso) {
+  if (!iso) return ''
+  const then = new Date(iso).getTime()
+  if (!Number.isFinite(then)) return ''
+  const diffMin = Math.floor((Date.now() - then) / 60000)
+  if (diffMin < 1) return 'just now'
+  if (diffMin < 60) return `${diffMin}m ago`
+  const diffH = Math.floor(diffMin / 60)
+  if (diffH < 24) return `${diffH}h ago`
+  const diffD = Math.floor(diffH / 24)
+  if (diffD === 1) return 'Yesterday'
+  if (diffD < 7) return `${diffD}d ago`
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
+const XP_EVENT_META = {
+  session:     { Icon: IconClock,             color: 'var(--a)',  verb: 'Played' },
+  achievement: { Icon: IconTrophy,            color: '#fbbf24',   verb: 'Unlocked' },
+  finished:    { Icon: IconCircleCheckFilled, color: '#4ade80',   verb: 'Finished' },
+}
+
 // Module-level cache of the last loaded profile so navigating back to /profile
 // renders instantly from memory and refreshes in the background — instead of
 // flashing the full-page loading spinner on every visit.
@@ -70,14 +92,16 @@ export default function Profile() {
   const [imgBust, setImgBust] = useState(0)
   const [crop, setCrop]   = useState(null)   // { src, kind, setter }
   const [xp, setXp]       = useState(profileCache?.xp ?? null)
+  const [xpHistory, setXpHistory] = useState(profileCache?.xpHistory ?? [])
 
   const load = useCallback(async () => {
     if (!window.kozo?.api) return
-    const [allRes, statsRes, gamesRes, xpRes] = await Promise.all([
+    const [allRes, statsRes, gamesRes, xpRes, xpHistRes] = await Promise.all([
       window.kozo.api.settings.getAll(),
       window.kozo.api.stats.get('all'),
       window.kozo.api.games.list(),
       window.kozo.api.stats.xp(),
+      window.kozo.api.stats.xpHistory?.(12),
     ])
     const d = allRes?.ok ? allRes.data : {}
     setName(d.profile_name || 'Player')
@@ -96,12 +120,13 @@ export default function Profile() {
     const st = statsRes?.ok ? statsRes.data : (profileCache?.stats ?? null)
     const gm = gamesRes?.ok ? (gamesRes.data || []) : (profileCache?.games ?? [])
     const xpv = xpRes?.ok ? xpRes.data : (profileCache?.xp ?? null)
-    setStats(st); setGames(gm); setXp(xpv)
+    const xph = xpHistRes?.ok ? (xpHistRes.data || []) : (profileCache?.xpHistory ?? [])
+    setStats(st); setGames(gm); setXp(xpv); setXpHistory(xph)
     profileCache = {
       name: d.profile_name || 'Player', tagline: d.profile_tagline || '', title: d.profile_title || '',
       avatar: d.profile_avatar_path || '', banner: d.profile_banner_path || '',
       bannerStyle: d.profile_banner_style || 'accent', showcase: ids, createdAt: created,
-      stats: st, games: gm, xp: xpv,
+      stats: st, games: gm, xp: xpv, xpHistory: xph,
     }
     setLoading(false)
   }, [])
@@ -114,14 +139,16 @@ export default function Profile() {
   // the stats are re-pulled (not the editable profile fields), and never mid-edit.
   const refreshStats = useCallback(async () => {
     if (!window.kozo?.api || editing) return
-    const [statsRes, gamesRes, xpRes] = await Promise.all([
+    const [statsRes, gamesRes, xpRes, xpHistRes] = await Promise.all([
       window.kozo.api.stats.get('all'),
       window.kozo.api.games.list(),
       window.kozo.api.stats.xp(),
+      window.kozo.api.stats.xpHistory?.(12),
     ])
     if (statsRes?.ok) { setStats(statsRes.data); if (profileCache) profileCache.stats = statsRes.data }
     if (gamesRes?.ok) { setGames(gamesRes.data || []); if (profileCache) profileCache.games = gamesRes.data || [] }
     if (xpRes?.ok)    { setXp(xpRes.data); if (profileCache) profileCache.xp = xpRes.data }
+    if (xpHistRes?.ok) { setXpHistory(xpHistRes.data || []); if (profileCache) profileCache.xpHistory = xpHistRes.data || [] }
   }, [editing])
 
   useEffect(() => {
@@ -206,6 +233,28 @@ export default function Profile() {
 
   const heroBg = banner ? undefined : (BANNER_STYLES[bannerStyle] || BANNER_STYLES.accent)
   const bannerSrc = banner ? fileUrl(banner, imgBust || undefined) : null
+  // No uploaded banner → use the first showcase game's art as a blurred backdrop
+  // behind the gradient, so the hero feels personal out of the box.
+  const showcaseArt = !banner && showcaseGames[0]
+    ? (showcaseGames[0].hero_local_path
+        ? fileUrl(showcaseGames[0].hero_local_path, imgBust || undefined)
+        : (showcaseGames[0].banner_local_path
+            ? fileUrl(showcaseGames[0].banner_local_path, imgBust || undefined)
+            : showcaseGames[0].banner_url))
+    : null
+
+  // Top genres — aggregate library genres weighted by playtime.
+  const genreSeconds = {}
+  for (const g of games) {
+    let gs = []
+    try { gs = JSON.parse(g.genres || '[]') } catch {}
+    for (const name of gs) {
+      genreSeconds[name] = (genreSeconds[name] || 0) + (g.total_playtime_seconds || 0) + 1
+    }
+  }
+  const topGenres = Object.entries(genreSeconds)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
 
   return (
     <div className={s.page}>
@@ -217,7 +266,12 @@ export default function Profile() {
                 <img src={bannerSrc} className={s.heroBlur} alt="" aria-hidden="true" onError={e => { e.target.style.display = 'none' }} />
                 <img src={bannerSrc} className={s.heroImg} alt="" onError={e => { e.target.style.display = 'none' }} />
               </>
-            : <div className={s.heroGradient} style={{ background: heroBg }} />}
+            : <>
+                {showcaseArt && (
+                  <img src={showcaseArt} className={s.heroBlur} alt="" aria-hidden="true" onError={e => { e.target.style.display = 'none' }} />
+                )}
+                <div className={`${s.heroGradient} ${showcaseArt ? s.heroGradientOverArt : ''}`} style={{ background: heroBg }} />
+              </>}
           <div className={s.heroShade} />
 
           {!editing
@@ -277,6 +331,7 @@ export default function Profile() {
                   ? <input className={s.nameInput} value={name} maxLength={32} onChange={e => setName(e.target.value)} placeholder="Your name" />
                   : <div className={s.name}>{name}</div>}
                 {!editing && title && <span className={s.titlePill}>{title}</span>}
+                {!editing && xp && <span className={s.levelPill}>LVL {xp.level}</span>}
               </div>
               {editing
                 ? <input className={s.taglineInput} value={tagline} maxLength={80} onChange={e => setTagline(e.target.value)} placeholder="Add a tagline…" />
@@ -365,6 +420,27 @@ export default function Profile() {
                   </div>
                 ))}
               </div>
+
+              {/* Recent XP — where the last gains came from (derived live, no ledger) */}
+              {xpHistory.length > 0 && (
+                <div className={s.xpHistory}>
+                  <div className={s.xpHistoryTitle}>Recent XP</div>
+                  {xpHistory.map((e, i) => {
+                    const meta = XP_EVENT_META[e.type] || XP_EVENT_META.session
+                    return (
+                      <div key={`${e.type}-${e.ts}-${i}`} className={s.xpHistoryRow}>
+                        <meta.Icon size={13} stroke={1.8} style={{ color: meta.color, flexShrink: 0 }} />
+                        <span className={s.xpHistoryLabel}>
+                          {meta.verb} {e.label}
+                          {e.type === 'session' && e.detail ? ` · ${formatPlaytime(e.detail)}` : ''}
+                        </span>
+                        <span className={s.xpHistoryWhen}>{timeAgo(e.ts)}</span>
+                        <span className={s.xpHistoryXp}>+{e.xp}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )
         })()}
@@ -387,6 +463,21 @@ export default function Profile() {
         <div className={s.memberRow}>
           <IconCalendar size={13} stroke={1.7} /> Member since {memberSince(createdAt)}
         </div>
+
+        {/* Top genres — what you actually play, weighted by playtime */}
+        {topGenres.length > 0 && (
+          <div className={s.section}>
+            <div className={s.sectionTitle}>Top Genres</div>
+            <div className={s.genreRow}>
+              {topGenres.map(([name, sec], i) => (
+                <span key={name} className={`${s.genreTag} ${i === 0 ? s.genreTagTop : ''}`}>
+                  {name}
+                  <span className={s.genreTagTime}>{formatPlaytime(sec) || '—'}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Showcase shelf */}
         <div className={s.section}>

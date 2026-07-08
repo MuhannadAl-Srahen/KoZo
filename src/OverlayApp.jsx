@@ -1,7 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { IconTrophy, IconPlayerPlay, IconX, IconClock, IconDeviceGamepad2 } from '@tabler/icons-react'
+import { IconTrophy, IconPlayerPlay, IconX, IconClock, IconDeviceGamepad2, IconSparkles, IconArrowBigUpLines } from '@tabler/icons-react'
 import { applyAccent } from './context/AccentColorContext'
+import { fileUrl } from './lib/utils'
 import s from './OverlayApp.module.css'
+
+// Cover-art thumb for session toasts — local cached banner first, CDN fallback,
+// hidden entirely when neither loads (returns null so the icon shows instead).
+function ToastArt({ artPath, artUrl }) {
+  const [stage, setStage] = useState(artPath ? 'local' : (artUrl ? 'remote' : 'none'))
+  if (stage === 'none') return null
+  const src = stage === 'local' ? fileUrl(artPath) : artUrl
+  return (
+    <img
+      className={s.toastArt}
+      src={src}
+      alt=""
+      onError={() => setStage(stage === 'local' && artUrl ? 'remote' : 'none')}
+    />
+  )
+}
 
 const DISPLAY_MS = 6000
 
@@ -76,9 +93,13 @@ function SessionToast({ toast, onDismiss }) {
         <span className={s.toastHeaderText}>Now Playing</span>
       </div>
       <div className={s.toastBody}>
-        <div className={`${s.toastIcon} ${s.sessionIcon}`}>
-          <IconPlayerPlay size={22} stroke={1.5} style={{ color: 'var(--a, #a78bfa)' }} />
-        </div>
+        {(toast.artPath || toast.artUrl) ? (
+          <ToastArt artPath={toast.artPath} artUrl={toast.artUrl} />
+        ) : (
+          <div className={`${s.toastIcon} ${s.sessionIcon}`}>
+            <IconPlayerPlay size={22} stroke={1.5} style={{ color: 'var(--a, #a78bfa)' }} />
+          </div>
+        )}
         <div className={s.toastInfo}>
           <div className={s.toastName}>{toast.gameName}</div>
           <div className={s.toastDesc}>Session started — tracking playtime</div>
@@ -120,6 +141,67 @@ function StatusToast({ toast, onDismiss }) {
                 </div>
               )}
             </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Level-up toast ────────────────────────────────────────────────────────────
+
+function LevelUpToast({ toast, onDismiss }) {
+  const { leaving, close } = useAutoClose(onDismiss, 7000)
+  const { level, tier, totalXp } = toast
+  return (
+    <div className={`${s.toast} ${s.levelUpToast} ${leaving ? s.toastOut : s.toastIn}`}
+      {...toastInteractions(close)}>
+      <CloseButton close={close} />
+      <div className={s.toastHeader}>
+        <IconArrowBigUpLines size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
+        <span className={s.toastHeaderText}>Level Up!</span>
+      </div>
+      <div className={s.toastBody}>
+        <div className={`${s.toastIcon} ${s.levelUpIcon}`}>
+          <span className={s.levelUpNumber}>{level}</span>
+        </div>
+        <div className={s.toastInfo}>
+          <div className={s.toastName}>Level {level} — {tier}</div>
+          <div className={s.toastDesc}>{totalXp?.toLocaleString?.() ?? totalXp} XP total. Keep it up!</div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Session-end XP summary toast ──────────────────────────────────────────────
+
+function SessionEndToast({ toast, onDismiss }) {
+  const { leaving, close } = useAutoClose(onDismiss, 6000)
+  const { gameName, durationSeconds, gainedXp, toNextLevel } = toast
+  return (
+    <div className={`${s.toast} ${s.sessionToast} ${leaving ? s.toastOut : s.toastIn}`}
+      {...toastInteractions(close)}>
+      <CloseButton close={close} />
+      <div className={s.toastHeader}>
+        <IconSparkles size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
+        <span className={s.toastHeaderText}>Session Complete</span>
+      </div>
+      <div className={s.toastBody}>
+        {(toast.artPath || toast.artUrl) ? (
+          <ToastArt artPath={toast.artPath} artUrl={toast.artUrl} />
+        ) : (
+          <div className={`${s.toastIcon} ${s.sessionIcon}`}>
+            <span className={s.xpGain}>+{gainedXp}</span>
+          </div>
+        )}
+        <div className={s.toastInfo}>
+          <div className={s.toastName}>{gameName}</div>
+          <div className={s.toastDesc}>
+            {flashTime(durationSeconds || 0)} played — +{gainedXp} XP earned
+          </div>
+          {toNextLevel != null && (
+            <div className={s.toastGame}>Only {toNextLevel} XP to the next level!</div>
           )}
         </div>
       </div>
@@ -234,6 +316,14 @@ export default function OverlayApp() {
       setToasts(q => [...q, ...newToasts].slice(-4))
     })
 
+    // XP: level-up celebration + post-session "+N XP" summary.
+    window.kozo?.events?.onXpOverlay?.((data) => {
+      setToasts(q => [...q, { id: ++nextId.current, type: 'levelup', ...data }].slice(-4))
+    })
+    window.kozo?.events?.onSessionEndOverlay?.((data) => {
+      setToasts(q => [...q, { id: ++nextId.current, type: 'sessionEnd', ...data }].slice(-4))
+    })
+
     // Tell main both listeners are attached — it flushes any queued messages
     // (e.g. a "Test notification" fired before this window finished loading).
     window.kozo?.api?.overlay?.ready?.()
@@ -244,6 +334,8 @@ export default function OverlayApp() {
       window.kozo?.events?.removeAll?.('session:overlay')
       window.kozo?.events?.removeAll?.('achievement:overlay')
       window.kozo?.events?.removeAll?.('status:overlay')
+      window.kozo?.events?.removeAll?.('xp:overlay')
+      window.kozo?.events?.removeAll?.('sessionEnd:overlay')
     }
   }, [])
 
@@ -260,10 +352,14 @@ export default function OverlayApp() {
     <div className={s.container}>
       {toasts.map(t =>
         t.type === 'session'
-          ? <SessionToast   key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
+          ? <SessionToast    key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
           : t.type === 'status'
-          ? <StatusToast    key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
-          : <OverlayToast   key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
+          ? <StatusToast     key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
+          : t.type === 'levelup'
+          ? <LevelUpToast    key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
+          : t.type === 'sessionEnd'
+          ? <SessionEndToast key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
+          : <OverlayToast    key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
       )}
     </div>
   )

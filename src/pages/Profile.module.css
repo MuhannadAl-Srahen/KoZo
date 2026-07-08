@@ -33,6 +33,8 @@
 .heroBlur { filter: blur(18px) brightness(0.5) saturate(1.1); transform: scale(1.2); z-index: 0; }
 .heroImg  { z-index: 1; }
 .heroGradient { position: absolute; inset: 0; z-index: 0; }
+/* When showcase art sits behind the gradient, let it show through */
+.heroGradientOverArt { opacity: 0.55; z-index: 1; }
 .heroShade {
   position: absolute; inset: 0; z-index: 2;
   background: linear-gradient(180deg, rgba(9,9,15,0.15) 0%, rgba(9,9,15,0.5) 55%, rgba(9,9,15,0.92) 100%);
@@ -109,6 +111,12 @@
   color: var(--a); background: var(--ad); border: 1px solid var(--ab);
   border-radius: var(--r-pill); padding: 3px 9px;
 }
+.levelPill {
+  flex-shrink: 0;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
+  color: #0a0a12; background: var(--a);
+  border-radius: var(--r-pill); padding: 3px 9px;
+}
 .tagline { font-size: 13.5px; color: var(--text-secondary); margin-top: 5px; }
 .taglineMuted { font-size: 13.5px; color: var(--text-muted); margin-top: 5px; font-style: italic; }
 
@@ -123,10 +131,6 @@
   padding: 5px 10px; width: 100%; max-width: 420px; margin-top: 7px; font-family: var(--font);
 }
 .nameInput:focus, .taglineInput:focus { outline: none; border-color: var(--a); }
-
-.rankBadge { flex-shrink: 0; text-align: right; padding-bottom: 4px; }
-.rankName { display: block; font-size: 15px; font-weight: 600; color: var(--a); }
-.rankMeta { font-size: 11.5px; color: var(--text-secondary); }
 
 /* Title picker */
 .titlePicker { display: flex; align-items: center; gap: 12px; padding: 14px 24px 0; flex-wrap: wrap; }
@@ -143,14 +147,6 @@
 }
 .titleOpt:hover { color: var(--text-primary); border-color: var(--ab); }
 .titleOptOn { color: var(--a); background: var(--ad); border-color: var(--a); font-weight: 500; }
-
-/* Rank progress */
-.rankBar { padding: 16px 24px 6px; }
-.rankBarHead { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-secondary); margin-bottom: 7px; }
-.rankBarHead > span:first-child { color: var(--text-primary); font-weight: 500; }
-.rankNext { color: var(--text-muted); }
-.rankTrack { height: 7px; border-radius: 4px; background: var(--surface-3); overflow: hidden; }
-.rankFill { height: 100%; background: linear-gradient(90deg, var(--a), var(--ab)); border-radius: 4px; transition: width 0.4s; }
 
 /* Stat grid */
 .statGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 14px 24px 0; }
@@ -310,9 +306,41 @@
 .xpSourceLabel { font-size: 11.5px; color: var(--text-secondary); width: calc(100% - 24px); order: 2; }
 .xpSourceSub { font-size: 10.5px; color: var(--text-muted); width: 100%; order: 4; }
 
+/* Recent XP history — compact event rows under the breakdown */
+.xpHistory { margin-top: 16px; border-top: 1px solid var(--border-subtle); padding-top: 12px; }
+.xpHistoryTitle {
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 7px;
+}
+.xpHistoryRow {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 2px;
+  border-radius: var(--r-input);
+}
+.xpHistoryRow:hover { background: var(--surface-3); }
+.xpHistoryLabel {
+  flex: 1; min-width: 0;
+  font-size: 12.5px; color: var(--text-secondary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.xpHistoryWhen { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+.xpHistoryXp { font-size: 12.5px; font-weight: 700; color: var(--a); flex-shrink: 0; min-width: 42px; text-align: right; }
+
 @media (max-width: 760px) {
   .statGrid { grid-template-columns: repeat(2, 1fr); }
   .shelf { grid-template-columns: repeat(3, 1fr); }
   .xpHero { flex-wrap: wrap; }
   .xpStreaks { border-left: none; padding-left: 0; }
 }
+
+/* ── Top genres ─────────────────────────────────────────────── */
+.genreRow { display: flex; flex-wrap: wrap; gap: 7px; }
+.genreTag {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12px; font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--r-pill); padding: 5px 12px;
+}
+.genreTagTop { color: var(--a); border-color: var(--ab); background: var(--ad); }
+.genreTagTime { font-size: 11px; color: var(--text-muted); font-weight: 400; }

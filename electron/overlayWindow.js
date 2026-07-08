@@ -99,6 +99,8 @@ function markReady() {
 function sendAchievements(data)   { _send('achievement:overlay', data) }
 function sendSessionStarted(data) { _send('session:overlay',     data) }
 function sendStatusFlash(data)    { _send('status:overlay',      data) }
+function sendLevelUp(data)        { _send('xp:overlay',          data) }
+function sendSessionEnded(data)   { _send('sessionEnd:overlay',  data) }
 
 // Toggle whether the overlay captures mouse clicks. The window is click-through
 // by default (events pass to the game). When the cursor is over a toast the
@@ -124,4 +126,4 @@ function applyAccent(hex) {
   }
 }
 
-module.exports = { getOrCreate, sendAchievements, sendSessionStarted, sendStatusFlash, hideOverlay, markReady, setInteractive, applyAccent }
+module.exports = { getOrCreate, sendAchievements, sendSessionStarted, sendStatusFlash, sendLevelUp, sendSessionEnded, hideOverlay, markReady, setInteractive, applyAccent }

@@ -4,7 +4,7 @@ const gamesQ = require('./db/queries/games')
 const sessionsQ = require('./db/queries/sessions')
 const achievementsQ = require('./db/queries/achievements')
 const gameListQ = require('./db/queries/gameList')
-const categoriesQ = require('./db/queries/categories')
+const customListsQ = require('./db/queries/customLists')
 const settingsQ = require('./db/queries/settings')
 const logger = require('./logger')
 
@@ -68,6 +68,16 @@ handle('games:add', async (data) => {
       logger.warn(`Banner download failed for game ${game.id}`, { message: e.message })
     }
 
+    // Steam store genres — power auto-grouping on the Game List and genre chips.
+    try {
+      const { getStoreArt } = require('./services/steamApi')
+      const art = await getStoreArt(game.steam_app_id)
+      if (art?.genres?.length) {
+        gamesQ.updateGame(game.id, { genres: JSON.stringify(art.genres) })
+        game.genres = JSON.stringify(art.genres)
+      }
+    } catch {}
+
     // Achievements sync in background — doesn't block the add response
     const { fetchAndStoreAchievements } = require('./services/achievementSync')
     setImmediate(async () => {
@@ -87,10 +97,17 @@ handle('games:add', async (data) => {
   return game
 })
 handle('games:update', (id, data) => {
-  const r = gamesQ.updateGame(id, data); bk()
+  // Status changes go through statusSync so linked Game List rows stay in step.
+  const { completion_status, ...rest } = data || {}
+  let r = null
+  if (Object.keys(rest).length) r = gamesQ.updateGame(id, rest)
+  if (completion_status !== undefined) {
+    r = require('./services/statusSync').setGameStatus(id, completion_status)
+  }
+  bk()
   // Broadcast so Library/GameDetail/Achievements re-render (e.g. favorite toggle, edits)
   broadcast('game:updated', id)
-  return r
+  return r || gamesQ.getGame(id)
 })
 handle('shell:openExternal', (url) => {
   if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {
@@ -238,6 +255,36 @@ handle('achievements:listAll', (filters) => achievementsQ.listAllAchievements(fi
 handle('achievements:listUnlocksForGame', (gameId) => achievementsQ.listAchievementsForGame(gameId))
 handle('achievements:addUnlock', (data) => { achievementsQ.addUnlock(data); bk(); return true })
 handle('achievements:removeUnlock', (id) => { achievementsQ.removeUnlock(id); bk(); return true })
+// Manual unlock toggle — the fallback for cracks whose emulator never persists
+// unlocks to disk. Unlocking routes through emitNewUnlocks so the overlay toast,
+// notification and XP check all fire exactly like a real detected unlock.
+handle('achievements:toggleManual', (achievementId) => {
+  const db = require('./db/database').getDb()
+  const ach = db.prepare('SELECT * FROM achievements WHERE id = ?').get(achievementId)
+  if (!ach) throw new Error('Achievement not found')
+  const existing = db.prepare('SELECT id FROM achievement_unlocks WHERE achievement_id = ?').get(achievementId)
+
+  if (existing) {
+    achievementsQ.removeUnlock(achievementId)
+    // Silent XP re-check so totals stay consistent (check only toasts on level UP).
+    try { require('./services/xpTracker').check({ reason: 'manual_lock' }) } catch {}
+    bk()
+    broadcast('game:updated', ach.game_id)
+    return { unlocked: false }
+  }
+
+  const unlocked_at = new Date().toISOString()
+  achievementsQ.addUnlock({ achievement_id: achievementId, session_id: null, unlocked_at, source: 'manual' })
+  const game = gamesQ.getGame(ach.game_id)
+  try {
+    require('./services/achievementSync').emitNewUnlocks(game, [{ ...ach, unlocked_at }])
+  } catch (e) {
+    logger.warn('toggleManual emit failed', { message: e.message })
+  }
+  bk()
+  broadcast('game:updated', ach.game_id)
+  return { unlocked: true, unlocked_at }
+})
 // Automatically resolve a Steam appid by name and import the achievement list
 // (for Xbox/Epic/etc.) — no App ID typing. Used on add and from GameDetail.
 handle('achievements:autoImport', async (gameId) => {
@@ -256,13 +303,23 @@ handle('gameList:add', async (data) => {
   // newer/unreleased titles. Resolve to the real art when needed.
   if (data?.steam_app_id) {
     try {
-      const { resolveBannerUrl } = require('./services/steamApi')
-      data = { ...data, banner_url: await resolveBannerUrl(data.steam_app_id) }
+      const { resolveBannerUrl, getStoreArt } = require('./services/steamApi')
+      const [bannerUrl, art] = await Promise.all([
+        resolveBannerUrl(data.steam_app_id),
+        getStoreArt(data.steam_app_id),
+      ])
+      data = { ...data, banner_url: bannerUrl }
+      if (art?.genres?.length) data.genres = JSON.stringify(art.genres)
     } catch {}
   }
   const r = gameListQ.addGameListItem(data); bk(); return r
 })
-handle('gameList:update', (id, data) => { const r = gameListQ.updateGameListItem(id, data); bk(); broadcast('game:updated', null); return r })
+handle('gameList:update', (id, data) => {
+  const r = gameListQ.updateGameListItem(id, data)
+  // Mirror a status change onto the linked library game (and vice versa elsewhere).
+  if (data?.status) { try { require('./services/statusSync').syncFromGameList(id, data.status) } catch (e) { logger.warn('statusSync from game list failed', { message: e.message }) } }
+  bk(); broadcast('game:updated', null); return r
+})
 handle('gameList:delete', (id) => { gameListQ.deleteGameListItem(id); bk(); return true })
 
 // Re-resolve the remote cover URL for every list item that has a Steam App ID.
@@ -284,11 +341,45 @@ handle('gameList:refreshBanners', async () => {
   return { updated }
 })
 
-// ── Categories ────────────────────────────────────────────────────────────────
-handle('categories:list', () => categoriesQ.listCategories())
-handle('categories:add', (data) => categoriesQ.addCategory(data))
-handle('categories:update', (id, data) => categoriesQ.updateCategory(id, data))
-handle('categories:delete', ({ id, reassignToId }) => { categoriesQ.deleteCategory(id, reassignToId); return true })
+// ── Custom lists (Spotify-playlist-style game lists) ─────────────────────────
+handle('customLists:list', () => customListsQ.listLists())
+handle('customLists:create', (data) => { const r = customListsQ.createList(data); bk(); return r })
+handle('customLists:update', (id, data) => { const r = customListsQ.updateList(id, data); bk(); return r })
+handle('customLists:delete', (id) => { customListsQ.deleteList(id); bk(); return true })
+handle('customLists:addGame', (listId, itemId) => { customListsQ.addGameToList(listId, itemId); bk(); return true })
+handle('customLists:removeGame', (listId, itemId) => { customListsQ.removeGameFromList(listId, itemId); bk(); return true })
+handle('customLists:listsForItem', (itemId) => customListsQ.listIdsForItem(itemId))
+
+// ── Genres ────────────────────────────────────────────────────────────────────
+handle('genres:distinct', () => gameListQ.distinctGenres())
+// Backfill Steam genres for existing rows that predate the genres column.
+// Throttled (appdetails rate-limits hard) and aborts after repeated failures.
+handle('genres:backfill', async () => {
+  const { getStoreArt } = require('./services/steamApi')
+  const db = require('./db/database').getDb()
+  const targets = [
+    ...db.prepare("SELECT id, steam_app_id, 'games' AS tbl FROM games WHERE steam_app_id IS NOT NULL AND genres IS NULL").all(),
+    ...db.prepare("SELECT id, steam_app_id, 'game_list' AS tbl FROM game_list WHERE steam_app_id IS NOT NULL AND genres IS NULL").all(),
+  ]
+  let updated = 0, failures = 0
+  for (const row of targets) {
+    try {
+      const art = await getStoreArt(row.steam_app_id)
+      if (art?.genres?.length) {
+        db.prepare(`UPDATE ${row.tbl} SET genres = ? WHERE id = ?`).run(JSON.stringify(art.genres), row.id)
+        updated++
+        failures = 0
+      } else if (art === null) {
+        failures++
+      }
+    } catch { failures++ }
+    if (failures >= 5) break   // likely rate-limited — stop hammering
+    await new Promise(r => setTimeout(r, 300))
+  }
+  bk()
+  broadcast('game:updated', null)
+  return { updated, remaining: targets.length - updated }
+})
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 handle('settings:get', (key) => settingsQ.getSetting(key))
@@ -512,78 +603,11 @@ handle('crack:scanAll', async () => {
   return scanAllCrackedGames()
 })
 
-// Returns diagnostic info for crack achievement scanning — which files exist,
-// what the emulator-detected appid is, and the top checked paths per source.
+// Structured diagnosis: emulator family, config vs stored appid, every existing
+// candidate file with its parsed unlock count, and a plain-language verdict.
 handle('crack:diagnose', (gameId) => {
-  const gamesQ = require('./db/queries/games')
-  const { buildCandidates } = require('./services/crackWatcher')
-  const fs   = require('fs')
-  const path = require('path')
-  const os   = require('os')
-
-  const game = gamesQ.getGame(gameId)
-  if (!game) return { error: 'game_not_found' }
-
-  const cands = buildCandidates(game)
-
-  // Which files actually exist on disk
-  const found = cands.filter(c => {
-    try { return c.path !== 'sse' && fs.existsSync(c.path) } catch { return false }
-  })
-
-  // Try to read actual appid from the game folder (Goldberg stores it here)
-  let detectedAppid = null
-  if (game.install_path) {
-    const hints = [
-      path.join(game.install_path, 'steam_settings', 'steam_appid.txt'),
-      path.join(game.install_path, 'steam_appid.txt'),
-      path.join(game.install_path, 'appid.txt'),
-    ]
-    for (const h of hints) {
-      try {
-        if (fs.existsSync(h)) {
-          const raw = fs.readFileSync(h, 'utf8').trim()
-          if (/^\d+$/.test(raw)) { detectedAppid = raw; break }
-        }
-      } catch {}
-    }
-  }
-
-  // Goldberg save folder path (most common for ZIP games)
-  const appdata = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming')
-  const goldbergPath = game.steam_app_id
-    ? path.join(appdata, 'Goldberg SteamEmu Saves', String(game.steam_app_id))
-    : null
-  const goldbergExists = goldbergPath ? (fs.existsSync(goldbergPath) || false) : false
-
-  // Key paths to show user (most likely locations)
-  const keyPaths = []
-  if (goldbergPath) {
-    keyPaths.push({
-      label: 'Goldberg save folder',
-      path: goldbergPath,
-      exists: goldbergExists,
-      note: goldbergExists ? 'Folder exists' : 'Not found — play the game first, or the appid may differ',
-    })
-  }
-  if (game.install_path) {
-    keyPaths.push({
-      label: 'Game install folder',
-      path: game.install_path,
-      exists: fs.existsSync(game.install_path),
-    })
-  }
-
-  return {
-    gameName: game.name,
-    appid: game.steam_app_id,
-    detectedAppid,
-    appidMismatch: detectedAppid && String(detectedAppid) !== String(game.steam_app_id),
-    installPath: game.install_path,
-    totalChecked: cands.length,
-    found: found.map(c => ({ path: c.path, source: c.source })),
-    keyPaths,
-  }
+  const { diagnoseGame } = require('./services/crackWatcher')
+  return diagnoseGame(gameId)
 })
 
 // ── PC Scanner ────────────────────────────────────────────────────────────────
@@ -694,10 +718,23 @@ handle('scanner:addGames', async (games) => {
             .then(p => gamesQ.updateGame(game.id, { banner_local_path: p }))
             .catch(() => {})
         )
+        // Steam store genres for auto-grouping — non-fatal on failure
+        const { getStoreArt } = require('./services/steamApi')
+        bannerJobs.push(
+          getStoreArt(game.steam_app_id)
+            .then(art => {
+              if (art?.genres?.length) gamesQ.updateGame(game.id, { genres: JSON.stringify(art.genres) })
+            })
+            .catch(() => {})
+        )
         const { fetchAndStoreAchievements } = require('./services/achievementSync')
         setImmediate(() => fetchAndStoreAchievements(game.id).catch(() => {}))
-      } else if (!game.is_cracked) {
-        // Non-Steam (Xbox/Epic/manual) → auto-resolve appid by name + import list.
+      } else {
+        // No appid detected (Xbox/Epic/manual, or an unzipped/cracked game whose
+        // folder had no steam_appid.txt) → auto-resolve the appid by name and
+        // import the achievement list. For cracked games this stores manual_appid,
+        // which the crack watcher and schema loader now use as a fallback — so
+        // game3rb/AnkerGames-style unzipped games get achievement tracking too.
         const { autoImportSchemaByName } = require('./services/achievementSync')
         setImmediate(() => autoImportSchemaByName(game.id).catch(() => {}))
       }
@@ -864,7 +901,14 @@ handle('overlay:test', () => {
   BrowserWindow.getAllWindows().forEach(w => {
     if (!w.isDestroyed()) w.webContents.send('achievement:unlocked', payload)
   })
-  try { require('./overlayWindow').sendAchievements(payload) } catch {}
+  const ow = require('./overlayWindow')
+  try { ow.sendAchievements(payload) } catch {}
+  // Also preview the session toast with cover art (first game that has one).
+  try {
+    const g = require('./db/database').getDb()
+      .prepare('SELECT name, banner_local_path, banner_url FROM games WHERE banner_local_path IS NOT NULL OR banner_url IS NOT NULL LIMIT 1').get()
+    if (g) ow.sendSessionStarted({ gameName: g.name, gameId: 0, artPath: g.banner_local_path || null, artUrl: g.banner_url || null })
+  } catch {}
   return true
 })
 
@@ -925,7 +969,7 @@ handle('backup:import', async () => {
     return n
   }
 
-  const TABLES = ['categories', 'games', 'game_list', 'sessions', 'achievements', 'achievement_unlocks', 'settings']
+  const TABLES = ['categories', 'games', 'game_list', 'custom_lists', 'custom_list_games', 'sessions', 'achievements', 'achievement_unlocks', 'settings']
   const counts = {}
   const doImport = db.transaction(() => {
     for (const t of TABLES) counts[t] = upsertRows(t, data[t])
@@ -1105,141 +1149,7 @@ handle('stats:hourActivity', (hour) => {
 })
 
 // ── XP / Level system ─────────────────────────────────────────────────────────
-// One source of truth for the player's "career" progression. XP is earned from
-// three pillars so it rewards both grinders and achievement hunters:
-//   • Playtime   — 60 XP per hour played (an hour ≈ a solid achievement)
-//   • Unlocks    — 30 XP base + a rarity bonus (rarer = more, up to ~+50)
-//   • Streaks    — 50 XP per day in your longest play streak
-// Balanced so all three pillars contribute meaningfully (a grinder, a hunter,
-// and a daily player all level up). Levels use a gently-rising triangular curve:
-// reaching level L costs 50*(L-1)*L cumulative XP, so each level needs 100 more.
-const XP_PER_HOUR = 60
-const XP_PER_UNLOCK = 30
-const XP_PER_STREAK_DAY = 50
-const XP_PER_FINISH = 250   // completing a game is a big, deliberate milestone
-
-function levelForXp(totalXp) {
-  // Largest L with 50*(L-1)*L <= totalXp.
-  let level = 1
-  while (50 * level * (level + 1) <= totalXp) level++
-  const curBase = 50 * (level - 1) * level
-  const nextBase = 50 * level * (level + 1)
-  return {
-    level,
-    intoLevel: totalXp - curBase,         // XP earned inside the current level
-    levelSpan: nextBase - curBase,        // XP the current level spans
-    nextLevelTotal: nextBase,
-  }
-}
-
-// Creative tier names by level band — flair shown next to the level number.
-const TIER_BANDS = [
-  { level: 3,  name: 'Apprentice' },
-  { level: 7,  name: 'Adept' },
-  { level: 12, name: 'Seasoned' },
-  { level: 18, name: 'Veteran' },
-  { level: 25, name: 'Master' },
-  { level: 35, name: 'Legend' },
-  { level: 45, name: 'Grandmaster' },
-  { level: 60, name: 'Mythic' },
-]
-
-function tierForLevel(level) {
-  let name = 'Rookie'
-  for (const b of TIER_BANDS) { if (level >= b.level) name = b.name }
-  return name
-}
-
-// The next tier the user will unlock — drives the "X levels to <Tier>" hook.
-function nextTierInfo(level) {
-  for (const b of TIER_BANDS) { if (level < b.level) return { name: b.name, level: b.level } }
-  return null   // already Mythic
-}
-
-handle('stats:xp', () => {
-  const db = require('./db/database').getDb()
-
-  const playSec = db.prepare(`
-    SELECT COALESCE(SUM(duration_seconds), 0) AS s FROM sessions WHERE ended_at IS NOT NULL
-  `).get().s || 0
-
-  // Rarity-weighted unlock XP. global_unlock_percent is 0–100 (NULL when unknown).
-  // Bonus = round((100 - pct)/2), so a 2%-rare unlock is worth ~+49, a 90%-common ~+5.
-  const unlockRows = db.prepare(`
-    SELECT a.global_unlock_percent AS pct
-    FROM achievement_unlocks au JOIN achievements a ON a.id = au.achievement_id
-  `).all()
-  const unlockCount = unlockRows.length
-  let unlockXp = 0
-  for (const r of unlockRows) {
-    const pct = (r.pct == null) ? 50 : Math.max(0, Math.min(100, r.pct))
-    unlockXp += XP_PER_UNLOCK + Math.round((100 - pct) / 2)
-  }
-
-  // Distinct local play days → current + longest streak.
-  const dayRows = db.prepare(`
-    SELECT DISTINCT DATE(started_at, 'localtime') AS d
-    FROM sessions WHERE ended_at IS NOT NULL ORDER BY d ASC
-  `).all().map(r => r.d).filter(Boolean)
-
-  const daySet = new Set(dayRows)
-  const dayMs = 86400000
-  const toUTC = (s) => { const [y, m, d] = s.split('-').map(Number); return Date.UTC(y, m - 1, d) }
-  let longestStreak = 0, run = 0, prev = null
-  for (const d of dayRows) {
-    if (prev != null && toUTC(d) - prev === dayMs) run++
-    else run = 1
-    if (run > longestStreak) longestStreak = run
-    prev = toUTC(d)
-  }
-  // Current streak: count back from today (or yesterday) while days are present.
-  const todayStr = new Date().toLocaleDateString('en-CA')   // YYYY-MM-DD local
-  let currentStreak = 0
-  let cursor = toUTC(todayStr)
-  if (!daySet.has(todayStr)) cursor -= dayMs   // a gap today is OK if you played yesterday
-  while (true) {
-    const key = new Date(cursor).toISOString().slice(0, 10)
-    if (daySet.has(key)) { currentStreak++; cursor -= dayMs } else break
-  }
-
-  // Finished games — a deliberate milestone. Two places can mark a game finished:
-  //   • the library (games.completion_status = 'finished', via GameDetail), and
-  //   • the Game List page (game_list.status = 'finished').
-  // Count both so either action earns the milestone XP, but don't double-count a
-  // Game-List row that links to a library game already marked finished.
-  const finishedCount = db.prepare(`
-    SELECT
-      (SELECT COUNT(*) FROM games WHERE completion_status = 'finished')
-      +
-      (SELECT COUNT(*) FROM game_list
-         WHERE status = 'finished'
-           AND (game_id IS NULL
-                OR game_id NOT IN (SELECT id FROM games WHERE completion_status = 'finished')))
-      AS c
-  `).get().c || 0
-
-  const playtimeXp = Math.round((playSec / 3600) * XP_PER_HOUR)
-  const streakXp = longestStreak * XP_PER_STREAK_DAY
-  const finishedXp = finishedCount * XP_PER_FINISH
-  const totalXp = playtimeXp + unlockXp + streakXp + finishedXp
-
-  const lv = levelForXp(totalXp)
-  const nextTier = nextTierInfo(lv.level)
-  return {
-    totalXp,
-    level: lv.level,
-    tier: tierForLevel(lv.level),
-    nextTier,                              // { name, level } or null at the top
-    intoLevel: lv.intoLevel,
-    levelSpan: lv.levelSpan,
-    nextLevelTotal: lv.nextLevelTotal,
-    toNextLevel: Math.max(0, lv.levelSpan - lv.intoLevel),
-    progress: lv.levelSpan ? Math.min(100, (lv.intoLevel / lv.levelSpan) * 100) : 100,
-    breakdown: { playtime: playtimeXp, achievements: unlockXp, streak: streakXp, finished: finishedXp },
-    currentStreak,
-    longestStreak,
-    playDays: dayRows.length,
-    unlockCount,
-    finishedCount,
-  }
-})
+// The computation lives in services/xp.js (shared with xpTracker, which detects
+// level-ups after sessions/unlocks/finishes). These handlers just delegate.
+handle('stats:xp', () => require('./services/xp').computeXp())
+handle('stats:xpHistory', (limit) => require('./services/xp').xpHistory(limit || 25))
