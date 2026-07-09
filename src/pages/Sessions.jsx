@@ -154,10 +154,23 @@ export default function Sessions() {
                   const bg = getBannerBg(session.game_id)
                   return (
                     <div key={session.id} className={s.sessionRow}>
-                      {/* Thumbnail */}
+                      {/* Thumbnail — local file first, remote banner_url if the
+                          file is missing (e.g. right after a backup restore) */}
                       <div className={s.thumb} style={{ background: bg }}>
-                        {session.banner_local_path
-                          ? <img src={fileUrl(session.banner_local_path)} alt="" onError={e => { e.target.style.display = 'none' }} />
+                        {(session.banner_local_path || session.banner_url)
+                          ? <img
+                              src={session.banner_local_path ? fileUrl(session.banner_local_path) : session.banner_url}
+                              alt=""
+                              onError={e => {
+                                const img = e.target
+                                if (session.banner_local_path && session.banner_url && !img.dataset.fallbackTried) {
+                                  img.dataset.fallbackTried = '1'
+                                  img.src = session.banner_url
+                                  return
+                                }
+                                img.style.display = 'none'
+                              }}
+                            />
                           : <IconDeviceGamepad2 size={16} stroke={1.4} style={{ color: 'rgba(255,255,255,0.2)' }} />
                         }
                       </div>

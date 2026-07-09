@@ -15,13 +15,13 @@
 /* ── Hero ──────────────────────────────────────────────────── */
 .hero {
   position: relative;
-  /* Responsive height that scales with the viewport but stays bounded, so the
-     banner never becomes a thin sliver on an ultrawide/2K monitor nor huge on a
-     small one. The foreground image uses object-fit:contain (below) so the WHOLE
-     cropped banner is always visible at any width — the blurred cover layer fills
-     the sides. This is screen-size agnostic and can never crop the banner. */
+  /* Match the banner CROP's aspect (ImageCropModal saves 1280×440) so the full
+     cropped image is always visible — the old fixed-height clamp re-cropped the
+     banner into a thin slice. max-height only caps truly ultrawide windows. */
   width: 100%;
-  height: clamp(190px, 15vw, 300px);
+  aspect-ratio: 1280 / 440;
+  height: auto;
+  max-height: 440px;
   overflow: hidden;
   display: flex;
   align-items: flex-end;
@@ -37,7 +37,7 @@
 .heroGradientOverArt { opacity: 0.55; z-index: 1; }
 .heroShade {
   position: absolute; inset: 0; z-index: 2;
-  background: linear-gradient(180deg, rgba(9,9,15,0.15) 0%, rgba(9,9,15,0.5) 55%, rgba(9,9,15,0.92) 100%);
+  background: linear-gradient(180deg, rgba(9,9,15,0.12) 0%, rgba(9,9,15,0.45) 55%, rgba(9,9,15,0.95) 100%);
 }
 
 .editBtn, .saveBtn, .cancelBtn {
@@ -83,13 +83,13 @@
 
 .avatarWrap { position: relative; flex-shrink: 0; }
 .avatar {
-  width: 96px; height: 96px; border-radius: 50%;
+  width: 120px; height: 120px; border-radius: 50%;
   border: 3px solid var(--bg);
-  box-shadow: 0 4px 18px rgba(0,0,0,0.5);
+  box-shadow: 0 6px 24px rgba(0,0,0,0.55);
   overflow: hidden; display: flex; align-items: center; justify-content: center;
 }
 .avatar img { width: 100%; height: 100%; object-fit: cover; }
-.avatarInitials { font-size: 34px; font-weight: 600; color: #0a0a12; letter-spacing: 0.02em; }
+.avatarInitials { font-size: 42px; font-weight: 600; color: #0a0a12; letter-spacing: 0.02em; }
 .avatarPick, .avatarClear {
   position: absolute; width: 28px; height: 28px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center; cursor: pointer;
@@ -102,7 +102,8 @@
 .identity { flex: 1; min-width: 0; padding-bottom: 4px; }
 .nameRow { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .name {
-  font-size: 26px; font-weight: 600; color: var(--text-primary); line-height: 1.1;
+  font-size: 30px; font-weight: 700; color: var(--text-primary); line-height: 1.1;
+  text-shadow: 0 2px 12px rgba(0,0,0,0.6);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .titlePill {
@@ -149,10 +150,17 @@
 .titleOptOn { color: var(--a); background: var(--ad); border-color: var(--a); font-weight: 500; }
 
 /* Stat grid */
-.statGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 14px 24px 0; }
+/* Glass chips overlapping the hero's bottom edge — the cinematic touch. */
+.statGrid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+  padding: 0 24px;
+  margin-top: -30px;
+  position: relative; z-index: 4;
+}
 .statCard {
   display: flex; align-items: center; gap: 11px;
-  background: var(--surface-2); border: 1px solid var(--border);
+  background: rgba(14, 14, 26, 0.72); border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(10px);
   border-radius: var(--r-card); padding: 13px 15px; min-width: 0;
 }
 .statIcon {
@@ -169,9 +177,9 @@
 .memberRow { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); padding: 12px 24px 0; }
 
 /* Sections */
-.section { padding: 18px 24px 0; }
+.section { padding: 16px 24px 0; }
 .sectionTitle {
-  font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.07em;
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em;
   color: var(--text-secondary); margin-bottom: 12px;
 }
 .sectionHint { color: var(--text-muted); text-transform: none; letter-spacing: 0; font-weight: 400; }
@@ -297,34 +305,70 @@
 
 .xpBreakdown { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-top: 16px; }
 .xpSource {
-  display: flex; align-items: center; column-gap: 9px; flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-rows: auto auto;
+  column-gap: 9px; row-gap: 1px; align-items: center;
   background: var(--surface-3); border: 1px solid var(--border);
   border-radius: var(--r-input); padding: 9px 12px; min-width: 0;
 }
-.xpSource > svg { flex-shrink: 0; }
-.xpSourceVal { font-size: 14px; font-weight: 700; color: var(--text-primary); margin-left: auto; order: 3; }
-.xpSourceLabel { font-size: 11.5px; color: var(--text-secondary); width: calc(100% - 24px); order: 2; }
-.xpSourceSub { font-size: 10.5px; color: var(--text-muted); width: 100%; order: 4; }
+.xpSource > svg { grid-column: 1; grid-row: 1 / 3; align-self: center; flex-shrink: 0; }
+.xpSourceLabel { grid-column: 2; grid-row: 1; font-size: 11.5px; color: var(--text-secondary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xpSourceVal { grid-column: 3; grid-row: 1; font-size: 14px; font-weight: 700; color: var(--text-primary); text-align: right; white-space: nowrap; }
+.xpSourceSub { grid-column: 2 / 4; grid-row: 2; font-size: 10.5px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Recent XP history — compact event rows under the breakdown */
-.xpHistory { margin-top: 16px; border-top: 1px solid var(--border-subtle); padding-top: 12px; }
+/* Recent XP history — compact two-column card grid + inline "Show all" */
+.xpHistory { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border-subtle); }
 .xpHistoryTitle {
   font-size: 11px; font-weight: 600; text-transform: uppercase;
-  letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 7px;
+  letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 8px;
 }
-.xpHistoryRow {
-  display: flex; align-items: center; gap: 8px;
-  padding: 5px 2px;
+.xpHistoryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 8px;
+}
+.xpEntry {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 11px;
+  background: var(--surface-3);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--r-input);
+  min-width: 0;
 }
-.xpHistoryRow:hover { background: var(--surface-3); }
-.xpHistoryLabel {
-  flex: 1; min-width: 0;
-  font-size: 12.5px; color: var(--text-secondary);
+.xpEntryInfo { flex: 1; min-width: 0; }
+.xpEntryTitle {
+  font-size: 12.5px;
+  color: var(--text-secondary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.xpHistoryWhen { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
-.xpHistoryXp { font-size: 12.5px; font-weight: 700; color: var(--a); flex-shrink: 0; min-width: 42px; text-align: right; }
+.xpEntrySub {
+  margin-top: 1px;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.xpEntryXp {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--a);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.xpShowAll {
+  display: block;
+  margin: 8px auto 0;
+  padding: 4px 12px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.xpShowAll:hover { color: var(--a); }
 
 @media (max-width: 760px) {
   .statGrid { grid-template-columns: repeat(2, 1fr); }

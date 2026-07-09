@@ -8,6 +8,7 @@ import {
 import { fileUrl, formatPlaytime, getBannerBg } from '../lib/utils'
 import { useAccentColor } from '../context/AccentColorContext'
 import ImageCropModal from '../components/modals/ImageCropModal'
+import Modal from '../components/ui/Modal'
 import s from './Profile.module.css'
 
 
@@ -42,6 +43,42 @@ function parseIds(raw) {
   try { const a = JSON.parse(raw || '[]'); return Array.isArray(a) ? a.map(String) : [] } catch { return [] }
 }
 
+// Collapse repeated same-game session entries from the same calendar day into
+// one "N sessions" row so the feed isn't spammed by short play bursts.
+// Achievement/finished entries pass through untouched; newest-first preserved.
+function mergeXpHistory(entries) {
+  const merged = []
+  const sessionKey = new Map()   // "label|YYYY-M-D" -> merged entry
+  for (const e of entries) {
+    if (e.type !== 'session') { merged.push(e); continue }
+    const d = new Date(e.ts)
+    const key = `${e.label}|${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+    const hit = sessionKey.get(key)
+    if (hit) {
+      hit.xp += e.xp
+      hit.count += 1
+      hit.totalSeconds += e.detail || 0
+    } else {
+      const entry = { ...e, count: 1, totalSeconds: e.detail || 0 }
+      sessionKey.set(key, entry)
+      merged.push(entry)
+    }
+  }
+  return merged
+}
+
+// Cover <img> onError: if the local file is missing (e.g. right after a backup
+// restore), retry once with the remote banner_url before hiding the image.
+function coverError(e, remote) {
+  const img = e.target
+  if (remote && img.src !== remote && !img.dataset.fallbackTried) {
+    img.dataset.fallbackTried = '1'
+    img.src = remote
+    return
+  }
+  img.style.display = 'none'
+}
+
 // Compact "when" for XP history rows: "2m ago", "3h ago", "Yesterday", "Jun 12".
 function timeAgo(iso) {
   if (!iso) return ''
@@ -62,6 +99,27 @@ const XP_EVENT_META = {
   session:     { Icon: IconClock,             color: 'var(--a)',  verb: 'Played' },
   achievement: { Icon: IconTrophy,            color: '#fbbf24',   verb: 'Unlocked' },
   finished:    { Icon: IconCircleCheckFilled, color: '#4ade80',   verb: 'Finished' },
+}
+
+// One compact Recent-XP entry card — shared by the profile grid and the
+// full-history modal so they always look identical.
+function XpEntryCard({ entry }) {
+  const meta = XP_EVENT_META[entry.type] || XP_EVENT_META.session
+  const sub = [timeAgo(entry.ts)]
+  if (entry.type === 'session') {
+    if (entry.count > 1) sub.push(`${entry.count} sessions`)
+    if (entry.totalSeconds) sub.push(formatPlaytime(entry.totalSeconds))
+  }
+  return (
+    <div className={s.xpEntry}>
+      <meta.Icon size={15} stroke={1.8} style={{ color: meta.color, flexShrink: 0 }} />
+      <div className={s.xpEntryInfo}>
+        <div className={s.xpEntryTitle}>{meta.verb} {entry.label}</div>
+        <div className={s.xpEntrySub}>{sub.join(' · ')}</div>
+      </div>
+      <span className={s.xpEntryXp}>+{entry.xp}</span>
+    </div>
+  )
 }
 
 // Module-level cache of the last loaded profile so navigating back to /profile
@@ -93,6 +151,7 @@ export default function Profile() {
   const [crop, setCrop]   = useState(null)   // { src, kind, setter }
   const [xp, setXp]       = useState(profileCache?.xp ?? null)
   const [xpHistory, setXpHistory] = useState(profileCache?.xpHistory ?? [])
+  const [xpModalOpen, setXpModalOpen] = useState(false)
 
   const load = useCallback(async () => {
     if (!window.kozo?.api) return
@@ -101,7 +160,7 @@ export default function Profile() {
       window.kozo.api.stats.get('all'),
       window.kozo.api.games.list(),
       window.kozo.api.stats.xp(),
-      window.kozo.api.stats.xpHistory?.(12),
+      window.kozo.api.stats.xpHistory?.(30),
     ])
     const d = allRes?.ok ? allRes.data : {}
     setName(d.profile_name || 'Player')
@@ -113,12 +172,15 @@ export default function Profile() {
     // Migrate the old single-favorite key into the showcase list.
     let ids = parseIds(d.profile_showcase_ids)
     if (!ids.length && d.profile_favorite_game_id) ids = [String(d.profile_favorite_game_id)]
-    setShowcase(ids)
     let created = d.profile_created_at
     if (!created) { created = new Date().toISOString(); await window.kozo.api.settings.set('profile_created_at', created) }
     setCreatedAt(created)
     const st = statsRes?.ok ? statsRes.data : (profileCache?.stats ?? null)
     const gm = gamesRes?.ok ? (gamesRes.data || []) : (profileCache?.games ?? [])
+    // Drop stale ids of deleted games — ghosts silently ate showcase slots
+    // (the cap counted them, so a visible 3/4 refused a fourth pick).
+    ids = ids.filter(sid => gm.some(g => String(g.id) === sid))
+    setShowcase(ids)
     const xpv = xpRes?.ok ? xpRes.data : (profileCache?.xp ?? null)
     const xph = xpHistRes?.ok ? (xpHistRes.data || []) : (profileCache?.xpHistory ?? [])
     setStats(st); setGames(gm); setXp(xpv); setXpHistory(xph)
@@ -143,7 +205,7 @@ export default function Profile() {
       window.kozo.api.stats.get('all'),
       window.kozo.api.games.list(),
       window.kozo.api.stats.xp(),
-      window.kozo.api.stats.xpHistory?.(12),
+      window.kozo.api.stats.xpHistory?.(30),
     ])
     if (statsRes?.ok) { setStats(statsRes.data); if (profileCache) profileCache.stats = statsRes.data }
     if (gamesRes?.ok) { setGames(gamesRes.data || []); if (profileCache) profileCache.games = gamesRes.data || [] }
@@ -268,7 +330,24 @@ export default function Profile() {
               </>
             : <>
                 {showcaseArt && (
-                  <img src={showcaseArt} className={s.heroBlur} alt="" aria-hidden="true" onError={e => { e.target.style.display = 'none' }} />
+                  <img
+                    src={showcaseArt}
+                    className={s.heroBlur}
+                    alt=""
+                    aria-hidden="true"
+                    onError={e => {
+                      // Local hero/banner file missing (e.g. post-restore) —
+                      // fall back to the remote cover once, then give up.
+                      const img = e.target
+                      const remote = showcaseGames[0]?.banner_url
+                      if (remote && img.src !== remote && !img.dataset.fallbackTried) {
+                        img.dataset.fallbackTried = '1'
+                        img.src = remote
+                        return
+                      }
+                      img.style.display = 'none'
+                    }}
+                  />
                 )}
                 <div className={`${s.heroGradient} ${showcaseArt ? s.heroGradientOverArt : ''}`} style={{ background: heroBg }} />
               </>}
@@ -421,26 +500,27 @@ export default function Profile() {
                 ))}
               </div>
 
-              {/* Recent XP — where the last gains came from (derived live, no ledger) */}
-              {xpHistory.length > 0 && (
-                <div className={s.xpHistory}>
-                  <div className={s.xpHistoryTitle}>Recent XP</div>
-                  {xpHistory.map((e, i) => {
-                    const meta = XP_EVENT_META[e.type] || XP_EVENT_META.session
-                    return (
-                      <div key={`${e.type}-${e.ts}-${i}`} className={s.xpHistoryRow}>
-                        <meta.Icon size={13} stroke={1.8} style={{ color: meta.color, flexShrink: 0 }} />
-                        <span className={s.xpHistoryLabel}>
-                          {meta.verb} {e.label}
-                          {e.type === 'session' && e.detail ? ` · ${formatPlaytime(e.detail)}` : ''}
-                        </span>
-                        <span className={s.xpHistoryWhen}>{timeAgo(e.ts)}</span>
-                        <span className={s.xpHistoryXp}>+{e.xp}</span>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
+              {/* Recent XP — same-day sessions merged per game, newest 6 in a
+                  compact two-column grid; "Show all" opens a modal so the page
+                  never grows. */}
+              {xpHistory.length > 0 && (() => {
+                const entries = mergeXpHistory(xpHistory)
+                return (
+                  <div className={s.xpHistory}>
+                    <div className={s.xpHistoryTitle}>Recent XP</div>
+                    <div className={s.xpHistoryGrid}>
+                      {entries.slice(0, 6).map((e, i) => (
+                        <XpEntryCard key={`${e.type}-${e.ts}-${i}`} entry={e} />
+                      ))}
+                    </div>
+                    {entries.length > 6 && (
+                      <button className={s.xpShowAll} onClick={() => setXpModalOpen(true)}>
+                        Show all ({entries.length})
+                      </button>
+                    )}
+                  </div>
+                )
+              })()}
             </div>
           )
         })()}
@@ -496,8 +576,8 @@ export default function Profile() {
                         <div className={s.shelfBanner} style={{ background: getBannerBg(g.id) }}>
                           {src
                             ? <>
-                                <img src={src} className={s.shelfBlur} alt="" aria-hidden="true" onError={e => { e.target.style.display = 'none' }} />
-                                <img src={src} className={s.shelfImg} alt="" onError={e => { e.target.style.display = 'none' }} />
+                                <img src={src} className={s.shelfBlur} alt="" aria-hidden="true" onError={e => coverError(e, g.banner_url)} />
+                                <img src={src} className={s.shelfImg} alt="" onError={e => coverError(e, g.banner_url)} />
                               </>
                             : <IconDeviceGamepad2 size={24} stroke={1.1} style={{ color: 'rgba(255,255,255,0.15)' }} />}
                           {i === 0 && <div className={s.favTag}><IconStar size={10} stroke={2} /> Favorite</div>}
@@ -525,7 +605,7 @@ export default function Profile() {
                         onClick={() => toggleShowcase(g.id)} title={g.name}>
                         <div className={s.pickBanner} style={{ background: getBannerBg(g.id) }}>
                           {src
-                            ? <img src={src} className={s.pickImg} alt="" onError={e => { e.target.style.display = 'none' }} />
+                            ? <img src={src} className={s.pickImg} alt="" onError={e => coverError(e, g.banner_url)} />
                             : <IconDeviceGamepad2 size={20} stroke={1.1} style={{ color: 'rgba(255,255,255,0.15)' }} />}
                           {on && <span className={s.pickOrder}>{idx + 1}</span>}
                         </div>
@@ -562,6 +642,18 @@ export default function Profile() {
           onCancel={() => setCrop(null)}
           onDone={(path) => { crop.setter(path); setImgBust(Date.now()); setCrop(null) }}
         />
+      )}
+
+      {xpModalOpen && (
+        <Modal title="Recent XP" icon={<IconHistory size={17} stroke={1.6} />} width={640} onClose={() => setXpModalOpen(false)}>
+          <div style={{ maxHeight: '60vh', overflowY: 'auto', paddingRight: 4 }}>
+            <div className={s.xpHistoryGrid}>
+              {mergeXpHistory(xpHistory).map((e, i) => (
+                <XpEntryCard key={`${e.type}-${e.ts}-${i}`} entry={e} />
+              ))}
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   )

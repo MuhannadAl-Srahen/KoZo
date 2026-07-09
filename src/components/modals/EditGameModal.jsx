@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import {
   IconEdit, IconAlertTriangle, IconCrosshair, IconCheck, IconFolderOpen,
+  IconChevronDown, IconChevronRight,
 } from '@tabler/icons-react'
 import Modal, { modalStyles as ms } from '../ui/Modal'
 import RunningProcessPicker from '../ui/RunningProcessPicker'
@@ -25,6 +26,7 @@ export default function EditGameModal({ game, onClose, onSaved }) {
   const [saving, setSaving]           = useState(false)
   const [saved, setSaved]             = useState(false)
   const [showPicker, setShowPicker]   = useState(false)
+  const [showAdvanced, setShowAdvanced] = useState(false)
 
   function onExeChange(val) {
     setExeName(val)
@@ -182,6 +184,24 @@ export default function EditGameModal({ game, onClose, onSaved }) {
         <div className={s.inputHint}>Used to detect crack emulator achievement files (Goldberg, Codex, etc.)</div>
       </div>
 
+      {/* Everything below is rarely touched (auto-detected or set once at add
+          time) — collapsed so the modal stays a quick name/exe/path editor. */}
+      <button
+        type="button"
+        onClick={() => setShowAdvanced(v => !v)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6, width: '100%',
+          padding: '8px 0', marginTop: 2, background: 'none', border: 'none',
+          borderTop: '1px solid var(--border-subtle)', cursor: 'pointer',
+          color: 'var(--text-muted)', fontFamily: 'inherit', fontSize: 11,
+          fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em',
+        }}
+      >
+        {showAdvanced ? <IconChevronDown size={13} stroke={1.8} /> : <IconChevronRight size={13} stroke={1.8} />}
+        Advanced — status, launcher, copy type
+      </button>
+
+      {showAdvanced && <>
       {/* Installed status — manual override for when detection is wrong */}
       <div className={s.field}>
         <label className={s.label}>Installation status</label>
@@ -279,6 +299,7 @@ export default function EditGameModal({ game, onClose, onSaved }) {
           emulator files (Goldberg, CODEX, online-fix, etc) instead of the Steam API.
         </div>
       </div>
+      </>}
 
       {errors.save && <div className={s.errorText} style={{ marginTop: 6 }}>{errors.save}</div>}
     </Modal>

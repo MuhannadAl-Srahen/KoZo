@@ -5,6 +5,7 @@ import {
   IconDotsVertical, IconTrash, IconRefresh, IconEdit, IconPlayerPlayFilled,
   IconStethoscope, IconFolderSearch, IconDeviceFloppy, IconDownload, IconLoader2,
   IconCircleCheck, IconCircleOff, IconEye, IconEyeOff, IconChevronDown,
+  IconChevronRight, IconAlertTriangle,
 } from '@tabler/icons-react'
 import { getBannerBg, getBannerIcon, formatPlaytime, formatDate, formatDateTime, fileUrl, isSteamTracked, launcherLabel } from '../lib/utils'
 import { STATUS_META } from '../components/GameCard'
@@ -151,21 +152,82 @@ export default function GameDetail() {
   const menuRef                     = useRef(null)
   const [statusMenuOpen, setStatusMenuOpen] = useState(false)
   const statusMenuRef               = useRef(null)
+  const [syncPrivacyError, setSyncPrivacyError] = useState(null)
+
+  // Notes — debounced autosave, flushed on unmount so nothing is lost.
+  const [notes, setNotes]           = useState('')
+  const [notesOpen, setNotesOpen]   = useState(false)   // opened on load when notes exist
+  const [notesSaved, setNotesSaved] = useState(false)
+  const notesTimer   = useRef(null)
+  const notesDirty   = useRef(null)   // pending unsaved text (null = clean)
+  const notesLoaded  = useRef(false)
+
+  function persistNotes(text) {
+    notesDirty.current = null
+    window.kozo?.api?.games?.update(Number(id), { notes: text })
+    setNotesSaved(true)
+    setTimeout(() => setNotesSaved(false), 1500)
+  }
+
+  function handleNotesChange(text) {
+    setNotes(text)
+    notesDirty.current = text
+    clearTimeout(notesTimer.current)
+    notesTimer.current = setTimeout(() => persistNotes(text), 800)
+  }
+
+  useEffect(() => () => {
+    // Flush pending notes when leaving the page.
+    clearTimeout(notesTimer.current)
+    if (notesDirty.current != null) {
+      window.kozo?.api?.games?.update(Number(id), { notes: notesDirty.current })
+    }
+  }, [id])
+
+  // Automatic achievement sync — fires silently once per page visit so nobody
+  // ever has to press a sync button. Live sessions are already covered by the
+  // file watchers + periodic sync; this catches unlocks earned while KoZo was
+  // closed or before the watchers attached.
+  const autoSyncedRef = useRef(null)
+  useEffect(() => {
+    if (loading || !game?.id || autoSyncedRef.current === game.id) return
+    autoSyncedRef.current = game.id
+    ;(async () => {
+      try {
+        if (game.is_cracked) {
+          await window.kozo?.api?.crack?.scanGame?.(game.id)
+        } else if (game.steam_app_id) {
+          await window.kozo?.api?.steam?.refresh?.(game.id)
+        }
+        load()   // reflect anything the sync found
+      } catch { /* silent — manual sync in the menu surfaces errors */ }
+    })()
+  }, [loading, game?.id])
 
   const load = useCallback(async () => {
     if (!window.kozo?.api || !id) return
-    const [gRes, aRes, sRes, activeRes] = await Promise.all([
+    const [gRes, aRes, sRes, activeRes, privRes] = await Promise.all([
       window.kozo.api.games.get(Number(id)),
       window.kozo.api.achievements.listForGame(Number(id)),
       window.kozo.api.sessions.getForGame(Number(id)),
       window.kozo.api.sessions.active(),
+      window.kozo.api.steam?.lastSyncError?.(Number(id)),
     ])
-    if (gRes?.ok) setGame(gRes.data)
+    if (gRes?.ok) {
+      setGame(gRes.data)
+      // Seed notes once per game — don't clobber live typing on background reloads.
+      if (!notesLoaded.current) {
+        setNotes(gRes.data?.notes || '')
+        setNotesOpen(!!gRes.data?.notes)   // expanded only when there's something to read
+        notesLoaded.current = true
+      }
+    }
     if (aRes?.ok) setAch(aRes.data ?? [])
     if (sRes?.ok) setSessions(sRes.data ?? [])
     if (activeRes?.ok) {
       setIsLive((activeRes.data ?? []).some(s => s.gameId === Number(id)))
     }
+    setSyncPrivacyError(privRes?.ok ? privRes.data : null)
     setLoading(false)
   }, [id])
 
@@ -602,60 +664,13 @@ export default function GameDetail() {
               </div>
             )}
           </div>
-          {steamTracked && (
-            <button
-              onClick={handleRefresh}
-              disabled={refreshing}
-              title="Sync achievements from Steam"
-              className={s.bannerSyncBtn}
-            >
-              {refreshing
-                ? <IconRefresh size={13} style={{ animation: 'spin 1s linear infinite' }} />
-                : <IconRefresh size={13} />
-              }
-              {refreshing ? 'Syncing…' : 'Sync'}
-            </button>
-          )}
-
-          {!!game.is_cracked && (
-            <button
-              onClick={handleCrackSync}
-              disabled={crackScanning || refreshing}
-              title="Sync achievements — reads crack emulator files (and Steam schema if linked)"
-              className={s.bannerSyncBtn}
-            >
-              {(crackScanning || refreshing)
-                ? <IconRefresh size={13} style={{ animation: 'spin 1s linear infinite' }} />
-                : <IconRefresh size={13} />
-              }
-              {(crackScanning || refreshing) ? 'Syncing…' : 'Sync'}
-            </button>
-          )}
-
-          {/* Check achievements — scan + plain-language diagnosis for cracked games */}
-          {!!game.is_cracked && (
-            <button
-              onClick={handleCrackFiles}
-              disabled={crackScanning || refreshing}
-              title="Check crack achievement files and explain why unlocks may be missing"
-              className={s.bannerSyncBtn}
-            >
-              <IconStethoscope size={13} />
-              Check achievements
-            </button>
-          )}
-
-          {/* Non-Steam, non-cracked → one-click auto-import of the achievement list */}
-          {!steamTracked && !game.is_cracked && (
-            <button
-              onClick={handleAutoImport}
-              disabled={importing}
-              title="Find this game on Steam and import its achievement list"
-              className={s.bannerSyncBtn}
-            >
-              <IconRefresh size={13} style={importing ? { animation: 'spin 1s linear infinite' } : undefined} />
-              {importing ? 'Syncing…' : 'Sync'}
-            </button>
+          {/* Achievements sync automatically (on open + live during sessions);
+              a subtle spinner appears while a background sync is running.
+              Manual sync/diagnose now live in the ⋯ menu for the rare case. */}
+          {(refreshing || crackScanning || importing) && (
+            <span className={s.bannerSyncing} title="Syncing achievements…">
+              <IconRefresh size={13} style={{ animation: 'spin 1s linear infinite' }} />
+            </span>
           )}
         </div>
 
@@ -713,6 +728,28 @@ export default function GameDetail() {
                 <button className={s.gameMenuItem} onClick={handleDiagnose}>
                   <IconStethoscope size={14} stroke={1.6} />
                   Diagnose Steam sync
+                </button>
+              )}
+
+              {!!game.is_cracked && (
+                <button
+                  className={s.gameMenuItem}
+                  onClick={() => { handleCrackSync(); setMenuOpen(false) }}
+                  disabled={crackScanning || refreshing}
+                >
+                  <IconRefresh size={14} stroke={1.6} />
+                  {(crackScanning || refreshing) ? 'Syncing…' : 'Sync achievements now'}
+                </button>
+              )}
+
+              {!!game.is_cracked && (
+                <button
+                  className={s.gameMenuItem}
+                  onClick={() => { handleCrackFiles(); setMenuOpen(false) }}
+                  disabled={crackScanning || refreshing}
+                >
+                  <IconStethoscope size={14} stroke={1.6} />
+                  Check achievement files
                 </button>
               )}
 
@@ -814,6 +851,32 @@ export default function GameDetail() {
         </div>
       </div>
 
+      {/* Notes — mods installed, save locations, where you left off.
+          Collapsible + height-capped so it can never bury the achievements. */}
+      <div className={s.notesCard}>
+        <button className={s.notesHeader} onClick={() => setNotesOpen(v => !v)}>
+          {notesOpen ? <IconChevronDown size={13} stroke={1.8} /> : <IconChevronRight size={13} stroke={1.8} />}
+          <IconEdit size={13} stroke={1.6} />
+          Notes
+          {!notesOpen && (
+            <span className={s.notesPreview}>
+              {notes ? notes.split('\n')[0] : 'Add notes…'}
+            </span>
+          )}
+          {notesSaved && <span className={s.notesSaved}>Saved</span>}
+        </button>
+        {notesOpen && (
+          <textarea
+            className={s.notesTextarea}
+            value={notes}
+            onChange={e => handleNotesChange(e.target.value)}
+            placeholder="Mods installed, save locations, where you left off…"
+            rows={3}
+            spellCheck={false}
+          />
+        )}
+      </div>
+
       {/* Tabs */}
       <div className={s.tabs}>
         <button
@@ -838,6 +901,14 @@ export default function GameDetail() {
       <div className={s.content}>
         {tab === 'achievements' && (
           <>
+            {syncPrivacyError && (
+              <div className={s.privacyBanner}>
+                <IconAlertTriangle size={14} stroke={1.8} />
+                {syncPrivacyError === 'profile_not_found'
+                  ? 'Your Steam profile could not be read — check the Steam ID in Settings → Steam.'
+                  : 'Your Steam profile\'s Game details are private, so KoZo can\'t read your unlocks. Set Steam Privacy → Game details to Public, or add an API key in Settings → Steam.'}
+              </div>
+            )}
             {total === 0 ? (
               <div className={s.emptyState}>
                 {game.is_cracked
