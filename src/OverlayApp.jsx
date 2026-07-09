@@ -162,9 +162,13 @@ function LevelUpToast({ toast, onDismiss }) {
         <span className={s.toastHeaderText}>Level Up!</span>
       </div>
       <div className={s.toastBody}>
-        <div className={`${s.toastIcon} ${s.levelUpIcon}`}>
-          <span className={s.levelUpNumber}>{level}</span>
-        </div>
+        {(toast.artPath || toast.artUrl) ? (
+          <ToastArt artPath={toast.artPath} artUrl={toast.artUrl} />
+        ) : (
+          <div className={`${s.toastIcon} ${s.levelUpIcon}`}>
+            <span className={s.levelUpNumber}>{level}</span>
+          </div>
+        )}
         <div className={s.toastInfo}>
           <div className={s.toastName}>Level {level} — {tier}</div>
           <div className={s.toastDesc}>{totalXp?.toLocaleString?.() ?? totalXp} XP total. Keep it up!</div>
@@ -241,14 +245,20 @@ function OverlayToast({ toast, onDismiss }) {
         <span className={s.toastHeaderText}>{title}</span>
       </div>
 
-      {/* Body */}
+      {/* Body — achievement icon first, game cover if the icon is missing
+          (cracked games often have no icon art), trophy as the last resort */}
       <div className={s.toastBody}>
-        <div className={s.toastIcon}>
-          {displayAch?.icon_url
-            ? <img src={displayAch.icon_url} alt="" onError={e => { e.target.style.display = 'none' }} />
-            : <IconTrophy size={28} stroke={1.3} style={{ color: 'var(--a)' }} />
-          }
-        </div>
+        {displayAch?.icon_url ? (
+          <div className={s.toastIcon}>
+            <img src={displayAch.icon_url} alt="" onError={e => { e.target.style.display = 'none' }} />
+          </div>
+        ) : (toast.artPath || toast.artUrl) ? (
+          <ToastArt artPath={toast.artPath} artUrl={toast.artUrl} />
+        ) : (
+          <div className={s.toastIcon}>
+            <IconTrophy size={28} stroke={1.3} style={{ color: 'var(--a)' }} />
+          </div>
+        )}
         <div className={s.toastInfo}>
           <div className={s.toastName}>
             {summary ? `${summary.count} achievements` : (displayAch?.display_name || displayAch?.steam_api_name)}
@@ -293,8 +303,9 @@ export default function OverlayApp() {
   }, [])
 
   useEffect(() => {
-    window.kozo?.events?.onSessionOverlay?.(({ gameName, gameId }) => {
-      setToasts(q => [...q, { id: ++nextId.current, type: 'session', gameName }].slice(-4))
+    // Spread the FULL payload — main sends artPath/artUrl for the cover thumb.
+    window.kozo?.events?.onSessionOverlay?.((data) => {
+      setToasts(q => [...q, { id: ++nextId.current, type: 'session', ...data }].slice(-4))
     })
 
     // Global-hotkey status flash. Replace any existing flash card so repeated
@@ -306,13 +317,13 @@ export default function OverlayApp() {
       setToasts(q => [...q.filter(t => t.type !== 'status'), ...list].slice(-4))
     })
 
-    window.kozo?.events?.onAchievementOverlay?.(({ achievements, gameName }) => {
+    window.kozo?.events?.onAchievementOverlay?.(({ achievements, gameName, artPath, artUrl }) => {
       const list = achievements || []
       if (!list.length) return
       // Batch many at once into a summary so we don't flood the screen
       const newToasts = list.length > 3
-        ? [{ id: ++nextId.current, summary: { count: list.length, first: list[0] }, gameName }]
-        : list.map(ach => ({ id: ++nextId.current, ach, gameName }))
+        ? [{ id: ++nextId.current, summary: { count: list.length, first: list[0] }, gameName, artPath, artUrl }]
+        : list.map(ach => ({ id: ++nextId.current, ach, gameName, artPath, artUrl }))
       setToasts(q => [...q, ...newToasts].slice(-4))
     })
 

@@ -29,6 +29,7 @@ function getOrCreate() {
     skipTaskbar: true,
     resizable: false,
     focusable: false,
+    fullScreenable: false,
     hasShadow: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -59,6 +60,25 @@ function getOrCreate() {
     _fallback = setTimeout(() => { if (!_ready) markReady() }, 1500)
   })
 
+  // The overlay sits transparent/always-on-top over the game, which can crash
+  // or silently reload its renderer (GPU driver quirks, especially over
+  // exclusive fullscreen). The window itself survives that, so `closed` never
+  // fires and `_ready` would otherwise stay stale-true — new sends would then
+  // go into a renderer with no listeners yet and be silently dropped, only
+  // surfacing as a batch the next time an achievement sync runs. Reset `_ready`
+  // and reload so the readiness handshake runs again.
+  _win.webContents.on('render-process-gone', (_e, details) => {
+    logger.warn(`Overlay renderer gone: ${details.reason}`)
+    _ready = false
+    clearTimeout(_fallback); _fallback = null
+    if (_win && !_win.isDestroyed()) _win.webContents.reload()
+  })
+  _win.webContents.on('did-fail-load', (_e, errorCode, errorDesc) => {
+    if (errorCode === -3) return // aborted load, not a real failure
+    logger.warn(`Overlay failed to load: ${errorDesc}`)
+    _ready = false
+  })
+
   _win.on('closed', () => {
     _win = null; _ready = false; _pending = []
     clearTimeout(_fallback); _fallback = null
@@ -71,11 +91,26 @@ function getOrCreate() {
 // listeners are attached, so a message can never be sent into the void.
 function flush() {
   if (!_win || _win.isDestroyed() || !_ready || _pending.length === 0) return
-  _win.showInactive()
+  raise()
   for (const { channel, data } of _pending) {
     try { _win.webContents.send(channel, data) } catch {}
   }
   _pending = []
+  // Fullscreen games re-assert topmost aggressively; re-raising once shortly
+  // after the show wins the z-order race so toasts actually appear over them.
+  setTimeout(() => { if (_win && !_win.isDestroyed() && _win.isVisible()) raise() }, 1000)
+}
+
+// Show + force the overlay above whatever currently owns the top of the
+// z-order (borderless-fullscreen games). Set once at creation is not enough —
+// games re-claim topmost, so this is re-asserted on every toast.
+function raise() {
+  if (!_win || _win.isDestroyed()) return
+  try {
+    _win.setAlwaysOnTop(true, 'screen-saver')
+    _win.showInactive()
+    _win.moveTop()
+  } catch {}
 }
 
 function _send(channel, data) {

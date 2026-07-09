@@ -41,7 +41,7 @@ function broadcast(channel, payload) {
  * level-up. Returns { gained, totalXp, level, tier, leveledUp, toNextLevel,
  * nextTier } for the caller. `reason` is for logs; `gameName` flavors the toast.
  */
-function check({ reason = 'unknown', gameName = null } = {}) {
+function check({ reason = 'unknown', gameName = null, artPath = null, artUrl = null } = {}) {
   let xp
   try { xp = require('./xp').computeXp() } catch (e) {
     logger.warn('xpTracker: computeXp failed', { message: e.message })
@@ -67,6 +67,8 @@ function check({ reason = 'unknown', gameName = null } = {}) {
       totalXp: xp.totalXp,
       toNextLevel: xp.toNextLevel,
       gameName,
+      artPath,
+      artUrl,
     }
     logger.info(`Level up! ${last.level} → ${xp.level} (${xp.tier})`, { reason })
     try { require('../overlayWindow').sendLevelUp(payload) } catch {}
