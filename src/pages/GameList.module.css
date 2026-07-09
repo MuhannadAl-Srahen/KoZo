@@ -149,6 +149,51 @@
   opacity: 0.88;
 }
 
+/* ── Search box (matches Library's) ────────────────────────── */
+.searchBox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-input);
+  padding: 0 8px;
+  flex: 1;
+  min-width: 120px;
+  max-width: 220px;
+  transition: border-color 0.12s;
+}
+
+.searchBox:focus-within { border-color: var(--ab); }
+
+.searchIcon { color: var(--text-muted); flex-shrink: 0; }
+
+.searchInput {
+  flex: 1;
+  padding: 6px 0;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  outline: none;
+  min-width: 0;
+}
+
+.searchInput::placeholder { color: var(--text-muted); }
+
+.searchClear {
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  background: none;
+  border: none;
+  transition: color 0.1s;
+}
+
+.searchClear:hover { color: var(--text-secondary); }
+
 /* ── Content ───────────────────────────────────────────────── */
 .content {
   flex: 1;
@@ -181,6 +226,7 @@
 }
 
 /* ── Grid views ────────────────────────────────────────────── */
+/* Fixed 4/6 columns — identical to the Library grids so cards match exactly */
 .bigGrid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -301,7 +347,7 @@
   background: rgba(0, 0, 0, 0.6);
   color: #fbbf24;
   backdrop-filter: blur(4px);
-  z-index: 2;
+  z-index: 3;
 }
 
 /* Favorite star on the grid cover — top-right, hover-revealed, gold when set */
@@ -342,12 +388,20 @@
 .listFavBtn:hover { color: #fbbf24; border-color: rgba(251,191,36,0.4); }
 .listFavBtnActive { color: #fbbf24; border-color: rgba(251,191,36,0.4); background: rgba(251,191,36,0.1); }
 
+/* Drop-target highlight while drag-reordering */
+.cardDragOver {
+  outline: 2px solid var(--a);
+  outline-offset: 2px;
+  border-radius: var(--r-card);
+}
+
+/* Name + genres info strip below the cover — art stays clean */
 .cardInfo {
-  padding: 9px 10px;
+  padding: 8px 10px 9px;
 }
 
 .cardName {
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 500;
   color: var(--text-primary);
   overflow: hidden;
@@ -355,18 +409,10 @@
   white-space: nowrap;
 }
 
-.cardCategory {
-  display: inline-flex;
-  align-items: center;
-  margin-top: 4px;
-  font-size: 11.5px;
-  font-weight: 500;
-  color: var(--a);
-  background: var(--ad);
-  border: 1px solid var(--ab);
-  border-radius: var(--r-pill);
-  padding: 1px 7px;
-  max-width: 100%;
+.cardGenresLine {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -618,13 +664,14 @@
   color: var(--text-muted);
 }
 
-/* ── Custom lists rail (Spotify-playlist style) ─────────────── */
-.listsRail {
+/* ── Custom lists — one slim chips row ──────────────────────── */
+.listsBar {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 10px 20px 0;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border);
 }
 
 .listChip {
@@ -656,11 +703,21 @@
   color: var(--text-muted);
 }
 
+.listChipDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
 .listChipEdit {
-  display: inline-flex;
+  display: none;
   align-items: center;
   color: var(--text-muted);
+  cursor: pointer;
 }
+.listChip:hover .listChipEdit,
+.listChipActive .listChipEdit { display: inline-flex; }
 .listChipEdit:hover { color: var(--a); }
 
 .listChipNew {
@@ -679,47 +736,23 @@
 }
 .listChipNew:hover { border-color: var(--a); color: var(--a); }
 
-/* ── Genre chips (auto-grouping from Steam genres) ──────────── */
-.genreBar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 5px;
-  padding: 8px 20px 0;
-}
-
-.genreChip {
-  padding: 3px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border-subtle);
-  background: transparent;
-  color: var(--text-muted);
-  font-family: inherit;
-  font-size: 11.5px;
-  cursor: pointer;
-  transition: border-color 0.12s, color 0.12s, background 0.12s;
-}
-
-.genreChip:hover { border-color: var(--ab); color: var(--text-secondary); }
-
-.genreChipActive {
-  border-color: var(--a);
-  background: var(--ab);
-  color: var(--text);
-}
-
-.genreChipFetch {
+/* "Add games to <list>" — right-aligned accent button, unmistakably an action
+   for the ACTIVE list (kept away from the toolbar's "Add Game"). */
+.addToListBtn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 10px;
+  gap: 5px;
+  margin-left: auto;
+  padding: 6px 14px;
   border-radius: 999px;
-  border: 1px dashed var(--border);
-  background: transparent;
-  color: var(--text-muted);
+  border: 1px solid var(--a);
+  background: var(--ab);
+  color: var(--a);
   font-family: inherit;
-  font-size: 11.5px;
+  font-size: 12.5px;
+  font-weight: 600;
   cursor: pointer;
+  transition: background 0.12s, color 0.12s;
 }
-.genreChipFetch:hover { border-color: var(--a); color: var(--a); }
-.genreChipFetch:disabled { opacity: 0.6; cursor: default; }
+.addToListBtn:hover { background: var(--a); color: #09090f; }
+

@@ -1,14 +1,16 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   IconPlus, IconLayoutGrid, IconList, IconLayoutColumns,
-  IconDeviceGamepad2, IconPencil, IconSparkles,
+  IconDeviceGamepad2, IconPencil, IconSearch,
   IconCheckbox, IconSquare, IconTrash, IconX, IconCheck, IconStar,
 } from '@tabler/icons-react'
-import { getBannerBg } from '../lib/utils'
+import { getBannerBg, parseGenres } from '../lib/utils'
 import AddGameToListModal from '../components/modals/AddGameToListModal'
+import AddGamesToCustomListModal from '../components/modals/AddGamesToCustomListModal'
 import CreateEditListModal from '../components/modals/CreateEditListModal'
 import EditGameListModal from '../components/modals/EditGameListModal'
 import SearchableSelect from '../components/ui/SearchableSelect'
+import CardContextMenu from '../components/ui/CardContextMenu'
 import s from './GameList.module.css'
 
 const STATUS_CONFIG = {
@@ -28,10 +30,6 @@ const VIEW_OPTIONS = [
 ]
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-
-function parseGenres(item) {
-  try { return JSON.parse(item.genres || '[]') } catch { return [] }
-}
 
 // Append a cache-busting param so a re-resolved remote cover reloads even when
 // the URL is unchanged (the browser would otherwise serve the stale image).
@@ -53,7 +51,7 @@ function bannerOnError(e) {
 
 // ── Card components ─────────────────────────────────────────────────────────
 
-function GridCard({ item, onClick, selectionMode, selected, onToggle, onToggleFav }) {
+function GridCard({ item, onClick, selectionMode, selected, onToggle, onToggleFav, onContextMenu }) {
   const cfg = STATUS_CONFIG[item.status] || { label: item.status, color: 'var(--text-muted)' }
   const bg  = getBannerBg(item.id)
   const src = withBust(item.banner_url, item._imgBust)
@@ -67,6 +65,7 @@ function GridCard({ item, onClick, selectionMode, selected, onToggle, onToggleFa
     <div
       className={`${s.card} ${selected ? s.cardSelected : ''}`}
       onClick={handleClick}
+      onContextMenu={selectionMode ? undefined : (e) => { e.preventDefault(); onContextMenu?.(e, item) }}
     >
       <div className={s.cardBanner} style={{ background: bg }}>
         {src
@@ -102,17 +101,18 @@ function GridCard({ item, onClick, selectionMode, selected, onToggle, onToggleFa
           </div>
         )}
       </div>
+      {/* Name + genres below the cover — nothing overlaps the artwork */}
       <div className={s.cardInfo}>
         <div className={s.cardName}>{item.name}</div>
         {genres.length > 0 && (
-          <div className={s.cardCategory}>{genres.slice(0, 2).join(' · ')}</div>
+          <div className={s.cardGenresLine}>{genres.slice(0, 3).join(' · ')}</div>
         )}
       </div>
     </div>
   )
 }
 
-function ListRow({ item, onClick, selectionMode, selected, onToggle, onToggleFav }) {
+function ListRow({ item, onClick, selectionMode, selected, onToggle, onToggleFav, onContextMenu }) {
   const cfg = STATUS_CONFIG[item.status] || { label: item.status, color: 'var(--text-muted)' }
   const bg  = getBannerBg(item.id)
   const src = withBust(item.banner_url, item._imgBust)
@@ -126,6 +126,7 @@ function ListRow({ item, onClick, selectionMode, selected, onToggle, onToggleFav
     <div
       className={`${s.listRow} ${selected ? s.listRowSelected : ''}`}
       onClick={handleClick}
+      onContextMenu={selectionMode ? undefined : (e) => { e.preventDefault(); onContextMenu?.(e, item) }}
     >
       {/* Portrait thumbnail with blurred fill */}
       <div className={s.listThumb} style={{ background: bg }}>
@@ -188,16 +189,44 @@ export default function GameList() {
   const [page, setPage]         = useState(1)
   const [statusFilter, setStatusFilter] = useState('')
   const [genreFilter, setGenreFilter]   = useState('')
+  const [searchText, setSearchText]     = useState('')
   const [genreOptions, setGenreOptions] = useState([])
   const [customLists, setCustomLists]   = useState([])
   const [activeListId, setActiveListId] = useState(null)   // null = All
   const [view, setView]         = useState(() => localStorage.getItem('kozo:view:gamelist') || 'big')
   const [loading, setLoading]   = useState(true)
-  const [backfilling, setBackfilling] = useState(false)
 
   const [showAdd, setShowAdd]   = useState(false)
   const [listModal, setListModal] = useState(null)   // 'new' | list object | null
   const [editItem, setEditItem] = useState(null)
+  const [ctxMenu, setCtxMenu]   = useState(null)     // null | { x, y, item }
+  const [addToList, setAddToList] = useState(false)  // add-games picker for the active custom list
+  const [dragOverId, setDragOverId] = useState(null) // drop-target highlight
+  const dragIdRef = useRef(null)
+
+  // Drag-reorder within the current page/filter view. Persists sequential
+  // display_order values offset by the page, so pages stay in sequence; rows
+  // never dragged (display_order NULL) always sort after ordered ones.
+  async function handleCardDrop(targetId) {
+    const dragId = dragIdRef.current
+    dragIdRef.current = null
+    setDragOverId(null)
+    if (dragId == null || dragId === targetId) return
+    const pageItems = [...items]
+    const from = pageItems.findIndex(i => i.id === dragId)
+    const to   = pageItems.findIndex(i => i.id === targetId)
+    if (from === -1 || to === -1) return
+    const [moved] = pageItems.splice(from, 1)
+    pageItems.splice(to, 0, moved)
+    setItems(pageItems)
+    const base = (page - 1) * PAGE_SIZE
+    for (let i = 0; i < pageItems.length; i++) {
+      if (pageItems[i].display_order !== base + i) {
+        await window.kozo?.api?.gameList?.update?.(pageItems[i].id, { display_order: base + i })
+      }
+    }
+    loadItems(page, { silent: true })
+  }
 
   // ── Selection mode ──────────────────────────────────────────────────────────
   const [selectionMode, setSelectionMode] = useState(false)
@@ -251,26 +280,35 @@ export default function GameList() {
     if (res?.ok) setGenreOptions(res.data ?? [])
   }, [])
 
-  const loadItems = useCallback(async (pg = 1, { silent = false, status = statusFilter, genre = genreFilter, listId = activeListId } = {}) => {
+  const loadItems = useCallback(async (pg = 1, { silent = false, status = statusFilter, genre = genreFilter, listId = activeListId, search = searchText } = {}) => {
     if (!window.kozo?.api) return
     if (!silent) setLoading(true)
     const filters = { limit: PAGE_SIZE, offset: (pg - 1) * PAGE_SIZE }
     if (status) filters.status = status
     if (genre)  filters.genre = genre
     if (listId) filters.listId = listId
+    if (search?.trim()) filters.search = search.trim()
     const res = await window.kozo.api.gameList.list(filters)
     if (res?.ok) {
       setItems(res.data?.items ?? [])
       setTotal(res.data?.total ?? 0)
     }
     if (!silent) setLoading(false)
-  }, [statusFilter, genreFilter, activeListId])
+  }, [statusFilter, genreFilter, activeListId, searchText])
 
   useEffect(() => {
     loadLists()
     loadGenres()
     loadItems(1, { status: '', genre: '', listId: null })
   }, [])
+
+  // Debounced server-side search — skips the initial mount (loadItems above).
+  const searchInit = useRef(true)
+  useEffect(() => {
+    if (searchInit.current) { searchInit.current = false; return }
+    const t = setTimeout(() => { setPage(1); loadItems(1, { search: searchText }) }, 250)
+    return () => clearTimeout(t)
+  }, [searchText])
 
   function handleStatusChange(v) {
     setStatusFilter(v)
@@ -279,10 +317,9 @@ export default function GameList() {
   }
 
   function handleGenreChange(v) {
-    const next = v === genreFilter ? '' : v
-    setGenreFilter(next)
+    setGenreFilter(v)
     setPage(1)
-    loadItems(1, { genre: next })
+    loadItems(1, { genre: v })
   }
 
   function handleListChange(listId) {
@@ -304,17 +341,8 @@ export default function GameList() {
     loadGenres()
   }
 
-  // One-time genre backfill for rows added before genres existed.
-  async function handleBackfillGenres() {
-    setBackfilling(true)
-    await window.kozo?.api?.genres?.backfill()
-    await Promise.all([loadGenres(), loadItems(page, { silent: true })])
-    setBackfilling(false)
-  }
-
   const totalPages = Math.ceil(total / PAGE_SIZE)
   const activeList = customLists.find(l => l.id === activeListId)
-  const hasMissingGenres = items.some(i => i.steam_app_id && !i.genres)
 
   return (
     <div className={s.page}>
@@ -325,6 +353,22 @@ export default function GameList() {
             Game List
             {total > 0 && <span className={s.pageTitleCount}>{total}</span>}
           </h1>
+
+          {/* Search */}
+          <div className={s.searchBox}>
+            <IconSearch size={13} stroke={1.6} className={s.searchIcon} />
+            <input
+              className={s.searchInput}
+              placeholder="Search games…"
+              value={searchText}
+              onChange={e => setSearchText(e.target.value)}
+            />
+            {searchText && (
+              <button className={s.searchClear} onClick={() => setSearchText('')}>
+                <IconX size={12} stroke={2} />
+              </button>
+            )}
+          </div>
 
           <div className={s.filters}>
             <SearchableSelect
@@ -341,6 +385,15 @@ export default function GameList() {
                 { value: 'upcoming',     label: 'Upcoming' },
               ]}
             />
+            {genreOptions.length > 0 && (
+              <SearchableSelect
+                value={genreFilter}
+                onChange={handleGenreChange}
+                placeholder="All genres"
+                width={140}
+                options={genreOptions.map(g => ({ value: g, label: g }))}
+              />
+            )}
           </div>
 
           {items.length > 0 && (
@@ -409,62 +462,50 @@ export default function GameList() {
         </div>
       )}
 
-      {/* Custom lists rail — your playlists */}
+      {/* Custom lists — one slim row of chips (genre filtering moved into the
+          toolbar dropdown, so the header stays compact) */}
       {!selectionMode && (
-        <div className={s.listsRail}>
+        <div className={s.listsBar}>
           <button
             className={`${s.listChip} ${activeListId == null ? s.listChipActive : ''}`}
             onClick={() => handleListChange(null)}
           >
             All
+            <span className={s.listChipCount}>{total}</span>
           </button>
           {customLists.map(l => (
             <button
               key={l.id}
               className={`${s.listChip} ${activeListId === l.id ? s.listChipActive : ''}`}
               onClick={() => handleListChange(l.id)}
+              style={activeListId === l.id && l.color
+                ? { borderColor: l.color, background: l.color + '22', color: l.color }
+                : undefined}
             >
+              {l.color && <span className={s.listChipDot} style={{ background: l.color }} />}
               {l.emoji ? `${l.emoji} ` : ''}{l.name}
               <span className={s.listChipCount}>{l.game_count}</span>
-              {activeListId === l.id && (
-                <span
-                  className={s.listChipEdit}
-                  title="Edit list"
-                  onClick={(e) => { e.stopPropagation(); setListModal(l) }}
-                >
-                  <IconPencil size={12} stroke={1.8} />
-                </span>
-              )}
+              <span
+                className={s.listChipEdit}
+                title="Edit list"
+                onClick={(e) => { e.stopPropagation(); setListModal(l) }}
+              >
+                <IconPencil size={12} stroke={1.8} />
+              </span>
             </button>
           ))}
           <button className={s.listChipNew} onClick={() => setListModal('new')}>
             <IconPlus size={13} stroke={2} />
             New list
           </button>
-        </div>
-      )}
-
-      {/* Genre chips — auto-grouping from Steam store genres */}
-      {!selectionMode && (genreOptions.length > 0 || hasMissingGenres) && (
-        <div className={s.genreBar}>
-          {genreOptions.map(g => (
+          {activeList && (
             <button
-              key={g}
-              className={`${s.genreChip} ${genreFilter === g ? s.genreChipActive : ''}`}
-              onClick={() => handleGenreChange(g)}
+              className={s.addToListBtn}
+              onClick={() => setAddToList(true)}
+              title={`Pick games from your Game List to add to "${activeList.name}"`}
             >
-              {g}
-            </button>
-          ))}
-          {hasMissingGenres && (
-            <button
-              className={s.genreChipFetch}
-              onClick={handleBackfillGenres}
-              disabled={backfilling}
-              title="Fetch Steam genres for games that don't have them yet"
-            >
-              <IconSparkles size={12} stroke={1.8} />
-              {backfilling ? 'Fetching genres…' : 'Fetch genres'}
+              <IconPlus size={14} stroke={2} />
+              Add games to "{activeList.name.length > 16 ? activeList.name.slice(0, 16) + '…' : activeList.name}"
             </button>
           )}
         </div>
@@ -486,25 +527,50 @@ export default function GameList() {
             </div>
             <div className={s.emptyDesc}>
               {activeList
-                ? 'Open any game and tick this list to add it here.'
+                ? 'Pick games from your Game List, or open any game and tick this list.'
                 : 'Add games to your backlog, wishlist, or track what you\'re playing.'}
             </div>
+            {activeList && (
+              <button className={s.btnPrimary} style={{ marginTop: 12 }} onClick={() => setAddToList(true)}>
+                <IconPlus size={15} stroke={2} />
+                Add games
+              </button>
+            )}
           </div>
         )}
 
         {!loading && items.length > 0 && (view === 'big' || view === 'grid') && (
           <div className={view === 'big' ? s.bigGrid : s.grid}>
-            {items.map(item => (
-              <GridCard
-                key={item.id}
-                item={item}
-                onClick={setEditItem}
-                selectionMode={selectionMode}
-                selected={selectedIds.has(item.id)}
-                onToggle={toggleItem}
-                onToggleFav={toggleFav}
-              />
-            ))}
+            {items.map(item => {
+              const draggable = !selectionMode
+              return (
+                <div
+                  key={item.id}
+                  data-gpnav=""
+                  className={dragOverId === item.id ? s.cardDragOver : undefined}
+                  draggable={draggable || undefined}
+                  onDragStart={draggable ? (e) => {
+                    dragIdRef.current = item.id
+                    e.dataTransfer.setData('text/plain', String(item.id))
+                    e.dataTransfer.effectAllowed = 'move'
+                  } : undefined}
+                  onDragOver={draggable ? (e) => { e.preventDefault(); setDragOverId(item.id) } : undefined}
+                  onDragLeave={draggable ? () => setDragOverId(prev => prev === item.id ? null : prev) : undefined}
+                  onDrop={draggable ? (e) => { e.preventDefault(); handleCardDrop(item.id) } : undefined}
+                  onDragEnd={draggable ? () => { dragIdRef.current = null; setDragOverId(null) } : undefined}
+                >
+                  <GridCard
+                    item={item}
+                    onClick={setEditItem}
+                    selectionMode={selectionMode}
+                    selected={selectedIds.has(item.id)}
+                    onToggle={toggleItem}
+                    onToggleFav={toggleFav}
+                    onContextMenu={(e, it) => setCtxMenu({ x: e.clientX, y: e.clientY, item: it })}
+                  />
+                </div>
+              )
+            })}
           </div>
         )}
 
@@ -519,6 +585,7 @@ export default function GameList() {
                 selected={selectedIds.has(item.id)}
                 onToggle={toggleItem}
                 onToggleFav={toggleFav}
+                onContextMenu={(e, it) => setCtxMenu({ x: e.clientX, y: e.clientY, item: it })}
               />
             ))}
           </div>
@@ -577,6 +644,48 @@ export default function GameList() {
             if (listModal !== 'new' && activeListId === listModal.id) handleListChange(null)
             loadLists()
           }}
+        />
+      )}
+
+      {addToList && activeList && (
+        <AddGamesToCustomListModal
+          list={activeList}
+          onClose={() => setAddToList(false)}
+          onAdded={() => {
+            setAddToList(false)
+            loadItems(1, { listId: activeListId })
+            setPage(1)
+            loadLists()
+          }}
+        />
+      )}
+
+      {ctxMenu && !selectionMode && (
+        <CardContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          game={ctxMenu.item}
+          onClose={() => setCtxMenu(null)}
+          statuses={STATUS_CONFIG}
+          statusField="status"
+          clearable={false}
+          onSetStatus={(item, status) => {
+            if (!status) return
+            // Optimistic badge update; the silent reload reconciles from the DB.
+            setItems(prev => prev.map(i => i.id === item.id ? { ...i, status } : i))
+            window.kozo?.api?.gameList?.update(item.id, { status })
+            loadItems(page, { silent: true })
+          }}
+          onToggleFavorite={toggleFav}
+          onEdit={setEditItem}
+          onDelete={async (item) => {
+            await window.kozo?.api?.gameList?.delete(item.id)
+            await loadItems(page)
+            loadLists()
+            loadGenres()
+          }}
+          deleteLabel="Remove from list"
+          deleteHint="Removes this entry from your Game List. Library data is not affected."
         />
       )}
     </div>

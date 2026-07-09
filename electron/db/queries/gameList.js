@@ -9,11 +9,6 @@ function listGameListItems(filters = {}) {
   `
   const params = []
 
-  if (filters.categoryId) {
-    query += ' AND gl.category_id = ?'
-    params.push(filters.categoryId)
-  }
-
   // Genre filter — genres is a JSON array string, LIKE match is fine at this scale.
   if (filters.genre) {
     query += " AND gl.genres LIKE ?"
@@ -31,7 +26,13 @@ function listGameListItems(filters = {}) {
     params.push(filters.status)
   }
 
-  query += ' ORDER BY gl.is_favorite DESC, gl.added_at DESC'
+  if (filters.search) {
+    query += " AND gl.name LIKE '%' || ? || '%' COLLATE NOCASE"
+    params.push(filters.search)
+  }
+
+  // Custom drag order first (rows without one sort after, favorites leading).
+  query += ' ORDER BY (gl.display_order IS NULL), gl.display_order, gl.is_favorite DESC, gl.added_at DESC'
 
   const total = getDb()
     .prepare(query.replace('SELECT gl.*, c.name AS category_name, c.emoji AS category_emoji', 'SELECT COUNT(*) AS count'))
@@ -56,21 +57,24 @@ function getGameListItem(id) {
 }
 
 function addGameListItem(data) {
-  if (data.steam_app_id) {
-    const existing = getDb()
-      .prepare('SELECT id FROM game_list WHERE steam_app_id = ? LIMIT 1')
-      .get(data.steam_app_id)
-    if (existing) throw new Error('This game is already in your list.')
-  }
+  // Dedupe on Steam appid OR (case-insensitive) name — manual adds have no
+  // appid, so an appid-only check let identical entries pile up.
+  const existing = getDb().prepare(`
+    SELECT id FROM game_list
+    WHERE (@steam_app_id IS NOT NULL AND steam_app_id = @steam_app_id)
+       OR lower(name) = lower(@name)
+    LIMIT 1
+  `).get({ steam_app_id: data.steam_app_id ?? null, name: data.name || '' })
+  if (existing) throw new Error('This game is already in your list.')
   const result = getDb().prepare(`
-    INSERT INTO game_list (game_id, steam_app_id, name, banner_url, category_id, status, rating, genres)
-    VALUES (@game_id, @steam_app_id, @name, @banner_url, @category_id, @status, @rating, @genres)
-  `).run({ category_id: null, genres: null, ...data })
+    INSERT INTO game_list (game_id, steam_app_id, name, banner_url, category_id, status, rating, genres, release_date)
+    VALUES (@game_id, @steam_app_id, @name, @banner_url, @category_id, @status, @rating, @genres, @release_date)
+  `).run({ category_id: null, genres: null, release_date: null, ...data })
   return getGameListItem(result.lastInsertRowid)
 }
 
 function updateGameListItem(id, data) {
-  const allowed = ['game_id', 'steam_app_id', 'name', 'banner_url', 'category_id', 'status', 'rating', 'is_favorite', 'genres']
+  const allowed = ['game_id', 'steam_app_id', 'name', 'banner_url', 'category_id', 'status', 'rating', 'is_favorite', 'genres', 'display_order', 'release_date']
   const sets = Object.keys(data)
     .filter(k => allowed.includes(k))
     .map(k => `${k} = @${k}`)

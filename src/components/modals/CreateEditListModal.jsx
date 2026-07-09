@@ -4,6 +4,8 @@ import Modal, { modalStyles as ms } from '../ui/Modal'
 import s from './AddGameModal.module.css'
 
 const EMOJI_SUGGESTIONS = ['🎮', '⭐', '🔥', '🏆', '💀', '🧘', '🚀', '❤️', '📦', '🕹️', '👻', '⚔️']
+const COLOR_SUGGESTIONS = ['#8b5cf6', '#3b82f6', '#22c55e', '#eab308', '#f97316', '#ef4444', '#ec4899', '#14b8a6']
+const HEX_RE = /^#[0-9a-fA-F]{6}$/
 
 // Create or edit a custom game list (the Spotify-playlist analogue).
 // Pass `list` to edit/delete an existing one; omit it to create.
@@ -11,6 +13,7 @@ export default function CreateEditListModal({ list, onClose, onSaved, onDeleted 
   const isEdit = !!list
   const [name, setName]   = useState(list?.name || '')
   const [emoji, setEmoji] = useState(list?.emoji || '')
+  const [color, setColor] = useState(list?.color || '')
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -19,7 +22,11 @@ export default function CreateEditListModal({ list, onClose, onSaved, onDeleted 
   async function handleSave() {
     if (!name.trim()) { setError('List name is required'); return }
     setSaving(true)
-    const payload = { name: name.trim(), emoji: emoji.trim() || null }
+    const payload = {
+      name: name.trim(),
+      emoji: emoji.trim() || null,
+      color: HEX_RE.test(color.trim()) ? color.trim().toLowerCase() : null,
+    }
     const res = isEdit
       ? await window.kozo?.api?.customLists?.update(list.id, payload)
       : await window.kozo?.api?.customLists?.create(payload)
@@ -94,6 +101,35 @@ export default function CreateEditListModal({ list, onClose, onSaved, onDeleted 
               {e}
             </button>
           ))}
+        </div>
+      </div>
+
+      <div className={s.field}>
+        <label className={s.label}>Color <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional — tints the list chip)</span></label>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div className={s.pills} style={{ flex: 1 }}>
+            {COLOR_SUGGESTIONS.map(c => (
+              <button
+                key={c}
+                className={s.pill}
+                onClick={() => setColor(color === c ? '' : c)}
+                title={c}
+                style={{
+                  width: 24, height: 24, padding: 0, borderRadius: '50%',
+                  background: c,
+                  border: color === c ? '2px solid var(--text-primary)' : '2px solid transparent',
+                }}
+              />
+            ))}
+          </div>
+          <input
+            className={s.input}
+            value={color}
+            onChange={e => setColor(e.target.value)}
+            placeholder="#8b5cf6"
+            maxLength={7}
+            style={{ width: 90, flexShrink: 0, borderColor: color && !HEX_RE.test(color.trim()) ? 'var(--status-dropped)' : undefined }}
+          />
         </div>
       </div>
     </Modal>
