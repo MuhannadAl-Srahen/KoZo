@@ -12,6 +12,11 @@ export function getBannerBg(id) {
   return BANNER_COLORS[(id || 0) % BANNER_COLORS.length]
 }
 
+// Genre column is stored as a JSON array string (see electron/db/database.js).
+export function parseGenres(item) {
+  try { return JSON.parse(item?.genres || '[]') } catch { return [] }
+}
+
 export function getBannerIcon(name = '') {
   const n = name.toLowerCase()
   if (n.match(/dead|evil|horror|skull|fear|silent|alien/)) return IconSkull

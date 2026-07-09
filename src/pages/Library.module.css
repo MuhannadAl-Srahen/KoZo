@@ -111,6 +111,32 @@
 
 .searchClear:hover { color: var(--text-secondary); }
 
+/* Drop-target highlight while drag-reordering (Custom order sort) */
+.cardDragOver {
+  outline: 2px solid var(--a);
+  outline-offset: 2px;
+  border-radius: var(--r-card);
+}
+
+/* Collapsed hidden-games section header at the bottom of the grid */
+.hiddenHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 18px;
+  padding: 8px 4px;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.12s;
+}
+.hiddenHeader:hover { color: var(--text-secondary); }
 
 .btnSecondary {
   display: flex;

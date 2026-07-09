@@ -1,7 +1,8 @@
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import { IconTrophy, IconCheck, IconClock, IconPlayerPlayFilled, IconStar, IconCircleCheckFilled, IconPlayerPauseFilled, IconX, IconEyeOff } from '@tabler/icons-react'
-import { getBannerBg, getBannerIcon, formatPlaytime, formatDate, fileUrl, LAUNCHERS } from '../lib/utils'
+import { getBannerBg, getBannerIcon, formatPlaytime, formatDate, fileUrl, LAUNCHERS, parseGenres } from '../lib/utils'
+import InfoModal from './ui/InfoModal'
 import s from './GameCard.module.css'
 
 export { formatPlaytime }
@@ -40,6 +41,8 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
   const bg       = getBannerBg(game.id)
   const iconSize = variant === 'big' ? 40 : 24
   const src      = sourceBadge(game)
+  const genres   = parseGenres(game)
+  const [launchError, setLaunchError] = React.useState(null)
 
   function handleClick() {
     if (selectionMode) { onToggle?.(game.id) } else { navigate(`/game/${game.id}`) }
@@ -48,7 +51,7 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
   async function handlePlay(e) {
     e.stopPropagation()
     const res = await window.kozo?.api?.games?.launch(game.id)
-    if (!res?.ok) alert(res?.error || 'Failed to launch')
+    if (!res?.ok) setLaunchError(res?.error || 'Failed to launch')
   }
 
   return (
@@ -62,22 +65,64 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
             it. If the image fails to load the icon shows again. */}
         <Icon size={iconSize} className={s.bannerIcon} stroke={1.1} style={{ zIndex: 0 }} />
         {(() => {
-          const src = game.banner_local_path ? fileUrl(game.banner_local_path, game._imgBust) : game.banner_url
+          const localSrc = game.banner_local_path ? fileUrl(game.banner_local_path, game._imgBust) : null
+          const src = localSrc || game.banner_url
           if (!src) return null
+          // A local banner file can go missing (e.g. after a backup restore that
+          // only round-trips DB rows, not the banners folder) — fall back to the
+          // remote cover instead of just going blank.
+          function handleError(e) {
+            const img = e.target
+            if (localSrc && game.banner_url && img.src !== game.banner_url && !img.dataset.fallbackTried) {
+              img.dataset.fallbackTried = '1'
+              img.src = game.banner_url
+              return
+            }
+            img.style.display = 'none'
+            if (img.className.includes(s.bannerImg)) {
+              const b = img.previousElementSibling
+              if (b) b.style.display = 'none'
+            }
+          }
           return (
             <>
-              <img src={src} className={s.bannerBlur} alt="" aria-hidden="true"
-                onError={e => { e.target.style.display = 'none' }} />
-              <img src={src} className={s.bannerImg} alt=""
-                onError={e => { e.target.style.display = 'none'; const b = e.target.previousElementSibling; if (b) b.style.display = 'none' }} />
+              <img src={src} className={s.bannerBlur} alt="" aria-hidden="true" onError={handleError} />
+              <img src={src} className={s.bannerImg} alt="" onError={handleError} />
             </>
           )
         })()}
 
-        {/* Source badge — top-left, all sizes */}
-        {!selectionMode && src && (
-          <div className={s.sourceBadge} style={{ color: src.color, borderColor: src.color + '44', background: src.color + '18' }}>
-            {src.label}
+        {/* Text badges — one top-left column so they never collide with the
+            round play/favorite buttons or the title overlay */}
+        {!selectionMode && (
+          <div className={s.badgeStack}>
+            {src && (
+              <div className={s.sourceBadge} style={{ color: src.color, borderColor: src.color + '44', background: src.color + '18' }}>
+                {src.label}
+              </div>
+            )}
+            {STATUS_META[game.completion_status] && (() => {
+              const st = STATUS_META[game.completion_status]
+              return (
+                <div
+                  className={`${s.statusBadge} ${variant === 'small' ? s.statusBadgeSmall : ''}`}
+                  style={{ color: st.color, borderColor: st.color + '44' }}
+                  title={`Status: ${st.label}`}
+                >
+                  <st.Icon size={variant === 'small' ? 10 : 12} />
+                  {st.label}
+                </div>
+              )
+            })()}
+            {game._isLive && (
+              <div className={s.liveBadge}><span className={s.liveDot} />LIVE</div>
+            )}
+            {!game.is_installed && (
+              <div className={s.notInstalledBadge}>Not installed</div>
+            )}
+            {!!game.is_hidden && (
+              <div className={s.hiddenBadge}><IconEyeOff size={10} stroke={1.8} />Hidden</div>
+            )}
           </div>
         )}
 
@@ -91,40 +136,10 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
           </>
         )}
 
-        {/* LIVE badge — top-right (when not selecting) */}
-        {!selectionMode && game._isLive && (
-          <div className={s.liveBadge}><span className={s.liveDot} />LIVE</div>
-        )}
-
-        {/* Status badge (Playing/Finished/Dropped/On hold) — bottom-left, above the name */}
-        {!selectionMode && STATUS_META[game.completion_status] && (() => {
-          const st = STATUS_META[game.completion_status]
-          return (
-            <div
-              className={`${s.statusBadge} ${variant === 'small' ? s.statusBadgeSmall : ''}`}
-              style={{ color: st.color, borderColor: st.color + '44' }}
-              title={`Status: ${st.label}`}
-            >
-              <st.Icon size={variant === 'small' ? 10 : 12} />
-              {st.label}
-            </div>
-          )
-        })()}
-
-        {!selectionMode && !game.is_installed && (
-          <div className={s.notInstalledBadge}>Not installed</div>
-        )}
-
-        {/* Hidden tag — only visible when the "Show hidden" filter reveals the card */}
-        {!selectionMode && !!game.is_hidden && (
-          <div className={s.hiddenBadge}><IconEyeOff size={10} stroke={1.8} />Hidden</div>
-        )}
-
-        {/* Favorite star — alongside the play button; stays visible when starred */}
+        {/* Favorite star — top-right corner; stays visible when starred */}
         {!selectionMode && (
           <button
             className={`${s.favBtn} ${game.is_favorite ? s.favBtnActive : ''}`}
-            style={{ right: game.is_installed ? 45 : 7 }}
             onClick={(e) => toggleFavorite(e, game, onFavorite)}
             title={game.is_favorite ? 'Remove from favorites' : 'Pin to top (favorite)'}
           >
@@ -133,7 +148,7 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
           </button>
         )}
 
-        {/* Play button — only when not selecting and the game is installed */}
+        {/* Play button — left of the star, only when installed */}
         {!selectionMode && !!game.is_installed && (
           <button
             className={s.playBtn}
@@ -144,9 +159,12 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
           </button>
         )}
 
-        {/* Name overlay at bottom */}
+        {/* Name + genres overlay at bottom */}
         <div className={`${s.bannerName} ${variant === 'small' ? s.bannerNameSmall : ''}`}>
-          {game.name}
+          <div className={s.bannerTitle}>{game.name}</div>
+          {variant !== 'small' && genres.length > 0 && (
+            <div className={s.bannerGenres}>{genres.slice(0, 3).join(' · ')}</div>
+          )}
         </div>
       </div>
 
@@ -165,6 +183,17 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
           </span>
         </div>
       </div>
+
+      {launchError && (
+        <div onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()} onContextMenu={e => e.stopPropagation()}>
+          <InfoModal
+            variant="error"
+            title="Couldn't launch"
+            message={`${game.name}: ${launchError}`}
+            onClose={() => setLaunchError(null)}
+          />
+        </div>
+      )}
     </div>
   )
 }
@@ -179,6 +208,8 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite, onConte
   const total    = game._total ?? 0
   const unlocked = game._unlocked ?? 0
   const achPct   = total > 0 ? Math.round((unlocked / total) * 100) : 0
+  const genres   = parseGenres(game)
+  const [launchError, setLaunchError] = React.useState(null)
 
   function handleClick() {
     if (selectionMode) { onToggle?.(game.id) } else { navigate(`/game/${game.id}`) }
@@ -187,7 +218,7 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite, onConte
   async function handlePlay(e) {
     e.stopPropagation()
     const res = await window.kozo?.api?.games?.launch(game.id)
-    if (!res?.ok) alert(res?.error || 'Failed to launch')
+    if (!res?.ok) setLaunchError(res?.error || 'Failed to launch')
   }
 
   return (
@@ -200,14 +231,26 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite, onConte
       <div className={s.listThumb} style={{ background: bg }}>
         <Icon size={20} stroke={1.2} style={{ color: 'rgba(255,255,255,0.15)', position: 'relative', zIndex: 0 }} />
         {(() => {
-          const src = game.banner_local_path ? fileUrl(game.banner_local_path, game._imgBust) : game.banner_url
+          const localSrc = game.banner_local_path ? fileUrl(game.banner_local_path, game._imgBust) : null
+          const src = localSrc || game.banner_url
           if (!src) return null
+          function handleError(e) {
+            const img = e.target
+            if (localSrc && game.banner_url && img.src !== game.banner_url && !img.dataset.fallbackTried) {
+              img.dataset.fallbackTried = '1'
+              img.src = game.banner_url
+              return
+            }
+            img.style.display = 'none'
+            if (img.className.includes(s.listThumbImg)) {
+              const b = img.previousElementSibling
+              if (b?.tagName === 'IMG') b.style.display = 'none'
+            }
+          }
           return (
             <>
-              <img src={src} className={s.listThumbBlur} alt="" aria-hidden="true"
-                onError={e => { e.target.style.display = 'none' }} />
-              <img src={src} className={s.listThumbImg} alt=""
-                onError={e => { e.target.style.display = 'none'; const b = e.target.previousElementSibling; if (b?.tagName === 'IMG') b.style.display = 'none' }} />
+              <img src={src} className={s.listThumbBlur} alt="" aria-hidden="true" onError={handleError} />
+              <img src={src} className={s.listThumbImg} alt="" onError={handleError} />
             </>
           )
         })()}
@@ -246,6 +289,9 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite, onConte
           })()}
           {!!game.is_hidden && !selectionMode && (
             <span className={s.listHiddenTag}>Hidden</span>
+          )}
+          {genres.length > 0 && (
+            <span className={s.listGenre}>{genres.slice(0, 3).join(' · ')}</span>
           )}
         </div>
         {total > 0 && (
@@ -289,6 +335,17 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite, onConte
         </span>
         <span className={s.listDate}>{formatDate(game.last_played_at)}</span>
       </div>
+
+      {launchError && (
+        <div onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()} onContextMenu={e => e.stopPropagation()}>
+          <InfoModal
+            variant="error"
+            title="Couldn't launch"
+            message={`${game.name}: ${launchError}`}
+            onClose={() => setLaunchError(null)}
+          />
+        </div>
+      )}
     </div>
   )
 }

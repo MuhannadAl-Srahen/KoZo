@@ -3,9 +3,9 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import {
   IconPlus, IconLayoutGrid, IconList, IconLayoutColumns,
   IconDeviceGamepad2, IconScan, IconLoader2, IconCheckbox, IconSquare,
-  IconTrash, IconX, IconCheck, IconSearch, IconEye, IconEyeOff,
+  IconTrash, IconX, IconCheck, IconSearch, IconEyeOff, IconChevronRight, IconChevronDown,
 } from '@tabler/icons-react'
-import GameCard, { formatPlaytime } from '../components/GameCard'
+import GameCard, { formatPlaytime, STATUS_META } from '../components/GameCard'
 import AddGameModal from '../components/modals/AddGameModal'
 import ScanResultModal from '../components/modals/ScanResultModal'
 import SearchableSelect from '../components/ui/SearchableSelect'
@@ -23,10 +23,19 @@ const SORT_OPTIONS = [
   { value: 'last_added',  label: 'Last added'   },
   { value: 'most_played', label: 'Most played'  },
   { value: 'achievements',label: 'Achievements' },
+  { value: 'custom',      label: 'Custom order' },
 ]
 const SORT_VALUES = new Set(SORT_OPTIONS.map(o => o.value))
 
 function sortGames(games, sortBy) {
+  // Custom order: exactly the user's drag order — no favorite pinning, no
+  // fallback sorts. Unordered games (never dragged) go last, newest first.
+  if (sortBy === 'custom') {
+    return [...games].sort((a, b) =>
+      (a.display_order == null) - (b.display_order == null) ||
+      (a.display_order ?? 0) - (b.display_order ?? 0) ||
+      (b.id || 0) - (a.id || 0))
+  }
   return [...games].sort((a, b) => {
     // Favorites always pin to the top, regardless of the chosen sort. (The DB
     // already returns them first, but this client-side sort would otherwise
@@ -86,8 +95,42 @@ export default function Library() {
     const saved = localStorage.getItem('kozo:sort:library')
     return SORT_VALUES.has(saved) ? saved : 'last_played'
   })
-  const [showHidden, setShowHidden] = useState(() => localStorage.getItem('kozo:show-hidden') === '1')
+  const [hiddenExpanded, setHiddenExpanded] = useState(() => localStorage.getItem('kozo:show-hidden') === '1')
+  const [statusFilter, setStatusFilter] = useState(() => localStorage.getItem('kozo:status:library') || '')
   const [ctxMenu, setCtxMenu]       = useState(null)  // null | { x, y, game }
+  const [dragOverId, setDragOverId] = useState(null)  // drop-target highlight (custom sort)
+  const dragIdRef = React.useRef(null)
+
+  // Drop the dragged card before the target and persist the full new order.
+  // Dragging works in ANY sort: the current visual order becomes the starting
+  // point, the sort switches to "Custom order", and the drop is applied.
+  function handleCardDrop(targetId) {
+    const dragId = dragIdRef.current
+    dragIdRef.current = null
+    setDragOverId(null)
+    if (dragId == null || dragId === targetId) return
+    const baseSort = sortBy
+    if (baseSort !== 'custom') {
+      setSortBy('custom')
+      localStorage.setItem('kozo:sort:library', 'custom')
+    }
+    setGames(prev => {
+      // Seed from what the user currently SEES, not the stored custom order.
+      const ordered = sortGames(prev.map(g => ({ ...g })), baseSort)
+      const from = ordered.findIndex(g => g.id === dragId)
+      const to   = ordered.findIndex(g => g.id === targetId)
+      if (from === -1 || to === -1) return prev
+      const [moved] = ordered.splice(from, 1)
+      ordered.splice(to, 0, moved)
+      ordered.forEach((g, i) => { g.display_order = i })
+      window.kozo?.api?.games?.reorder?.(ordered.map(g => g.id))
+      // Map the new orders back onto the unsorted state array.
+      const orderById = new Map(ordered.map(g => [g.id, g.display_order]))
+      const next = prev.map(g => orderById.has(g.id) ? { ...g, display_order: orderById.get(g.id) } : g)
+      libraryCache = next
+      return next
+    })
+  }
 
   // Auto-open Add Game modal when navigated with ?add=1 (e.g. from unknown-process prompt)
   useEffect(() => {
@@ -230,20 +273,22 @@ export default function Library() {
   }, [loadGames, loadActiveSessions])
 
   const allGamesWithLive = games.map(g => ({ ...g, _isLive: liveIds.has(g.id) }))
-  const hiddenCount = games.reduce((n, g) => n + (g.is_hidden ? 1 : 0), 0)
-  const filtered = allGamesWithLive.filter(g => {
-    if (g.is_hidden && !showHidden) return false
+  // Shared search/status predicate for both the main grid and the hidden section.
+  const matchesFilters = g => {
+    if (statusFilter && g.completion_status !== statusFilter) return false
     if (search.trim()) {
       const q = search.trim().toLowerCase()
       if (!g.name.toLowerCase().includes(q) && !(g.exe_name || '').toLowerCase().includes(q)) return false
     }
     return true
-  })
+  }
+  const filtered = allGamesWithLive.filter(g => !g.is_hidden && matchesFilters(g))
   const gamesWithLive = sortGames(filtered, sortBy)
-  // Header stats exclude hidden games — the numbers should match the grid the
-  // user sees (hidden games still track time/achievements/XP everywhere else).
-  const visibleGames = games.filter(g => !g.is_hidden)
-  const stats = computeStats(visibleGames)
+  // Hidden games live in their own collapsed section at the bottom of the grid.
+  const hiddenGames = sortGames(allGamesWithLive.filter(g => g.is_hidden && matchesFilters(g)), sortBy)
+  // Header stats include hidden games — hiding only affects grid visibility,
+  // not playtime/achievement totals.
+  const stats = computeStats(games)
   const gridClass = view === 'big' ? s.bigGrid : view === 'small' ? s.smallGrid : s.listGrid
 
   return (
@@ -252,7 +297,7 @@ export default function Library() {
       <div className={s.statsBar}>
         <div className={s.statCard}>
           <span className={s.statLabel}>Games</span>
-          <span className={s.statValue}>{visibleGames.length}</span>
+          <span className={s.statValue}>{games.length}</span>
         </div>
         <div className={s.statCard}>
           <span className={s.statLabel}>Playtime</span>
@@ -304,6 +349,20 @@ export default function Library() {
             width={148}
           />
 
+          {/* Status filter — filter out dropped/on-hold etc. without hiding */}
+          <SearchableSelect
+            value={statusFilter}
+            onChange={v => {
+              const next = v || ''
+              setStatusFilter(next)
+              localStorage.setItem('kozo:status:library', next)
+            }}
+            options={Object.entries(STATUS_META).map(([value, st]) => ({ value, label: st.label }))}
+            placeholder="All statuses"
+            searchable={false}
+            width={140}
+          />
+
           <button
             className={s.btnSecondary}
             title="Scan your PC for installed games to add (folders configured in Settings → Scan PC)"
@@ -315,21 +374,6 @@ export default function Library() {
               : <IconScan size={15} stroke={1.6} />}
             {scanning ? 'Scanning…' : 'Scan PC'}
           </button>
-
-          {hiddenCount > 0 && (
-            <button
-              className={s.btnSecondary}
-              title={showHidden ? 'Hide hidden games again' : `Show ${hiddenCount} hidden game${hiddenCount !== 1 ? 's' : ''}`}
-              onClick={() => {
-                const next = !showHidden
-                setShowHidden(next)
-                localStorage.setItem('kozo:show-hidden', next ? '1' : '0')
-              }}
-            >
-              {showHidden ? <IconEye size={15} stroke={1.6} /> : <IconEyeOff size={15} stroke={1.6} />}
-              Hidden ({hiddenCount})
-            </button>
-          )}
 
           {games.length > 0 && (
             <button className={s.btnSecondary} onClick={enterSelection}>
@@ -431,19 +475,70 @@ export default function Library() {
 
         {!loading && games.length > 0 && (
           <div className={gridClass}>
-            {gamesWithLive.map(game => (
-              <GameCard
-                key={game.id}
-                game={game}
-                view={view}
-                selectionMode={selectionMode}
-                selected={selectedIds.has(game.id)}
-                onToggle={toggleGame}
-                onFavorite={handleFavorite}
-                onContextMenu={(e, g) => setCtxMenu({ x: e.clientX, y: e.clientY, game: g })}
-              />
-            ))}
+            {gamesWithLive.map(game => {
+              const draggable = !selectionMode
+              return (
+                <div
+                  key={game.id}
+                  data-gpnav=""
+                  className={dragOverId === game.id ? s.cardDragOver : undefined}
+                  draggable={draggable || undefined}
+                  onDragStart={draggable ? (e) => {
+                    dragIdRef.current = game.id
+                    e.dataTransfer.setData('text/plain', String(game.id))
+                    e.dataTransfer.effectAllowed = 'move'
+                  } : undefined}
+                  onDragOver={draggable ? (e) => { e.preventDefault(); setDragOverId(game.id) } : undefined}
+                  onDragLeave={draggable ? () => setDragOverId(prev => prev === game.id ? null : prev) : undefined}
+                  onDrop={draggable ? (e) => { e.preventDefault(); handleCardDrop(game.id) } : undefined}
+                  onDragEnd={draggable ? () => { dragIdRef.current = null; setDragOverId(null) } : undefined}
+                >
+                  <GameCard
+                    game={game}
+                    view={view}
+                    selectionMode={selectionMode}
+                    selected={selectedIds.has(game.id)}
+                    onToggle={toggleGame}
+                    onFavorite={handleFavorite}
+                    onContextMenu={(e, g) => setCtxMenu({ x: e.clientX, y: e.clientY, game: g })}
+                  />
+                </div>
+              )
+            })}
           </div>
+        )}
+
+        {/* Hidden games — collapsed section at the bottom instead of mixing
+            into the grid; expand to manage/unhide (right-click still works) */}
+        {!loading && hiddenGames.length > 0 && !selectionMode && (
+          <>
+            <button
+              className={s.hiddenHeader}
+              onClick={() => {
+                const next = !hiddenExpanded
+                setHiddenExpanded(next)
+                localStorage.setItem('kozo:show-hidden', next ? '1' : '0')
+              }}
+            >
+              {hiddenExpanded ? <IconChevronDown size={14} stroke={1.8} /> : <IconChevronRight size={14} stroke={1.8} />}
+              <IconEyeOff size={13} stroke={1.6} />
+              Hidden ({hiddenGames.length})
+            </button>
+            {hiddenExpanded && (
+              <div className={gridClass}>
+                {hiddenGames.map(game => (
+                  <GameCard
+                    key={game.id}
+                    game={game}
+                    view={view}
+                    selectionMode={false}
+                    onFavorite={handleFavorite}
+                    onContextMenu={(e, g) => setCtxMenu({ x: e.clientX, y: e.clientY, game: g })}
+                  />
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -481,6 +576,13 @@ export default function Library() {
             window.kozo?.api?.games?.update(game.id, { is_hidden: next })
           }}
           onToggleFavorite={handleFavorite}
+          onDelete={async (game) => {
+            await window.kozo?.api?.games?.delete(game.id)
+            setGames(prev => { const u = prev.filter(g => g.id !== game.id); libraryCache = u; return u })
+            loadGames()
+          }}
+          deleteLabel="Remove from library"
+          deleteHint="Sessions and achievements for this game will be deleted."
         />
       )}
     </div>

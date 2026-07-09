@@ -49,18 +49,15 @@
 
 .bannerIcon { color: rgba(255,255,255,0.10); position: relative; z-index: 1; }
 
-/* Name gradient overlay */
+/* Name + genres gradient overlay */
 .bannerName {
   position: absolute;
   bottom: 0; left: 0; right: 0;
-  padding: 40px 10px 10px;
+  padding: 48px 10px 10px;
   background: linear-gradient(to bottom, transparent, rgba(0,0,0,0.9));
   color: #fff;
   font-size: 16px;
   font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   z-index: 2;
 }
 
@@ -69,11 +66,36 @@
   padding: 24px 7px 7px;
 }
 
+.bannerTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bannerGenres {
+  margin-top: 1px;
+  font-size: 10.5px;
+  font-weight: 400;
+  color: rgba(255,255,255,0.65);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── Badges ─────────────────────────────────────────────────── */
-.sourceBadge {
+/* All text badges live in one top-left column so they can never collide with
+   the round play/favorite buttons, which own the top-right corner. */
+.badgeStack {
   position: absolute;
   top: 7px; left: 7px;
   z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.sourceBadge {
   padding: 2px 7px;
   border-radius: var(--r-pill);
   font-size: 10px;
@@ -82,12 +104,7 @@
   background: rgba(0,0,0,0.72);
 }
 
-/* Top-left, stacked UNDER the source badge (Steam/Cracked) so it never collides
-   with the play/favorite buttons in the top-right corner. */
 .liveBadge {
-  position: absolute;
-  top: 32px; left: 7px;
-  z-index: 3;
   display: flex; align-items: center; gap: 5px;
   background: rgba(0,0,0,0.82);
   padding: 3px 8px 3px 6px;
@@ -108,9 +125,6 @@
 @keyframes livePulse { 0%,100%{opacity:1} 50%{opacity:0.2} }
 
 .notInstalledBadge {
-  position: absolute;
-  top: 7px; right: 7px;
-  z-index: 3;
   background: rgba(0,0,0,0.82);
   padding: 3px 8px;
   border-radius: var(--r-pill);
@@ -119,12 +133,7 @@
   border: 1px solid rgba(251,146,60,0.25);
 }
 
-/* Shown on hidden games when the "Show hidden" library filter is on. Stacks
-   below "Not installed" if both apply. */
 .hiddenBadge {
-  position: absolute;
-  top: 32px; right: 7px;
-  z-index: 3;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -136,15 +145,9 @@
   border: 1px solid var(--border);
 }
 
-/* Status badge (Playing/Finished/Dropped/On hold) — bottom-left of the banner,
-   sitting just above the name overlay. The name row is taller on big cards
-   (16px text + 10px padding) than on small ones (13px + 7px), so each variant
-   gets its own offset — a single hardcoded bottom misaligned the small cards. */
+/* Status badge (Playing/Finished/Dropped/On hold) — lives in the top-left
+   badge stack so it can never cover the title overlay. */
 .statusBadge {
-  position: absolute;
-  left: 7px;
-  bottom: 36px;
-  z-index: 3;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -157,8 +160,6 @@
 }
 
 .statusBadgeSmall {
-  left: 5px;
-  bottom: 28px;
   gap: 3px;
   padding: 1px 6px 1px 5px;
   font-size: 9.5px;
@@ -187,7 +188,7 @@
 /* ── Info strip below banner ─────────────────────────────────── */
 .gameInfo {
   padding: 8px 10px 9px;
-  display: flex; align-items: center;
+  display: flex; flex-direction: column; align-items: stretch;
 }
 
 .gameInfoSmall { padding: 5px 7px 7px; }
@@ -368,6 +369,14 @@
   border: 1px solid;
 }
 
+.listGenre {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .listLivePill {
   display: flex; align-items: center; gap: 4px;
   font-size: 10.5px;
@@ -453,7 +462,7 @@
 /* ── Play button ─────────────────────────────────────────────── */
 .playBtn {
   position: absolute;
-  top: 7px; right: 7px;
+  top: 7px; right: 45px;
   z-index: 4;
   width: 32px; height: 32px;
   border-radius: 50%;
@@ -481,7 +490,7 @@
    (gold) once starred so favorites read at a glance. */
 .favBtn {
   position: absolute;
-  top: 7px;
+  top: 7px; right: 7px;
   z-index: 4;
   width: 32px; height: 32px;
   border-radius: 50%;
