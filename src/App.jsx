@@ -1,17 +1,26 @@
 import React, { useState, useEffect } from 'react'
-import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { HashRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { AccentColorProvider } from './context/AccentColorContext'
+import { initGamepadNav } from './lib/gamepadNav'
 import Sidebar from './components/Sidebar'
 import Library from './pages/Library'
 import GameDetail from './pages/GameDetail'
 import GameList from './pages/GameList'
+import AchievementsHub from './pages/AchievementsHub'
+import Upcoming from './pages/Upcoming'
 import Sessions from './pages/Sessions'
 import Statistics from './pages/Statistics'
 import Profile from './pages/Profile'
 import Settings from './pages/Settings'
 import UnknownGamePrompt from './components/UnknownGamePrompt'
-import AchievementToast from './components/AchievementToast'
 import OnboardingModal from './components/OnboardingModal'
+
+// Controller navigation — must live under the router so useNavigate works.
+function GamepadNav() {
+  const navigate = useNavigate()
+  useEffect(() => initGamepadNav({ navigate }), [navigate])
+  return null
+}
 
 export default function App() {
   const [showOnboarding, setShowOnboarding] = useState(false)
@@ -53,6 +62,8 @@ export default function App() {
               <Route path="/" element={<Library />} />
               <Route path="/game/:id" element={<GameDetail />} />
               <Route path="/game-list" element={<GameList />} />
+              <Route path="/achievements" element={<AchievementsHub />} />
+              <Route path="/upcoming" element={<Upcoming />} />
               <Route path="/sessions" element={<Sessions />} />
               <Route path="/statistics" element={<Statistics />} />
               <Route path="/profile" element={<Profile />} />
@@ -61,8 +72,10 @@ export default function App() {
             </Routes>
           </div>
         </div>
+        {/* Achievement/level-up toasts come ONLY from the always-on-top overlay
+            window — an in-app copy here would show duplicates. */}
+        <GamepadNav />
         <UnknownGamePrompt />
-        <AchievementToast />
         {showOnboarding && <OnboardingModal onDone={() => setShowOnboarding(false)} />}
       </HashRouter>
     </AccentColorProvider>

@@ -64,19 +64,55 @@ export function applyAccent(rawHex) {
   root.style.setProperty('--ab', hexToRgba(hex, 0.22))
 }
 
+function hexHue(hex) {
+  if (!/^#[0-9A-Fa-f]{6}$/.test(hex)) return 250
+  const r = parseInt(hex.slice(1, 3), 16) / 255
+  const g = parseInt(hex.slice(3, 5), 16) / 255
+  const b = parseInt(hex.slice(5, 7), 16) / 255
+  const max = Math.max(r, g, b), min = Math.min(r, g, b)
+  const d = max - min
+  if (d === 0) return 250
+  let h
+  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6
+  else if (max === g) h = ((b - r) / d + 2) / 6
+  else h = ((r - g) / d + 4) / 6
+  return Math.round(h * 360)
+}
+
+// "Match background to accent": re-hue the dark surfaces with the accent's
+// hue at the same near-black lightness the stock theme uses — a subtly tinted
+// dark theme instead of the fixed blue-violet one.
+export function applyBackgroundTint(accentHex, enabled) {
+  const root = document.documentElement
+  const vars = ['--bg', '--surface-1', '--surface-2', '--surface-3']
+  if (!enabled) {
+    for (const v of vars) root.style.removeProperty(v)
+    return
+  }
+  const h = hexHue(accentHex)
+  root.style.setProperty('--bg',        `hsl(${h}, 28%, 4.7%)`)
+  root.style.setProperty('--surface-1', `hsl(${h}, 26%, 6.9%)`)
+  root.style.setProperty('--surface-2', `hsl(${h}, 25%, 7.8%)`)
+  root.style.setProperty('--surface-3', `hsl(${h}, 22%, 10%)`)
+}
+
 export function AccentColorProvider({ children }) {
   const [accent, setAccentState] = useState('#a78bfa')
+  const [bgTint, setBgTintState] = useState(false)
 
   useEffect(() => {
     const load = async () => {
       if (window.kozo?.api) {
-        const res = await window.kozo.api.settings.get('accent_color')
-        if (res?.ok && res.data) {
-          setAccentState(res.data)
-          applyAccent(res.data)
-        } else {
-          applyAccent(accent)
-        }
+        const [res, tintRes] = await Promise.all([
+          window.kozo.api.settings.get('accent_color'),
+          window.kozo.api.settings.get('bg_tint'),
+        ])
+        const hex = (res?.ok && res.data) ? res.data : accent
+        const tint = tintRes?.ok && tintRes.data === '1'
+        setAccentState(hex)
+        setBgTintState(tint)
+        applyAccent(hex)
+        applyBackgroundTint(hex, tint)
       } else {
         applyAccent(accent)
       }
@@ -87,6 +123,7 @@ export function AccentColorProvider({ children }) {
   const setAccent = async (hex) => {
     setAccentState(hex)
     applyAccent(hex)
+    applyBackgroundTint(hex, bgTint)
     if (window.kozo?.api) {
       await window.kozo.api.settings.set('accent_color', hex)
       // Push to the overlay window too — it's a separate BrowserWindow that won't
@@ -95,8 +132,16 @@ export function AccentColorProvider({ children }) {
     }
   }
 
+  const setBgTint = async (on) => {
+    setBgTintState(on)
+    applyBackgroundTint(accent, on)
+    if (window.kozo?.api) {
+      await window.kozo.api.settings.set('bg_tint', on ? '1' : '0')
+    }
+  }
+
   return (
-    <AccentColorContext.Provider value={{ accent, setAccent, presets: PRESET_ACCENTS }}>
+    <AccentColorContext.Provider value={{ accent, setAccent, presets: PRESET_ACCENTS, bgTint, setBgTint }}>
       {children}
     </AccentColorContext.Provider>
   )

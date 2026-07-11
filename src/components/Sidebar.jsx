@@ -3,6 +3,8 @@ import { NavLink, useLocation } from 'react-router-dom'
 import {
   IconLayoutGrid,
   IconList,
+  IconTrophy,
+  IconCalendar,
   IconHistory,
   IconChartBar,
   IconSettings,
@@ -18,10 +20,12 @@ function initials(name) {
 }
 
 const NAV_ITEMS = [
-  { path: '/',            label: 'Library',     Icon: IconLayoutGrid },
-  { path: '/game-list',   label: 'Game List',   Icon: IconList },
-  { path: '/sessions',    label: 'Sessions',    Icon: IconHistory },
-  { path: '/statistics',  label: 'Statistics',  Icon: IconChartBar },
+  { path: '/',              label: 'Library',      Icon: IconLayoutGrid },
+  { path: '/game-list',     label: 'Game List',    Icon: IconList },
+  { path: '/achievements',  label: 'Achievements', Icon: IconTrophy },
+  { path: '/upcoming',      label: 'Upcoming',     Icon: IconCalendar },
+  { path: '/sessions',      label: 'Sessions',     Icon: IconHistory },
+  { path: '/statistics',    label: 'Statistics',   Icon: IconChartBar },
 ]
 
 function formatSessionTime(startedAt, idleSeconds = 0) {
@@ -125,6 +129,7 @@ export default function Sidebar() {
             key={path}
             to={path}
             end={path === '/'}
+            data-gpnav=""
             className={({ isActive }) =>
               `${s.navItem} ${isActive ? s.navItemActive : ''}`
             }

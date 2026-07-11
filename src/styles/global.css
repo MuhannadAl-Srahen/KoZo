@@ -97,3 +97,10 @@ ul, ol { list-style: none; }
   overflow-y: auto;
   padding: 20px 22px;
 }
+
+/* Controller-navigation focus ring (see src/lib/gamepadNav.js) */
+.gpFocus {
+  outline: 2px solid var(--a);
+  outline-offset: 3px;
+  border-radius: var(--r-card);
+}
