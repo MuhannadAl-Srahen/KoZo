@@ -35,14 +35,25 @@ function exists(p) {
 }
 
 // ── CRC32 for SSE binary matching ────────────────────────────────────────────
-// crc-32 is a transitive dependency already in node_modules.
-let _crc32 = null
+// Inline standard CRC-32 (IEEE 802.3) — the previously-required `crc-32`
+// package was never actually installed, which silently disabled ALL SmartSteamEmu
+// binary parsing (require failed → null → zero matches). Zero-dependency now.
+let _crcTable = null
 function crc32hex(str) {
-  if (!_crc32) {
-    try { _crc32 = require('crc-32') } catch { return null }
+  if (!_crcTable) {
+    _crcTable = new Int32Array(256)
+    for (let n = 0; n < 256; n++) {
+      let c = n
+      for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1)
+      _crcTable[n] = c
+    }
   }
-  const val = (_crc32.str(str) >>> 0)   // unsigned 32-bit
-  return val.toString(16).padStart(8, '0')
+  const bytes = Buffer.from(str, 'utf8')
+  let crc = -1
+  for (let i = 0; i < bytes.length; i++) {
+    crc = (crc >>> 8) ^ _crcTable[(crc ^ bytes[i]) & 0xFF]
+  }
+  return ((crc ^ -1) >>> 0).toString(16).padStart(8, '0')
 }
 
 // ── Parsers ──────────────────────────────────────────────────────────────────
@@ -463,6 +474,12 @@ async function scanGameForCrackAchievements(gameId) {
 
   // Map api_name → local achievement row
   const localAchs = achievementsQ.listAchievementsForGame(gameId)
+  if (localAchs.length === 0) {
+    // Unlocks parsed but no schema to match them against — without this the
+    // unlocks vanish silently (the #1 confusing failure for cracked games).
+    logger.warn(`crackWatcher: ${allUnlocks.length} unlocks parsed for "${game.name}" but no achievement schema — check the appid, add a Steam API key, or make your Steam profile public`)
+    return { added: 0, hits, scannedPaths, candidatesTried: unique.length, schemaMissing: true }
+  }
   const nameToAch = {}
   const alreadyUnlocked = new Set()
   for (const a of localAchs) {
@@ -562,7 +579,10 @@ async function diagnoseGame(gameId) {
 
   // Plain-language verdict for the UI.
   let verdict
-  if (candidates.some(c => c.parsedUnlockCount > 0)) verdict = 'ok'
+  if (candidates.some(c => c.parsedUnlockCount > 0)) {
+    // Unlocks parse fine — but with no schema they can't be recorded.
+    verdict = schemaNames.length === 0 ? 'no-schema' : 'ok'
+  }
   else if (!candidates.length)                       verdict = mismatch ? 'appid-mismatch' : 'no-files'
   else if (mismatch)                                 verdict = 'appid-mismatch'
   else                                               verdict = 'emu-not-persisting'
@@ -709,4 +729,6 @@ module.exports = {
   scanGameForCrackAchievements, scanAllCrackedGames, scanActiveSessions,
   watchGame, unwatchGame,
   buildCandidates, readEmuConfigAppIds, detectEmulator, diagnoseGame,
+  // Pure parsers — exported for the standalone test script (scripts/test-parsers.js)
+  parseGoldbergJson, parseCodexIni, parseSseBinary,
 }

@@ -22,13 +22,39 @@ function emitNewUnlocks(game, newUnlocks) {
   try { require('./autoBackup').markDirty() } catch {}
   broadcastToRenderers('game:updated', game.id)
   if (global.__kozoSilenceAchNotify) return
-  const payload = { gameId: game.id, achievements: newUnlocks, gameName: game.name }
+  // Game cover for the overlay toasts. Some callers pass a partial game object —
+  // look the art up from the DB when the fields aren't present.
+  let artPath = game.banner_local_path ?? null
+  let artUrl  = game.banner_url ?? null
+  if (game.banner_local_path === undefined && game.banner_url === undefined) {
+    try {
+      const row = require('../db/database').getDb()
+        .prepare('SELECT banner_local_path, banner_url FROM games WHERE id = ?').get(game.id)
+      artPath = row?.banner_local_path ?? null
+      artUrl  = row?.banner_url ?? null
+    } catch {}
+  }
+  const payload = { gameId: game.id, achievements: newUnlocks, gameName: game.name, artPath, artUrl }
   broadcastToRenderers('achievement:unlocked', payload)
   // Show over the running game in the overlay window
   try { require('../overlayWindow').sendAchievements(payload) } catch {}
   try { require('./notifications').notifyAchievements({ gameName: game.name, achievements: newUnlocks }) } catch {}
   // Unlocks earn XP — check for a level-up right away.
-  try { require('./xpTracker').check({ reason: 'achievement', gameName: game.name }) } catch {}
+  try { require('./xpTracker').check({ reason: 'achievement', gameName: game.name, artPath, artUrl }) } catch {}
+}
+
+// Last Steam-sync failure per game (privacy-class errors only) so the UI can
+// show "your profile is private" inline instead of silently syncing nothing.
+const lastSyncErrors = new Map()
+function recordSyncError(gameId, error) {
+  if (error === 'private_profile' || error === 'private' || error === 'profile_not_found') {
+    lastSyncErrors.set(gameId, error)
+  } else {
+    lastSyncErrors.delete(gameId)
+  }
+}
+function getLastSyncError(gameId) {
+  return lastSyncErrors.get(gameId) || null
 }
 
 // Foreign-launcher games (Xbox/Epic/GOG/EA/Ubisoft) have no Steam-readable
@@ -58,14 +84,20 @@ async function ensureSchema(gameId) {
   const appid = game?.steam_app_id || game?.manual_appid
   if (!appid || isForeignLauncher(game)) return local
   const apiKey = settingsQ.getSetting('steam_api_key')
-  if (!apiKey) return local
+  const steamId = settingsQ.getSetting('steam_user_id')
+  if (!apiKey && !steamId) return local
 
   try {
-    const { getSchemaForGame, getGlobalAchievementPercentages } = require('./steamApi')
-    const [schema, pcts] = await Promise.all([
-      getSchemaForGame(appid, apiKey),
-      getGlobalAchievementPercentages(appid).catch(() => ({})),
-    ])
+    const { getSchemaForGame, getGlobalAchievementPercentages, getPlayerAchievementsXml } = require('./steamApi')
+    let schema
+    if (apiKey) {
+      schema = await getSchemaForGame(appid, apiKey)
+    } else {
+      // Keyless: the community XML feed carries names/descriptions/icons too.
+      const xml = await getPlayerAchievementsXml(appid, steamId)
+      schema = xml.error ? [] : xml.schema
+    }
+    const pcts = await getGlobalAchievementPercentages(appid).catch(() => ({}))
     const achievements = (schema || []).map(a => ({
       steam_api_name: a.name,
       display_name: a.displayName || a.name,
@@ -102,12 +134,21 @@ async function importSchemaFromAppId(gameId, appId) {
   const appid = parseInt(appId, 10)
   if (!appid || appid < 1) throw new Error('Enter a valid Steam App ID.')
   const apiKey = settingsQ.getSetting('steam_api_key')
-  if (!apiKey) throw new Error('Add your Steam Web API key in Settings → Steam first.')
+  const steamId = settingsQ.getSetting('steam_user_id')
+  if (!apiKey && !steamId) throw new Error('Add a Steam API key in Settings → Steam, or make sure Steam is installed so KoZo can detect your account.')
 
-  const [schema, pcts] = await Promise.all([
-    getSchemaForGame(appid, apiKey),
-    getGlobalAchievementPercentages(appid).catch(() => ({})),
-  ])
+  let schema
+  if (apiKey) {
+    schema = await getSchemaForGame(appid, apiKey)
+  } else {
+    // Keyless fallback: works when the user's public profile has stats for
+    // this appid (the XML feed includes the full achievement list + icons).
+    const { getPlayerAchievementsXml } = require('./steamApi')
+    const xml = await getPlayerAchievementsXml(appid, steamId)
+    if (xml.error) throw new Error('Could not load the achievement list without an API key — add one in Settings → Steam, or make your Steam profile public.')
+    schema = xml.schema
+  }
+  const pcts = await getGlobalAchievementPercentages(appid).catch(() => ({}))
   const achievements = (schema || []).map(a => ({
     steam_api_name: a.name,
     display_name: a.displayName || a.name,
@@ -216,9 +257,13 @@ async function syncAfterSession(gameId, sessionId) {
 
     const apiKey  = settingsQ.getSetting('steam_api_key')
     const steamId = settingsQ.getSetting('steam_user_id')
-    if (!apiKey || !steamId) return
+    if (!steamId) return
 
-    const result = await getPlayerAchievements(game.steam_app_id, apiKey, steamId)
+    // Keyless fallback: the public community XML feed needs no API key.
+    const result = apiKey
+      ? await getPlayerAchievements(game.steam_app_id, apiKey, steamId)
+      : await require('./steamApi').getPlayerAchievementsXml(game.steam_app_id, steamId)
+    recordSyncError(gameId, result.error)
     if (result.error) {
       logger.warn(`syncAfterSession: ${result.error} for ${game.name}`)
       return
@@ -278,10 +323,13 @@ async function syncPlayerUnlocks(gameId) {
 
   const apiKey  = settingsQ.getSetting('steam_api_key')
   const steamId = settingsQ.getSetting('steam_user_id')
-  if (!apiKey)  return { added: 0, total: 0, reason: 'no_api_key' }
   if (!steamId) return { added: 0, total: 0, reason: 'no_steam_id' }
 
-  const result = await getPlayerAchievements(game.steam_app_id, apiKey, steamId)
+  // Keyless fallback: public profiles work with no API key at all.
+  const result = apiKey
+    ? await getPlayerAchievements(game.steam_app_id, apiKey, steamId)
+    : await require('./steamApi').getPlayerAchievementsXml(game.steam_app_id, steamId)
+  recordSyncError(gameId, result.error)
   if (result.error) {
     return { added: 0, total: 0, reason: result.error }
   }
@@ -317,4 +365,4 @@ async function syncPlayerUnlocks(gameId) {
   return { added, total: steamUnlocks.length, newUnlocks }
 }
 
-module.exports = { fetchAndStoreAchievements, syncAfterSession, syncPlayerUnlocks, ensureSchema, importSchemaFromAppId, autoImportSchemaByName, emitNewUnlocks, isForeignLauncher }
+module.exports = { fetchAndStoreAchievements, syncAfterSession, syncPlayerUnlocks, ensureSchema, importSchemaFromAppId, autoImportSchemaByName, emitNewUnlocks, isForeignLauncher, getLastSyncError }

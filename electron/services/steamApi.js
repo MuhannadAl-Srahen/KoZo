@@ -175,20 +175,36 @@ async function getGlobalAchievementPercentages(appId) {
 // Resolve the REAL (correctly-hashed) art URLs for a game via the store
 // appdetails API. Newer titles serve art only from hashed `store_item_assets`
 // paths whose hash can't be guessed — this is the authoritative source.
-async function getStoreArt(appId) {
+async function getStoreArt(appId, _retried = false) {
   try {
     const data = await getJSON('https://store.steampowered.com/api/appdetails', { appids: appId, l: 'en' })
-    const d = data?.[appId]?.data
+    const entry = data?.[appId]
+    if (!entry?.success) {
+      logger.warn(`getStoreArt: Steam returned success:false for ${appId}`)
+      return null
+    }
+    const d = entry.data
     if (!d) return null
+    const genres = (d.genres || []).map(g => g.description).filter(Boolean)
+    if (!genres.length) logger.warn(`getStoreArt: no genres returned for ${appId}`)
     // header_image is the sharp 460×215 cover (correct hash); capsule_image is
     // the 231×87 fallback. Larger sizes live under different hashes we can't
     // derive, so these two are the reliable authoritative URLs.
     return {
       header_image: d.header_image || null,
       capsule_image: d.capsule_image || null,
-      genres: (d.genres || []).map(g => g.description).filter(Boolean),
+      genres,
+      release_date: d.release_date?.date || null,
+      coming_soon: !!d.release_date?.coming_soon,
     }
   } catch (e) {
+    // Steam's unauthenticated appdetails endpoint rate-limits aggressively —
+    // retry once after a short backoff instead of failing silently.
+    if (!_retried && e.response?.status === 429) {
+      logger.warn(`getStoreArt: rate-limited for ${appId}, retrying in 1.5s`)
+      await new Promise(r => setTimeout(r, 1500))
+      return getStoreArt(appId, true)
+    }
     logger.warn(`getStoreArt failed for ${appId}`, { message: e.message })
     return null
   }
@@ -241,6 +257,24 @@ async function downloadBanner(appId, gameId, extraUrls = []) {
   throw new Error(`No banner found for appId ${appId}`)
 }
 
+// When no downloadable banner exists (unreleased/demo titles whose appid-path
+// CDN art 404s), store the best remote URL as banner_url so the card still
+// shows art — the UI already prefers local files and falls back to banner_url.
+async function storeRemoteFallback(gameId, appId) {
+  try {
+    const url = await resolveBannerUrl(appId)
+    if (url) {
+      require('../db/database').getDb()
+        .prepare('UPDATE games SET banner_url = ? WHERE id = ?').run(url, gameId)
+      logger.info(`Stored remote banner fallback for game ${gameId}`)
+      return url
+    }
+  } catch (e) {
+    logger.warn(`Remote banner fallback failed for game ${gameId}`, { message: e.message })
+  }
+  return null
+}
+
 async function refreshGameData(gameId) {
   const { getDb } = require('../db/database')
   const settingsQ = require('../db/queries/settings')
@@ -277,6 +311,7 @@ async function refreshGameData(gameId) {
     getDb().prepare('UPDATE games SET banner_local_path = ? WHERE id = ?').run(bannerPath, gameId)
   } catch (e) {
     logger.warn(`Banner download failed for game ${gameId}`, { message: e.message })
+    await storeRemoteFallback(gameId, game.steam_app_id)
   }
 
   // Hero banner (wide landscape, used in GameDetail)
@@ -319,6 +354,7 @@ async function refreshBanners(gameId) {
     getDb().prepare('UPDATE games SET banner_local_path = ? WHERE id = ?').run(bannerPath, gameId)
   } catch (e) {
     logger.warn(`Portrait banner failed for game ${gameId}`, { message: e.message })
+    await storeRemoteFallback(gameId, game.steam_app_id)
   }
 
   // Hero banner (game detail page wide banner)
@@ -446,9 +482,142 @@ async function resolveSteamId(input, apiKey) {
   }
 }
 
+// ── Keyless achievements (community XML feed) ────────────────────────────────
+// Public Steam profiles expose per-game achievements at
+//   steamcommunity.com/profiles/<id64>/stats/<appid>/achievements?xml=1
+// with names, descriptions, icons AND unlock state — no API key needed. This
+// powers zero-setup sync; the API key remains an optional upgrade (works for
+// private profiles). Cached 60s per (appId, steamId) so one sync's unlock +
+// schema reads cost a single HTTP call. KoZo stores SteamID64 only, so the
+// /profiles/ URL form is always correct (never build /id/<vanity> URLs).
+const _xmlCache = new Map()   // `${appId}:${steamId}` -> { at, result }
+
+async function getPlayerAchievementsXml(appId, steamId) {
+  const key = `${appId}:${steamId}`
+  const hit = _xmlCache.get(key)
+  if (hit && Date.now() - hit.at < 60_000) return hit.result
+
+  let result
+  try {
+    const axios = getAxios()
+    const res = await axios.get(
+      `https://steamcommunity.com/profiles/${steamId}/stats/${appId}/achievements/`,
+      {
+        params: { xml: 1, l: 'english' },
+        timeout: 30000,
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+        responseType: 'text',
+        transformResponse: [x => x],
+      }
+    )
+    const body = String(res.data || '')
+    if (/<error>/i.test(body)) {
+      const msg = body.match(/<error>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/error>/i)?.[1] || ''
+      result = { error: /private|permission/i.test(msg) ? 'private_profile' : 'profile_not_found', detail: msg }
+    } else if (!/<playerstats/i.test(body)) {
+      result = { error: 'profile_not_found' }
+    } else {
+      const unlocks = []
+      const schema = []
+      for (const m of body.matchAll(/<achievement([^>]*)>([\s\S]*?)<\/achievement>/gi)) {
+        const attrs = m[1], inner = m[2]
+        const pick = (tag) =>
+          inner.match(new RegExp(`<${tag}>\\s*(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?\\s*</${tag}>`, 'i'))?.[1]?.trim() || ''
+        const apiname = pick('apiname')
+        if (!apiname) continue
+        schema.push({
+          name: apiname,
+          displayName: pick('name'),
+          description: pick('description'),
+          icon: pick('iconClosed') || null,
+          icongray: pick('iconOpen') || null,
+          hidden: 0,
+        })
+        if (/closed="1"/i.test(attrs)) {
+          unlocks.push({ name: apiname, unlocktime: parseInt(pick('unlockTimestamp') || '0', 10) })
+        }
+      }
+      // A valid playerstats with zero achievements = game has stats but no
+      // achievements for this user — not a privacy error.
+      result = schema.length ? { unlocks, schema, error: null } : { error: 'no_stats' }
+    }
+  } catch (e) {
+    logger.warn(`getPlayerAchievementsXml failed for ${appId}`, { message: e.message })
+    result = { error: e.message || 'network_error' }
+  }
+  _xmlCache.set(key, { at: Date.now(), result })
+  return result
+}
+
+// Silently fills in missing genres for any games/game_list rows that predate
+// the genres column, don't have one cached, or came in through an App-Data
+// Backup restore. Fire-and-forget — no UI surface, just runs and lets
+// game:updated pick up the result whenever it lands. Throttled/backed-off
+// since the Steam Store appdetails endpoint rate-limits hard.
+let _genreBackfillRunning = false
+let _genreRetries = 0
+async function runGenreBackfill() {
+  if (_genreBackfillRunning) return { updated: 0, remaining: 0, skipped: true }
+  _genreBackfillRunning = true
+  try {
+    const { getDb } = require('../db/database')
+    const db = getDb()
+    // '[]' rows count as missing too — an empty fetch result must not park a
+    // game outside the backfill forever.
+    const targets = [
+      ...db.prepare("SELECT id, steam_app_id, 'games' AS tbl FROM games WHERE steam_app_id IS NOT NULL AND (genres IS NULL OR genres = '[]')").all(),
+      ...db.prepare("SELECT id, steam_app_id, 'game_list' AS tbl FROM game_list WHERE steam_app_id IS NOT NULL AND (genres IS NULL OR genres = '[]' OR (status = 'upcoming' AND release_date IS NULL))").all(),
+    ]
+    let updated = 0, failures = 0
+    for (const row of targets) {
+      try {
+        const art = await getStoreArt(row.steam_app_id)
+        if (art?.genres?.length) {
+          db.prepare(`UPDATE ${row.tbl} SET genres = ? WHERE id = ?`).run(JSON.stringify(art.genres), row.id)
+          updated++
+          failures = 0
+        } else if (art === null) {
+          failures++
+        }
+        // Release dates ride along on the same store fetch (Upcoming tab).
+        if (row.tbl === 'game_list' && art?.release_date) {
+          db.prepare('UPDATE game_list SET release_date = ? WHERE id = ? AND release_date IS NULL').run(art.release_date, row.id)
+        }
+      } catch (e) {
+        logger.warn(`runGenreBackfill failed for ${row.steam_app_id}`, { message: e.message })
+        failures++
+      }
+      if (failures >= 8) break   // likely rate-limited — stop hammering
+      await new Promise(r => setTimeout(r, 700 + failures * 300))
+    }
+    if (updated > 0) {
+      try {
+        const { BrowserWindow } = require('electron')
+        for (const win of BrowserWindow.getAllWindows()) {
+          if (!win.isDestroyed()) win.webContents.send('game:updated', null)
+        }
+      } catch { /* no windows yet */ }
+    }
+    const remaining = targets.length - updated
+    // Self-heal: a rate-limited/aborted pass re-arms itself instead of waiting
+    // for the next app launch. Caps at 5 retries per session.
+    if (remaining > 0 && _genreRetries < 5) {
+      _genreRetries++
+      logger.info(`runGenreBackfill: ${remaining} still missing — retry ${_genreRetries}/5 in 10 min`)
+      const t = setTimeout(() => runGenreBackfill().catch(() => {}), 10 * 60 * 1000)
+      t.unref?.()
+    } else if (remaining === 0) {
+      _genreRetries = 0
+    }
+    return { updated, remaining }
+  } finally {
+    _genreBackfillRunning = false
+  }
+}
+
 module.exports = {
   testApiKey, searchGames, findAppByName, refreshGameData, refreshBanners, downloadBanner,
-  getStoreArt, resolveBannerUrl, resolveSteamId,
-  getSchemaForGame, getGlobalAchievementPercentages, getPlayerAchievements,
+  getStoreArt, resolveBannerUrl, resolveSteamId, runGenreBackfill, storeRemoteFallback,
+  getSchemaForGame, getGlobalAchievementPercentages, getPlayerAchievements, getPlayerAchievementsXml,
   getPlayerSummary, getOwnedGames,
 }

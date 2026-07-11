@@ -216,4 +216,34 @@ function unwatchAll() {
   for (const gameId of [...watchers.keys()]) unwatchGame(gameId)
 }
 
-module.exports = { watchGame, unwatchGame, unwatchAll, scanGame }
+// Read the logged-in Steam account (SteamID64 + persona name) from Steam's
+// local loginusers.vdf — picks the MostRecent account, falling back to the
+// newest Timestamp. Used for silent auto-setup so nobody types their ID.
+function detectLoggedInUser() {
+  const steamPath = getSteamPath()
+  if (!steamPath) return { error: 'steam_not_found' }
+  const vdfPath = path.join(steamPath, 'config', 'loginusers.vdf')
+  if (!fs.existsSync(vdfPath)) return { error: 'no_users' }
+  try {
+    const raw = fs.readFileSync(vdfPath, 'utf8')
+    const users = []
+    for (const m of raw.matchAll(/"(7656\d{13})"\s*\{([^}]*)\}/g)) {
+      const body = m[2]
+      users.push({
+        steamId: m[1],
+        personaName: body.match(/"PersonaName"\s*"([^"]*)"/i)?.[1] || '',
+        mostRecent: /"MostRecent"\s*"1"/i.test(body),
+        timestamp: parseInt(body.match(/"Timestamp"\s*"(\d+)"/i)?.[1] || '0', 10),
+      })
+    }
+    if (!users.length) return { error: 'no_users' }
+    const pick = users.find(u => u.mostRecent)
+      || users.slice().sort((a, b) => b.timestamp - a.timestamp)[0]
+    return { steamId: pick.steamId, personaName: pick.personaName }
+  } catch (e) {
+    logger.warn('detectLoggedInUser failed', { message: e.message })
+    return { error: 'parse_failed' }
+  }
+}
+
+module.exports = { watchGame, unwatchGame, unwatchAll, scanGame, getSteamPath, detectLoggedInUser }
