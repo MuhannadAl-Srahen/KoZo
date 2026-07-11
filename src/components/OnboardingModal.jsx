@@ -86,21 +86,30 @@ function MockXp() {
 
 export default function OnboardingModal({ onDone }) {
   const [step, setStep]       = useState(0)
-  const [apiKey, setApiKey]   = useState('')
   const [steamId, setSteamId] = useState('')
-  const [testState, setTestState] = useState('idle')   // idle | testing | valid | invalid
-  const [testMsg, setTestMsg] = useState('')
-  const [saving, setSaving]   = useState(false)
-  const [resolving, setResolving] = useState(false)
-  const [idMsg, setIdMsg] = useState(null)   // { type: 'ok'|'err', text }
+  const [persona, setPersona] = useState('')
+  const [signingIn, setSigningIn] = useState(false)
+  const [steamMsg, setSteamMsg] = useState(null)   // { type: 'ok'|'err', text }
 
   useEffect(() => {
-    window.kozo?.api?.settings?.getAll?.().then(res => {
+    ;(async () => {
+      const res = await window.kozo?.api?.settings?.getAll?.()
       if (res?.ok) {
-        setApiKey(res.data?.steam_api_key || '')
         setSteamId(res.data?.steam_user_id || '')
+        setPersona(res.data?.steam_persona || '')
       }
-    })
+      // Not connected yet? Try the silent local detect right here so the step
+      // usually opens already done.
+      if (!res?.data?.steam_user_id) {
+        const d = await window.kozo?.api?.steam?.detectUser?.()
+        const det = d?.ok ? d.data : d
+        if (det?.steamId) {
+          await window.kozo?.api?.settings?.set('steam_user_id', det.steamId)
+          setSteamId(det.steamId)
+          setPersona(det.personaName || '')
+        }
+      }
+    })()
   }, [])
 
   async function finish() {
@@ -108,47 +117,19 @@ export default function OnboardingModal({ onDone }) {
     onDone()
   }
 
-  async function testKey() {
-    if (!apiKey.trim()) return
-    setTestState('testing'); setTestMsg('')
-    const res = await window.kozo?.api?.steam?.testKey(apiKey.trim())
-    if (res?.ok) { setTestState(res.data?.valid ? 'valid' : 'invalid'); setTestMsg(res.data?.message || '') }
-    else { setTestState('invalid'); setTestMsg('Test failed') }
-  }
-
-  // Resolve whatever's in the Steam field (URL / name / ID) to a SteamID64.
-  async function resolveId() {
-    if (!steamId.trim()) return null
-    setResolving(true); setIdMsg(null)
-    const r = await window.kozo?.api?.steam?.resolveId(steamId.trim(), apiKey.trim())
-    setResolving(false)
-    if (r?.ok && r.data?.steamId) {
-      setSteamId(r.data.steamId)
-      setIdMsg({ type: 'ok', text: `Found your account: ${r.data.steamId}` })
-      return r.data.steamId
+  async function signInWithSteam() {
+    setSigningIn(true)
+    setSteamMsg({ type: 'ok', text: 'Waiting for the browser sign-in…' })
+    const r = await window.kozo?.api?.steam?.signIn?.()
+    setSigningIn(false)
+    const d = r?.ok ? r.data : r
+    if (d?.steamId) {
+      setSteamId(d.steamId)
+      setPersona(d.personaName || '')
+      setSteamMsg(null)
+    } else {
+      setSteamMsg({ type: 'err', text: d?.error === 'timeout' ? 'Sign-in timed out — try again.' : 'Sign-in failed — try again.' })
     }
-    const reason = r?.data?.error
-    setIdMsg({ type: 'err', text:
-      reason === 'no_api_key' ? 'Add your API key above first, then check again.' :
-      reason === 'not_found'  ? "Couldn't find that profile. Make sure the name/URL is right." :
-      reason === 'unrecognized' ? "That doesn't look like a Steam profile URL, name, or ID." :
-      'Could not look that up. Check your API key and try again.' })
-    return null
-  }
-
-  async function saveSteamAndNext() {
-    setSaving(true)
-    const key = apiKey.trim()
-    if (key) await window.kozo?.api?.settings?.set('steam_api_key', key)
-    const idInput = steamId.trim()
-    if (idInput) {
-      // Resolve a URL/name to a SteamID64 before saving (a raw 17-digit ID passes through).
-      const r = await window.kozo?.api?.steam?.resolveId(idInput, key)
-      const finalId = (r?.ok && r.data?.steamId) ? r.data.steamId : idInput
-      await window.kozo?.api?.settings?.set('steam_user_id', finalId)
-    }
-    setSaving(false)
-    setStep(2)
   }
 
   const STEPS = [
@@ -168,52 +149,52 @@ export default function OnboardingModal({ onDone }) {
       </div>
     </div>,
 
-    // 1 — Connect Steam
+    // 1 — Connect Steam (automatic — nothing to type)
     <div key="s" className={s.stepBody}>
       <div className={s.stepIcon}><IconBrandSteam size={30} stroke={1.5} /></div>
-      <h2 className={s.stepTitle}>Connect Steam <span className={s.optional}>recommended</span></h2>
+      <h2 className={s.stepTitle}>Steam connects itself</h2>
       <p className={s.stepText}>
-        This is the part most people forget. KoZo needs a free <strong>Steam Web API key</strong> and
-        your <strong>Steam ID</strong> to sync achievements and cover art. You can always add these
-        later in Settings → Steam.
+        Nothing to type: KoZo reads your logged-in account straight from the Steam app on
+        this PC and syncs achievements + cover art from there. No API key needed.
       </p>
 
-      <label className={s.fieldLabel}>
-        Steam Web API key
-        <a className={s.help} href="#" onClick={e => { e.preventDefault(); window.kozo?.api?.shell?.openExternal(API_KEY_URL) }}>
-          Get a key <IconExternalLink size={11} stroke={1.8} />
-        </a>
-      </label>
-      <input className={s.input} value={apiKey} onChange={e => { setApiKey(e.target.value); setTestState('idle') }}
-        placeholder="Paste your API key" spellCheck={false} />
-
-      <label className={s.fieldLabel} style={{ marginTop: 12 }}>Your Steam profile</label>
-      <input className={s.input} value={steamId} onChange={e => { setSteamId(e.target.value); setIdMsg(null) }}
-        placeholder="Profile link, custom name, or SteamID64" spellCheck={false} />
-      <p className={s.note} style={{ marginTop: 6 }}>
-        In Steam, click your name (top-right) → <strong>View my profile</strong>, then copy the page
-        URL and paste it above. KoZo turns it into your ID for you — no other websites needed.
-      </p>
-
-      <div className={s.testRow}>
-        <button className={s.ghostBtn} onClick={testKey} disabled={!apiKey.trim() || testState === 'testing'}>
-          {testState === 'testing' ? <IconLoader2 size={13} className="spin" /> : <IconCheck size={13} stroke={2} />}
-          Test key
-        </button>
-        <button className={s.ghostBtn} onClick={resolveId} disabled={!steamId.trim() || resolving}>
-          {resolving ? <IconLoader2 size={13} className="spin" /> : <IconSearch size={13} stroke={2} />}
-          Find my ID
-        </button>
-      </div>
-      <div className={s.testRow} style={{ marginTop: 8 }}>
-        {testState === 'valid'   && <span className={s.ok}><IconCheck size={13} stroke={2.5} /> Key is valid</span>}
-        {testState === 'invalid' && <span className={s.err}><IconX size={13} stroke={2.5} /> {testMsg || 'Invalid key'}</span>}
-        {idMsg?.type === 'ok'  && <span className={s.ok}><IconCheck size={13} stroke={2.5} /> {idMsg.text}</span>}
-        {idMsg?.type === 'err' && <span className={s.err}><IconX size={13} stroke={2.5} /> {idMsg.text}</span>}
-      </div>
+      {steamId ? (
+        <div className={s.testRow} style={{ marginTop: 4 }}>
+          <span className={s.ok}>
+            <IconCheck size={13} stroke={2.5} />
+            Connected{persona ? <> as <strong>&nbsp;{persona}</strong></> : ` — ${steamId}`}
+          </span>
+        </div>
+      ) : (
+        <>
+          <p className={s.note}>
+            Steam isn't installed on this PC (or nobody is logged in) — sign in with your
+            browser instead:
+          </p>
+          <div className={s.testRow}>
+            <button className={s.ghostBtn} onClick={signInWithSteam} disabled={signingIn}>
+              {signingIn ? <IconLoader2 size={13} className="spin" /> : <IconBrandSteam size={13} stroke={2} />}
+              {signingIn ? 'Waiting…' : 'Sign in with Steam'}
+            </button>
+          </div>
+        </>
+      )}
+      {steamMsg && (
+        <div className={s.testRow} style={{ marginTop: 8 }}>
+          <span className={steamMsg.type === 'ok' ? s.ok : s.err}>
+            {steamMsg.type === 'ok' ? <IconLoader2 size={13} className="spin" /> : <IconX size={13} stroke={2.5} />}
+            {steamMsg.text}
+          </span>
+        </div>
+      )}
 
       <p className={s.note}>
-        For achievement sync to work, your Steam profile + game details must be set to <strong>Public</strong>.
+        Your Steam profile's <strong>Game details</strong> must be Public for achievement sync.
+        Private profile? Add an optional{' '}
+        <a className={s.help} href="#" onClick={e => { e.preventDefault(); window.kozo?.api?.shell?.openExternal(API_KEY_URL) }}>
+          API key <IconExternalLink size={11} stroke={1.8} />
+        </a>{' '}
+        later in Settings → Steam.
       </p>
     </div>,
 
@@ -276,8 +257,7 @@ export default function OnboardingModal({ onDone }) {
     </div>,
   ]
 
-  const isLast  = step === STEPS.length - 1
-  const isSteam = step === 1
+  const isLast = step === STEPS.length - 1
 
   return (
     <div className={s.overlay}>
@@ -298,13 +278,7 @@ export default function OnboardingModal({ onDone }) {
                 <IconArrowLeft size={14} stroke={2} /> Back
               </button>
             )}
-            {isSteam ? (
-              <button className={s.primaryBtn} onClick={saveSteamAndNext} disabled={saving}>
-                {saving ? <IconLoader2 size={14} className="spin" /> : null}
-                {apiKey.trim() || steamId.trim() ? 'Save & continue' : 'Skip for now'}
-                <IconArrowRight size={14} stroke={2} />
-              </button>
-            ) : isLast ? (
+            {isLast ? (
               <button className={s.primaryBtn} onClick={finish}>
                 <IconCheck size={14} stroke={2.5} /> Get started
               </button>
