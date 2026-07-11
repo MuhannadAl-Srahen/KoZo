@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('kozo', {
     },
     gameList: {
       list: (filters) => ipcRenderer.invoke('gameList:list', filters),
+      refreshUpcomingInfo: () => ipcRenderer.invoke('gameList:refreshUpcomingInfo'),
       get: (id) => ipcRenderer.invoke('gameList:get', id),
       add: (data) => ipcRenderer.invoke('gameList:add', data),
       update: (id, data) => ipcRenderer.invoke('gameList:update', id, data),
@@ -61,6 +62,7 @@ contextBridge.exposeInMainWorld('kozo', {
       bannerRefreshStatus: () => ipcRenderer.invoke('banners:refreshStatus'),
       detectUser: () => ipcRenderer.invoke('steam:detectUser'),
       signIn: () => ipcRenderer.invoke('steam:signIn'),
+      storeDetails: (appId) => ipcRenderer.invoke('steam:storeDetails', appId),
       lastSyncError: (gameId) => ipcRenderer.invoke('steam:lastSyncError', gameId),
       getProfile: (overrides) => ipcRenderer.invoke('steam:getProfile', overrides),
       diagnose: (gameId) => ipcRenderer.invoke('steam:diagnose', gameId),
@@ -84,6 +86,7 @@ contextBridge.exposeInMainWorld('kozo', {
       backup: (gameId, sourcePath) => ipcRenderer.invoke('saves:backup', gameId, sourcePath),
       listBackups: (gameId) => ipcRenderer.invoke('saves:listBackups', gameId),
       backupsDir: () => ipcRenderer.invoke('saves:backupsDir'),
+      overview: () => ipcRenderer.invoke('saves:overview'),
       backupAll: () => ipcRenderer.invoke('saves:backupAll'),
       restore: (gameId, backupId, target) => ipcRenderer.invoke('saves:restore', gameId, backupId, target),
       deleteBackup: (gameId, backupId) => ipcRenderer.invoke('saves:deleteBackup', gameId, backupId),

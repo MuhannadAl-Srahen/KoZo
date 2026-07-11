@@ -161,6 +161,24 @@ handle('saves:deleteBackup', (gameId, backupId) =>
   require('./services/saveBackup').deleteBackup(gameNameOf(gameId), backupId))
 handle('saves:backupsDir', () => require('./services/saveBackup').rootPath())
 
+// Per-game backup overview for the Backups tab — count + newest snapshot, so
+// the user can see at a glance what's protected and what isn't.
+handle('saves:overview', () => {
+  const { listBackups } = require('./services/saveBackup')
+  const db = require('./db/database').getDb()
+  const games = db.prepare('SELECT id, name FROM games ORDER BY name COLLATE NOCASE').all()
+  return games.map(g => {
+    let backups = []
+    try { backups = listBackups(g.name) } catch {}
+    return {
+      id: g.id,
+      name: g.name,
+      count: backups.length,
+      latestAt: backups[0]?.createdAt || null,
+    }
+  })
+})
+
 // Auto-backup of game saves after each session (mirrors the app-data auto-backup).
 handle('saves:getAutoBackup', () => settingsQ.getSetting('auto_save_backup_enabled') === '1')
 handle('saves:setAutoBackup', (enabled) => {
@@ -377,6 +395,19 @@ handle('gameList:update', (id, data) => {
   const r = gameListQ.updateGameListItem(id, data)
   // Mirror a status change onto the linked library game (and vice versa elsewhere).
   if (data?.status) { try { require('./services/statusSync').syncFromGameList(id, data.status) } catch (e) { logger.warn('statusSync from game list failed', { message: e.message }) } }
+  // Newly marked "upcoming" with no stored release date → fetch it right away so
+  // the Upcoming tab shows the countdown immediately (not on the next backfill).
+  if (data?.status === 'upcoming' && r?.steam_app_id && !r?.release_date) {
+    setImmediate(async () => {
+      try {
+        const art = await require('./services/steamApi').getStoreArt(r.steam_app_id)
+        if (art?.release_date) {
+          gameListQ.updateGameListItem(id, { release_date: art.release_date })
+          broadcast('game:updated', null)
+        }
+      } catch {}
+    })
+  }
   bk(); broadcast('game:updated', null); return r
 })
 handle('gameList:delete', (id) => { gameListQ.deleteGameListItem(id); bk(); return true })
@@ -803,6 +834,42 @@ handle('steam:detectUser', () => require('./services/steamStatsWatcher').detectL
 
 // Real browser "Sign in with Steam" (OpenID) — fallback / account switching.
 handle('steam:signIn', () => require('./services/steamOpenId').signIn())
+
+// Store-page details (description, developers, screenshots) for the Upcoming popup.
+handle('steam:storeDetails', (appId) => require('./services/steamApi').getStoreDetails(appId))
+
+// Called when the Upcoming tab opens: warms the store-details cache for every
+// upcoming game (so popups open instantly) AND backfills missing release dates
+// — fixes released games (e.g. Dead Cells added long ago) sitting in "No date
+// yet" forever. Serialized with a small delay to respect Steam's rate limits.
+let _upcomingRefreshing = false
+handle('gameList:refreshUpcomingInfo', async () => {
+  if (_upcomingRefreshing) return { skipped: true }
+  _upcomingRefreshing = true
+  try {
+    const { getStoreDetails } = require('./services/steamApi')
+    const db = require('./db/database').getDb()
+    const rows = db.prepare("SELECT id, steam_app_id, release_date, genres FROM game_list WHERE status = 'upcoming' AND steam_app_id IS NOT NULL").all()
+    let filled = 0
+    for (const row of rows) {
+      const d = await getStoreDetails(row.steam_app_id)
+      if (d) {
+        if (!row.release_date && d.release_date) {
+          gameListQ.updateGameListItem(row.id, { release_date: d.release_date })
+          filled++
+        }
+        if ((!row.genres || row.genres === '[]') && d.genres?.length) {
+          gameListQ.updateGameListItem(row.id, { genres: JSON.stringify(d.genres) })
+        }
+      }
+      await new Promise(r => setTimeout(r, 250))
+    }
+    if (filled > 0) { bk(); broadcast('game:updated', null) }
+    return { filled, checked: rows.length }
+  } finally {
+    _upcomingRefreshing = false
+  }
+})
 
 // Returns persona name and avatar so the user can confirm the right account is loaded.
 handle('steam:getProfile', async (overrides) => {

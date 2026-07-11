@@ -175,6 +175,37 @@ async function getGlobalAchievementPercentages(appId) {
 // Resolve the REAL (correctly-hashed) art URLs for a game via the store
 // appdetails API. Newer titles serve art only from hashed `store_item_assets`
 // paths whose hash can't be guessed — this is the authoritative source.
+// Richer store info for the Upcoming detail popup — description, developers,
+// screenshots etc. Cached 1h per appid; the Upcoming tab prefetches on load so
+// opening a popup is instant.
+const _detailsCache = new Map()
+async function getStoreDetails(appId) {
+  const hit = _detailsCache.get(appId)
+  if (hit && Date.now() - hit.at < 60 * 60_000) return hit.result
+  let result = null
+  try {
+    const data = await getJSON('https://store.steampowered.com/api/appdetails', { appids: appId, l: 'en' })
+    const d = data?.[appId]?.success ? data[appId].data : null
+    if (d) {
+      result = {
+        name: d.name || null,
+        description: d.short_description || null,
+        developers: d.developers || [],
+        publishers: d.publishers || [],
+        genres: (d.genres || []).map(g => g.description).filter(Boolean),
+        release_date: d.release_date?.date || null,
+        coming_soon: !!d.release_date?.coming_soon,
+        header_image: d.header_image || null,
+        screenshots: (d.screenshots || []).slice(0, 4).map(sc => sc.path_thumbnail).filter(Boolean),
+      }
+    }
+  } catch (e) {
+    logger.warn(`getStoreDetails failed for ${appId}`, { message: e.message })
+  }
+  _detailsCache.set(appId, { at: Date.now(), result })
+  return result
+}
+
 async function getStoreArt(appId, _retried = false) {
   try {
     const data = await getJSON('https://store.steampowered.com/api/appdetails', { appids: appId, l: 'en' })
@@ -617,7 +648,7 @@ async function runGenreBackfill() {
 
 module.exports = {
   testApiKey, searchGames, findAppByName, refreshGameData, refreshBanners, downloadBanner,
-  getStoreArt, resolveBannerUrl, resolveSteamId, runGenreBackfill, storeRemoteFallback,
+  getStoreArt, getStoreDetails, resolveBannerUrl, resolveSteamId, runGenreBackfill, storeRemoteFallback,
   getSchemaForGame, getGlobalAchievementPercentages, getPlayerAchievements, getPlayerAchievementsXml,
   getPlayerSummary, getOwnedGames,
 }

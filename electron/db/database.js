@@ -66,6 +66,8 @@ function initDatabase() {
     try { db.exec('ALTER TABLE games ADD COLUMN notes TEXT') } catch (_) {}
     // Steam release date for Game List entries — powers the Upcoming tab.
     try { db.exec('ALTER TABLE game_list ADD COLUMN release_date TEXT') } catch (_) {}
+    // Set once the "it's out now!" notification has fired for an upcoming game.
+    try { db.exec('ALTER TABLE game_list ADD COLUMN release_notified INTEGER DEFAULT 0') } catch (_) {}
 
     migrateCategoriesToCustomLists()
     dedupeGameList()

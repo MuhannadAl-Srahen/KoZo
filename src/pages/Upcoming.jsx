@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react'
 import {
   IconCalendar, IconLoader2, IconHourglassLow, IconConfetti, IconHelpCircle,
-  IconExternalLink, IconPlayerPlayFilled, IconBookmark,
+  IconExternalLink, IconPlayerPlayFilled, IconBookmark, IconBrandSteam,
 } from '@tabler/icons-react'
 import { parseGenres } from '../lib/utils'
+import Modal, { modalStyles as ms } from '../components/ui/Modal'
 import s from './Upcoming.module.css'
 
 // Steam's release_date strings vary in precision: "13 Nov, 2025" (exact),
@@ -16,7 +17,6 @@ function parseRelease(str) {
   const yearOnly = trimmed.match(/^(\d{4})$/)
   if (yearOnly) {
     const y = parseInt(yearOnly[1], 10)
-    // Sort within its year (mid-year anchor), display just the year.
     return { ts: Date.UTC(y, 5, 30), vague: true, label: trimmed }
   }
   const t = Date.parse(trimmed)
@@ -24,7 +24,7 @@ function parseRelease(str) {
 }
 
 function countdown(rel) {
-  if (rel.ts == null) return 'TBA'
+  if (!rel || rel.ts == null) return 'No date'
   if (rel.vague) return rel.label
   const days = Math.ceil((rel.ts - Date.now()) / 86400000)
   if (days <= 0) return 'Out now'
@@ -35,20 +35,7 @@ function countdown(rel) {
   return `in ~${(days / 365).toFixed(1)} years`
 }
 
-// Timeline group label: "October 2026" for precise dates, "2027" for year-only.
-function groupLabel(rel) {
-  if (rel.vague) return rel.label
-  return new Date(rel.ts).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
-}
-
-function openStore(item) {
-  if (item.steam_app_id) {
-    window.kozo?.api?.shell?.openExternal(`https://store.steampowered.com/app/${item.steam_app_id}`)
-  }
-}
-
-// The stored banner_url is a PORTRAIT cover (600×900) — stretched across a wide
-// strip it shows a warped slice. Wide cards want Steam's wide art instead:
+// The stored banner_url is a PORTRAIT cover — wide cards want Steam's wide art:
 // library_hero (3840×1240) → header (460×215) → portrait as a last resort.
 function wideArtSources(item) {
   const id = item.steam_app_id
@@ -68,44 +55,103 @@ function WideArt({ item, className }) {
   return <img className={className} src={srcs[idx]} alt="" onError={() => setIdx(i => i + 1)} />
 }
 
-// Wide banner-strip row — wide cover art as the card background.
-function StripCard({ item, rel, actions }) {
-  const genres = parseGenres(item)
+function badgeClassFor(rel) {
+  if (!rel || rel.ts == null) return s.badgeTba
+  if (rel.ts <= Date.now()) return s.badgeOut
+  if (!rel.vague && rel.ts - Date.now() < 31 * 86400000) return s.badgeSoon
+  return ''
+}
+
+// ── Detail popup — richer store info, Steam link, quick status ───────────────
+function DetailModal({ item, rel, onClose, onStatus }) {
+  const [details, setDetails] = useState(undefined)   // undefined = loading, null = unavailable
+
+  useEffect(() => {
+    let cancelled = false
+    if (item.steam_app_id) {
+      window.kozo?.api?.steam?.storeDetails?.(item.steam_app_id).then(res => {
+        if (!cancelled) setDetails(res?.ok ? res.data : null)
+      })
+    } else {
+      setDetails(null)
+    }
+    return () => { cancelled = true }
+  }, [item.id])
+
+  const genres = details?.genres?.length ? details.genres : parseGenres(item)
+
   return (
-    <div className={s.stripCard} onClick={() => openStore(item)} role="button" tabIndex={0}>
-      <WideArt item={item} className={s.stripArt} />
-      <span className={s.stripGrad} />
-      <div className={s.stripInfo}>
-        <div className={s.stripName}>{item.name}</div>
-        {genres.length > 0 && <div className={s.stripGenres}>{genres.slice(0, 3).join(' · ')}</div>}
+    <Modal title={item.name} icon={<IconCalendar size={17} stroke={1.6} />} width={620} onClose={onClose}>
+      <div className={s.detailHero}>
+        <WideArt item={item} className={s.detailArt} />
+        <span className={s.detailGrad} />
+        <span className={`${s.badge} ${badgeClassFor(rel)}`} style={{ position: 'absolute', top: 10, right: 10 }}>
+          {countdown(rel)}
+        </span>
       </div>
-      {actions ? (
-        <div className={s.statusActions} onClick={e => e.stopPropagation()}>
-          <button className={s.actionBtn} title="Move to Want to play" onClick={() => actions('want_to_play')}>
-            <IconBookmark size={12} stroke={1.8} /> Want to play
-          </button>
-          <button className={s.actionBtn} title="Move to Playing" onClick={() => actions('playing')}>
-            <IconPlayerPlayFilled size={11} /> Playing
-          </button>
-        </div>
-      ) : (
-        <div className={s.stripWhen}>
-          <span className={s.stripCountdown}>{rel ? countdown(rel) : 'TBA'}</span>
-          {(() => {
-            const sub = item.release_date || 'To be announced'
-            const main = rel ? countdown(rel) : 'TBA'
-            return sub !== main ? <span className={s.stripDate}>{sub}</span> : null
-          })()}
+
+      <div className={s.detailMeta}>
+        {item.release_date && <span className={s.detailDate}><IconCalendar size={13} stroke={1.7} /> {item.release_date}</span>}
+        {genres.length > 0 && <span className={s.detailGenres}>{genres.slice(0, 4).join(' · ')}</span>}
+      </div>
+
+      {details === undefined && (
+        <div className={s.detailLoading}><IconLoader2 size={15} className="spin" /> Loading store info…</div>
+      )}
+      {details?.description && <p className={s.detailDesc}>{details.description}</p>}
+      {details?.developers?.length > 0 && (
+        <div className={s.detailDevs}>
+          By <strong>{details.developers.join(', ')}</strong>
+          {details.publishers?.length > 0 && details.publishers.join() !== details.developers.join() && (
+            <> · Published by {details.publishers.join(', ')}</>
+          )}
         </div>
       )}
-      {item.steam_app_id && <IconExternalLink size={13} stroke={1.7} className={s.stripLink} />}
-    </div>
+      {details === null && !item.steam_app_id && (
+        <p className={s.detailDesc} style={{ color: 'var(--text-muted)' }}>No Steam page linked for this game.</p>
+      )}
+
+      <div className={s.detailActions}>
+        {item.steam_app_id && (
+          <button
+            className={ms.btnPrimary}
+            onClick={() => window.kozo?.api?.shell?.openExternal(`https://store.steampowered.com/app/${item.steam_app_id}`)}
+          >
+            <IconBrandSteam size={14} stroke={1.8} /> View on Steam
+          </button>
+        )}
+        <button className={ms.btnCancel} onClick={() => onStatus('want_to_play')}>
+          <IconBookmark size={13} stroke={1.8} /> Want to play
+        </button>
+        <button className={ms.btnCancel} onClick={() => onStatus('playing')}>
+          <IconPlayerPlayFilled size={12} /> Playing
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
+// ── Card ──────────────────────────────────────────────────────────────────────
+function UpcomingCard({ item, rel, onOpen }) {
+  const genres = parseGenres(item)
+  return (
+    <button className={s.card} onClick={() => onOpen({ item, rel })}>
+      <WideArt item={item} className={s.cardArt} />
+      <span className={s.cardGrad} />
+      <span className={`${s.badge} ${badgeClassFor(rel)}`}>{countdown(rel)}</span>
+      <div className={s.cardBody}>
+        <div className={s.cardName}>{item.name}</div>
+        <div className={s.cardSub}>
+          {item.release_date || (genres.length ? genres.slice(0, 2).join(' · ') : 'To be announced')}
+        </div>
+      </div>
+    </button>
   )
 }
 
 export default function Upcoming() {
   const [items, setItems] = useState(null)
-  const [moving, setMoving] = useState(false)
+  const [detail, setDetail] = useState(null)   // { item, rel } | null
 
   async function load() {
     const res = await window.kozo?.api?.gameList?.list?.({ status: 'upcoming', limit: 1000, offset: 0 })
@@ -114,21 +160,16 @@ export default function Upcoming() {
 
   useEffect(() => {
     load()
+    // Warm the store-details cache (instant popups) and backfill any missing
+    // release dates so long-released games can't linger in "No date yet".
+    window.kozo?.api?.gameList?.refreshUpcomingInfo?.()
     window.kozo?.events?.onGameUpdated?.(load)
     return () => window.kozo?.events?.removeAll?.('game:updated')
   }, [])
 
   async function setStatus(item, status) {
+    setDetail(null)
     await window.kozo?.api?.gameList?.update?.(item.id, { status })
-    load()
-  }
-
-  async function moveAll(list) {
-    setMoving(true)
-    for (const { item } of list) {
-      await window.kozo?.api?.gameList?.update?.(item.id, { status: 'want_to_play' })
-    }
-    setMoving(false)
     load()
   }
 
@@ -137,29 +178,15 @@ export default function Upcoming() {
   }
 
   const withRel = items.map(item => ({ item, rel: parseRelease(item.release_date) }))
-  const future = withRel
-    .filter(x => x.rel.ts != null && x.rel.ts > Date.now())
-    .sort((a, b) => a.rel.ts - b.rel.ts)
-  const released = withRel
-    .filter(x => x.rel.ts != null && x.rel.ts <= Date.now())
-    .sort((a, b) => b.rel.ts - a.rel.ts)
-  const tba = withRel
-    .filter(x => x.rel.ts == null)
-    .sort((a, b) => a.item.name.localeCompare(b.item.name))
+  const soon = withRel.filter(x => x.rel.ts != null && x.rel.ts > Date.now()).sort((a, b) => a.rel.ts - b.rel.ts)
+  const released = withRel.filter(x => x.rel.ts != null && x.rel.ts <= Date.now()).sort((a, b) => b.rel.ts - a.rel.ts)
+  const tba = withRel.filter(x => x.rel.ts == null).sort((a, b) => a.item.name.localeCompare(b.item.name))
 
-  const featured = future[0] || null
-  const rest = future.slice(1)
-
-  // Chronological month/year groups for everything after the featured one.
-  const groups = []
-  for (const entry of rest) {
-    const label = groupLabel(entry.rel)
-    const g = groups[groups.length - 1]
-    if (g && g.label === label) g.entries.push(entry)
-    else groups.push({ label, entries: [entry] })
-  }
-
-  const featuredGenres = featured ? parseGenres(featured.item) : []
+  const sections = [
+    { key: 'soon', Icon: IconCalendar, label: 'Coming soon', entries: soon },
+    { key: 'out', Icon: IconConfetti, label: 'Out now — click a game to update its status', entries: released, out: true },
+    { key: 'tba', Icon: IconHelpCircle, label: 'No date yet', entries: tba },
+  ].filter(sec => sec.entries.length > 0)
 
   return (
     <div className={s.page}>
@@ -177,72 +204,26 @@ export default function Upcoming() {
           </div>
         )}
 
-        {/* NEXT UP — the soonest dated release, big */}
-        {featured && (
-          <div className={s.featured} onClick={() => openStore(featured.item)} role="button" tabIndex={0}>
-            <WideArt item={featured.item} className={s.featuredArt} />
-            <span className={s.featuredGrad} />
-            <div className={s.featuredBody}>
-              <div className={s.featuredTag}>Next up</div>
-              <div className={s.featuredName}>{featured.item.name}</div>
-              {featuredGenres.length > 0 && <div className={s.featuredGenres}>{featuredGenres.slice(0, 3).join(' · ')}</div>}
+        {sections.map(sec => (
+          <section key={sec.key} className={s.section}>
+            <div className={`${s.sectionTitle} ${sec.out ? s.sectionTitleOut : ''}`}>
+              <sec.Icon size={14} stroke={1.7} /> {sec.label}
             </div>
-            <div className={s.featuredWhen}>
-              <div className={s.featuredCountdown}>{countdown(featured.rel)}</div>
-              {featured.item.release_date !== countdown(featured.rel) && (
-                <div className={s.featuredDate}>{featured.item.release_date}</div>
-              )}
+            <div className={s.grid}>
+              {sec.entries.map(({ item, rel }) => (
+                <UpcomingCard key={item.id} item={item} rel={rel} onOpen={setDetail} />
+              ))}
             </div>
-          </div>
-        )}
+          </section>
+        ))}
 
-        {/* Timeline */}
-        {groups.length > 0 && (
-          <div className={s.timeline}>
-            {groups.map(g => (
-              <div key={g.label} className={s.timelineGroup}>
-                <div className={s.groupHeader}><span className={s.groupDot} />{g.label}</div>
-                <div className={s.groupRows}>
-                  {g.entries.map(({ item, rel }) => <StripCard key={item.id} item={item} rel={rel} />)}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Out now — released, still marked upcoming → one-click status update */}
-        {released.length > 0 && (
-          <div className={s.timeline}>
-            <div className={s.timelineGroup}>
-              <div className={`${s.groupHeader} ${s.groupHeaderOut}`}>
-                <span className={`${s.groupDot} ${s.groupDotOut}`} />
-                <IconConfetti size={13} stroke={1.8} /> Out now — update their status
-                <button className={s.moveAllBtn} disabled={moving} onClick={() => moveAll(released)}>
-                  {moving ? 'Moving…' : 'Move all to Want to play'}
-                </button>
-              </div>
-              <div className={s.groupRows}>
-                {released.map(({ item }) => (
-                  <StripCard key={item.id} item={item} actions={(status) => setStatus(item, status)} />
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TBA */}
-        {tba.length > 0 && (
-          <div className={s.timeline}>
-            <div className={s.timelineGroup}>
-              <div className={s.groupHeader}>
-                <span className={s.groupDot} />
-                <IconHelpCircle size={13} stroke={1.8} /> No date yet
-              </div>
-              <div className={s.groupRows}>
-                {tba.map(({ item }) => <StripCard key={item.id} item={item} rel={null} />)}
-              </div>
-            </div>
-          </div>
+        {detail && (
+          <DetailModal
+            item={detail.item}
+            rel={detail.rel}
+            onClose={() => setDetail(null)}
+            onStatus={(status) => setStatus(detail.item, status)}
+          />
         )}
       </div>
     </div>

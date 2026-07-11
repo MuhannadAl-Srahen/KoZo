@@ -172,6 +172,9 @@ app.whenReady().then(() => {
     require('./services/crackWatcher').scanAllCrackedGames().catch(() => {})
   }, 20000)
 
+  // "It's out now!" — notify when a tracked upcoming game's release date passes.
+  try { require('./services/releaseWatch').start() } catch {}
+
   // Auto-update from GitHub Releases (packaged builds only; silent when the
   // release repo isn't configured yet).
   try { require('./services/appUpdater').setupAutoUpdate() } catch {}
