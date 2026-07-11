@@ -21,14 +21,15 @@
   width: 100%;
   aspect-ratio: 1280 / 440;
   height: auto;
-  max-height: 440px;
   overflow: hidden;
   display: flex;
   align-items: flex-end;
 }
 .heroBlur, .heroImg {
   position: absolute; inset: 0; width: 100%; height: 100%;
-  object-fit: cover;   /* fill the whole banner edge-to-edge; crop the overflow */
+  /* Full container width at the crop's exact 2.9:1 shape (no max-height cap) —
+     the image is never re-cropped and never needs blur side bars. */
+  object-fit: cover;
 }
 .heroBlur { filter: blur(18px) brightness(0.5) saturate(1.1); transform: scale(1.2); z-index: 0; }
 .heroImg  { z-index: 1; }

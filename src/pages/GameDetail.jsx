@@ -713,28 +713,12 @@ export default function GameDetail() {
                 </button>
               )}
 
-              {steamTracked && (
+              {/* ONE sync + ONE check — each runs the right pipeline for the
+                  game type (crack files vs Steam), no duplicate entries. */}
+              {(steamTracked || !!game.is_cracked) && (
                 <button
                   className={s.gameMenuItem}
-                  onClick={handleRefresh}
-                  disabled={refreshing}
-                >
-                  <IconRefresh size={14} stroke={1.6} />
-                  {refreshing ? 'Refreshing…' : 'Refresh achievements'}
-                </button>
-              )}
-
-              {steamTracked && (
-                <button className={s.gameMenuItem} onClick={handleDiagnose}>
-                  <IconStethoscope size={14} stroke={1.6} />
-                  Diagnose Steam sync
-                </button>
-              )}
-
-              {!!game.is_cracked && (
-                <button
-                  className={s.gameMenuItem}
-                  onClick={() => { handleCrackSync(); setMenuOpen(false) }}
+                  onClick={() => { (game.is_cracked ? handleCrackSync : handleRefresh)(); setMenuOpen(false) }}
                   disabled={crackScanning || refreshing}
                 >
                   <IconRefresh size={14} stroke={1.6} />
@@ -742,22 +726,11 @@ export default function GameDetail() {
                 </button>
               )}
 
-              {!!game.is_cracked && (
+              {(steamTracked || !!game.is_cracked) && (
                 <button
                   className={s.gameMenuItem}
-                  onClick={() => { handleCrackFiles(); setMenuOpen(false) }}
+                  onClick={() => { setMenuOpen(false); (game.is_cracked ? handleCrackFiles : handleDiagnose)() }}
                   disabled={crackScanning || refreshing}
-                >
-                  <IconStethoscope size={14} stroke={1.6} />
-                  Check achievement files
-                </button>
-              )}
-
-              {!!game.is_cracked && (
-                <button
-                  className={s.gameMenuItem}
-                  onClick={() => { setMenuOpen(false); handleCrackFiles() }}
-                  disabled={crackScanning}
                 >
                   <IconStethoscope size={14} stroke={1.6} />
                   Check achievements

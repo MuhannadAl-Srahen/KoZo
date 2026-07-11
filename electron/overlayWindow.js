@@ -115,12 +115,35 @@ function raise() {
 
 function _send(channel, data) {
   try {
+    clearTimeout(_idleTimer)   // activity — cancel any pending idle teardown
     getOrCreate()
     _pending.push({ channel, data })
     flush()   // delivers immediately if the renderer already signalled ready
   } catch (e) {
     logger.warn(`overlayWindow.${channel}: ${e.message}`)
   }
+}
+
+// ── Idle teardown ─────────────────────────────────────────────────────────────
+// A hidden transparent always-on-top window still costs a renderer process and
+// GPU compositing. Once the toast queue empties AND no game session is running,
+// destroy it after a few idle minutes — it's recreated lazily on the next toast
+// (and a session's start toast pre-warms it, so in-game unlocks stay instant).
+const IDLE_DESTROY_MS = 3 * 60 * 1000
+let _idleTimer = null
+
+function scheduleIdleDestroy() {
+  clearTimeout(_idleTimer)
+  _idleTimer = setTimeout(() => {
+    try {
+      const active = require('./db/queries/sessions').getActiveSessions()
+      if (active.length > 0) { scheduleIdleDestroy(); return }   // in-game: stay warm
+    } catch {}
+    if (_win && !_win.isDestroyed() && !_win.isVisible()) {
+      logger.info('overlayWindow: tearing down idle overlay to free memory')
+      _win.destroy()   // the closed handler resets state; next toast recreates
+    }
+  }, IDLE_DESTROY_MS)
 }
 
 // Called via the `overlay:ready` IPC once the overlay React app has registered
@@ -149,6 +172,7 @@ function setInteractive(interactive) {
 
 function hideOverlay() {
   if (_win && !_win.isDestroyed()) _win.hide()
+  scheduleIdleDestroy()
 }
 
 // Push a live accent change to the overlay window (its own BrowserWindow, so it

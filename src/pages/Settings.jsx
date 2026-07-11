@@ -794,28 +794,29 @@ function DataTab({ onManageSaves }) {
   // Sync folder ("sign in" without an account)
   const [sync, setSync]               = useState(dataTabCache?.sync ?? null)
 
-  // Game saves
-  const [games, setGames]             = useState(dataTabCache?.games ?? [])
+  // Game saves — per-game overview (count + latest) so backups are trackable.
+  const [overview, setOverview]       = useState(dataTabCache?.overview ?? [])
   const [backupsDir, setBackupsDir]   = useState(dataTabCache?.backupsDir ?? null)
   const [allState, setAllState]       = useState('idle')   // idle | working | done | error
   const [allResult, setAllResult]     = useState(null)
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(dataTabCache?.autoSaveEnabled ?? false)
+
+  async function loadOverview() {
+    const res = await window.kozo?.api?.saves?.overview?.()
+    if (res?.ok) { setOverview(res.data ?? []); if (dataTabCache) dataTabCache.overview = res.data ?? [] }
+  }
 
   async function doBackupAll() {
     setAllState('working'); setAllResult(null)
     const res = await window.kozo?.api?.saves?.backupAll?.()
     if (res?.ok) { setAllResult(res.data); setAllState('done') }
     else { setAllResult({ error: res?.error || 'Backup failed' }); setAllState('error') }
+    loadOverview()
   }
 
   useEffect(() => {
     dataTabCache = dataTabCache || {}
-    window.kozo?.api?.games?.list?.().then(res => {
-      if (res?.ok) {
-        const g = (res.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name))
-        setGames(g); dataTabCache.games = g
-      }
-    })
+    loadOverview()
     window.kozo?.api?.saves?.backupsDir?.().then(res => { if (res?.ok) { setBackupsDir(res.data); dataTabCache.backupsDir = res.data } })
     window.kozo?.api?.saves?.getAutoBackup?.().then(res => { if (res?.ok) { setAutoSaveEnabled(!!res.data); dataTabCache.autoSaveEnabled = !!res.data } })
     window.kozo?.api?.backup?.syncStatus?.().then(res => { if (res?.ok) { setSync(res.data); dataTabCache.sync = res.data } })
@@ -830,6 +831,7 @@ function DataTab({ onManageSaves }) {
     const dir = await window.kozo?.api?.saves?.backupsDir?.()
     if (dir?.ok) { setBackupsDir(dir.data); if (dataTabCache) dataTabCache.backupsDir = dir.data }
     setAutoSaveEnabled(true)
+    loadOverview()
   }
 
   async function doSyncRestore() {
@@ -953,7 +955,7 @@ function DataTab({ onManageSaves }) {
           </div>
 
           {/* Back up every game's saves at once — for moving PCs / formatting */}
-          {games.length > 0 && (
+          {overview.length > 0 && (
             <div className={s.keyRow}>
               <button className={s.testBtn} onClick={doBackupAll} disabled={allState === 'working'}>
                 {allState === 'working'
@@ -978,15 +980,25 @@ function DataTab({ onManageSaves }) {
             </div>
           )}
 
-          {games.length === 0 ? (
+          {/* Per-game overview — count + newest snapshot at a glance */}
+          {overview.length === 0 ? (
             <p className={s.sectionDesc} style={{ fontStyle: 'italic' }}>No games in your library yet.</p>
           ) : (
             <div className={s.saveGameList}>
-              {games.map(g => (
+              {overview.map(g => (
                 <div key={g.id} className={s.saveGameRow}>
                   <span className={s.saveGameName}>{g.name}</span>
-                  <button className={s.saveManageBtn} onClick={() => onManageSaves?.(g)}>
-                    <IconDeviceFloppy size={12} stroke={1.7} /> Manage saves
+                  {g.count > 0 ? (
+                    <span className={s.saveBackupInfo}>
+                      <IconCheck size={11} stroke={2.5} style={{ color: 'var(--status-playing)' }} />
+                      {g.count} backup{g.count === 1 ? '' : 's'}
+                      {g.latestAt && <span className={s.saveBackupDate}> · {new Date(g.latestAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>}
+                    </span>
+                  ) : (
+                    <span className={`${s.saveBackupInfo} ${s.saveBackupNone}`}>No backups</span>
+                  )}
+                  <button className={s.saveManageBtn} onClick={() => onManageSaves?.({ id: g.id, name: g.name })}>
+                    <IconDeviceFloppy size={12} stroke={1.7} /> Manage
                   </button>
                 </div>
               ))}
