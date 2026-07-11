@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react'
 import {
-  IconKey, IconCheck, IconX, IconLoader2, IconClock, IconEye, IconEyeOff,
+  IconKey, IconCheck, IconX, IconLoader2, IconClock, IconEye, IconEyeOff, IconLayoutGrid,
   IconUser, IconRefresh, IconExternalLink, IconAlertTriangle,
   IconPalette, IconInfoCircle, IconRocket, IconDeviceGamepad2,
   IconBrandSteam,
   IconSearch, IconPlus, IconMinus, IconFolder, IconTrophy,
-  IconDownload, IconUpload, IconDatabase, IconDeviceFloppy, IconArchive,
+  IconDownload, IconUpload, IconDatabase, IconDeviceFloppy, IconArchive, IconCloud,
   IconHistory, IconList, IconChartBar, IconBell, IconBolt,
-  IconStar,
+  IconStar, IconStethoscope,
 } from '@tabler/icons-react'
 import { useAccentColor } from '../context/AccentColorContext'
 import HoneycombLogo from '../components/HoneycombLogo'
@@ -168,6 +168,9 @@ function SteamTab() {
   const [profile, setProfile]       = useState(steamTabCache?.profile ?? null)
   const [profileState, setProfileState] = useState(steamTabCache?.profile ? 'found' : 'idle')
   const [profileMsg, setProfileMsg] = useState('')
+  const [detectMsg, setDetectMsg]   = useState('')
+  const [signingIn, setSigningIn]   = useState(false)
+  const [steamPersona, setSteamPersona] = useState(steamTabCache?.steamPersona ?? '')
 
   useEffect(() => {
     async function load() {
@@ -176,14 +179,41 @@ function SteamTab() {
       if (res?.ok) {
         const key = res.data?.steam_api_key || ''
         const sid = res.data?.steam_user_id || ''
+        const persona = res.data?.steam_persona || ''
         setApiKey(key)
         setSteamUserId(sid)
-        steamTabCache = { ...(steamTabCache || {}), apiKey: key, steamUserId: sid }
+        setSteamPersona(persona)
+        steamTabCache = { ...(steamTabCache || {}), apiKey: key, steamUserId: sid, steamPersona: persona }
         // Only re-fetch the profile card if we don't already have it cached.
         if (key && sid && !steamTabCache.profile) loadProfile(key, sid)
       }
     }
     load()
+  }, [])
+
+  // Banner-refresh progress lives in the MAIN process, so switching tabs
+  // mid-run and coming back re-seeds the live counter instead of looking idle.
+  useEffect(() => {
+    let cancelled = false
+    function applyState(st) {
+      if (cancelled || !st) return
+      if (st.running) {
+        setBannerRefreshing(true)
+        setBannerMsg(`Refreshing covers… ${st.done}/${st.total}`)
+      } else {
+        setBannerRefreshing(false)
+        if (st.total > 0) setBannerMsg('Cover images refreshed at 2× quality.')
+      }
+    }
+    window.kozo?.api?.steam?.bannerRefreshStatus?.().then(res => {
+      const st = res?.ok ? res.data : res
+      if (st?.running) applyState(st)
+    })
+    window.kozo?.events?.onBannerRefreshProgress?.(applyState)
+    return () => {
+      cancelled = true
+      window.kozo?.events?.removeAll?.('banners:refreshProgress')
+    }
   }, [])
 
   async function loadProfile(key, sid) {
@@ -223,29 +253,23 @@ function SteamTab() {
 
   async function save() {
     if (!window.kozo?.api) return
+    // The Steam ID is managed by detect / sign-in — Save only stores the key.
     await window.kozo.api.settings.set('steam_api_key', apiKey.trim())
-    // Accept a profile URL / custom name / raw ID and resolve to a SteamID64.
-    let finalId = steamUserId.trim()
-    if (finalId) {
-      const r = await window.kozo.api.steam.resolveId(finalId, apiKey.trim())
-      if (r?.ok && r.data?.steamId) { finalId = r.data.steamId; setSteamUserId(finalId) }
-    }
-    await window.kozo.api.settings.set('steam_user_id', finalId)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
-    if (apiKey.trim() && finalId) loadProfile(apiKey.trim(), finalId)
+    if (apiKey.trim() && steamUserId) loadProfile(apiKey.trim(), steamUserId)
   }
 
   async function doRefreshBanners() {
     setBannerRefreshing(true)
-    setBannerMsg('')
-    // Refresh BOTH cover systems: Library local banners + Game List remote covers.
+    setBannerMsg('Refreshing covers…')
+    // Covers BOTH systems (Library local banners + Game List remote covers) in
+    // one main-process run; the progress event stream drives the message.
     const res = await window.kozo?.api?.steam?.refreshAllBanners?.()
-    await window.kozo?.api?.gameList?.refreshBanners?.()
-    setBannerRefreshing(false)
-    setBannerMsg(res?.ok === false
-      ? '❌ ' + (res?.error || 'Could not refresh images.')
-      : 'Cover images refreshed at 2× quality.')
+    if (res?.ok === false) {
+      setBannerRefreshing(false)
+      setBannerMsg('❌ ' + (res?.error || 'Could not refresh images.'))
+    }
   }
 
   return (
@@ -257,8 +281,16 @@ function SteamTab() {
           <span>Steam Web API Key</span>
         </div>
         <p className={s.sectionDesc}>
-          Required for syncing achievements and game metadata. Get yours at{' '}
-          <span className={s.link}>steamcommunity.com/dev/apikey</span>
+          <strong style={{ color: 'var(--text-primary)' }}>Optional</strong> — KoZo syncs achievements
+          without a key as long as your Steam profile's Game details are public. A key adds support for
+          private profiles and owned-games data. Get yours at{' '}
+          <span
+            className={s.link}
+            style={{ cursor: 'pointer' }}
+            onClick={() => window.kozo?.api?.shell?.openExternal('https://steamcommunity.com/dev/apikey')}
+          >
+            steamcommunity.com/dev/apikey
+          </span>
         </p>
         <div className={s.keyRow}>
           <div className={s.keyInputWrap}>
@@ -289,27 +321,75 @@ function SteamTab() {
           <span>Your Steam Profile</span>
         </div>
         <p className={s.sectionDesc}>
-          Paste your <strong style={{ color: 'var(--text-primary)' }}>profile URL</strong> (in Steam:
-          your name → View my profile, then copy the page URL), your custom name, or a 17-digit
-          SteamID64 — KoZo resolves it to your ID for you. No third-party sites.
+          Connects <strong style={{ color: 'var(--text-primary)' }}>automatically</strong> — KoZo reads
+          your logged-in account from the Steam app on this PC. Use "Sign in with Steam" for a
+          different account or when Steam isn't installed here. Nothing to type.
         </p>
-        <div className={s.keyRow}>
-          <div className={s.keyInputWrap}>
-            <input type="text" className={s.keyInput} placeholder="Profile URL, custom name, or SteamID64"
-              value={steamUserId} spellCheck={false} autoComplete="off"
-              onChange={e => { setSteamUserId(e.target.value); setProfileState('idle'); setProfile(null) }} />
+        {steamUserId && (
+          <div className={s.testResult + ' ' + s.testValid} style={{ marginBottom: 8 }}>
+            <IconCheck size={13} stroke={2.5} />
+            Connected{steamPersona ? <> as <strong>&nbsp;{steamPersona}</strong></> : <> — {steamUserId}</>}
           </div>
+        )}
+        <div className={s.keyRow} style={{ flexWrap: 'wrap' }}>
           <button className={s.testBtn}
+            title="Read your logged-in account from the local Steam install — no typing needed"
             onClick={async () => {
-              const r = await window.kozo?.api?.steam?.resolveId(steamUserId.trim(), apiKey.trim())
-              const id = (r?.ok && r.data?.steamId) ? r.data.steamId : steamUserId.trim()
-              if (r?.ok && r.data?.steamId) setSteamUserId(id)
-              loadProfile(apiKey.trim(), id)
-            }}
-            disabled={!apiKey.trim() || !steamUserId.trim() || profileState === 'loading'}>
-            {profileState === 'loading' ? <IconLoader2 size={13} stroke={1.8} className={s.spin} /> : 'Verify'}
+              const r = await window.kozo?.api?.steam?.detectUser?.()
+              const d = r?.ok ? r.data : r
+              if (d?.steamId) {
+                setSteamUserId(d.steamId)
+                setSteamPersona(d.personaName || '')
+                await window.kozo?.api?.settings?.set('steam_user_id', d.steamId)
+                if (d.personaName) await window.kozo?.api?.settings?.set('steam_persona', d.personaName)
+                setProfileState('idle'); setProfile(null)
+                setDetectMsg(d.personaName ? `Detected: ${d.personaName}` : 'Detected your Steam account')
+                if (apiKey.trim()) loadProfile(apiKey.trim(), d.steamId)
+              } else {
+                setDetectMsg(d?.error === 'steam_not_found'
+                  ? 'Steam installation not found on this PC.'
+                  : 'Could not detect a logged-in Steam account.')
+              }
+            }}>
+            Detect from this PC
+          </button>
+          <button className={s.testBtn}
+            title="Sign in with Steam in your browser — for a different account or when Steam isn't installed here"
+            disabled={signingIn}
+            onClick={async () => {
+              setSigningIn(true)
+              setDetectMsg('Waiting for you to sign in with Steam in the browser…')
+              const r = await window.kozo?.api?.steam?.signIn?.()
+              setSigningIn(false)
+              const d = r?.ok ? r.data : r
+              if (d?.steamId) {
+                setSteamUserId(d.steamId)
+                setSteamPersona(d.personaName || '')
+                setProfileState('idle'); setProfile(null)
+                setDetectMsg(d.personaName ? `Signed in as ${d.personaName}` : 'Signed in with Steam')
+                if (apiKey.trim()) loadProfile(apiKey.trim(), d.steamId)
+              } else {
+                setDetectMsg(d?.error === 'timeout'
+                  ? 'Sign-in timed out — try again.'
+                  : 'Steam sign-in failed — try again.')
+              }
+            }}>
+            <IconBrandSteam size={13} stroke={1.8} />
+            {signingIn ? 'Waiting…' : 'Sign in with Steam'}
           </button>
         </div>
+        {detectMsg && (() => {
+          const ok = detectMsg.startsWith('Detected') || detectMsg.startsWith('Signed in')
+          const pending = detectMsg.startsWith('Waiting')
+          return (
+            <div className={`${s.testResult} ${ok || pending ? s.testValid : s.testInvalid}`}>
+              {ok ? <IconCheck size={13} stroke={2.5} />
+                : pending ? <IconLoader2 size={13} stroke={1.8} className={s.spin} />
+                : <IconAlertTriangle size={13} stroke={2} />}
+              {detectMsg}
+            </div>
+          )
+        })()}
         {profile && profileState === 'found' && (
           <div className={s.profileCard}>
             {profile.avatar && <img src={profile.avatar} alt="" className={s.profileAvatar} />}
@@ -485,7 +565,7 @@ function ScanPCTab() {
 
 // ── Tab: Appearance ──────────────────────────────────────────────────────────
 function AppearanceTab() {
-  const { accent, setAccent, presets } = useAccentColor()
+  const { accent, setAccent, presets, bgTint, setBgTint } = useAccentColor()
   const [customHex, setCustomHex] = useState(accent)
   useEffect(() => { setCustomHex(accent) }, [accent])
   function applyCustom() {
@@ -525,6 +605,23 @@ function AppearanceTab() {
         <p className={s.sectionDesc} style={{ marginTop: 4 }}>
           Enter any hex color. Very dark colors are automatically brightened for readability.
         </p>
+
+        {/* Accent-matched dark background */}
+        <div className={s.toggleList} style={{ marginTop: 14 }}>
+          <label className={s.toggleRow}>
+            <div className={s.toggleInfo}>
+              <div className={s.toggleLabel}>Match background to accent</div>
+              <div className={s.toggleDesc}>
+                Tints the app's dark background and cards with your accent color's hue —
+                a themed dark look instead of the stock blue-violet.
+              </div>
+            </div>
+            <button className={`${s.toggle} ${bgTint ? s.toggleOn : ''}`}
+              onClick={() => setBgTint(!bgTint)} type="button">
+              <span className={s.toggleThumb} />
+            </button>
+          </label>
+        </div>
       </section>
     </div>
   )
@@ -694,9 +791,8 @@ function DataTab({ onManageSaves }) {
   const [importState, setImportState] = useState('idle')   // idle | working | done | error
   const [importResult, setImportResult] = useState(null)
 
-  // Auto-backup
-  const [autoEnabled, setAutoEnabled] = useState(dataTabCache?.autoEnabled ?? false)
-  const [autoDir, setAutoDir]         = useState(dataTabCache?.autoDir ?? null)
+  // Sync folder ("sign in" without an account)
+  const [sync, setSync]               = useState(dataTabCache?.sync ?? null)
 
   // Game saves
   const [games, setGames]             = useState(dataTabCache?.games ?? [])
@@ -714,13 +810,6 @@ function DataTab({ onManageSaves }) {
 
   useEffect(() => {
     dataTabCache = dataTabCache || {}
-    window.kozo?.api?.backup?.getAutoConfig?.().then(res => {
-      if (res?.ok) {
-        const en = !!res.data?.enabled, dir = res.data?.dir || null
-        setAutoEnabled(en); setAutoDir(dir)
-        dataTabCache.autoEnabled = en; dataTabCache.autoDir = dir
-      }
-    })
     window.kozo?.api?.games?.list?.().then(res => {
       if (res?.ok) {
         const g = (res.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name))
@@ -729,30 +818,43 @@ function DataTab({ onManageSaves }) {
     })
     window.kozo?.api?.saves?.backupsDir?.().then(res => { if (res?.ok) { setBackupsDir(res.data); dataTabCache.backupsDir = res.data } })
     window.kozo?.api?.saves?.getAutoBackup?.().then(res => { if (res?.ok) { setAutoSaveEnabled(!!res.data); dataTabCache.autoSaveEnabled = !!res.data } })
+    window.kozo?.api?.backup?.syncStatus?.().then(res => { if (res?.ok) { setSync(res.data); dataTabCache.sync = res.data } })
   }, [])
+
+  async function doSyncSetup() {
+    const res = await window.kozo?.api?.backup?.syncSetup?.()
+    if (!res?.ok || !res.data) return   // cancelled
+    setSync(res.data)
+    if (dataTabCache) dataTabCache.sync = res.data
+    // The sync setup rewires the backup dirs + toggles — refresh dependent state.
+    const dir = await window.kozo?.api?.saves?.backupsDir?.()
+    if (dir?.ok) { setBackupsDir(dir.data); if (dataTabCache) dataTabCache.backupsDir = dir.data }
+    setAutoSaveEnabled(true)
+  }
+
+  async function doSyncRestore() {
+    setImportState('working')
+    setImportResult(null)
+    try {
+      const res = await window.kozo?.api?.backup?.syncRestore?.()
+      const data = res?.ok ? res.data : res
+      if (data?.error) {
+        setImportResult({ error: data.error === 'no_backup_found' ? 'No backup file found in the sync folder yet.' : 'Sync folder is not set up.' })
+        setImportState('error')
+        return
+      }
+      setImportResult(data)
+      setImportState('done')
+    } catch (e) {
+      setImportResult({ error: e.message })
+      setImportState('error')
+    }
+  }
 
   async function toggleAutoSave(val) {
     setAutoSaveEnabled(val)
     if (dataTabCache) dataTabCache.autoSaveEnabled = val
     await window.kozo?.api?.saves?.setAutoBackup?.(val)
-  }
-
-  async function toggleAuto(val) {
-    // Enabling without a folder → ask for one first.
-    if (val && !autoDir) {
-      const res = await window.kozo?.api?.backup?.chooseAutoFolder?.()
-      if (!res?.ok || !res.data) return
-      setAutoDir(res.data)
-      if (dataTabCache) dataTabCache.autoDir = res.data
-    }
-    setAutoEnabled(val)
-    if (dataTabCache) dataTabCache.autoEnabled = val
-    await window.kozo?.api?.backup?.setAutoEnabled?.(val)
-  }
-
-  async function chooseAutoDir() {
-    const res = await window.kozo?.api?.backup?.chooseAutoFolder?.()
-    if (res?.ok && res.data) setAutoDir(res.data)
   }
 
   async function doImport() {
@@ -771,48 +873,45 @@ function DataTab({ onManageSaves }) {
 
   return (
     <div className={s.tabContent}>
-      {/* App-data backup — one continuously-synced file + restore */}
+      {/* Sync & Backup — folder based, fully offline. No accounts needed. */}
       <section className={s.section}>
         <div className={s.sectionHeader}>
-          <IconDatabase size={15} stroke={1.6} />
-          <span>App-Data Backup</span>
+          <IconCloud size={15} stroke={1.6} />
+          <span>Sync &amp; Backup — your data on any PC</span>
         </div>
         <p className={s.sectionDesc}>
-          Auto-saves <strong style={{ color: 'var(--text-primary)' }}>KoZo's own data</strong> (library,
-          playtime, achievements, settings — not game saves) to a folder you pick, always kept current.
-          Restore it any time.
+          No account needed — sync KoZo to <strong style={{ color: 'var(--text-primary)' }}>any folder</strong>:
+          a cloud-synced folder (OneDrive/Drive/Dropbox), a network drive, or a USB stick. It keeps your
+          library, playtime, achievements, lists AND game-save backups mirrored there. On a new PC:
+          install KoZo, choose the same folder, hit Restore.
         </p>
-        <div className={s.toggleList}>
-          <label className={s.toggleRow}>
-            <div className={s.toggleInfo}>
-              <div className={s.toggleLabel}>Always keep a synced backup</div>
-              <div className={s.toggleDesc}>
-                {autoEnabled && autoDir
-                  ? <>On — saving to <strong style={{ color: 'var(--text-secondary)' }}>{autoDir}</strong></>
-                  : autoDir ? `Folder: ${autoDir}` : 'Pick a folder to store the backup file'}
-              </div>
-            </div>
-            <button className={`${s.toggle} ${autoEnabled ? s.toggleOn : ''}`}
-              onClick={() => toggleAuto(!autoEnabled)} type="button">
-              <span className={s.toggleThumb} />
-            </button>
-          </label>
-        </div>
-        <div className={s.keyRow} style={{ marginTop: 8, flexWrap: 'wrap' }}>
-          <button className={s.testBtn} onClick={chooseAutoDir}>
-            <IconFolder size={13} stroke={1.8} /> {autoDir ? 'Change folder' : 'Choose folder'}
+        <div className={s.keyRow} style={{ flexWrap: 'wrap' }}>
+          <button className={s.testBtn} onClick={doSyncSetup}>
+            <IconFolder size={13} stroke={1.8} /> {sync?.configured ? 'Change sync folder' : 'Choose sync folder'}
           </button>
-          {autoDir && (
-            <button className={s.testBtn} onClick={() => window.kozo?.api?.shell?.openPath?.(autoDir)}>
-              <IconExternalLink size={13} stroke={1.8} /> Open folder
-            </button>
+          {sync?.configured && (
+            <>
+              <button className={s.testBtn} onClick={() => window.kozo?.api?.shell?.openPath?.(sync.folder)}>
+                <IconExternalLink size={13} stroke={1.8} /> Open folder
+              </button>
+              <button className={s.testBtn} onClick={doSyncRestore} disabled={importState === 'working'}>
+                {importState === 'working'
+                  ? <><IconLoader2 size={13} stroke={1.8} className={s.spin} /> Restoring…</>
+                  : <><IconDownload size={13} stroke={1.8} /> Restore from sync folder</>}
+              </button>
+            </>
           )}
           <button className={s.testBtn} onClick={doImport} disabled={importState === 'working'}>
-            {importState === 'working'
-              ? <><IconLoader2 size={13} stroke={1.8} className={s.spin} /> Restoring…</>
-              : <><IconUpload size={13} stroke={1.8} /> Restore from backup…</>}
+            <IconUpload size={13} stroke={1.8} /> Restore from file…
           </button>
         </div>
+        {sync?.configured && (
+          <div className={s.sectionDesc} style={{ fontSize: 11.5, marginTop: 8, opacity: 0.85 }}>
+            Syncing to <strong style={{ color: 'var(--text-secondary)' }}>{sync.folder}</strong>
+            {sync.lastBackupAt ? <> — last backup {new Date(sync.lastBackupAt).toLocaleString()}</> : ' — first backup will be written shortly'}
+          </div>
+        )}
+
         {importState === 'done' && importResult && (
           <div className={`${s.testResult} ${s.testValid}`} style={{ marginTop: 8 }}>
             <IconCheck size={13} stroke={2.5} />
@@ -825,91 +924,79 @@ function DataTab({ onManageSaves }) {
             <IconAlertTriangle size={13} stroke={2} /> {importResult?.error || 'Restore failed'}
           </div>
         )}
-        <div className={s.sectionDesc} style={{ fontSize: 11.5, marginTop: 8, opacity: 0.8 }}>
-          Restoring merges the file in (matching entries are updated) — it never deletes anything or touches game saves.
-        </div>
-      </section>
+        {/* ── Game save files — same folder, same section ── */}
+        <div style={{ borderTop: '1px solid var(--border-subtle)', marginTop: 14, paddingTop: 12 }}>
+          <div className={s.sectionHeader} style={{ marginBottom: 6 }}>
+            <IconDeviceFloppy size={14} stroke={1.6} />
+            <span>Game save files</span>
+          </div>
+          <p className={s.sectionDesc}>
+            Each game's save files back up into the same folder
+            {backupsDir && <> (<code style={{ fontSize: 11 }}>{backupsDir}</code>)</>} — great for
+            cracked/offline games with no cloud saves.
+          </p>
 
-      {/* Game save files */}
-      <section className={s.section}>
-        <div className={s.sectionHeader}>
-          <IconDeviceFloppy size={15} stroke={1.6} />
-          <span>Game Save Files</span>
-        </div>
-        <p className={s.sectionDesc}>
-          Back up each <strong style={{ color: 'var(--text-primary)' }}>game's own save files</strong> —
-          great for cracked/offline games with no cloud saves. Saved here (change it if you like):
-        </p>
-
-        {/* Automatic save backup — the save-file equivalent of app-data auto-backup */}
-        <div className={s.toggleList}>
-          <label className={s.toggleRow}>
-            <div className={s.toggleInfo}>
-              <div className={s.toggleLabel}>Auto-back up saves after each session</div>
-              <div className={s.toggleDesc}>
-                After you finish playing, snapshots that game's saves automatically (one rolling copy, skipped if unchanged).
+          <div className={s.toggleList}>
+            <label className={s.toggleRow}>
+              <div className={s.toggleInfo}>
+                <div className={s.toggleLabel}>Auto-back up saves after each session</div>
+                <div className={s.toggleDesc}>
+                  After you finish playing, snapshots that game's saves automatically — keeps the last two
+                  sessions (older ones are overwritten so backups never balloon in size).
+                </div>
               </div>
+              <button className={`${s.toggle} ${autoSaveEnabled ? s.toggleOn : ''}`}
+                onClick={() => toggleAutoSave(!autoSaveEnabled)} type="button">
+                <span className={s.toggleThumb} />
+              </button>
+            </label>
+          </div>
+
+          {/* Back up every game's saves at once — for moving PCs / formatting */}
+          {games.length > 0 && (
+            <div className={s.keyRow}>
+              <button className={s.testBtn} onClick={doBackupAll} disabled={allState === 'working'}>
+                {allState === 'working'
+                  ? <><IconLoader2 size={13} stroke={1.8} className={s.spin} /> Backing up all…</>
+                  : <><IconArchive size={13} stroke={1.8} /> Back up all game saves</>}
+              </button>
+              {allState === 'done' && allResult && (
+                <div className={`${s.testResult} ${(allResult.noSaves || allResult.failed) ? s.testInvalid : s.testValid}`}>
+                  {(allResult.noSaves || allResult.failed)
+                    ? <IconAlertTriangle size={13} stroke={2} />
+                    : <IconCheck size={13} stroke={2.5} />}
+                  {allResult.backedUp} backed up
+                  {allResult.noSaves ? ` — ${allResult.noSaves} had no detectable save folder (open that game's Save Files to back up manually)` : ''}
+                  {allResult.failed ? `, ${allResult.failed} failed` : ''}
+                </div>
+              )}
+              {allState === 'error' && (
+                <div className={`${s.testResult} ${s.testInvalid}`}>
+                  <IconAlertTriangle size={13} stroke={2} /> {allResult?.error || 'Backup failed'}
+                </div>
+              )}
             </div>
-            <button className={`${s.toggle} ${autoSaveEnabled ? s.toggleOn : ''}`}
-              onClick={() => toggleAutoSave(!autoSaveEnabled)} type="button">
-              <span className={s.toggleThumb} />
-            </button>
-          </label>
+          )}
+
+          {games.length === 0 ? (
+            <p className={s.sectionDesc} style={{ fontStyle: 'italic' }}>No games in your library yet.</p>
+          ) : (
+            <div className={s.saveGameList}>
+              {games.map(g => (
+                <div key={g.id} className={s.saveGameRow}>
+                  <span className={s.saveGameName}>{g.name}</span>
+                  <button className={s.saveManageBtn} onClick={() => onManageSaves?.(g)}>
+                    <IconDeviceFloppy size={12} stroke={1.7} /> Manage saves
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
-        {backupsDir && (
-          <div className={s.savePathRow}>
-            <code className={s.savePathCode}>{backupsDir}</code>
-            <button className={s.testBtn} onClick={async () => {
-              const res = await window.kozo?.api?.saves?.chooseBackupsDir?.()
-              if (res?.ok && res.data) { setBackupsDir(res.data); if (dataTabCache) dataTabCache.backupsDir = res.data }
-            }}>
-              <IconFolder size={13} stroke={1.8} /> Change folder
-            </button>
-            <button className={s.testBtn} onClick={() => window.kozo?.api?.shell?.openPath?.(backupsDir)}>
-              <IconExternalLink size={13} stroke={1.8} /> Open folder
-            </button>
-          </div>
-        )}
-
-        {/* Back up every game's saves at once — for moving PCs / formatting */}
-        {games.length > 0 && (
-          <div className={s.keyRow}>
-            <button className={s.testBtn} onClick={doBackupAll} disabled={allState === 'working'}>
-              {allState === 'working'
-                ? <><IconLoader2 size={13} stroke={1.8} className={s.spin} /> Backing up all…</>
-                : <><IconArchive size={13} stroke={1.8} /> Back up all game saves</>}
-            </button>
-            {allState === 'done' && allResult && (
-              <div className={`${s.testResult} ${s.testValid}`}>
-                <IconCheck size={13} stroke={2.5} />
-                {allResult.backedUp} backed up
-                {allResult.noSaves ? `, ${allResult.noSaves} had no saves` : ''}
-                {allResult.failed ? `, ${allResult.failed} failed` : ''}
-              </div>
-            )}
-            {allState === 'error' && (
-              <div className={`${s.testResult} ${s.testInvalid}`}>
-                <IconAlertTriangle size={13} stroke={2} /> {allResult?.error || 'Backup failed'}
-              </div>
-            )}
-          </div>
-        )}
-
-        {games.length === 0 ? (
-          <p className={s.sectionDesc} style={{ fontStyle: 'italic' }}>No games in your library yet.</p>
-        ) : (
-          <div className={s.saveGameList}>
-            {games.map(g => (
-              <div key={g.id} className={s.saveGameRow}>
-                <span className={s.saveGameName}>{g.name}</span>
-                <button className={s.saveManageBtn} onClick={() => onManageSaves?.(g)}>
-                  <IconDeviceFloppy size={12} stroke={1.7} /> Manage saves
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+        <div className={s.sectionDesc} style={{ fontSize: 11.5, marginTop: 10, opacity: 0.8 }}>
+          Restoring merges data in (matching entries are updated) — it never deletes anything or touches game saves.
+        </div>
       </section>
 
     </div>
@@ -941,15 +1028,17 @@ const FEATURE_GROUPS = [
       { Icon: IconSearch,         name: 'Scan PC',          desc: 'Finds installed games (Steam, Epic, GOG, Xbox, cracked) on your drives, with the right launcher badge — right from the Library toolbar.' },
       { Icon: IconDeviceGamepad2, name: 'Add manually',     desc: 'Point KoZo at any .exe — perfect for offline games.' },
       { Icon: IconStar,           name: 'Favorites',        desc: 'Star a game to pin it to the top of your Library and Game List.' },
-      { Icon: IconList,           name: 'Game List',        desc: 'A backlog / wishlist with statuses and custom categories.' },
+      { Icon: IconList,           name: 'Game List',        desc: 'A backlog / wishlist with statuses, genres, search, and Spotify-style custom lists.' },
+      { Icon: IconEyeOff,         name: 'Status filter & hidden games', desc: 'Filter the Library by Playing/Finished/Dropped/On hold; hidden games tuck into a collapsed section at the bottom (their stats still count).' },
+      { Icon: IconLayoutGrid,     name: 'Drag & drop ordering', desc: 'Pick "Custom order" and drag cards into any arrangement you like — in the Library and the Game List.' },
     ],
   },
   {
     title: 'Saves & Backups',
     items: [
       { Icon: IconDeviceFloppy, name: 'Save file finder',     desc: 'Locates each game’s real save folder (even tricky publisher paths).' },
-      { Icon: IconArchive,      name: 'Save backup & restore',desc: 'Snapshot and roll back any game’s saves — manually, all at once before a format, or automatically after each session.' },
-      { Icon: IconDatabase,     name: 'App-data backup',      desc: 'A live, always-synced backup of your whole KoZo library and settings, with one-click restore.' },
+      { Icon: IconArchive,      name: 'Save backup & restore',desc: 'Snapshot and roll back any game’s saves — manually, all at once before a format, or automatically after each session (keeps the last two).' },
+      { Icon: IconCloud,        name: 'Folder sync', desc: 'Sync everything (game saves included) to any folder — cloud-synced, network drive, or USB — and restore on any PC. Fully offline, no account.' },
     ],
   },
   {
@@ -999,6 +1088,34 @@ function FeaturesTab() {
 
 // ── Tab: About ───────────────────────────────────────────────────────────────
 function AboutTab() {
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState(null)   // null | { ok, steps }
+  const [version, setVersion] = useState('')
+  const [updState, setUpdState] = useState('idle')     // idle | checking | done
+  const [updResult, setUpdResult] = useState(null)
+
+  useEffect(() => {
+    window.kozo?.api?.app?.getVersion?.().then(res => {
+      if (res?.ok) setVersion(res.data)
+    })
+  }, [])
+
+  async function runTrackingTest() {
+    setTesting(true)
+    setTestResult(null)
+    const res = await window.kozo?.api?.diagnostics?.trackingSelfTest?.()
+    setTesting(false)
+    setTestResult(res?.ok ? res.data : (res || { ok: false, steps: [] }))
+  }
+
+  async function checkUpdates() {
+    setUpdState('checking')
+    setUpdResult(null)
+    const res = await window.kozo?.api?.app?.checkForUpdates?.()
+    setUpdResult(res?.ok ? res.data : res)
+    setUpdState('done')
+  }
+
   return (
     <div className={s.tabContent}>
       <section className={s.section}>
@@ -1006,13 +1123,33 @@ function AboutTab() {
           <div className={s.aboutLogo}><HoneycombLogo size={44} /></div>
           <div className={s.aboutInfo}>
             <div className={s.aboutName}>KoZo</div>
-            <div className={s.aboutVersion}>Version 1.0.0</div>
+            <div className={s.aboutVersion}>Version {version || '…'}</div>
             <div className={s.aboutDesc}>
               A local-first game tracker for Windows. Track playtime, sessions, and
               achievements — even for cracked and offline games.
             </div>
           </div>
         </div>
+        <div className={s.keyRow} style={{ marginTop: 10 }}>
+          <button className={s.testBtn} onClick={checkUpdates} disabled={updState === 'checking'}>
+            {updState === 'checking'
+              ? <><IconLoader2 size={13} stroke={1.8} className={s.spin} /> Checking…</>
+              : <><IconRefresh size={13} stroke={1.8} /> Check for updates</>}
+          </button>
+        </div>
+        {updState === 'done' && updResult && (
+          <div className={`${s.testResult} ${updResult.updateAvailable ? s.testValid : updResult.error ? s.testInvalid : s.testValid}`} style={{ marginTop: 8 }}>
+            {updResult.dev
+              ? <><IconInfoCircle size={13} stroke={1.8} /> Updates only run in the installed app (dev mode).</>
+              : updResult.notConfigured
+                ? <><IconInfoCircle size={13} stroke={1.8} /> Update source not configured yet.</>
+                : updResult.error
+                  ? <><IconAlertTriangle size={13} stroke={2} /> {updResult.error === 'timed_out' ? "Couldn't reach the update server — check your connection." : updResult.error}</>
+                  : updResult.updateAvailable
+                    ? <><IconCheck size={13} stroke={2.5} /> Update {updResult.latest} available — downloading in the background.</>
+                    : <><IconCheck size={13} stroke={2.5} /> You're up to date.</>}
+          </div>
+        )}
       </section>
       <section className={s.section}>
         <div className={s.sectionHeader}><IconInfoCircle size={15} stroke={1.6} /><span>Details</span></div>
@@ -1021,7 +1158,7 @@ function AboutTab() {
             ['Platform',            'Windows (Electron 41)'],
             ['Runtime',             'React 19 + SQLite'],
             ['Data storage',        'Local — nothing leaves your PC'],
-            ['Steam integration',   'Steam Web API (requires API key)'],
+            ['Steam integration',   'Steam Web API — optional; public profiles sync keyless'],
             ['Crack support',       'Goldberg, CODEX, EMPRESS, ALI213, SSE, CreamAPI, SKIDROW, Reloaded, online-fix'],
           ].map(([k, v]) => (
             <div key={k} className={s.aboutDetailRow}>
@@ -1030,6 +1167,41 @@ function AboutTab() {
             </div>
           ))}
         </div>
+      </section>
+
+      {/* Diagnostics — push-button proof the critical pipeline works */}
+      <section className={s.section}>
+        <div className={s.sectionHeader}><IconStethoscope size={15} stroke={1.6} /><span>Diagnostics</span></div>
+        <p className={s.sectionDesc}>
+          Verify the achievement pipeline end to end: KoZo plants a synthetic crack file,
+          runs the real scanner on it, records the unlock in the database, and fires the
+          real in-game overlay toast — then cleans everything up.
+        </p>
+        <div className={s.keyRow} style={{ flexWrap: 'wrap' }}>
+          <button className={s.testBtn} onClick={runTrackingTest} disabled={testing}>
+            {testing
+              ? <><IconLoader2 size={13} stroke={1.8} className={s.spin} /> Testing…</>
+              : <><IconTrophy size={13} stroke={1.8} /> Test achievement tracking</>}
+          </button>
+          <button className={s.testBtn} onClick={() => window.kozo?.api?.overlay?.test?.()}>
+            <IconBell size={13} stroke={1.8} /> Test notifications
+          </button>
+        </div>
+        {testResult && (
+          <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {(testResult.steps || []).map((st, i) => (
+              <div key={i} className={`${s.testResult} ${st.ok ? s.testValid : s.testInvalid}`} style={{ marginTop: 0 }}>
+                {st.ok ? <IconCheck size={13} stroke={2.5} /> : <IconX size={13} stroke={2.5} />}
+                {st.name}{st.detail ? <span style={{ opacity: 0.7 }}> — {st.detail}</span> : null}
+              </div>
+            ))}
+            <div className={`${s.testResult} ${testResult.ok ? s.testValid : s.testInvalid}`} style={{ marginTop: 4, fontWeight: 600 }}>
+              {testResult.ok
+                ? <><IconCheck size={13} stroke={2.5} /> Achievement tracking is working on this PC.</>
+                : <><IconAlertTriangle size={13} stroke={2} /> Something failed — see the steps above.</>}
+            </div>
+          </div>
+        )}
       </section>
       <section className={s.section}>
         <div className={s.sectionHeader}><IconRocket size={15} stroke={1.6} /><span>Getting Started</span></div>

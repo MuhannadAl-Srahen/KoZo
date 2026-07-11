@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('kozo', {
       add: (data) => ipcRenderer.invoke('games:add', data),
       update: (id, data) => ipcRenderer.invoke('games:update', id, data),
       delete: (id) => ipcRenderer.invoke('games:delete', id),
+      reorder: (orderedIds) => ipcRenderer.invoke('games:reorder', orderedIds),
       launch: (id) => ipcRenderer.invoke('games:launch', id),
     },
     sessions: {
@@ -17,6 +18,7 @@ contextBridge.exposeInMainWorld('kozo', {
       active: () => ipcRenderer.invoke('sessions:active'),
     },
     achievements: {
+      hub: () => ipcRenderer.invoke('achievements:hub'),
       listForGame: (gameId) => ipcRenderer.invoke('achievements:listForGame', gameId),
       listAll: (filters) => ipcRenderer.invoke('achievements:listAll', filters),
       listUnlocksForGame: (gameId) => ipcRenderer.invoke('achievements:listUnlocksForGame', gameId),
@@ -31,7 +33,6 @@ contextBridge.exposeInMainWorld('kozo', {
       add: (data) => ipcRenderer.invoke('gameList:add', data),
       update: (id, data) => ipcRenderer.invoke('gameList:update', id, data),
       delete: (id) => ipcRenderer.invoke('gameList:delete', id),
-      refreshBanners: () => ipcRenderer.invoke('gameList:refreshBanners'),
     },
     customLists: {
       list: () => ipcRenderer.invoke('customLists:list'),
@@ -44,7 +45,6 @@ contextBridge.exposeInMainWorld('kozo', {
     },
     genres: {
       distinct: () => ipcRenderer.invoke('genres:distinct'),
-      backfill: () => ipcRenderer.invoke('genres:backfill'),
     },
     settings: {
       get: (key) => ipcRenderer.invoke('settings:get', key),
@@ -58,6 +58,10 @@ contextBridge.exposeInMainWorld('kozo', {
       resolveId: (input, apiKey) => ipcRenderer.invoke('steam:resolveId', input, apiKey),
       refresh: (gameId) => ipcRenderer.invoke('steam:refresh', gameId),
       refreshAllBanners: () => ipcRenderer.invoke('steam:refreshAllBanners'),
+      bannerRefreshStatus: () => ipcRenderer.invoke('banners:refreshStatus'),
+      detectUser: () => ipcRenderer.invoke('steam:detectUser'),
+      signIn: () => ipcRenderer.invoke('steam:signIn'),
+      lastSyncError: (gameId) => ipcRenderer.invoke('steam:lastSyncError', gameId),
       getProfile: (overrides) => ipcRenderer.invoke('steam:getProfile', overrides),
       diagnose: (gameId) => ipcRenderer.invoke('steam:diagnose', gameId),
     },
@@ -80,7 +84,6 @@ contextBridge.exposeInMainWorld('kozo', {
       backup: (gameId, sourcePath) => ipcRenderer.invoke('saves:backup', gameId, sourcePath),
       listBackups: (gameId) => ipcRenderer.invoke('saves:listBackups', gameId),
       backupsDir: () => ipcRenderer.invoke('saves:backupsDir'),
-      chooseBackupsDir: () => ipcRenderer.invoke('saves:chooseBackupsDir'),
       backupAll: () => ipcRenderer.invoke('saves:backupAll'),
       restore: (gameId, backupId, target) => ipcRenderer.invoke('saves:restore', gameId, backupId, target),
       deleteBackup: (gameId, backupId) => ipcRenderer.invoke('saves:deleteBackup', gameId, backupId),
@@ -109,9 +112,12 @@ contextBridge.exposeInMainWorld('kozo', {
     },
     backup: {
       import: () => ipcRenderer.invoke('backup:import'),
-      getAutoConfig: () => ipcRenderer.invoke('backup:getAutoConfig'),
-      setAutoEnabled: (enabled) => ipcRenderer.invoke('backup:setAutoEnabled', enabled),
-      chooseAutoFolder: () => ipcRenderer.invoke('backup:chooseAutoFolder'),
+      syncSetup: () => ipcRenderer.invoke('sync:setup'),
+      syncStatus: () => ipcRenderer.invoke('sync:status'),
+      syncRestore: () => ipcRenderer.invoke('sync:restore'),
+    },
+    diagnostics: {
+      trackingSelfTest: () => ipcRenderer.invoke('tracking:selfTest'),
     },
     overlay: {
       hide: () => ipcRenderer.invoke('overlay:hide'),
@@ -125,6 +131,8 @@ contextBridge.exposeInMainWorld('kozo', {
       setStartup: (enable) => ipcRenderer.invoke('app:setStartup', enable),
       getStartMinimized: () => ipcRenderer.invoke('app:getStartMinimized'),
       setStartMinimized: (enable) => ipcRenderer.invoke('app:setStartMinimized', enable),
+      getVersion: () => ipcRenderer.invoke('app:getVersion'),
+      checkForUpdates: () => ipcRenderer.invoke('app:checkForUpdates'),
     },
   },
 
@@ -149,6 +157,9 @@ contextBridge.exposeInMainWorld('kozo', {
     },
     onGameUpdated: (cb) => {
       ipcRenderer.on('game:updated', (_, gameId) => cb(gameId))
+    },
+    onBannerRefreshProgress: (cb) => {
+      ipcRenderer.on('banners:refreshProgress', (_, state) => cb(state))
     },
     onAchievementOverlay: (cb) => {
       ipcRenderer.on('achievement:overlay', (_, data) => cb(data))

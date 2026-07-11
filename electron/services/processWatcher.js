@@ -271,7 +271,10 @@ async function tick() {
   const games           = gamesQ.listGames()
   const knownGameIds    = new Set(games.map(g => g.id))
   const sensitivitySecs = getSensitivitySeconds()
-  const ticksNeeded     = Math.max(1, Math.ceil(sensitivitySecs / (POLL_MS / 1000)))
+  // Detection counts consecutive sightings — base the tick count on the CURRENT
+  // poll cadence (adaptive: 5s in-session, 12s idle) so sensitivity stays honest.
+  const currentPollMs   = activeSessions.size > 0 ? POLL_MS : POLL_IDLE_MS
+  const ticksNeeded     = Math.max(1, Math.ceil(sensitivitySecs / (currentPollMs / 1000)))
 
   // ── Track registered games ─────────────────────────────────────────────────
   for (const game of games) {
@@ -376,7 +379,14 @@ async function tick() {
       const lastXp = xpCheckAt.get(game.id) || 0
       if (now - lastXp >= XP_CHECK_MS) {
         xpCheckAt.set(game.id, now)
-        try { require('./xpTracker').check({ reason: 'session_tick', gameName: game.name }) } catch {}
+        try {
+          require('./xpTracker').check({
+            reason: 'session_tick',
+            gameName: game.name,
+            artPath: game.banner_local_path || game.hero_local_path || null,
+            artUrl: game.banner_url || null,
+          })
+        } catch {}
       }
 
     } else if (!isRunning && hasSession) {
@@ -523,7 +533,12 @@ function endSession(gameId, session, forcedEndAt) {
   // overlay (with a near-level nudge when close), and fires the level-up toast
   // from inside xpTracker if this session pushed the player over a boundary.
   try {
-    const xp = require('./xpTracker').check({ reason: 'session_end', gameName: game?.name })
+    const xp = require('./xpTracker').check({
+      reason: 'session_end',
+      gameName: game?.name,
+      artPath: game?.banner_local_path || game?.hero_local_path || null,
+      artUrl: game?.banner_url || null,
+    })
     if (xp && xp.gained > 0) {
       require('../overlayWindow').sendSessionEnded({
         gameName: game?.name || 'Game',
@@ -554,6 +569,22 @@ function endSession(gameId, session, forcedEndAt) {
   }
 }
 
+// Adaptive polling: every process-list read spawns a helper process on Windows,
+// so ticking at full speed 24/7 wastes CPU. Poll fast only while a session is
+// live (precise playtime/AFK); idle KoZo relaxes — detection latency is bounded
+// by the sensitivity window (default 15s) anyway.
+const POLL_IDLE_MS = 12000
+
+function scheduleNextTick() {
+  const delay = activeSessions.size > 0 ? POLL_MS : POLL_IDLE_MS
+  pollTimer = setTimeout(async () => {
+    try { await tick() } catch (err) {
+      logger.error('processWatcher tick error', { message: err.message })
+    }
+    scheduleNextTick()
+  }, delay)
+}
+
 function start() {
   if (pollTimer) return
   lastTickAt = Date.now()
@@ -562,12 +593,8 @@ function start() {
   // game is running RIGHT NOW (not a fixed time window) — see below.
   resolveOrphanSessions().catch(e => logger.warn('resolveOrphanSessions failed', { message: e.message }))
 
-  pollTimer = setInterval(async () => {
-    try { await tick() } catch (err) {
-      logger.error('processWatcher tick error', { message: err.message })
-    }
-  }, POLL_MS)
-  logger.info('processWatcher started')
+  scheduleNextTick()
+  logger.info('processWatcher started (adaptive polling)')
 }
 
 // On startup, deal with sessions that are still open in the DB (KoZo was quit or
@@ -627,7 +654,7 @@ async function resolveOrphanSessions() {
 }
 
 function stop() {
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+  if (pollTimer) { clearTimeout(pollTimer); pollTimer = null }
   try { require('./controllerInput').stop() } catch {}
   try { require('./steamStatsWatcher').unwatchAll() } catch {}
   // Leave active sessions OPEN in the DB (do NOT finalize). On next start,

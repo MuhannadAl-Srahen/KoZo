@@ -64,6 +64,10 @@ handle('games:add', async (data) => {
       if (capsule_fallback) {
         gamesQ.updateGame(game.id, { banner_url: capsule_fallback })
         game.banner_url = capsule_fallback
+      } else {
+        const { storeRemoteFallback } = require('./services/steamApi')
+        const url = await storeRemoteFallback(game.id, game.steam_app_id)
+        if (url) game.banner_url = url
       }
       logger.warn(`Banner download failed for game ${game.id}`, { message: e.message })
     }
@@ -76,7 +80,11 @@ handle('games:add', async (data) => {
         gamesQ.updateGame(game.id, { genres: JSON.stringify(art.genres) })
         game.genres = JSON.stringify(art.genres)
       }
-    } catch {}
+    } catch (e) {
+      logger.warn(`Genre fetch failed for game add`, { gameId: game.id, message: e.message })
+      // The self-healing backfill will pick this game up shortly.
+      require('./services/steamApi').runGenreBackfill().catch(() => {})
+    }
 
     // Achievements sync in background — doesn't block the add response
     const { fetchAndStoreAchievements } = require('./services/achievementSync')
@@ -117,6 +125,18 @@ handle('shell:openExternal', (url) => {
 })
 handle('games:delete', (id) => { gamesQ.deleteGame(id); bk(); return true })
 
+// Persist a full drag-and-drop ordering: display_order = index in the given array.
+handle('games:reorder', (orderedIds) => {
+  if (!Array.isArray(orderedIds) || !orderedIds.length) return false
+  const db = require('./db/database').getDb()
+  const stmt = db.prepare('UPDATE games SET display_order = ? WHERE id = ?')
+  db.transaction(() => {
+    orderedIds.forEach((id, i) => stmt.run(i, id))
+  })()
+  bk()
+  return true
+})
+
 // Locate a game's save files across the standard Windows/Steam locations.
 handle('saves:find', (gameId) => {
   const game = gamesQ.getGame(gameId)
@@ -140,18 +160,6 @@ handle('saves:restore', (gameId, backupId, target) =>
 handle('saves:deleteBackup', (gameId, backupId) =>
   require('./services/saveBackup').deleteBackup(gameNameOf(gameId), backupId))
 handle('saves:backupsDir', () => require('./services/saveBackup').rootPath())
-
-// Let the user choose where game-save backups are stored (default Documents/KoZo Saves).
-handle('saves:chooseBackupsDir', async () => {
-  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
-  const res = await dialog.showOpenDialog(win, {
-    title: 'Choose a folder for game-save backups',
-    properties: ['openDirectory', 'createDirectory'],
-  })
-  if (res.canceled || !res.filePaths?.[0]) return null
-  settingsQ.setSetting('saves_backup_dir', res.filePaths[0])
-  return require('./services/saveBackup').rootPath()
-})
 
 // Auto-backup of game saves after each session (mirrors the app-data auto-backup).
 handle('saves:getAutoBackup', () => settingsQ.getSetting('auto_save_backup_enabled') === '1')
@@ -294,6 +302,53 @@ handle('achievements:autoImport', async (gameId) => {
   return res
 })
 
+// Everything the Achievements hub tab needs in one round-trip: totals, the
+// recent-unlocks feed, rarest unlocked trophies, and per-game completion.
+handle('achievements:hub', () => {
+  const db = require('./db/database').getDb()
+
+  const totals = db.prepare(`
+    SELECT COUNT(a.id) AS total, COUNT(au.id) AS unlocked
+    FROM achievements a
+    LEFT JOIN achievement_unlocks au ON au.achievement_id = a.id
+  `).get()
+
+  const recent = db.prepare(`
+    SELECT au.unlocked_at, au.source,
+           a.display_name, a.description, a.icon_url, a.global_unlock_percent,
+           g.id AS game_id, g.name AS game_name
+    FROM achievement_unlocks au
+    JOIN achievements a ON a.id = au.achievement_id
+    JOIN games g ON g.id = a.game_id
+    ORDER BY au.unlocked_at DESC
+    LIMIT 60
+  `).all()
+
+  const rarest = db.prepare(`
+    SELECT a.display_name, a.description, a.icon_url, a.global_unlock_percent,
+           au.unlocked_at, g.id AS game_id, g.name AS game_name
+    FROM achievement_unlocks au
+    JOIN achievements a ON a.id = au.achievement_id
+    JOIN games g ON g.id = a.game_id
+    WHERE a.global_unlock_percent IS NOT NULL
+    ORDER BY a.global_unlock_percent ASC
+    LIMIT 12
+  `).all()
+
+  const perGame = db.prepare(`
+    SELECT g.id, g.name, g.banner_local_path, g.banner_url,
+           COUNT(a.id) AS total, COUNT(au.id) AS unlocked
+    FROM games g
+    JOIN achievements a ON a.game_id = g.id
+    LEFT JOIN achievement_unlocks au ON au.achievement_id = a.id
+    GROUP BY g.id
+    HAVING total > 0
+    ORDER BY (CAST(COUNT(au.id) AS REAL) / COUNT(a.id)) DESC, g.name
+  `).all()
+
+  return { totals, recent, rarest, perGame }
+})
+
 // ── Game List ─────────────────────────────────────────────────────────────────
 handle('gameList:list', (filters) => gameListQ.listGameListItems(filters))
 handle('gameList:get', (id) => gameListQ.getGameListItem(id))
@@ -310,7 +365,11 @@ handle('gameList:add', async (data) => {
       ])
       data = { ...data, banner_url: bannerUrl }
       if (art?.genres?.length) data.genres = JSON.stringify(art.genres)
-    } catch {}
+      if (art?.release_date) data.release_date = art.release_date
+    } catch (e) {
+      logger.warn(`Banner/genre resolve failed for game list add`, { steamAppId: data.steam_app_id, message: e.message })
+      require('./services/steamApi').runGenreBackfill().catch(() => {})
+    }
   }
   const r = gameListQ.addGameListItem(data); bk(); return r
 })
@@ -321,25 +380,6 @@ handle('gameList:update', (id, data) => {
   bk(); broadcast('game:updated', null); return r
 })
 handle('gameList:delete', (id) => { gameListQ.deleteGameListItem(id); bk(); return true })
-
-// Re-resolve the remote cover URL for every list item that has a Steam App ID.
-// The Library "Refresh Images" only touches the games table (local files); list
-// items are remote-only, so they need their own refresh or the button does
-// nothing for them.
-handle('gameList:refreshBanners', async () => {
-  const { resolveBannerUrl } = require('./services/steamApi')
-  const db = require('./db/database').getDb()
-  const rows = db.prepare('SELECT id, steam_app_id FROM game_list WHERE steam_app_id IS NOT NULL').all()
-  let updated = 0
-  for (const row of rows) {
-    try {
-      const url = await resolveBannerUrl(row.steam_app_id)
-      if (url) { gameListQ.updateGameListItem(row.id, { banner_url: url }); updated++ }
-    } catch {}
-  }
-  bk()
-  return { updated }
-})
 
 // ── Custom lists (Spotify-playlist-style game lists) ─────────────────────────
 handle('customLists:list', () => customListsQ.listLists())
@@ -352,34 +392,8 @@ handle('customLists:listsForItem', (itemId) => customListsQ.listIdsForItem(itemI
 
 // ── Genres ────────────────────────────────────────────────────────────────────
 handle('genres:distinct', () => gameListQ.distinctGenres())
-// Backfill Steam genres for existing rows that predate the genres column.
-// Throttled (appdetails rate-limits hard) and aborts after repeated failures.
-handle('genres:backfill', async () => {
-  const { getStoreArt } = require('./services/steamApi')
-  const db = require('./db/database').getDb()
-  const targets = [
-    ...db.prepare("SELECT id, steam_app_id, 'games' AS tbl FROM games WHERE steam_app_id IS NOT NULL AND genres IS NULL").all(),
-    ...db.prepare("SELECT id, steam_app_id, 'game_list' AS tbl FROM game_list WHERE steam_app_id IS NOT NULL AND genres IS NULL").all(),
-  ]
-  let updated = 0, failures = 0
-  for (const row of targets) {
-    try {
-      const art = await getStoreArt(row.steam_app_id)
-      if (art?.genres?.length) {
-        db.prepare(`UPDATE ${row.tbl} SET genres = ? WHERE id = ?`).run(JSON.stringify(art.genres), row.id)
-        updated++
-        failures = 0
-      } else if (art === null) {
-        failures++
-      }
-    } catch { failures++ }
-    if (failures >= 5) break   // likely rate-limited — stop hammering
-    await new Promise(r => setTimeout(r, 300))
-  }
-  bk()
-  broadcast('game:updated', null)
-  return { updated, remaining: targets.length - updated }
-})
+// Genre backfill now runs on its own (app startup + after a backup restore —
+// see runGenreBackfill() in services/steamApi.js). No manual UI trigger.
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 handle('settings:get', (key) => settingsQ.getSetting(key))
@@ -501,6 +515,19 @@ handle('steam:getStoreArt', async (appId) => {
   return getStoreArt(appId)
 })
 
+// Privacy-class failure from the game's last Steam sync, so GameDetail can show
+// an inline "profile is private" warning without a manual diagnose.
+handle('steam:lastSyncError', (gameId) =>
+  require('./services/achievementSync').getLastSyncError(gameId))
+
+// End-to-end tracking self-test: synthetic crack file → real scanner → real DB
+// unlock → real overlay toast. Push-button proof the critical pipeline works.
+handle('tracking:selfTest', () => require('./services/trackingSelfTest').runSelfTest())
+
+// ── App version / updates ─────────────────────────────────────────────────────
+handle('app:getVersion', () => require('electron').app.getVersion())
+handle('app:checkForUpdates', () => require('./services/appUpdater').checkForUpdates())
+
 // Resolve a SteamID64 from a profile URL / custom name / raw ID. Uses the passed
 // key if given (onboarding, before it's saved), else the stored key.
 handle('steam:resolveId', async (input, apiKeyOverride) => {
@@ -519,8 +546,29 @@ handle('steam:diagnose', async (gameId) => {
   if (!game.steam_app_id) return { error: 'not_steam_linked' }
   const apiKey  = settingsQ.getSetting('steam_api_key')
   const steamId = settingsQ.getSetting('steam_user_id')
-  if (!apiKey)  return { error: 'no_api_key' }
   if (!steamId) return { error: 'no_steam_id' }
+
+  // Keyless diagnose — probe the public community XML feed instead.
+  if (!apiKey) {
+    const xml = await steamApi.getPlayerAchievementsXml(game.steam_app_id, steamId)
+    const db = require('./db/database').getDb()
+    const local = db.prepare(`
+      SELECT COUNT(a.id) AS total, COUNT(au.id) AS unlocked
+      FROM achievements a
+      LEFT JOIN achievement_unlocks au ON au.achievement_id = a.id
+      WHERE a.game_id = ?
+    `).get(gameId)
+    return {
+      ok: !xml.error,
+      keyless: true,
+      steam_app_id: game.steam_app_id,
+      schema_count: xml.error ? 0 : xml.schema.length,
+      steam_unlocks: xml.error ? 0 : xml.unlocks.length,
+      local_total: local.total,
+      local_unlocked: local.unlocked,
+      error: xml.error,
+    }
+  }
 
   const profile = await steamApi.getPlayerSummary(apiKey, steamId)
   if (!profile) return { error: 'profile_not_found' }
@@ -748,6 +796,14 @@ handle('scanner:addGames', async (games) => {
 })
 
 // Look up the Steam profile for the saved (or supplied) Steam ID + API key.
+// Auto-detect the logged-in Steam account from Steam's local loginusers.vdf —
+// no more typing the SteamID64 by hand. Picks the MostRecent account, falling
+// back to the newest Timestamp when several are saved.
+handle('steam:detectUser', () => require('./services/steamStatsWatcher').detectLoggedInUser())
+
+// Real browser "Sign in with Steam" (OpenID) — fallback / account switching.
+handle('steam:signIn', () => require('./services/steamOpenId').signIn())
+
 // Returns persona name and avatar so the user can confirm the right account is loaded.
 handle('steam:getProfile', async (overrides) => {
   const { getPlayerSummary } = require('./services/steamApi')
@@ -760,19 +816,53 @@ handle('steam:getProfile', async (overrides) => {
   return { ok: true, profile }
 })
 
-// Re-download banners for all Steam games at 2x quality
+// Re-download banners for all Steam games at 2x quality, plus re-resolve the
+// remote cover URLs for Game List rows. Progress lives in main-process state so
+// the Settings tab can leave/return mid-run and still show the live counter.
+const bannerRefreshState = { running: false, done: 0, total: 0 }
+handle('banners:refreshStatus', () => ({ ...bannerRefreshState }))
 handle('steam:refreshAllBanners', async () => {
-  const { refreshBanners } = require('./services/steamApi')
+  if (bannerRefreshState.running) return { alreadyRunning: true }
+
+  const { refreshBanners, resolveBannerUrl } = require('./services/steamApi')
   const db = require('./db/database').getDb()
   const games = db.prepare('SELECT id FROM games WHERE steam_app_id IS NOT NULL').all()
+  const listRows = db.prepare('SELECT id, steam_app_id FROM game_list WHERE steam_app_id IS NOT NULL').all()
+
+  bannerRefreshState.running = true
+  bannerRefreshState.done = 0
+  bannerRefreshState.total = games.length + listRows.length
+  broadcast('banners:refreshProgress', { ...bannerRefreshState })
+
   let upgraded = 0
-  for (const game of games) {
-    try {
-      await refreshBanners(game.id)
-      upgraded++
-    } catch {}
+  const queue = [
+    ...games.map(g => ({ kind: 'game', id: g.id })),
+    ...listRows.map(r => ({ kind: 'list', id: r.id, appId: r.steam_app_id })),
+  ]
+  async function worker() {
+    for (;;) {
+      const job = queue.shift()
+      if (!job) return
+      try {
+        if (job.kind === 'game') {
+          await refreshBanners(job.id)
+        } else {
+          const url = await resolveBannerUrl(job.appId)
+          if (url) gameListQ.updateGameListItem(job.id, { banner_url: url })
+        }
+        upgraded++
+      } catch {}
+      bannerRefreshState.done++
+      broadcast('banners:refreshProgress', { ...bannerRefreshState })
+    }
   }
-  const { BrowserWindow } = require('electron')
+  // Small parallelism — 3 workers keep it much faster than the old sequential
+  // loop without hammering Steam's CDN/rate limits.
+  await Promise.all([worker(), worker(), worker()])
+
+  bannerRefreshState.running = false
+  broadcast('banners:refreshProgress', { ...bannerRefreshState })
+  bk()
   broadcast('game:updated', null)
   return { upgraded }
 })
@@ -800,19 +890,27 @@ handle('app:setStartup', (enable) => {
   const { app } = require('electron')
   const { execSync } = require('child_process')
 
-  if (!enable) {
-    // Remove from both places so there's no leftover entry
-    try { execSync(`schtasks /delete /tn "${TASK_NAME}" /f`, { stdio: 'pipe' }) } catch {}
-    try { app.setLoginItemSettings({ openAtLogin: false }) } catch {}
-    return { ok: true }
-  }
-
   // In a packaged build process.execPath is KoZo.exe → launching it bare starts
   // the app. In dev it is electron.exe, and launching THAT bare opens Electron's
   // default "run a local app" welcome window (a confusing ghost window at boot).
   // So in dev we must also pass the app directory as an argument.
   const execPath = process.execPath
   const launchArgs = app.isPackaged ? [] : [app.getAppPath()]
+
+  if (!enable) {
+    // Remove from every place an entry might live. setLoginItemSettings must be
+    // called with the SAME path+args used when enabling — bare it computes a
+    // different Run value name and the real entry survives (toggle showed off
+    // but the app kept auto-starting).
+    try { execSync(`schtasks /delete /tn "${TASK_NAME}" /f`, { stdio: 'pipe' }) } catch {}
+    try { app.setLoginItemSettings({ openAtLogin: false, path: execPath, args: launchArgs }) } catch {}
+    // Belt and braces: kill any installer/legacy Run values keyed by app name too.
+    for (const name of new Set(['KoZo', app.getName()])) {
+      try { execSync(`reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v "${name}" /f`, { stdio: 'pipe' }) } catch {}
+    }
+    const verify = app.getLoginItemSettings({ path: execPath, args: launchArgs })
+    return { ok: true, openAtLogin: verify.openAtLogin }
+  }
 
   // Try Task Scheduler — works even when app runs as admin, no UAC at boot.
   try {
@@ -913,42 +1011,16 @@ handle('overlay:test', () => {
 })
 
 // ── Auto-backup config ────────────────────────────────────────────────────────
-handle('backup:getAutoConfig', () => require('./services/autoBackup').getConfig())
-
-handle('backup:setAutoEnabled', (enabled) => {
-  settingsQ.setSetting('auto_backup_enabled', enabled ? '1' : '0')
-  if (enabled) require('./services/autoBackup').writeNow()  // write an immediate first copy
-  return require('./services/autoBackup').getConfig()
-})
-
-handle('backup:chooseAutoFolder', async () => {
-  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
-  const res = await dialog.showOpenDialog(win, {
-    title: 'Choose a folder for automatic backups',
-    properties: ['openDirectory', 'createDirectory'],
-  })
-  if (res.canceled || !res.filePaths?.[0]) return null
-  settingsQ.setSetting('auto_backup_dir', res.filePaths[0])
-  require('./services/autoBackup').writeNow()
-  return res.filePaths[0]
-})
 
 // ── Backup / Restore (Import) ─────────────────────────────────────────────────
 // The "always-synced" auto-backup (services/autoBackup.js) IS the export now —
-// it keeps kozo-autobackup.json current. This restores from any such file.
-handle('backup:import', async () => {
+// it keeps kozo-autobackup.json current. Restores from any such file — via the
+// file picker (backup:import) or straight from the sync folder (sync:restore).
+async function importBackupFile(filePath) {
   const db = require('./db/database').getDb()
   const fs = require('fs')
 
-  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
-  const res = await dialog.showOpenDialog(win, {
-    title: 'Import KoZo backup',
-    filters: [{ name: 'KoZo Backup', extensions: ['json'] }],
-    properties: ['openFile'],
-  })
-  if (res.canceled || !res.filePaths?.[0]) return null
-
-  const data = JSON.parse(fs.readFileSync(res.filePaths[0], 'utf8'))
+  const data = JSON.parse(fs.readFileSync(filePath, 'utf8'))
   if (data.app !== 'kozo' || !Array.isArray(data.games)) throw new Error('Not a valid KoZo backup file')
 
   // Build safe upsert for each table using only columns that exist in the current schema
@@ -977,12 +1049,130 @@ handle('backup:import', async () => {
   doImport()
 
   broadcast('game:updated', null)
+
+  // A backup only exports DB rows, never the local `banners` image files those
+  // rows' banner_local_path points at — on a fresh machine/reinstall those
+  // files never existed, so covers would render blank. Repair silently in the
+  // background: clear any stale local path (falls back to the remote banner_url
+  // immediately) and re-download it for Steam games, same as `steam:refreshAllBanners`.
+  setImmediate(async () => {
+    try {
+      const { refreshBanners, runGenreBackfill } = require('./services/steamApi')
+
+      // Portrait banners (Library/Sessions cards)
+      const bannerRows = db.prepare(
+        "SELECT id, banner_local_path FROM games WHERE steam_app_id IS NOT NULL AND banner_local_path IS NOT NULL"
+      ).all()
+      const staleBanner = bannerRows.filter(r => !fs.existsSync(r.banner_local_path))
+      if (staleBanner.length) {
+        const clearStmt = db.prepare('UPDATE games SET banner_local_path = NULL WHERE id = ?')
+        for (const r of staleBanner) clearStmt.run(r.id)
+      }
+
+      // Hero banners (GameDetail / Profile showcase backdrop)
+      const heroRows = db.prepare(
+        "SELECT id, hero_local_path FROM games WHERE steam_app_id IS NOT NULL AND hero_local_path IS NOT NULL"
+      ).all()
+      const staleHero = heroRows.filter(r => !fs.existsSync(r.hero_local_path))
+      if (staleHero.length) {
+        const clearStmt = db.prepare('UPDATE games SET hero_local_path = NULL WHERE id = ?')
+        for (const r of staleHero) clearStmt.run(r.id)
+      }
+
+      // Profile avatar/banner images live outside the DB — clear stale paths so
+      // the Profile page shows initials/gradient instead of a broken image.
+      for (const key of ['profile_avatar_path', 'profile_banner_path']) {
+        const p = settingsQ.getSetting(key)
+        if (p && !fs.existsSync(p)) settingsQ.setSetting(key, '')
+      }
+
+      const staleIds = [...new Set([...staleBanner, ...staleHero].map(r => r.id))]
+      if (staleIds.length) {
+        broadcast('game:updated', null)   // remote banner_url fallback shows immediately
+        for (const id of staleIds) {
+          try { await refreshBanners(id) } catch (e) { logger.warn(`Post-restore banner repair failed for game ${id}`, { message: e.message }) }
+        }
+        broadcast('game:updated', null)
+      }
+      await runGenreBackfill()
+    } catch (e) {
+      logger.warn('Post-restore repair pass failed', { message: e.message })
+    }
+  })
+
   return {
     games: counts.games || 0,
     sessions: counts.sessions || 0,
     achievements: counts.achievements || 0,
     gameList: counts.game_list || 0,
   }
+}
+
+handle('backup:import', async () => {
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  const res = await dialog.showOpenDialog(win, {
+    title: 'Import KoZo backup',
+    filters: [{ name: 'KoZo Backup', extensions: ['json'] }],
+    properties: ['openFile'],
+  })
+  if (res.canceled || !res.filePaths?.[0]) return null
+  return importBackupFile(res.filePaths[0])
+})
+
+// ── Sync folder ("sign in" without an account) ───────────────────────────────
+// Point KoZo's app-data auto-backup + game-save backups at one folder — put it
+// inside OneDrive/Google Drive/Dropbox and everything follows the user to any
+// PC. Restore = read the auto-backup JSON straight from that folder.
+handle('sync:setup', async () => {
+  const fs = require('fs')
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  const res = await dialog.showOpenDialog(win, {
+    title: 'Choose a sync folder (put it inside OneDrive / Google Drive / Dropbox)',
+    properties: ['openDirectory', 'createDirectory'],
+  })
+  if (res.canceled || !res.filePaths?.[0]) return null
+
+  const folder = res.filePaths[0]
+  const appDataDir = path.join(folder, 'app-data')
+  const savesDir = path.join(folder, 'saves')
+  fs.mkdirSync(appDataDir, { recursive: true })
+  fs.mkdirSync(savesDir, { recursive: true })
+
+  // Existing save backups follow the user into the sync folder — otherwise they
+  // silently disappear from every game's Save Manager (old folder still has them,
+  // nothing reads it anymore).
+  const saveBackup = require('./services/saveBackup')
+  const oldSavesRoot = saveBackup.rootPath()
+
+  settingsQ.setSetting('sync_folder', folder)
+  settingsQ.setSetting('auto_backup_dir', appDataDir)
+  settingsQ.setSetting('saves_backup_dir', savesDir)
+  settingsQ.setSetting('auto_backup_enabled', '1')
+  settingsQ.setSetting('auto_save_backup_enabled', '1')
+  saveBackup.migrateRoot(oldSavesRoot, savesDir)
+  require('./services/autoBackup').writeNow()
+  return getSyncStatus()
+})
+
+function getSyncStatus() {
+  const fs = require('fs')
+  const folder = settingsQ.getSetting('sync_folder')
+  if (!folder) return { configured: false }
+  const jsonPath = path.join(settingsQ.getSetting('auto_backup_dir') || path.join(folder, 'app-data'), 'kozo-autobackup.json')
+  let lastBackupAt = null
+  try { lastBackupAt = fs.statSync(jsonPath).mtime.toISOString() } catch {}
+  return { configured: true, folder, lastBackupAt, hasBackup: lastBackupAt != null }
+}
+
+handle('sync:status', () => getSyncStatus())
+
+handle('sync:restore', async () => {
+  const fs = require('fs')
+  const dir = settingsQ.getSetting('auto_backup_dir')
+  if (!dir) return { error: 'not_configured' }
+  const jsonPath = path.join(dir, 'kozo-autobackup.json')
+  if (!fs.existsSync(jsonPath)) return { error: 'no_backup_found' }
+  return importBackupFile(jsonPath)
 })
 
 // ── Stats ─────────────────────────────────────────────────────────────────────

@@ -159,6 +159,37 @@ app.whenReady().then(() => {
   // Periodic safety-net for automatic backup (no-op unless the user enabled it)
   require('./services/autoBackup').startPeriodic()
 
+  // Silently fill in any missing game genres in the background — no button,
+  // no progress UI. Delayed so it doesn't compete with startup work.
+  setTimeout(() => {
+    require('./services/steamApi').runGenreBackfill().catch(() => {})
+  }, 8000)
+
+  // Automatic achievement catch-up: scan every cracked game's emulator files
+  // once on startup so unlocks earned while KoZo was closed appear on their
+  // own — no manual sync button needed, ever.
+  setTimeout(() => {
+    require('./services/crackWatcher').scanAllCrackedGames().catch(() => {})
+  }, 20000)
+
+  // Auto-update from GitHub Releases (packaged builds only; silent when the
+  // release repo isn't configured yet).
+  try { require('./services/appUpdater').setupAutoUpdate() } catch {}
+
+  // Zero-setup Steam: if no SteamID is saved yet, read the logged-in account
+  // from the local Steam install so the user never has to type it.
+  try {
+    const settingsQ = require('./db/queries/settings')
+    if (!settingsQ.getSetting('steam_user_id')) {
+      const d = require('./services/steamStatsWatcher').detectLoggedInUser()
+      if (d?.steamId) {
+        settingsQ.setSetting('steam_user_id', d.steamId)
+        if (d.personaName) settingsQ.setSetting('steam_persona', d.personaName)
+        require('./logger').info(`Auto-detected Steam account: ${d.personaName || d.steamId}`)
+      }
+    }
+  } catch {}
+
   const trayHandle = setupTray(mainWindow, watcher)
   watcher.onChange(() => trayHandle?.refreshMenu())
 
