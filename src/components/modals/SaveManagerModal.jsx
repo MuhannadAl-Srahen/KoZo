@@ -37,7 +37,13 @@ export default function SaveManagerModal({ game, onClose }) {
     setLocations(loc?.ok ? (loc.data?.locations || []) : [])
     setBackups(bk?.ok ? (bk.data || []) : [])
   }
-  useEffect(() => { loadAll() }, [])
+  useEffect(() => {
+    loadAll()
+    // Backups can be created elsewhere while this is open (Settings "Back up
+    // all", the post-session auto-backup) — refresh when the window refocuses.
+    window.addEventListener('focus', loadAll)
+    return () => window.removeEventListener('focus', loadAll)
+  }, [])
 
   async function doBackup(p) {
     setBusy('bk:' + p); setMsg(null)
@@ -118,6 +124,14 @@ export default function SaveManagerModal({ game, onClose }) {
       {/* Backups */}
       <div className={s.sectionTitle} style={{ marginTop: 18 }}>
         Backups {backups.length > 0 && <span className={s.count}>{backups.length}</span>}
+        <button
+          className={s.iconBtn}
+          title="Refresh the backup list"
+          style={{ marginLeft: 'auto' }}
+          onClick={loadAll}
+        >
+          <IconRestore size={13} stroke={1.7} />
+        </button>
       </div>
       {backups.length === 0 ? (
         <div className={s.empty}>No backups yet. Click “Back up” on a location above to save a copy you can restore later.</div>
@@ -128,7 +142,8 @@ export default function SaveManagerModal({ game, onClose }) {
               <div className={s.rowInfo}>
                 <div className={s.bkTitle}>
                   <IconClock size={12} stroke={1.6} /> {fmtDate(b.createdAt)}
-                  {b.label === 'auto' && <span className={s.tagAmber}>latest auto-save</span>}
+                  {b.label === 'auto' && <span className={s.tagAmber}>latest session</span>}
+                  {b.label === 'auto (previous)' && <span className={s.tagAmber}>previous session</span>}
                   {b.label === 'before-restore' && <span className={s.tagAmber}>auto (pre-restore)</span>}
                 </div>
                 <div className={s.meta}>{b.files} file{b.files === 1 ? '' : 's'} · {fmtBytes(b.bytes)}</div>

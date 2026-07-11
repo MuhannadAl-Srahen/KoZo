@@ -2,7 +2,7 @@ const { getDb } = require('../database')
 
 function listSessions(filters = {}) {
   let query = `
-    SELECT s.*, g.name AS game_name, g.banner_local_path
+    SELECT s.*, g.name AS game_name, g.banner_local_path, g.banner_url
     FROM sessions s
     JOIN games g ON g.id = s.game_id
     WHERE s.ended_at IS NOT NULL

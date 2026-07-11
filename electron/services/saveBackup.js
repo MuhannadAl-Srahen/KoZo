@@ -134,18 +134,22 @@ function deleteBackup(gameName, backupId) {
 //     game deleted don't linger.
 // Manual backups (and before-restore safety copies) stay as their own separate
 // timestamped snapshots — those are deliberate restore points and are untouched.
-const AUTO_ID = 'auto-latest'
+const AUTO_ID      = 'auto-latest'
+const AUTO_PREV_ID = 'auto-prev'
 
-// Remove legacy per-session auto snapshots (from before the single-folder model)
-// and any stray auto folders other than the rolling one.
-function cleanupLegacyAutos(gameName, keepId) {
+// Remove legacy per-session auto snapshots (from before the two-slot model)
+// and any stray auto folders other than the rolling slots.
+function cleanupLegacyAutos(gameName) {
   for (const b of listBackups(gameName)) {
-    if (b.label === 'auto' && b.id !== keepId) {
+    if ((b.label === 'auto' || b.label === 'auto (previous)') && b.id !== AUTO_ID && b.id !== AUTO_PREV_ID) {
       try { deleteBackup(gameName, b.id) } catch {}
     }
   }
 }
 
+// Two rolling slots: `auto-latest` (this session) and `auto-prev` (the one
+// before). On each changed save, latest rotates into prev — so the last TWO
+// sessions' saves are always recoverable without snapshots piling up on disk.
 function autoBackupGame(gameName, sourcePath) {
   if (!sourcePath || !fs.existsSync(sourcePath)) return { skipped: 'no_source' }
   const cur = measure(sourcePath)
@@ -153,18 +157,36 @@ function autoBackupGame(gameName, sourcePath) {
 
   const dest     = path.join(gameDir(gameName), AUTO_ID)
   const dataDest = path.join(dest, 'data')
+  const prevDest = path.join(gameDir(gameName), AUTO_PREV_ID)
 
   // Dedupe against the existing rolling snapshot.
   if (fs.existsSync(dataDest)) {
     const prev = measure(dataDest)
     if (prev.files === cur.files && prev.bytes === cur.bytes) {
-      cleanupLegacyAutos(gameName, AUTO_ID)
+      cleanupLegacyAutos(gameName)
       return { skipped: 'unchanged' }
     }
   }
 
-  // Clean replace in place — one combined auto save, always current.
-  fs.rmSync(dest, { recursive: true, force: true })
+  // Rotate: current latest becomes the "previous session" slot.
+  if (fs.existsSync(dest)) {
+    try {
+      fs.rmSync(prevDest, { recursive: true, force: true })
+      fs.renameSync(dest, prevDest)
+      const prevMetaPath = path.join(prevDest, 'meta.json')
+      try {
+        const prevMeta = JSON.parse(fs.readFileSync(prevMetaPath, 'utf8'))
+        prevMeta.id = AUTO_PREV_ID
+        prevMeta.label = 'auto (previous)'
+        fs.writeFileSync(prevMetaPath, JSON.stringify(prevMeta, null, 2), 'utf8')
+      } catch {}
+    } catch (e) {
+      logger.warn(`saveBackup: auto rotation failed for "${gameName}"`, { message: e.message })
+      fs.rmSync(dest, { recursive: true, force: true })
+    }
+  }
+
+  // Write the fresh latest snapshot.
   fs.mkdirSync(dataDest, { recursive: true })
   fs.cpSync(sourcePath, dataDest, { recursive: true })
   const { files, bytes } = measure(dataDest)
@@ -174,11 +196,64 @@ function autoBackupGame(gameName, sourcePath) {
   }
   fs.writeFileSync(path.join(dest, 'meta.json'), JSON.stringify(meta, null, 2), 'utf8')
 
-  cleanupLegacyAutos(gameName, AUTO_ID)
+  cleanupLegacyAutos(gameName)
   logger.info(`saveBackup: refreshed rolling auto save for "${gameName}" (${files} files)`)
   return { ...meta, path: dataDest }
 }
 
 function rootPath() { return rootDir() }
 
-module.exports = { backupSave, listBackups, restoreBackup, deleteBackup, autoBackupGame, rootPath }
+// When the user changes the backup folder (or sets up a sync folder), existing
+// backups must FOLLOW them — otherwise everything backed up so far silently
+// vanishes from every game's Save Manager (it still lives in the old folder,
+// but nothing reads it anymore). Moves each game folder; merges when the
+// destination already has the game (only non-colliding snapshot subfolders move).
+function migrateRoot(oldDir, newDir) {
+  try {
+    if (!oldDir || !newDir) return { moved: 0 }
+    const from = path.resolve(oldDir)
+    const to   = path.resolve(newDir)
+    if (from.toLowerCase() === to.toLowerCase()) return { moved: 0 }
+    if (!fs.existsSync(from)) return { moved: 0 }
+
+    fs.mkdirSync(to, { recursive: true })
+    let moved = 0
+    const moveEntry = (src, dest) => {
+      try {
+        fs.renameSync(src, dest)
+      } catch {
+        // Cross-drive or locked — copy then delete.
+        fs.cpSync(src, dest, { recursive: true })
+        fs.rmSync(src, { recursive: true, force: true })
+      }
+    }
+
+    for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const srcGame  = path.join(from, entry.name)
+      const destGame = path.join(to, entry.name)
+      if (!fs.existsSync(destGame)) {
+        moveEntry(srcGame, destGame)
+        moved++
+        continue
+      }
+      // Game exists in both roots — merge snapshot subfolders that don't collide.
+      for (const snap of fs.readdirSync(srcGame, { withFileTypes: true })) {
+        if (!snap.isDirectory()) continue
+        const destSnap = path.join(destGame, snap.name)
+        if (fs.existsSync(destSnap)) continue
+        moveEntry(path.join(srcGame, snap.name), destSnap)
+        moved++
+      }
+      // Remove the old game folder if it's now empty.
+      try { if (fs.readdirSync(srcGame).length === 0) fs.rmdirSync(srcGame) } catch {}
+    }
+    if (moved > 0) logger.info(`saveBackup: migrated ${moved} backup folder(s) from "${from}" to "${to}"`)
+    return { moved }
+  } catch (e) {
+    logger.warn('saveBackup: migrateRoot failed', { message: e.message })
+    return { moved: 0, error: e.message }
+  }
+}
+
+module.exports = { backupSave, listBackups, restoreBackup, deleteBackup, autoBackupGame, rootPath, migrateRoot }

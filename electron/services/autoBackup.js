@@ -73,4 +73,4 @@ function startPeriodic() {
   }, 5 * 60 * 1000)
 }
 
-module.exports = { markDirty, flush, writeNow, getConfig, startPeriodic }
+module.exports = { markDirty, flush, writeNow, getConfig, startPeriodic, buildPayload }
