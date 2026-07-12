@@ -16,12 +16,12 @@ import s from './Profile.module.css'
 const BANNER_STYLES = {
   accent: 'radial-gradient(120% 120% at 15% 0%, var(--ad), transparent 60%), linear-gradient(135deg, var(--surface-2), var(--bg))',
   sunset: 'linear-gradient(135deg, #f97316, #db2777 65%, #1a0f1e)',
-  ocean:  'linear-gradient(135deg, #0ea5e9, #2dd4bf 65%, #0a1422)',
+  ocean: 'linear-gradient(135deg, #0ea5e9, #2dd4bf 65%, #0a1422)',
   aurora: 'linear-gradient(135deg, #22c55e, #a855f7 65%, #0b0b18)',
-  ember:  'linear-gradient(135deg, #ef4444, #f59e0b 65%, #190f0a)',
-  grape:  'linear-gradient(135deg, #7c3aed, #ec4899 65%, #140b1e)',
+  ember: 'linear-gradient(135deg, #ef4444, #f59e0b 65%, #190f0a)',
+  grape: 'linear-gradient(135deg, #7c3aed, #ec4899 65%, #140b1e)',
   forest: 'linear-gradient(135deg, #166534, #84cc16 65%, #0a0f0a)',
-  mono:   'linear-gradient(135deg, #2b2b3a, #0c0c14)',
+  mono: 'linear-gradient(135deg, #2b2b3a, #0c0c14)',
 }
 const BANNER_ORDER = ['accent', 'sunset', 'ocean', 'aurora', 'ember', 'grape', 'forest', 'mono']
 
@@ -96,9 +96,9 @@ function timeAgo(iso) {
 }
 
 const XP_EVENT_META = {
-  session:     { Icon: IconClock,             color: 'var(--a)',  verb: 'Played' },
-  achievement: { Icon: IconTrophy,            color: '#fbbf24',   verb: 'Unlocked' },
-  finished:    { Icon: IconCircleCheckFilled, color: '#4ade80',   verb: 'Finished' },
+  session: { Icon: IconClock, color: 'var(--a)', verb: 'Played' },
+  achievement: { Icon: IconTrophy, color: '#fbbf24', verb: 'Unlocked' },
+  finished: { Icon: IconCircleCheckFilled, color: '#4ade80', verb: 'Finished' },
 }
 
 // One compact Recent-XP entry card — shared by the profile grid and the
@@ -133,13 +133,13 @@ export default function Profile() {
 
   const [loading, setLoading] = useState(!profileCache)
   const [editing, setEditing] = useState(false)
-  const [saving, setSaving]   = useState(false)
+  const [saving, setSaving] = useState(false)
 
-  const [name, setName]         = useState(profileCache?.name ?? 'Player')
-  const [tagline, setTagline]   = useState(profileCache?.tagline ?? '')
-  const [title, setTitle]       = useState(profileCache?.title ?? '')
-  const [avatar, setAvatar]     = useState(profileCache?.avatar ?? '')
-  const [banner, setBanner]     = useState(profileCache?.banner ?? '')
+  const [name, setName] = useState(profileCache?.name ?? 'Player')
+  const [tagline, setTagline] = useState(profileCache?.tagline ?? '')
+  const [title, setTitle] = useState(profileCache?.title ?? '')
+  const [avatar, setAvatar] = useState(profileCache?.avatar ?? '')
+  const [banner, setBanner] = useState(profileCache?.banner ?? '')
   const [bannerStyle, setBannerStyle] = useState(profileCache?.bannerStyle ?? 'accent')
   const [showcase, setShowcase] = useState(profileCache?.showcase ?? [])     // array of game-id strings
   const [createdAt, setCreatedAt] = useState(profileCache?.createdAt ?? '')
@@ -148,8 +148,8 @@ export default function Profile() {
   const [stats, setStats] = useState(profileCache?.stats ?? null)
   const [games, setGames] = useState(profileCache?.games ?? [])
   const [imgBust, setImgBust] = useState(0)
-  const [crop, setCrop]   = useState(null)   // { src, kind, setter }
-  const [xp, setXp]       = useState(profileCache?.xp ?? null)
+  const [crop, setCrop] = useState(null)   // { src, kind, setter }
+  const [xp, setXp] = useState(profileCache?.xp ?? null)
   const [xpHistory, setXpHistory] = useState(profileCache?.xpHistory ?? [])
   const [xpModalOpen, setXpModalOpen] = useState(false)
 
@@ -209,7 +209,7 @@ export default function Profile() {
     ])
     if (statsRes?.ok) { setStats(statsRes.data); if (profileCache) profileCache.stats = statsRes.data }
     if (gamesRes?.ok) { setGames(gamesRes.data || []); if (profileCache) profileCache.games = gamesRes.data || [] }
-    if (xpRes?.ok)    { setXp(xpRes.data); if (profileCache) profileCache.xp = xpRes.data }
+    if (xpRes?.ok) { setXp(xpRes.data); if (profileCache) profileCache.xp = xpRes.data }
     if (xpHistRes?.ok) { setXpHistory(xpHistRes.data || []); if (profileCache) profileCache.xpHistory = xpHistRes.data || [] }
   }, [editing])
 
@@ -275,22 +275,22 @@ export default function Profile() {
     </div></div>
   }
 
-  const playSec   = stats?.playtime?.seconds ?? 0
-  const sessions  = stats?.sessionCount?.count ?? 0
-  const unlocked  = stats?.achievementCounts?.unlocked ?? 0
-  const longest   = stats?.longestSessions?.[0]?.duration_seconds ?? 0
+  const playSec = stats?.playtime?.seconds ?? 0
+  const sessions = stats?.sessionCount?.count ?? 0
+  const unlocked = stats?.achievementCounts?.unlocked ?? 0
+  const longest = stats?.longestSessions?.[0]?.duration_seconds ?? 0
   const mostPlayed = stats?.topGames?.[0]?.name || '—'
 
   const avatarSrc = avatar ? fileUrl(avatar, imgBust || undefined) : null
   const showcaseGames = showcase.map(id => games.find(g => String(g.id) === id)).filter(Boolean)
 
   const STAT_CARDS = [
-    { Icon: IconClock,          label: 'Total playtime', value: formatPlaytime(playSec) || '—', color: 'var(--a)' },
-    { Icon: IconDeviceGamepad2, label: 'Games',          value: games.length,                   color: '#4ade80' },
-    { Icon: IconTrophy,         label: 'Achievements',   value: unlocked,                       color: '#fbbf24' },
-    { Icon: IconHistory,        label: 'Sessions',       value: sessions,                       color: '#60a5fa' },
-    { Icon: IconFlame,          label: 'Longest session',value: longest ? formatPlaytime(longest) : '—', color: '#fb923c' },
-    { Icon: IconStar,          label: 'Most played',     value: mostPlayed,                     color: '#f472b6' },
+    { Icon: IconClock, label: 'Total playtime', value: formatPlaytime(playSec) || '—', color: 'var(--a)' },
+    { Icon: IconDeviceGamepad2, label: 'Games', value: games.length, color: '#4ade80' },
+    { Icon: IconTrophy, label: 'Achievements', value: unlocked, color: '#fbbf24' },
+    { Icon: IconHistory, label: 'Sessions', value: sessions, color: '#60a5fa' },
+    { Icon: IconFlame, label: 'Longest session', value: longest ? formatPlaytime(longest) : '—', color: '#fb923c' },
+    { Icon: IconStar, label: 'Most played', value: mostPlayed, color: '#f472b6' },
   ]
 
   const heroBg = banner ? undefined : (BANNER_STYLES[bannerStyle] || BANNER_STYLES.accent)
@@ -299,17 +299,17 @@ export default function Profile() {
   // behind the gradient, so the hero feels personal out of the box.
   const showcaseArt = !banner && showcaseGames[0]
     ? (showcaseGames[0].hero_local_path
-        ? fileUrl(showcaseGames[0].hero_local_path, imgBust || undefined)
-        : (showcaseGames[0].banner_local_path
-            ? fileUrl(showcaseGames[0].banner_local_path, imgBust || undefined)
-            : showcaseGames[0].banner_url))
+      ? fileUrl(showcaseGames[0].hero_local_path, imgBust || undefined)
+      : (showcaseGames[0].banner_local_path
+        ? fileUrl(showcaseGames[0].banner_local_path, imgBust || undefined)
+        : showcaseGames[0].banner_url))
     : null
 
   // Top genres — aggregate library genres weighted by playtime.
   const genreSeconds = {}
   for (const g of games) {
     let gs = []
-    try { gs = JSON.parse(g.genres || '[]') } catch {}
+    try { gs = JSON.parse(g.genres || '[]') } catch { }
     for (const name of gs) {
       genreSeconds[name] = (genreSeconds[name] || 0) + (g.total_playtime_seconds || 0) + 1
     }
@@ -325,42 +325,42 @@ export default function Profile() {
         <div className={s.hero}>
           {bannerSrc
             ? <>
-                <img src={bannerSrc} className={s.heroBlur} alt="" aria-hidden="true" onError={e => { e.target.style.display = 'none' }} />
-                <img src={bannerSrc} className={s.heroImg} alt="" onError={e => { e.target.style.display = 'none' }} />
-              </>
+              <img src={bannerSrc} className={s.heroBlur} alt="" aria-hidden="true" onError={e => { e.target.style.display = 'none' }} />
+              <img src={bannerSrc} className={s.heroImg} alt="" onError={e => { e.target.style.display = 'none' }} />
+            </>
             : <>
-                {showcaseArt && (
-                  <img
-                    src={showcaseArt}
-                    className={s.heroBlur}
-                    alt=""
-                    aria-hidden="true"
-                    onError={e => {
-                      // Local hero/banner file missing (e.g. post-restore) —
-                      // fall back to the remote cover once, then give up.
-                      const img = e.target
-                      const remote = showcaseGames[0]?.banner_url
-                      if (remote && img.src !== remote && !img.dataset.fallbackTried) {
-                        img.dataset.fallbackTried = '1'
-                        img.src = remote
-                        return
-                      }
-                      img.style.display = 'none'
-                    }}
-                  />
-                )}
-                <div className={`${s.heroGradient} ${showcaseArt ? s.heroGradientOverArt : ''}`} style={{ background: heroBg }} />
-              </>}
+              {showcaseArt && (
+                <img
+                  src={showcaseArt}
+                  className={s.heroBlur}
+                  alt=""
+                  aria-hidden="true"
+                  onError={e => {
+                    // Local hero/banner file missing (e.g. post-restore) —
+                    // fall back to the remote cover once, then give up.
+                    const img = e.target
+                    const remote = showcaseGames[0]?.banner_url
+                    if (remote && img.src !== remote && !img.dataset.fallbackTried) {
+                      img.dataset.fallbackTried = '1'
+                      img.src = remote
+                      return
+                    }
+                    img.style.display = 'none'
+                  }}
+                />
+              )}
+              <div className={`${s.heroGradient} ${showcaseArt ? s.heroGradientOverArt : ''}`} style={{ background: heroBg }} />
+            </>}
           <div className={s.heroShade} />
 
           {!editing
             ? <button className={s.editBtn} onClick={startEdit}><IconEdit size={14} stroke={1.8} /> Edit profile</button>
             : <div className={s.editActions}>
-                <button className={s.cancelBtn} onClick={cancelEdit}><IconX size={14} stroke={2} /> Cancel</button>
-                <button className={s.saveBtn} onClick={saveEdit} disabled={saving}>
-                  {saving ? <IconLoader2 size={14} style={{ animation: 'spin 0.8s linear infinite' }} /> : <IconCheck size={14} stroke={2.2} />} Save
-                </button>
-              </div>}
+              <button className={s.cancelBtn} onClick={cancelEdit}><IconX size={14} stroke={2} /> Cancel</button>
+              <button className={s.saveBtn} onClick={saveEdit} disabled={saving}>
+                {saving ? <IconLoader2 size={14} style={{ animation: 'spin 0.8s linear infinite' }} /> : <IconCheck size={14} stroke={2.2} />} Save
+              </button>
+            </div>}
 
           {editing && (
             <div className={s.bannerControls}>
@@ -486,10 +486,10 @@ export default function Profile() {
 
               <div className={s.xpBreakdown}>
                 {[
-                  { Icon: IconClock,            label: 'Playtime',     value: xp.breakdown.playtime,     color: 'var(--a)',  sub: `${xp.playDays} days played` },
-                  { Icon: IconTrophy,          label: 'Achievements', value: xp.breakdown.achievements, color: '#fbbf24',   sub: `${xp.unlockCount} unlocked` },
-                  { Icon: IconCircleCheckFilled, label: 'Finished',   value: xp.breakdown.finished,     color: '#4ade80',   sub: `${xp.finishedCount} game${xp.finishedCount === 1 ? '' : 's'}` },
-                  { Icon: IconFlame,           label: 'Streaks',      value: xp.breakdown.streak,       color: '#fb923c',   sub: `best ${xp.longestStreak}d` },
+                  { Icon: IconClock, label: 'Playtime', value: xp.breakdown.playtime, color: 'var(--a)', sub: `${xp.playDays} days played` },
+                  { Icon: IconTrophy, label: 'Achievements', value: xp.breakdown.achievements, color: '#fbbf24', sub: `${xp.unlockCount} unlocked` },
+                  { Icon: IconCircleCheckFilled, label: 'Finished', value: xp.breakdown.finished, color: '#4ade80', sub: `${xp.finishedCount} game${xp.finishedCount === 1 ? '' : 's'}` },
+                  { Icon: IconFlame, label: 'Streaks', value: xp.breakdown.streak, color: '#fb923c', sub: `best ${xp.longestStreak}d` },
                 ].map(b => (
                   <div key={b.label} className={s.xpSource}>
                     <b.Icon size={15} stroke={1.7} style={{ color: b.color }} />
@@ -526,7 +526,7 @@ export default function Profile() {
         })()}
 
         {/* Stat grid */}
-        <div className={s.statGrid}>
+        <div className={`${s.statGrid} ${!xp ? s.statGridOverlap : ''}`}>
           {STAT_CARDS.map(({ Icon, label, value, color }) => (
             <div key={label} className={s.statCard}>
               <div className={s.statIcon} style={{ color, background: color + '18', borderColor: color + '33' }}>
@@ -569,51 +569,51 @@ export default function Profile() {
           {!editing && (
             showcaseGames.length
               ? <div className={s.shelf}>
-                  {showcaseGames.map((g, i) => {
-                    const src = g.banner_local_path ? fileUrl(g.banner_local_path, imgBust || undefined) : g.banner_url
-                    return (
-                      <div key={g.id} className={s.shelfCard} onClick={() => navigate(`/game/${g.id}`)} title={g.name}>
-                        <div className={s.shelfBanner} style={{ background: getBannerBg(g.id) }}>
-                          {src
-                            ? <>
-                                <img src={src} className={s.shelfBlur} alt="" aria-hidden="true" onError={e => coverError(e, g.banner_url)} />
-                                <img src={src} className={s.shelfImg} alt="" onError={e => coverError(e, g.banner_url)} />
-                              </>
-                            : <IconDeviceGamepad2 size={24} stroke={1.1} style={{ color: 'rgba(255,255,255,0.15)' }} />}
-                          {i === 0 && <div className={s.favTag}><IconStar size={10} stroke={2} /> Favorite</div>}
-                        </div>
-                        <div className={s.shelfName}>{g.name}</div>
-                        <div className={s.shelfMeta}>{formatPlaytime(g.total_playtime_seconds) || '—'}</div>
+                {showcaseGames.map((g, i) => {
+                  const src = g.banner_local_path ? fileUrl(g.banner_local_path, imgBust || undefined) : g.banner_url
+                  return (
+                    <div key={g.id} className={s.shelfCard} onClick={() => navigate(`/game/${g.id}`)} title={g.name}>
+                      <div className={s.shelfBanner} style={{ background: getBannerBg(g.id) }}>
+                        {src
+                          ? <>
+                            <img src={src} className={s.shelfBlur} alt="" aria-hidden="true" onError={e => coverError(e, g.banner_url)} />
+                            <img src={src} className={s.shelfImg} alt="" onError={e => coverError(e, g.banner_url)} />
+                          </>
+                          : <IconDeviceGamepad2 size={24} stroke={1.1} style={{ color: 'rgba(255,255,255,0.15)' }} />}
+                        {i === 0 && <div className={s.favTag}><IconStar size={10} stroke={2} /> Favorite</div>}
                       </div>
-                    )
-                  })}
-                </div>
+                      <div className={s.shelfName}>{g.name}</div>
+                      <div className={s.shelfMeta}>{formatPlaytime(g.total_playtime_seconds) || '—'}</div>
+                    </div>
+                  )
+                })}
+              </div>
               : <div className={s.shelfEmpty}>No games pinned yet — hit Edit profile to show off your favorites.</div>
           )}
 
           {editing && (
             games.length
               ? <div className={s.picker}>
-                  {games.map(g => {
-                    const sid = String(g.id)
-                    const idx = showcase.indexOf(sid)
-                    const on  = idx !== -1
-                    const src = g.banner_local_path ? fileUrl(g.banner_local_path, imgBust || undefined) : g.banner_url
-                    return (
-                      <button type="button" key={g.id}
-                        className={`${s.pickCard} ${on ? s.pickCardOn : ''}`}
-                        onClick={() => toggleShowcase(g.id)} title={g.name}>
-                        <div className={s.pickBanner} style={{ background: getBannerBg(g.id) }}>
-                          {src
-                            ? <img src={src} className={s.pickImg} alt="" onError={e => coverError(e, g.banner_url)} />
-                            : <IconDeviceGamepad2 size={20} stroke={1.1} style={{ color: 'rgba(255,255,255,0.15)' }} />}
-                          {on && <span className={s.pickOrder}>{idx + 1}</span>}
-                        </div>
-                        <div className={s.pickName}>{g.name}</div>
-                      </button>
-                    )
-                  })}
-                </div>
+                {games.map(g => {
+                  const sid = String(g.id)
+                  const idx = showcase.indexOf(sid)
+                  const on = idx !== -1
+                  const src = g.banner_local_path ? fileUrl(g.banner_local_path, imgBust || undefined) : g.banner_url
+                  return (
+                    <button type="button" key={g.id}
+                      className={`${s.pickCard} ${on ? s.pickCardOn : ''}`}
+                      onClick={() => toggleShowcase(g.id)} title={g.name}>
+                      <div className={s.pickBanner} style={{ background: getBannerBg(g.id) }}>
+                        {src
+                          ? <img src={src} className={s.pickImg} alt="" onError={e => coverError(e, g.banner_url)} />
+                          : <IconDeviceGamepad2 size={20} stroke={1.1} style={{ color: 'rgba(255,255,255,0.15)' }} />}
+                        {on && <span className={s.pickOrder}>{idx + 1}</span>}
+                      </div>
+                      <div className={s.pickName}>{g.name}</div>
+                    </button>
+                  )
+                })}
+              </div>
               : <div className={s.shelfEmpty}>Add games to your library first.</div>
           )}
         </div>
