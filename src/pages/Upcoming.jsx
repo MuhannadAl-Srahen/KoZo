@@ -7,6 +7,13 @@ import { parseGenres } from '../lib/utils'
 import Modal, { modalStyles as ms } from '../components/ui/Modal'
 import s from './Upcoming.module.css'
 
+// Persist the last working art source per game across tab switches so cards don't
+// re-run fallback image probing (hero -> header -> portrait) every time.
+const wideArtIndexCache = new Map()
+
+// Keep Upcoming data hot between route changes to avoid full visual resets.
+let upcomingCache = null
+
 // Steam's release_date strings vary in precision: "13 Nov, 2025" (exact),
 // "November 2025" (month), "2026" (year only), "TBA"/"Coming soon" (nothing).
 // Year-only must NOT be treated as Jan 1st — that faked "Out now!" for games
@@ -49,10 +56,26 @@ function wideArtSources(item) {
 }
 
 function WideArt({ item, className }) {
-  const [idx, setIdx] = useState(0)
+  const cacheKey = item?.id ?? item?.steam_app_id ?? item?.name
+  const [idx, setIdx] = useState(() => wideArtIndexCache.get(cacheKey) ?? 0)
   const srcs = wideArtSources(item)
+  useEffect(() => {
+    setIdx(wideArtIndexCache.get(cacheKey) ?? 0)
+  }, [cacheKey])
   if (idx >= srcs.length) return null
-  return <img className={className} src={srcs[idx]} alt="" onError={() => setIdx(i => i + 1)} />
+  return (
+    <img
+      className={className}
+      src={srcs[idx]}
+      alt=""
+      onLoad={() => wideArtIndexCache.set(cacheKey, idx)}
+      onError={() => setIdx((i) => {
+        const next = i + 1
+        wideArtIndexCache.set(cacheKey, next)
+        return next
+      })}
+    />
+  )
 }
 
 function badgeClassFor(rel) {
@@ -150,12 +173,16 @@ function UpcomingCard({ item, rel, onOpen }) {
 }
 
 export default function Upcoming() {
-  const [items, setItems] = useState(null)
+  const [items, setItems] = useState(upcomingCache)
   const [detail, setDetail] = useState(null)   // { item, rel } | null
 
   async function load() {
     const res = await window.kozo?.api?.gameList?.list?.({ status: 'upcoming', limit: 1000, offset: 0 })
-    if (res?.ok) setItems(res.data?.items ?? [])
+    if (res?.ok) {
+      const nextItems = res.data?.items ?? []
+      setItems(nextItems)
+      upcomingCache = nextItems
+    }
   }
 
   useEffect(() => {
