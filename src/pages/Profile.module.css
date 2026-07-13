@@ -21,11 +21,12 @@
 .hero {
   position: relative;
   /* Match the banner CROP's aspect (ImageCropModal saves 1280×440) so the full
-     cropped image is always visible — the old fixed-height clamp re-cropped the
-     banner into a thin slice. max-height only caps truly ultrawide windows. */
+     cropped image is always visible, while capping very wide layouts so the cover
+     does not dominate the page vertically. */
   width: 100%;
   aspect-ratio: 1280 / 440;
   height: auto;
+  max-height: 260px;
   overflow: hidden;
   display: flex;
   align-items: flex-end;
