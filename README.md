@@ -80,6 +80,8 @@ npm run build
 ```
 This regenerates the app icon, builds the renderer with Vite, and packages a Windows installer with `electron-builder`. The output lands in `dist/` (or the configured `electron-builder` output folder). The packaged app runs as `KoZo.exe`.
 
+If you just want to install KoZo without cloning the full project, grab the latest Windows installer from the [GitHub Releases page](https://github.com/MuhannadAl-Srahen/KoZo/releases).
+
 ---
 
 ## 🔑 Connecting Steam

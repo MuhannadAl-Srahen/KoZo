@@ -6,7 +6,7 @@
   "author": "Muhannad Al-Srahen",
   "repository": {
     "type": "git",
-    "url": "https://github.com/REPLACE_ME/KoZo.git"
+    "url": "https://github.com/MuhannadAl-Srahen/KoZo.git"
   },
   "main": "electron/main.js",
   "scripts": {
@@ -36,7 +36,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "REPLACE_ME",
+        "owner": "MuhannadAl-Srahen",
         "repo": "KoZo"
       }
     ]
