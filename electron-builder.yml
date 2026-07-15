@@ -1,10 +1,11 @@
 appId: com.kozo.app
 productName: KoZo
+artifactName: KoZo-Installer-${version}.${ext}
 directories:
   output: release
   buildResources: assets
 files:
-  - dist/**
+  - renderer-dist/**
   - electron/**
   - node_modules/**
   - package.json

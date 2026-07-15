@@ -20,9 +20,13 @@
     "appId": "com.kozo.gametracker",
     "productName": "KoZo",
     "icon": "build/icon.png",
+    "directories": {
+      "output": "release"
+    },
+    "artifactName": "KoZo-Installer-${version}.${ext}",
     "files": [
       "electron/**/*",
-      "dist/**/*",
+      "renderer-dist/**/*",
       "package.json"
     ],
     "win": {
