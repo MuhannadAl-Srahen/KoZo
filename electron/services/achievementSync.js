@@ -69,8 +69,16 @@ function isForeignLauncher(game) {
 // Make sure the game's achievement SCHEMA (names/icons/descriptions) is present.
 // Without it, sync can't match Steam's unlocked api-names to local rows, so NO
 // unlocks ever get recorded — the #1 cause of "I unlocked it but nothing shows".
+// Keyless users get the ownership-independent global fallback (getSchemaKeyless)
+// — the profile XML feed only works for games the user owns, which a cracked
+// game by definition isn't. Failed fetches back off 10 min (keyed on appid so a
+// corrected manual_appid retries immediately); force=true (the manual "Check
+// achievements" button) bypasses the backoff.
 // Returns the (possibly freshly-fetched) local achievement rows.
-async function ensureSchema(gameId) {
+const SCHEMA_RETRY_MS = 10 * 60_000
+const schemaFailAt = new Map()   // `${gameId}:${appid}` → last failed fetch ms
+
+async function ensureSchema(gameId, { force = false } = {}) {
   const { getDb }     = require('../db/database')
   const settingsQ     = require('../db/queries/settings')
   const achievementsQ = require('../db/queries/achievements')
@@ -83,19 +91,28 @@ async function ensureSchema(gameId) {
   // so their schema still auto-loads (otherwise no unlock can ever be recorded).
   const appid = game?.steam_app_id || game?.manual_appid
   if (!appid || isForeignLauncher(game)) return local
+
+  const bk = `${gameId}:${appid}`
+  if (!force && Date.now() - (schemaFailAt.get(bk) || 0) < SCHEMA_RETRY_MS) return local
+
   const apiKey = settingsQ.getSetting('steam_api_key')
   const steamId = settingsQ.getSetting('steam_user_id')
-  if (!apiKey && !steamId) return local
 
   try {
-    const { getSchemaForGame, getGlobalAchievementPercentages, getPlayerAchievementsXml } = require('./steamApi')
+    const { getSchemaForGame, getSchemaKeyless, getGlobalAchievementPercentages, getPlayerAchievementsXml } = require('./steamApi')
     let schema
     if (apiKey) {
       schema = await getSchemaForGame(appid, apiKey)
-    } else {
-      // Keyless: the community XML feed carries names/descriptions/icons too.
+    } else if (steamId) {
+      // Keyless: the community XML feed carries names/descriptions/icons too —
+      // but only for games this profile owns.
       const xml = await getPlayerAchievementsXml(appid, steamId)
       schema = xml.error ? [] : xml.schema
+    }
+    if (!schema || !schema.length) {
+      // No key, or the user doesn't own the game on Steam (every cracked game):
+      // build the schema from Steam's keyless global endpoints instead.
+      schema = await getSchemaKeyless(appid)
     }
     const pcts = await getGlobalAchievementPercentages(appid).catch(() => ({}))
     const achievements = (schema || []).map(a => ({
@@ -111,9 +128,13 @@ async function ensureSchema(gameId) {
       achievementsQ.bulkUpsertAchievements(gameId, achievements)
       logger.info(`ensureSchema: fetched ${achievements.length} achievements for "${game.name}"`)
       local = achievementsQ.listAchievementsForGame(gameId)
+      schemaFailAt.delete(bk)
+    } else {
+      schemaFailAt.set(bk, Date.now())
     }
   } catch (e) {
     logger.warn(`ensureSchema failed for game ${gameId}`, { message: e.message })
+    schemaFailAt.set(bk, Date.now())
   }
   return local
 }
@@ -135,18 +156,22 @@ async function importSchemaFromAppId(gameId, appId) {
   if (!appid || appid < 1) throw new Error('Enter a valid Steam App ID.')
   const apiKey = settingsQ.getSetting('steam_api_key')
   const steamId = settingsQ.getSetting('steam_user_id')
-  if (!apiKey && !steamId) throw new Error('Add a Steam API key in Settings → Steam, or make sure Steam is installed so KoZo can detect your account.')
 
   let schema
   if (apiKey) {
-    schema = await getSchemaForGame(appid, apiKey)
-  } else {
-    // Keyless fallback: works when the user's public profile has stats for
-    // this appid (the XML feed includes the full achievement list + icons).
+    schema = await getSchemaForGame(appid, apiKey).catch(() => [])
+  }
+  if ((!schema || !schema.length) && steamId) {
+    // The community XML feed has the full list + icons — but only for games
+    // this profile owns.
     const { getPlayerAchievementsXml } = require('./steamApi')
-    const xml = await getPlayerAchievementsXml(appid, steamId)
-    if (xml.error) throw new Error('Could not load the achievement list without an API key — add one in Settings → Steam, or make your Steam profile public.')
-    schema = xml.schema
+    const xml = await getPlayerAchievementsXml(appid, steamId).catch(() => ({ error: 'xml_failed' }))
+    if (!xml.error) schema = xml.schema
+  }
+  if (!schema || !schema.length) {
+    // Ownership-independent keyless fallback — works with no key and no account.
+    const { getSchemaKeyless } = require('./steamApi')
+    schema = await getSchemaKeyless(appid)
   }
   const pcts = await getGlobalAchievementPercentages(appid).catch(() => ({}))
   const achievements = (schema || []).map(a => ({
@@ -176,17 +201,17 @@ async function importSchemaFromAppId(gameId, appId) {
 // from the GameDetail "Import achievements" action for games KoZo can't auto-track
 // (Xbox/Epic/GOG/etc.). Skips if the game already has achievements. Returns a
 // structured result so the UI can explain what happened.
-async function autoImportSchemaByName(gameId) {
+async function autoImportSchemaByName(gameId, { force = false } = {}) {
   const { getDb }     = require('../db/database')
-  const settingsQ     = require('../db/queries/settings')
   const achievementsQ = require('../db/queries/achievements')
 
   const game = getDb().prepare('SELECT * FROM games WHERE id = ?').get(gameId)
   if (!game) return { count: 0, reason: 'no_game' }
-  if (achievementsQ.listAchievementsForGame(gameId).length > 0) return { count: 0, reason: 'already' }
-
-  const apiKey = settingsQ.getSetting('steam_api_key')
-  if (!apiKey) return { count: 0, reason: 'no_key' }
+  // force = explicit "Re-import" from the UI: refresh names/icons/rarity even
+  // when the list already exists (upsert keyed on api name — unlocks survive).
+  if (!force && achievementsQ.listAchievementsForGame(gameId).length > 0) return { count: 0, reason: 'already' }
+  // No API key needed: name matching uses the keyless store search, and
+  // importSchemaFromAppId has keyless fallbacks all the way down.
 
   // Prefer an appid we already know; otherwise match by name (confident matches only).
   let appId = game.manual_appid || game.steam_app_id

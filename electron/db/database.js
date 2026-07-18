@@ -64,6 +64,9 @@ function initDatabase() {
     try { db.exec('ALTER TABLE game_list ADD COLUMN display_order REAL') } catch (_) {}
     // Per-game freeform notes (mods installed, save locations, where I left off).
     try { db.exec('ALTER TABLE games ADD COLUMN notes TEXT') } catch (_) {}
+    // Crack save folder found by the deep scan (emulator layouts we don't know a
+    // priori) — scanned and live-watched alongside the fixed candidate paths.
+    try { db.exec('ALTER TABLE games ADD COLUMN crack_dir TEXT') } catch (_) {}
     // Steam release date for Game List entries — powers the Upcoming tab.
     try { db.exec('ALTER TABLE game_list ADD COLUMN release_date TEXT') } catch (_) {}
     // Set once the "it's out now!" notification has fired for an upcoming game.
