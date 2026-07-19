@@ -295,6 +295,13 @@ async function tick() {
       if (!detectingGames.has(game.id)) {
         detectingGames.set(game.id, { game_name: game.name, started_at: new Date(now).toISOString() })
         sendToRenderer('session:detected', { gameId: game.id })
+        // Cracked game → attach the live achievement file watcher NOW (~one poll
+        // after the exe appears) instead of after the sensitivity window, so an
+        // unlock in the opening seconds still surfaces instantly. Idempotent —
+        // the session-start call below becomes a no-op.
+        if (game.is_cracked === 1) {
+          try { require('./crackWatcher').watchGame(game.id) } catch {}
+        }
       }
 
       if (buf.ticks >= ticksNeeded) {
@@ -395,8 +402,13 @@ async function tick() {
     } else if (!isRunning) {
       detectionBuffer.delete(game.id)
       // Game closed before its session officially started — clear the optimistic
-      // "Now Playing" so the indicator doesn't linger.
-      if (detectingGames.delete(game.id)) sendToRenderer('session:undetected', { gameId: game.id })
+      // "Now Playing" so the indicator doesn't linger, and drop the crack watcher
+      // attached at detection (a real session's watcher is detached in endSession;
+      // this branch only runs when there is no session).
+      if (detectingGames.delete(game.id)) {
+        sendToRenderer('session:undetected', { gameId: game.id })
+        try { require('./crackWatcher').unwatchGame(game.id) } catch {}
+      }
     }
   }
 
