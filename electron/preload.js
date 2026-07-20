@@ -76,6 +76,7 @@ contextBridge.exposeInMainWorld('kozo', {
       scanGame: (gameId) => ipcRenderer.invoke('crack:scanGame', gameId),
       scanAll: () => ipcRenderer.invoke('crack:scanAll'),
       diagnose: (gameId) => ipcRenderer.invoke('crack:diagnose', gameId),
+      enableAchievements: (gameId) => ipcRenderer.invoke('crack:enableAchievements', gameId),
     },
     shell: {
       openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
