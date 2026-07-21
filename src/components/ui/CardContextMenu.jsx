@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { IconStar, IconEye, IconEyeOff, IconCircleOff, IconPencil, IconTrash } from '@tabler/icons-react'
+import { IconStar, IconEye, IconEyeOff, IconCircleOff, IconPencil, IconTrash, IconBrandSteam } from '@tabler/icons-react'
 import { STATUS_META } from '../GameCard'
 import s from './CardContextMenu.module.css'
 
@@ -16,6 +16,7 @@ export default function CardContextMenu({
   onToggleFavorite,
   onToggleHidden,          // optional — hide item rendered only when provided
   onEdit,                  // optional — "Edit…" item
+  steamAppId,              // optional — "Open Steam page" item when set
   onDelete,                // optional — danger item with two-click confirm
   deleteLabel = 'Remove',
   deleteHint = '',
@@ -91,6 +92,18 @@ export default function CardContextMenu({
           <button className={s.item} onClick={() => { onEdit(game); onClose() }}>
             <IconPencil size={13} />
             Edit…
+          </button>
+        )}
+        {steamAppId && (
+          <button
+            className={s.item}
+            onClick={() => {
+              window.kozo?.api?.shell?.openExternal(`https://store.steampowered.com/app/${steamAppId}`)
+              onClose()
+            }}
+          >
+            <IconBrandSteam size={13} />
+            Open Steam page
           </button>
         )}
         {onToggleHidden && (

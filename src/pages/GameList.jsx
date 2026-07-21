@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   IconPlus, IconLayoutGrid, IconList, IconLayoutColumns,
   IconDeviceGamepad2, IconPencil, IconSearch,
-  IconCheckbox, IconSquare, IconTrash, IconX, IconCheck, IconStar,
+  IconCheckbox, IconSquare, IconTrash, IconX, IconCheck, IconStar, IconLoader2,
 } from '@tabler/icons-react'
 import { getBannerBg, parseGenres } from '../lib/utils'
 import AddGameToListModal from '../components/modals/AddGameToListModal'
@@ -23,6 +23,12 @@ const STATUS_CONFIG = {
 }
 
 const PAGE_SIZE = 20
+
+// Session-lifetime cache of fetched pages, keyed by page+filters. Switching
+// tabs serves the last result INSTANTLY (covers stay in the browser's image
+// cache instead of re-downloading) and a silent refetch reconciles after.
+const pageCache = new Map()
+
 const VIEW_OPTIONS = [
   { key: 'big',  Icon: IconLayoutColumns, title: 'Big grid' },
   { key: 'grid', Icon: IconLayoutGrid,    title: 'Small grid' },
@@ -195,6 +201,9 @@ export default function GameList() {
   const [activeListId, setActiveListId] = useState(null)   // null = All
   const [view, setView]         = useState(() => localStorage.getItem('kozo:view:gamelist') || 'big')
   const [loading, setLoading]   = useState(true)
+  const [switching, setSwitching] = useState(false)   // filter change with grid kept on screen
+  const itemsRef = useRef([])
+  useEffect(() => { itemsRef.current = items }, [items])
 
   const [showAdd, setShowAdd]   = useState(false)
   const [listModal, setListModal] = useState(null)   // 'new' | list object | null
@@ -282,7 +291,20 @@ export default function GameList() {
 
   const loadItems = useCallback(async (pg = 1, { silent = false, status = statusFilter, genre = genreFilter, listId = activeListId, search = searchText } = {}) => {
     if (!window.kozo?.api) return
-    if (!silent) setLoading(true)
+    const cacheKey = JSON.stringify([pg, status, genre, listId, (search || '').trim()])
+    const cached = pageCache.get(cacheKey)
+    if (cached) {
+      // Serve instantly — no spinner, no unmount, no cover re-download.
+      setItems(cached.items)
+      setTotal(cached.total)
+    } else if (!silent && itemsRef.current.length === 0) {
+      // Full "Loading…" only when there's nothing on screen (cold mount).
+      setLoading(true)
+    } else if (!silent) {
+      // Keep the current grid rendered while the new tab loads — swapping to a
+      // spinner unmounted every card and made covers re-request + jump around.
+      setSwitching(true)
+    }
     const filters = { limit: PAGE_SIZE, offset: (pg - 1) * PAGE_SIZE }
     if (status) filters.status = status
     if (genre)  filters.genre = genre
@@ -290,10 +312,14 @@ export default function GameList() {
     if (search?.trim()) filters.search = search.trim()
     const res = await window.kozo.api.gameList.list(filters)
     if (res?.ok) {
-      setItems(res.data?.items ?? [])
-      setTotal(res.data?.total ?? 0)
+      const items = res.data?.items ?? []
+      const total = res.data?.total ?? 0
+      pageCache.set(cacheKey, { items, total })
+      setItems(items)
+      setTotal(total)
     }
-    if (!silent) setLoading(false)
+    setLoading(false)
+    setSwitching(false)
   }, [statusFilter, genreFilter, activeListId, searchText])
 
   useEffect(() => {
@@ -352,6 +378,13 @@ export default function GameList() {
           <h1 className={s.pageTitle}>
             Game List
             {total > 0 && <span className={s.pageTitleCount}>{total}</span>}
+            {switching && (
+              <IconLoader2
+                size={14}
+                stroke={1.8}
+                style={{ marginLeft: 6, color: 'var(--text-muted)', animation: 'spin 1s linear infinite' }}
+              />
+            )}
           </h1>
 
           {/* Search */}
@@ -665,6 +698,7 @@ export default function GameList() {
           x={ctxMenu.x}
           y={ctxMenu.y}
           game={ctxMenu.item}
+          steamAppId={ctxMenu.item.steam_app_id || null}
           onClose={() => setCtxMenu(null)}
           statuses={STATUS_CONFIG}
           statusField="status"

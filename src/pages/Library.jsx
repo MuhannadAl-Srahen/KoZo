@@ -564,6 +564,7 @@ export default function Library() {
           x={ctxMenu.x}
           y={ctxMenu.y}
           game={ctxMenu.game}
+          steamAppId={ctxMenu.game.steam_app_id || ctxMenu.game.manual_appid || null}
           onClose={() => setCtxMenu(null)}
           onSetStatus={(game, status) => {
             // Optimistic badge update; game:updated reconciles from the DB.
