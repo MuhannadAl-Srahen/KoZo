@@ -41,7 +41,8 @@
       {
         "provider": "github",
         "owner": "MuhannadAl-Srahen",
-        "repo": "KoZo"
+        "repo": "KoZo",
+        "releaseType": "release"
       }
     ]
   },
