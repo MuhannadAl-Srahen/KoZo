@@ -45,7 +45,7 @@ function getOrCreate() {
   _win.setIgnoreMouseEvents(true, { forward: true })
 
   const url = app.isPackaged
-    ? `file://${path.join(__dirname, '../dist/index.html')}?overlay=1`
+    ? `file://${path.join(__dirname, '../renderer-dist/index.html')}?overlay=1`
     : 'http://localhost:5173?overlay=1'
 
   _win.loadURL(url)
