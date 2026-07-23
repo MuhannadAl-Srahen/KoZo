@@ -72,7 +72,12 @@ function createWindow() {
     mainWindow.loadURL('http://localhost:5173')
     if (!startMin) mainWindow.webContents.openDevTools()
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
+    // Vite outputs to renderer-dist (NOT dist) — a wrong path here is a silent
+    // black window in every packaged build.
+    mainWindow.loadFile(path.join(__dirname, '../renderer-dist/index.html'))
+    mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
+      try { require('./logger').error(`main window failed to load renderer: ${desc} (${code}) ${url}`) } catch {}
+    })
   }
 
   mainWindow.once('ready-to-show', () => {

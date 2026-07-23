@@ -17,19 +17,26 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Node stays for the toolchain (vite, electron-builder, gen-icon run on
+      # Node); Bun replaces npm as the package manager — much faster installs.
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
-        run: npm ci
+        run: bun install --frozen-lockfile
 
       - name: Build and publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run build -- --publish always
+        run: |
+          node scripts/gen-icon.js
+          bunx vite build
+          bunx electron-builder --publish always
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
