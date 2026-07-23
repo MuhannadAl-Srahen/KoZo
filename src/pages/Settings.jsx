@@ -1150,16 +1150,28 @@ function AboutTab() {
           </button>
         </div>
         {updState === 'done' && updResult && (
-          <div className={`${s.testResult} ${updResult.updateAvailable ? s.testValid : updResult.error ? s.testInvalid : s.testValid}`} style={{ marginTop: 8 }}>
-            {updResult.dev
-              ? <><IconInfoCircle size={13} stroke={1.8} /> Updates only run in the installed app (dev mode).</>
+          <div className={`${s.testResult} ${updResult.error ? s.testInvalid : s.testValid}`} style={{ marginTop: 8 }}>
+            {updResult.error
+              ? <><IconAlertTriangle size={13} stroke={2} /> {updResult.error === 'timed_out' ? "Couldn't reach the update server — check your connection." : updResult.error}</>
               : updResult.notConfigured
-                ? <><IconInfoCircle size={13} stroke={1.8} /> Update source not configured yet.</>
-                : updResult.error
-                  ? <><IconAlertTriangle size={13} stroke={2} /> {updResult.error === 'timed_out' ? "Couldn't reach the update server — check your connection." : updResult.error}</>
+                ? <><IconInfoCircle size={13} stroke={1.8} /> Update source not configured yet (set build.publish in package.json).</>
+                : updResult.noReleases
+                  ? <><IconInfoCircle size={13} stroke={1.8} /> No releases published on {updResult.repo} yet — build the app and publish a GitHub release to enable updates.</>
                   : updResult.updateAvailable
-                    ? <><IconCheck size={13} stroke={2.5} /> Update {updResult.latest} available — downloading in the background.</>
-                    : <><IconCheck size={13} stroke={2.5} /> You're up to date.</>}
+                    ? <>
+                        <IconCheck size={13} stroke={2.5} />
+                        Update {updResult.latest} available (you have {updResult.current}){updResult.dev || updResult.manualOnly ? '' : ' — downloading in the background.'}
+                        {(updResult.dev || updResult.manualOnly) && updResult.releaseUrl && (
+                          <button
+                            className={s.testBtn}
+                            style={{ marginLeft: 8 }}
+                            onClick={() => window.kozo?.api?.shell?.openExternal(updResult.releaseUrl)}
+                          >
+                            Open release page
+                          </button>
+                        )}
+                      </>
+                    : <><IconCheck size={13} stroke={2.5} /> You're up to date{updResult.latest ? ` — ${updResult.latest} is the latest release` : ''}{updResult.dev ? ' (dev build, checked against GitHub)' : ''}.</>}
           </div>
         )}
       </section>

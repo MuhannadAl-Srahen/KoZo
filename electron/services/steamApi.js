@@ -172,6 +172,89 @@ async function getGlobalAchievementPercentages(appId) {
   }
 }
 
+// Ownership-independent, KEYLESS schema fetch — the only way to get an
+// achievement list for a cracked game the user doesn't own on Steam when no API
+// key is configured. Two keyless Steam sources combined:
+//   1. GetGlobalAchievementPercentagesForApp (api names + percents, no titles)
+//   2. steamcommunity.com/stats/<appid>/achievements (titles/desc/icons, sorted
+//      by percent desc, NO api names)
+// The page rows are zipped onto the percent-sorted api list; if the page can't
+// be fetched/validated we degrade to api-names-only (matching still works —
+// unlock recording only needs api names). Returns getSchemaForGame's shape.
+function decodeEntities(s) {
+  return String(s || '')
+    .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+}
+
+async function getSchemaKeyless(appId) {
+  try {
+    const data = await getJSON(
+      'https://api.steampowered.com/ISteamUserStats/GetGlobalAchievementPercentagesForApp/v2/',
+      { gameid: appId }
+    )
+    const apiList = (data?.achievementpercentages?.achievements ?? [])
+      .slice().sort((a, b) => Number(b.percent) - Number(a.percent))
+    if (!apiList.length) return []
+
+    // Best-effort HTML enrichment from Steam's own global achievements page.
+    let rows = []
+    try {
+      const axios = getAxios()
+      const res = await axios.get(`https://steamcommunity.com/stats/${appId}/achievements`, {
+        params: { l: 'english' },
+        timeout: 30000,
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+        responseType: 'text',
+        transformResponse: [x => x],
+      })
+      const body = String(res.data || '')
+      // Class is "achieveRow " (trailing space) and the <h3> title sits AFTER
+      // the percent div — split on row starts instead of trying to regex-match
+      // balanced divs. Each chunk runs to the next row (or page end).
+      for (const block of body.split(/<div class="achieveRow[^"]*">/).slice(1)) {
+        const icon    = block.match(/<img[^>]*src="([^"]+)"/)?.[1] || null
+        const title   = decodeEntities(block.match(/<h3[^>]*>([\s\S]*?)<\/h3>/)?.[1]?.trim())
+        const desc    = decodeEntities(block.match(/<h5[^>]*>([\s\S]*?)<\/h5>/)?.[1]?.trim())
+        const percent = parseFloat(block.match(/<div class="achievePercent">\s*([\d.]+)%/)?.[1])
+        if (title) rows.push({ icon, title, desc, percent })
+      }
+    } catch { rows = [] }
+
+    // Zip only when counts match AND the percent columns line up (page rounds to
+    // 1 decimal) — a percent-tie can at worst swap display metadata between two
+    // same-rarity achievements; the api name (the matching key) always comes
+    // from the API list, so unlock recording is always correct.
+    const aligned = rows.length === apiList.length &&
+      rows.filter((r, i) => Number.isFinite(r.percent) &&
+        Math.abs(Number(apiList[i].percent) - r.percent) <= 0.2).length >= apiList.length * 0.9
+    if (aligned) {
+      return apiList.map((a, i) => ({
+        name: a.name,
+        displayName: rows[i].title,
+        description: rows[i].desc || null,
+        icon: rows[i].icon,
+        icongray: rows[i].icon,
+        hidden: 0,
+      }))
+    }
+
+    // Degraded mode: api names only — prettify ACH_FOO_BAR-style names.
+    logger.info(`getSchemaKeyless: api-names-only schema for ${appId} (page enrichment unavailable)`)
+    return apiList.map(a => {
+      let display = a.name
+      if (/^[A-Z0-9_.-]+$/.test(display) && /[_.-]/.test(display)) {
+        display = display.replace(/^ach(ievement)?[_.-]+/i, '').replace(/[_.-]+/g, ' ').trim().toLowerCase()
+          .replace(/\b\w/g, c => c.toUpperCase()) || a.name
+      }
+      return { name: a.name, displayName: display, description: null, icon: null, icongray: null, hidden: 0 }
+    })
+  } catch (e) {
+    logger.warn(`getSchemaKeyless failed for ${appId}`, { message: e.message })
+    return []
+  }
+}
+
 // Resolve the REAL (correctly-hashed) art URLs for a game via the store
 // appdetails API. Newer titles serve art only from hashed `store_item_assets`
 // paths whose hash can't be guessed — this is the authoritative source.
@@ -649,6 +732,6 @@ async function runGenreBackfill() {
 module.exports = {
   testApiKey, searchGames, findAppByName, refreshGameData, refreshBanners, downloadBanner,
   getStoreArt, getStoreDetails, resolveBannerUrl, resolveSteamId, runGenreBackfill, storeRemoteFallback,
-  getSchemaForGame, getGlobalAchievementPercentages, getPlayerAchievements, getPlayerAchievementsXml,
+  getSchemaForGame, getSchemaKeyless, getGlobalAchievementPercentages, getPlayerAchievements, getPlayerAchievementsXml,
   getPlayerSummary, getOwnedGames,
 }

@@ -315,7 +315,9 @@ handle('achievements:toggleManual', (achievementId) => {
 // (for Xbox/Epic/etc.) — no App ID typing. Used on add and from GameDetail.
 handle('achievements:autoImport', async (gameId) => {
   const { autoImportSchemaByName } = require('./services/achievementSync')
-  const res = await autoImportSchemaByName(gameId)
+  // Explicit user action — force so "Re-import" refreshes an existing list
+  // instead of bailing with reason 'already'.
+  const res = await autoImportSchemaByName(gameId, { force: true })
   bk()
   return res
 })
@@ -675,7 +677,8 @@ handle('steam:refresh', async (gameId) => {
 
 handle('crack:scanGame', async (gameId) => {
   const { scanGameForCrackAchievements } = require('./services/crackWatcher')
-  return scanGameForCrackAchievements(gameId)
+  // Manual check from the UI — bypass the failed-schema-fetch backoff.
+  return scanGameForCrackAchievements(gameId, { forceSchema: true })
 })
 handle('crack:scanAll', async () => {
   const { scanAllCrackedGames } = require('./services/crackWatcher')
@@ -687,6 +690,14 @@ handle('crack:scanAll', async () => {
 handle('crack:diagnose', (gameId) => {
   const { diagnoseGame } = require('./services/crackWatcher')
   return diagnoseGame(gameId)
+})
+
+// Write the achievement list into a Goldberg crack's steam_settings so the
+// emulator starts tracking and saving unlocks (some repacks ship without it —
+// the game then never records ANY achievement, however long it's played).
+handle('crack:enableAchievements', async (gameId) => {
+  const { enableGoldbergAchievements } = require('./services/crackWatcher')
+  return enableGoldbergAchievements(gameId)
 })
 
 // ── PC Scanner ────────────────────────────────────────────────────────────────
