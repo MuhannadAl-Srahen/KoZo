@@ -5,10 +5,13 @@
   --ab: rgba(167, 139, 250, 0.22);   /* border — 22% alpha */
 
   /* ── Backgrounds ─────────────────────────────────────────────────── */
-  --bg:        #09090f;
-  --surface-1: #0d0d16;   /* sidebar */
-  --surface-2: #0e0e1a;   /* cards */
-  --surface-3: #13131f;   /* inputs */
+  /* Lifted from the original near-black (#09090f base) — cards were nearly
+     indistinguishable from the page behind them. Keep the same hierarchy:
+     bg < surface-1 < surface-2 < surface-3. */
+  --bg:        #10101a;
+  --surface-1: #141420;   /* sidebar */
+  --surface-2: #161624;   /* cards */
+  --surface-3: #1b1b2b;   /* inputs */
 
   /* ── Text ────────────────────────────────────────────────────────── */
   /* Raised contrast across the board — the old secondary/muted were close to
@@ -27,8 +30,8 @@
   /* want-to-play uses var(--a) */
 
   /* ── Borders ─────────────────────────────────────────────────────── */
-  --border:        rgba(255, 255, 255, 0.06);
-  --border-subtle: rgba(255, 255, 255, 0.04);
+  --border:        rgba(255, 255, 255, 0.09);
+  --border-subtle: rgba(255, 255, 255, 0.055);
 
   /* ── Layout ──────────────────────────────────────────────────────── */
   --sidebar-width: 205px;

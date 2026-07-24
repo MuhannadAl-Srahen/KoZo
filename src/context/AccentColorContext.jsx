@@ -89,11 +89,12 @@ export function applyBackgroundTint(accentHex, enabled) {
     for (const v of vars) root.style.removeProperty(v)
     return
   }
+  // Lightness values track the lifted stock palette in variables.css.
   const h = hexHue(accentHex)
-  root.style.setProperty('--bg',        `hsl(${h}, 28%, 4.7%)`)
-  root.style.setProperty('--surface-1', `hsl(${h}, 26%, 6.9%)`)
-  root.style.setProperty('--surface-2', `hsl(${h}, 25%, 7.8%)`)
-  root.style.setProperty('--surface-3', `hsl(${h}, 22%, 10%)`)
+  root.style.setProperty('--bg',        `hsl(${h}, 24%, 8.2%)`)
+  root.style.setProperty('--surface-1', `hsl(${h}, 23%, 10.2%)`)
+  root.style.setProperty('--surface-2', `hsl(${h}, 24%, 11.4%)`)
+  root.style.setProperty('--surface-3', `hsl(${h}, 21%, 13.7%)`)
 }
 
 export function AccentColorProvider({ children }) {
