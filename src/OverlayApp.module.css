@@ -292,6 +292,48 @@
   font-family: 'DM Sans', system-ui, sans-serif;
 }
 
+/* ── Unknown-game toast actions ─────────────────────────────── */
+.unknownActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.unknownAddBtn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 6px;
+  background: var(--a, #a78bfa);
+  color: #09090f;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+.unknownAddBtn:hover { filter: brightness(1.12); }
+
+.unknownNeverBtn {
+  padding: 4px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+.unknownNeverBtn:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+  color: rgba(255, 255, 255, 0.85);
+}
+
 /* ── Progress bar ───────────────────────────────────────────── */
 .progressTrack {
   height: 2px;

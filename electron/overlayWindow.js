@@ -151,14 +151,23 @@ function scheduleIdleDestroy() {
 function markReady() {
   clearTimeout(_fallback); _fallback = null
   _ready = true
+  // Belt-and-braces accent sync: the overlay renderer reads accent_color itself
+  // on mount, but if that read ever races or fails the toasts would silently
+  // fall back to the default purple — push the saved accent so the overlay
+  // always matches the app theme.
+  try {
+    const hex = require('./db/queries/settings').getSetting('accent_color')
+    if (hex) applyAccent(hex)
+  } catch {}
   flush()
 }
 
-function sendAchievements(data)   { _send('achievement:overlay', data) }
-function sendSessionStarted(data) { _send('session:overlay',     data) }
-function sendStatusFlash(data)    { _send('status:overlay',      data) }
-function sendLevelUp(data)        { _send('xp:overlay',          data) }
-function sendSessionEnded(data)   { _send('sessionEnd:overlay',  data) }
+function sendAchievements(data)   { _send('achievement:overlay',     data) }
+function sendSessionStarted(data) { _send('session:overlay',         data) }
+function sendStatusFlash(data)    { _send('status:overlay',          data) }
+function sendLevelUp(data)        { _send('xp:overlay',              data) }
+function sendSessionEnded(data)   { _send('sessionEnd:overlay',      data) }
+function sendUnknownGame(data)    { _send('unknownGame:overlay',      data) }
 
 // Toggle whether the overlay captures mouse clicks. The window is click-through
 // by default (events pass to the game). When the cursor is over a toast the
@@ -185,4 +194,6 @@ function applyAccent(hex) {
   }
 }
 
-module.exports = { getOrCreate, sendAchievements, sendSessionStarted, sendStatusFlash, sendLevelUp, sendSessionEnded, hideOverlay, markReady, setInteractive, applyAccent }
+// getWindow lets ipc.js tell the overlay apart from the main window (e.g. to
+// focus the main window when an overlay notification is clicked).
+module.exports = { getOrCreate, getWindow: () => _win, sendAchievements, sendSessionStarted, sendStatusFlash, sendLevelUp, sendSessionEnded, sendUnknownGame, hideOverlay, markReady, setInteractive, applyAccent }

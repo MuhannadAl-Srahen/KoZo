@@ -245,13 +245,36 @@ handle('games:launch', async (id) => {
   if (hasUsableLocalExe) {
     const fullPath = path.join(game.install_path, game.exe_name)
     const { spawn } = require('child_process')
-    const child = spawn(fullPath, [], {
-      detached: true,
-      stdio: 'ignore',
-      cwd: game.install_path,
-    })
-    child.unref()
-    return { launched: 'spawn', path: fullPath }
+    try {
+      await new Promise((resolve, reject) => {
+        const child = spawn(fullPath, [], {
+          detached: true,
+          stdio: 'ignore',
+          cwd: game.install_path,
+        })
+        child.once('spawn', () => { child.unref(); resolve() })
+        child.once('error', reject)
+      })
+      return { launched: 'spawn', path: fullPath }
+    } catch (e) {
+      // EACCES/EPERM here usually means the exe's manifest demands elevation
+      // (common with repacks) — spawn can't show a UAC prompt. Relaunch through
+      // ShellExecute (Start-Process), which can, keeping the game's own folder
+      // as the working directory. Before this, the async spawn 'error' event
+      // had no listener and crashed main with an uncaught-exception dialog.
+      logger.warn(`spawn failed (${e.code || e.message}) — retrying via ShellExecute: ${fullPath}`)
+      const psPath = fullPath.replace(/'/g, "''")
+      const psCwd  = game.install_path.replace(/'/g, "''")
+      await new Promise((resolve, reject) => {
+        const ps = spawn('powershell.exe',
+          ['-NoProfile', '-WindowStyle', 'Hidden', '-Command',
+           `Start-Process -FilePath '${psPath}' -WorkingDirectory '${psCwd}'`],
+          { detached: true, stdio: 'ignore', windowsHide: true })
+        ps.once('spawn', () => { ps.unref(); resolve() })
+        ps.once('error', reject)
+      })
+      return { launched: 'shell-elevated', path: fullPath }
+    }
   }
 
   // Cracked games: never fall back to Steam — that's the wrong client.
@@ -1059,6 +1082,21 @@ handle('overlay:setInteractive', (interactive) => {
 // Push a live accent change to the overlay window so its toasts match the app.
 handle('overlay:applyAccent', (hex) => {
   try { require('./overlayWindow').applyAccent(hex) } catch {}
+  return true
+})
+
+// "Add to library" on the overlay's New-Game-Detected notification: bring the
+// main window to the front and hand the exe to its add-game flow (the renderer
+// prefills the Add modal from this event).
+handle('overlay:addUnknownGame', (data) => {
+  const { BrowserWindow } = require('electron')
+  const overlayWin = require('./overlayWindow').getWindow()
+  const target = BrowserWindow.getAllWindows().find(w => !w.isDestroyed() && w !== overlayWin)
+  if (!target) return false
+  if (target.isMinimized()) target.restore()
+  target.show()
+  target.focus()
+  target.webContents.send('unknown-process:add', data || {})
   return true
 })
 
