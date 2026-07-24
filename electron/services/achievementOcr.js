@@ -17,9 +17,14 @@
 
 const POLL_MS = 6000
 
+// Screenshots are downscaled to at most this width before OCR. Banner text is
+// still perfectly legible, and it cuts OCR cost ~4-6x on high-DPI displays.
+const MAX_CAPTURE_WIDTH = 1600
+
 const active = new Map()   // gameId -> setInterval handle
 let worker = null
 let workerPromise = null
+let scanBusy = false       // single-flight: a slow OCR pass must never stack
 
 function isEnabled() {
   try {
@@ -89,6 +94,11 @@ function findMatch(lines, achievements) {
 }
 
 async function scanOnce(gameId) {
+  // One pass at a time: on a slow machine (or 4K screen) OCR can take longer
+  // than the poll interval — without this guard, passes stack up and the whole
+  // app starts stuttering.
+  if (scanBusy) return
+  scanBusy = true
   try {
     const gamesQ = require('../db/queries/games')
     const achievementsQ = require('../db/queries/achievements')
@@ -98,7 +108,10 @@ async function scanOnce(gameId) {
     if (!achievements.some(a => !a.unlocked_at)) return   // nothing left to catch
 
     const { desktopCapturer, screen } = require('electron')
-    const { width, height } = screen.getPrimaryDisplay().size
+    const display = screen.getPrimaryDisplay().size
+    const scale = Math.min(1, MAX_CAPTURE_WIDTH / display.width)
+    const width  = Math.round(display.width * scale)
+    const height = Math.round(display.height * scale)
     const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width, height } })
     if (!sources.length) return
     const png = sources[0].thumbnail.toPNG()
@@ -123,6 +136,8 @@ async function scanOnce(gameId) {
     try { require('../logger').info(`achievementOcr: matched "${match.display_name}" for "${game.name}" from on-screen text`) } catch {}
   } catch (e) {
     try { require('../logger').warn('achievementOcr.scanOnce: ' + e.message) } catch {}
+  } finally {
+    scanBusy = false
   }
 }
 

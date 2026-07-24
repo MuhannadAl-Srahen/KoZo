@@ -684,7 +684,7 @@ handle('steam:refresh', async (gameId) => {
     playerSync = await syncPlayerUnlocks(gameId).catch(() => ({ added: 0 }))
   }
 
-  const crackScan = await scanGameForCrackAchievements(gameId)
+  const crackScan = await scanGameForCrackAchievements(gameId, { fresh: true })
     .catch(() => ({ added: 0, hits: [], scannedPaths: [] }))
 
   return {
@@ -700,8 +700,9 @@ handle('steam:refresh', async (gameId) => {
 
 handle('crack:scanGame', async (gameId) => {
   const { scanGameForCrackAchievements } = require('./services/crackWatcher')
-  // Manual check from the UI — bypass the failed-schema-fetch backoff.
-  return scanGameForCrackAchievements(gameId, { forceSchema: true })
+  // Manual check from the UI — bypass the failed-schema-fetch backoff AND the
+  // poll's cached directory walk.
+  return scanGameForCrackAchievements(gameId, { forceSchema: true, fresh: true })
 })
 handle('crack:scanAll', async () => {
   const { scanAllCrackedGames } = require('./services/crackWatcher')

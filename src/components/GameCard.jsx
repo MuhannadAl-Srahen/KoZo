@@ -86,8 +86,8 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
           }
           return (
             <>
-              <img src={src} className={s.bannerBlur} alt="" aria-hidden="true" onError={handleError} />
-              <img src={src} className={s.bannerImg} alt="" onError={handleError} />
+              <img src={src} className={s.bannerBlur} alt="" aria-hidden="true" loading="lazy" decoding="async" onError={handleError} />
+              <img src={src} className={s.bannerImg} alt="" loading="lazy" decoding="async" onError={handleError} />
             </>
           )
         })()}
@@ -249,8 +249,8 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite, onConte
           }
           return (
             <>
-              <img src={src} className={s.listThumbBlur} alt="" aria-hidden="true" onError={handleError} />
-              <img src={src} className={s.listThumbImg} alt="" onError={handleError} />
+              <img src={src} className={s.listThumbBlur} alt="" aria-hidden="true" loading="lazy" decoding="async" onError={handleError} />
+              <img src={src} className={s.listThumbImg} alt="" loading="lazy" decoding="async" onError={handleError} />
             </>
           )
         })()}
