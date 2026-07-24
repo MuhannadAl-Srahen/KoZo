@@ -132,6 +132,9 @@ const HARD_DENY = new Set([
   // Anti-cheat services (run alongside games, not the game)
   'easyanticheat.exe','easyanticheat_eos.exe',
   'beservice.exe','beservice_x64.exe',
+  // Wallpaper Engine (lives in steamapps\common but is not a game)
+  'wallpaper32.exe','wallpaper64.exe','ui32.exe','ui64.exe',
+  'webwallpaper32.exe','webwallpaper64.exe','wallpaperservice32_c.exe',
   // Store launcher helpers
   'epicwebhelper.exe','originclientservice.exe','origincrashdump.exe',
   'gameoverlayrenderer.exe','gameoverlayrenderer64.exe','gameoverlayui.exe',
@@ -163,6 +166,7 @@ const GAME_PATH_HINTS = [
 
 // Paths that DEFINITELY aren't games even if some other hint matches.
 const NON_GAME_PATH_HINTS = [
+  '\\wallpaper_engine\\',
   '\\windows\\', '\\system32\\', '\\syswow64\\',
   '\\windowsapps\\', '\\microsoft\\edge', '\\microsoft\\onedrive',
   '\\common files\\',

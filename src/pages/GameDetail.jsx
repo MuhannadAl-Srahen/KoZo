@@ -551,7 +551,7 @@ export default function GameDetail() {
         setInfo({
           variant: 'warning',
           title: 'This is the Games for Windows LIVE version',
-          message: 'KoZo found xlive.dll in the install folder — this build predates Steam achievements entirely (its achievements lived in the long-dead GFWL service), so NO tool can read unlocks from it. To get automatic tracking you\'d need the Complete Edition build with a Steam emulator. The achievement list is loaded — mark your unlocks manually by clicking them below.',
+          message: 'KoZo found xlive.dll in the install folder — this build predates Steam achievements entirely (its achievements lived in the long-dead GFWL service), so NO tool can read unlocks from it. To get automatic tracking you\'d need the Complete Edition build with a Steam emulator. The achievement list is loaded. While you play, KoZo also watches the screen for the game\'s own unlock popups (OCR) and marks a match automatically — anything it misses you can click below.',
           lines,
         })
         break
@@ -560,7 +560,7 @@ export default function GameDetail() {
         setInfo({
           variant: 'warning',
           title: 'No Steam emulator found in this crack',
-          message: 'KoZo checked the install folder (configs AND dlls) and found no Steam emulator at all — so this crack doesn\'t produce unlock files anywhere. The achievement list is loaded — mark your unlocks manually by clicking them below. If the game DOES show achievement popups in-game, play a bit and run this check again — the deep scan will catch any file the crack writes under this game\'s AppID.',
+          message: 'KoZo checked the install folder (configs AND dlls) and found no Steam emulator at all — so this crack doesn\'t produce unlock files anywhere (some, like this one, use their own launcher\'s stats system instead of Steam). The achievement list is loaded. While you play, KoZo watches the screen for the game\'s own unlock popups (OCR) and marks a match automatically — anything it misses you can click below. If the game DOES show achievement popups in-game, play a bit and run this check again — the deep scan will catch any file the crack writes under this game\'s AppID.',
           lines,
         })
         break

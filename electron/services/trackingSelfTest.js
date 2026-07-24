@@ -84,7 +84,9 @@ async function runSelfTest() {
     // 4. Run the REAL crack scanner against the synthetic file.
     let scan
     try {
-      scan = await require('./crackWatcher').scanGameForCrackAchievements(gameId)
+      // fresh: the synthetic file was written moments ago — a cached directory
+      // walk from the background poll would miss it and fail the test.
+      scan = await require('./crackWatcher').scanGameForCrackAchievements(gameId, { fresh: true })
       const hit = scan.hits?.[0]
       step(
         'Crack scanner finds & parses the file',

@@ -129,6 +129,7 @@ contextBridge.exposeInMainWorld('kozo', {
       ready: () => ipcRenderer.invoke('overlay:ready'),
       setInteractive: (v) => ipcRenderer.invoke('overlay:setInteractive', v),
       applyAccent: (hex) => ipcRenderer.invoke('overlay:applyAccent', hex),
+      addUnknownGame: (data) => ipcRenderer.invoke('overlay:addUnknownGame', data),
     },
     app: {
       getStartup: () => ipcRenderer.invoke('app:getStartup'),
@@ -174,6 +175,9 @@ contextBridge.exposeInMainWorld('kozo', {
     onStatusOverlay: (cb) => {
       ipcRenderer.on('status:overlay', (_, data) => cb(data))
     },
+    onUnknownGameOverlay: (cb) => {
+      ipcRenderer.on('unknownGame:overlay', (_, data) => cb(data))
+    },
     onXpOverlay: (cb) => {
       ipcRenderer.on('xp:overlay', (_, data) => cb(data))
     },
@@ -186,8 +190,8 @@ contextBridge.exposeInMainWorld('kozo', {
     onAccentChanged: (cb) => {
       ipcRenderer.on('accent:changed', (_, hex) => cb(hex))
     },
-    onUnknownProcess: (cb) => {
-      ipcRenderer.on('unknown-process', (_, data) => cb(data))
+    onUnknownProcessAdd: (cb) => {
+      ipcRenderer.on('unknown-process:add', (_, data) => cb(data))
     },
     removeAll: (channel) => {
       ipcRenderer.removeAllListeners(channel)

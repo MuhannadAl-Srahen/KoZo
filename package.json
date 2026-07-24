@@ -29,6 +29,11 @@
       "renderer-dist/**/*",
       "package.json"
     ],
+    "asarUnpack": [
+      "node_modules/tesseract.js/**",
+      "node_modules/tesseract.js-core/**",
+      "node_modules/wasm-feature-detect/**"
+    ],
     "win": {
       "target": "nsis",
       "executableName": "KoZo",
@@ -64,7 +69,8 @@
     "ps-list": "^9.0.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-router-dom": "^7.17.0"
+    "react-router-dom": "^7.17.0",
+    "tesseract.js": "^7.0.0"
   },
   "trustedDependencies": [
     "electron"

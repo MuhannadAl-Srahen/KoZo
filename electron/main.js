@@ -42,7 +42,7 @@ function createWindow() {
     height: 800,
     minWidth: 960,
     minHeight: 600,
-    backgroundColor: '#09090f',
+    backgroundColor: '#10101a',
     show: false,
     autoHideMenuBar: true,
     icon: require('./appIcon').getWindowImage(),
@@ -201,14 +201,13 @@ app.whenReady().then(() => {
   const trayHandle = setupTray(mainWindow, watcher)
   watcher.onChange(() => trayHandle?.refreshMenu())
 
-  // Prompt user to add unrecognized game-like processes to the library. Send to
-  // the actual main window (not getAllWindows()[0], which can be the overlay
-  // after a tray re-create), falling back to broadcasting to all renderers.
-  watcher.onUnknownProcess(({ exe_name, install_path }) => {
-    const target = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null
-    if (target) target.webContents.send('unknown-process', { exe_name, install_path })
-    else for (const w of BrowserWindow.getAllWindows()) {
-      if (!w.isDestroyed()) w.webContents.send('unknown-process', { exe_name, install_path })
+  // "New game detected" is a notification now: it goes to the overlay window
+  // (visible over any game or the desktop) instead of a card inside the app.
+  // The overlay's "Add to library" button calls back via overlay:addUnknownGame,
+  // which brings up the main window with the Add flow prefilled.
+  watcher.onUnknownProcess((data) => {
+    try { require('./overlayWindow').sendUnknownGame(data) } catch (e) {
+      try { require('./logger').warn('unknown-game notify failed: ' + e.message) } catch {}
     }
   })
 })

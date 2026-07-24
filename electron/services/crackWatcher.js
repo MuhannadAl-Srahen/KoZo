@@ -472,7 +472,21 @@ const SKIP_DIRS = new Set([
   'steam_settings',
 ])
 
-function recursiveScan(rootPath, appid) {
+// recursiveScan runs on every in-session sync poll (10s) — walking a game
+// install (up to 4 roots x 4000 entries) with SYNCHRONOUS readdir on the main
+// process every few seconds caused visible app stutter. Directory structure
+// rarely changes mid-session, so memoize the hit list per root for a few
+// minutes: the chokidar live watcher and the fixed-path candidates still catch
+// fresh unlock writes instantly, and every manual/diagnostic path passes
+// fresh=true to bypass the cache.
+const RECURSIVE_SCAN_TTL_MS = 3 * 60 * 1000
+const recursiveScanCache = new Map()   // `${root}|${appid}` -> { at, hits }
+
+function recursiveScan(rootPath, appid, fresh = false) {
+  const cacheKey = `${String(rootPath || '').toLowerCase()}|${appid || ''}`
+  const cached = recursiveScanCache.get(cacheKey)
+  if (!fresh && cached && Date.now() - cached.at < RECURSIVE_SCAN_TTL_MS) return cached.hits
+
   const hits = []
   if (!rootPath || !exists(rootPath)) return hits
   let visited = 0
@@ -502,6 +516,7 @@ function recursiveScan(rootPath, appid) {
     }
   }
   walk(rootPath, 0)
+  recursiveScanCache.set(cacheKey, { at: Date.now(), hits })
   return hits
 }
 
@@ -587,10 +602,10 @@ const BINARY_SUBDIRS = new Set([
   'shipping', 'retail', 'game', 'app',
 ])
 
-function collectCandidates(game) {
+function collectCandidates(game, fresh = false) {
   const gameAppid = game.steam_app_id || game.manual_appid
   const fixed     = buildCandidates(game)
-  const recursive = recursiveScan(game.install_path, gameAppid)
+  const recursive = recursiveScan(game.install_path, gameAppid, fresh)
 
   // The install folder's own emu config may declare a DIFFERENT appid than the
   // one KoZo stored (repacks do this) — emulator save folders are keyed by the
@@ -613,15 +628,15 @@ function collectCandidates(game) {
     const parent2 = path.dirname(parent1)
     const root    = path.parse(game.install_path).root
     if (parent1 !== game.install_path && parent1 !== root) {
-      extraRecursive = [...extraRecursive, ...recursiveScan(parent1, gameAppid)]
+      extraRecursive = [...extraRecursive, ...recursiveScan(parent1, gameAppid, fresh)]
     }
     if (parent2 !== parent1 && parent2 !== root) {
-      extraRecursive = [...extraRecursive, ...recursiveScan(parent2, gameAppid)]
+      extraRecursive = [...extraRecursive, ...recursiveScan(parent2, gameAppid, fresh)]
     }
   }
 
   // Save folder a previous deep scan discovered — always included.
-  const crackDirHits = game.crack_dir ? recursiveScan(game.crack_dir, gameAppid) : []
+  const crackDirHits = game.crack_dir ? recursiveScan(game.crack_dir, gameAppid, fresh) : []
 
   const all = [...fixed, ...configCandidates, ...recursive, ...extraRecursive, ...crackDirHits]
   const seen = new Set()
@@ -652,7 +667,7 @@ async function scanGameForCrackAchievements(gameId, opts = {}) {
   // forceSchema (manual "Check achievements") bypasses the failed-fetch backoff.
   try { await require('./achievementSync').ensureSchema(gameId, { force: !!opts.forceSchema }) } catch {}
 
-  const { unique } = collectCandidates(game)
+  const { unique } = collectCandidates(game, !!opts.fresh)
 
   // Load schema names for SSE CRC matching
   let schemaNames = null
@@ -758,8 +773,9 @@ async function diagnoseGame(gameId) {
   const emulator     = detectEmulator(game.install_path)
   const goldberg     = emulator === 'Goldberg' ? inspectGoldberg(game.install_path) : null
 
-  // The exact same candidate list the scanner reads.
-  const { unique, configIds: configAppIds } = collectCandidates(game)
+  // The exact same candidate list the scanner reads. Always a fresh walk —
+  // a diagnosis must reflect what's on disk right now, never the poll cache.
+  const { unique, configIds: configAppIds } = collectCandidates(game, true)
   const mismatch = !!(storedAppId && configAppIds.length &&
                       !configAppIds.includes(String(storedAppId)))
 
@@ -968,7 +984,9 @@ function scheduleScan(gameId) {
   clearTimeout(scanDebounce.get(gameId))
   scanDebounce.set(gameId, setTimeout(() => {
     scanDebounce.delete(gameId)
-    scanGameForCrackAchievements(gameId).catch(e =>
+    // fresh: a file just changed on disk — this pass exists to pick it up, so
+    // it must never be served the cached directory walk.
+    scanGameForCrackAchievements(gameId, { fresh: true }).catch(e =>
       logger.warn(`crackWatcher: live re-scan failed for game ${gameId}`, { message: e.message }))
   }, 500))
 }
@@ -979,10 +997,22 @@ const WATCH_NAMES = new Set([
 ])
 
 function watchGame(gameId) {
-  if (fileWatchers.has(gameId)) return
   let game
   try { game = require('../db/queries/games').getGame(gameId) } catch { return }
   if (!game || game.is_cracked !== 1) return  // SQLite boolean
+
+  // No Steam emulator (and not GFWL) means nothing is EVER written to disk
+  // when an achievement pops — file-watching below has nothing to watch.
+  // Fall back to screenshotting + OCR-matching the game's own on-screen
+  // popup against its imported achievement list. Independent of the
+  // file-watch path below (which can legitimately have nothing to watch).
+  try {
+    const emu = detectEmulator(game.install_path)
+    if (!emu || emu === 'GFWL') require('./achievementOcr').start(gameId)
+    else require('./achievementOcr').stop(gameId)
+  } catch {}
+
+  if (fileWatchers.has(gameId)) return
 
   const { existing, pending } = dirsToWatch(game)
   if (!existing.length && !pending.length) return
@@ -1063,6 +1093,7 @@ function unwatchGame(gameId) {
   if (w) { try { w.close() } catch {} ; fileWatchers.delete(gameId) }
   clearInterval(pendingPollers.get(gameId)); pendingPollers.delete(gameId)
   clearTimeout(scanDebounce.get(gameId)); scanDebounce.delete(gameId)
+  try { require('./achievementOcr').stop(gameId) } catch {}
 }
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
@@ -1076,6 +1107,9 @@ function startWatching() {
 function stopWatching() {
   if (scanTimer) { clearInterval(scanTimer); scanTimer = null }
   for (const id of [...fileWatchers.keys()]) unwatchGame(id)
+  // Games with no file-watch dirs at all (nothing but OCR watching them,
+  // e.g. our GTA IV case) never end up in fileWatchers — stop OCR directly.
+  try { require('./achievementOcr').stopAll() } catch {}
 }
 
 module.exports = {

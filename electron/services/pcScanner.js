@@ -33,6 +33,8 @@ const SKIP_FOLDERS = new Set([
   'intel','nvidia corporation','amd','microsoft','common files','windows kits',
   '.net framework','internet explorer','windowsapps','microsoft office',
   'microsoft visual studio','msbuild','windows defender',
+  // Non-game Steam apps / desktop tools that live in game libraries
+  'wallpaper engine','wallpaper_engine','soundpad','vtube studio',
   // Tools
   'cheat engine','cheatengine','autohotkey','7-zip','winrar','notepad++',
   'ruxim','ruxim folderwatcher','trcccap','tcno account switcher',

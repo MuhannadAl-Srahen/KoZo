@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { IconTrophy, IconPlayerPlay, IconX, IconClock, IconDeviceGamepad2, IconSparkles, IconArrowBigUpLines } from '@tabler/icons-react'
+import { IconTrophy, IconPlayerPlay, IconX, IconClock, IconDeviceGamepad2, IconSparkles, IconArrowBigUpLines, IconPlus } from '@tabler/icons-react'
 import { applyAccent } from './context/AccentColorContext'
 import { fileUrl } from './lib/utils'
+import { playAchievement, playLevelUp, playSessionStart } from './lib/sounds'
 import s from './OverlayApp.module.css'
 
 // Cover-art thumb for session toasts — local cached banner first, CDN fallback,
@@ -124,9 +125,13 @@ function StatusToast({ toast, onDismiss }) {
         <span className={s.toastHeaderText}>{idle ? 'KoZo' : 'Session'}</span>
       </div>
       <div className={s.toastBody}>
-        <div className={`${s.toastIcon} ${s.sessionIcon}`}>
-          <IconDeviceGamepad2 size={22} stroke={1.5} style={{ color: 'var(--a)' }} />
-        </div>
+        {(toast.artPath || toast.artUrl) ? (
+          <ToastArt artPath={toast.artPath} artUrl={toast.artUrl} />
+        ) : (
+          <div className={`${s.toastIcon} ${s.sessionIcon}`}>
+            <IconDeviceGamepad2 size={22} stroke={1.5} style={{ color: 'var(--a)' }} />
+          </div>
+        )}
         <div className={s.toastInfo}>
           <div className={s.toastName}>{gameName}</div>
           {idle ? (
@@ -245,15 +250,15 @@ function OverlayToast({ toast, onDismiss }) {
         <span className={s.toastHeaderText}>{title}</span>
       </div>
 
-      {/* Body — achievement icon first, game cover if the icon is missing
-          (cracked games often have no icon art), trophy as the last resort */}
+      {/* Body — game cover first (all toasts lead with the cover), the
+          achievement's own icon when no cover is cached, trophy last */}
       <div className={s.toastBody}>
-        {displayAch?.icon_url ? (
+        {(toast.artPath || toast.artUrl) ? (
+          <ToastArt artPath={toast.artPath} artUrl={toast.artUrl} />
+        ) : displayAch?.icon_url ? (
           <div className={s.toastIcon}>
             <img src={displayAch.icon_url} alt="" onError={e => { e.target.style.display = 'none' }} />
           </div>
-        ) : (toast.artPath || toast.artUrl) ? (
-          <ToastArt artPath={toast.artPath} artUrl={toast.artUrl} />
         ) : (
           <div className={s.toastIcon}>
             <IconTrophy size={28} stroke={1.3} style={{ color: 'var(--a)' }} />
@@ -276,6 +281,74 @@ function OverlayToast({ toast, onDismiss }) {
       {/* Progress timer bar */}
       <div className={s.progressTrack}>
         <div className={s.progressFill} style={{ width: `${progress}%` }} />
+      </div>
+    </div>
+  )
+}
+
+// ── Unknown-game toast ────────────────────────────────────────────────────────
+// "New game detected" now surfaces as an overlay notification (visible over any
+// game or the desktop) instead of a card inside the app. "Add to library"
+// brings up the main window with the Add flow prefilled; "Never" persists the
+// exe so it's not offered again. localStorage is shared with the main window
+// (same origin), so dismissals from the old in-app card still count.
+
+const DISMISSED_KEY = 'kozo:dismissed-exes'
+
+function loadDismissed() {
+  try { return new Set(JSON.parse(localStorage.getItem(DISMISSED_KEY) || '[]')) }
+  catch { return new Set() }
+}
+
+function dismissForever(exeName) {
+  try {
+    const set = loadDismissed()
+    set.add(exeName.toLowerCase())
+    localStorage.setItem(DISMISSED_KEY, JSON.stringify([...set]))
+  } catch {}
+}
+
+function UnknownGameToast({ toast, onDismiss }) {
+  const { leaving, close } = useAutoClose(onDismiss, 12000)
+  const folderHint = toast.install_path
+    ? toast.install_path.split(/[\\/]/).slice(-2).join('\\')
+    : null
+
+  function add(e) {
+    e.stopPropagation()
+    try { window.kozo?.api?.overlay?.addUnknownGame?.({ exe_name: toast.exe_name, install_path: toast.install_path }) } catch {}
+    close()
+  }
+
+  function never(e) {
+    e.stopPropagation()
+    dismissForever(toast.exe_name)
+    close()
+  }
+
+  return (
+    <div className={`${s.toast} ${leaving ? s.toastOut : s.toastIn}`}
+      {...toastInteractions(close)}>
+      <CloseButton close={close} />
+      <div className={s.toastHeader}>
+        <IconDeviceGamepad2 size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
+        <span className={s.toastHeaderText}>New Game Detected</span>
+      </div>
+      <div className={s.toastBody}>
+        <div className={s.toastIcon}>
+          <IconDeviceGamepad2 size={22} stroke={1.5} style={{ color: 'var(--a)' }} />
+        </div>
+        <div className={s.toastInfo}>
+          <div className={s.toastName}>{toast.exe_name}</div>
+          {folderHint && <div className={s.toastDesc}>from {folderHint}</div>}
+          <div className={s.unknownActions}>
+            <button className={s.unknownAddBtn} onClick={add}>
+              <IconPlus size={12} stroke={2.4} />
+              Add to library
+            </button>
+            <button className={s.unknownNeverBtn} onClick={never}>Never ask</button>
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -305,6 +378,7 @@ export default function OverlayApp() {
   useEffect(() => {
     // Spread the FULL payload — main sends artPath/artUrl for the cover thumb.
     window.kozo?.events?.onSessionOverlay?.((data) => {
+      playSessionStart()
       setToasts(q => [...q, { id: ++nextId.current, type: 'session', ...data }].slice(-4))
     })
 
@@ -320,6 +394,7 @@ export default function OverlayApp() {
     window.kozo?.events?.onAchievementOverlay?.(({ achievements, gameName, artPath, artUrl }) => {
       const list = achievements || []
       if (!list.length) return
+      playAchievement()   // one chime per event, even when batched below
       // Batch many at once into a summary so we don't flood the screen
       const newToasts = list.length > 3
         ? [{ id: ++nextId.current, summary: { count: list.length, first: list[0] }, gameName, artPath, artUrl }]
@@ -329,10 +404,22 @@ export default function OverlayApp() {
 
     // XP: level-up celebration + post-session "+N XP" summary.
     window.kozo?.events?.onXpOverlay?.((data) => {
+      playLevelUp()
       setToasts(q => [...q, { id: ++nextId.current, type: 'levelup', ...data }].slice(-4))
     })
     window.kozo?.events?.onSessionEndOverlay?.((data) => {
       setToasts(q => [...q, { id: ++nextId.current, type: 'sessionEnd', ...data }].slice(-4))
+    })
+
+    // "New game detected" notification. Skips exes the user said never to ask
+    // about again, and never stacks a duplicate for the same exe.
+    window.kozo?.events?.onUnknownGameOverlay?.((data) => {
+      if (!data?.exe_name) return
+      const key = data.exe_name.toLowerCase()
+      if (loadDismissed().has(key)) return
+      setToasts(q => q.some(t => t.type === 'unknown' && t.exe_name?.toLowerCase() === key)
+        ? q
+        : [...q, { id: ++nextId.current, type: 'unknown', ...data }].slice(-4))
     })
 
     // Tell main both listeners are attached — it flushes any queued messages
@@ -347,6 +434,7 @@ export default function OverlayApp() {
       window.kozo?.events?.removeAll?.('status:overlay')
       window.kozo?.events?.removeAll?.('xp:overlay')
       window.kozo?.events?.removeAll?.('sessionEnd:overlay')
+      window.kozo?.events?.removeAll?.('unknownGame:overlay')
     }
   }, [])
 
@@ -370,6 +458,8 @@ export default function OverlayApp() {
           ? <LevelUpToast    key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
           : t.type === 'sessionEnd'
           ? <SessionEndToast key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
+          : t.type === 'unknown'
+          ? <UnknownGameToast key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
           : <OverlayToast    key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
       )}
     </div>
