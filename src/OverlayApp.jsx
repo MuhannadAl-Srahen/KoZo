@@ -125,9 +125,13 @@ function StatusToast({ toast, onDismiss }) {
         <span className={s.toastHeaderText}>{idle ? 'KoZo' : 'Session'}</span>
       </div>
       <div className={s.toastBody}>
-        <div className={`${s.toastIcon} ${s.sessionIcon}`}>
-          <IconDeviceGamepad2 size={22} stroke={1.5} style={{ color: 'var(--a)' }} />
-        </div>
+        {(toast.artPath || toast.artUrl) ? (
+          <ToastArt artPath={toast.artPath} artUrl={toast.artUrl} />
+        ) : (
+          <div className={`${s.toastIcon} ${s.sessionIcon}`}>
+            <IconDeviceGamepad2 size={22} stroke={1.5} style={{ color: 'var(--a)' }} />
+          </div>
+        )}
         <div className={s.toastInfo}>
           <div className={s.toastName}>{gameName}</div>
           {idle ? (
@@ -246,15 +250,15 @@ function OverlayToast({ toast, onDismiss }) {
         <span className={s.toastHeaderText}>{title}</span>
       </div>
 
-      {/* Body — achievement icon first, game cover if the icon is missing
-          (cracked games often have no icon art), trophy as the last resort */}
+      {/* Body — game cover first (all toasts lead with the cover), the
+          achievement's own icon when no cover is cached, trophy last */}
       <div className={s.toastBody}>
-        {displayAch?.icon_url ? (
+        {(toast.artPath || toast.artUrl) ? (
+          <ToastArt artPath={toast.artPath} artUrl={toast.artUrl} />
+        ) : displayAch?.icon_url ? (
           <div className={s.toastIcon}>
             <img src={displayAch.icon_url} alt="" onError={e => { e.target.style.display = 'none' }} />
           </div>
-        ) : (toast.artPath || toast.artUrl) ? (
-          <ToastArt artPath={toast.artPath} artUrl={toast.artUrl} />
         ) : (
           <div className={s.toastIcon}>
             <IconTrophy size={28} stroke={1.3} style={{ color: 'var(--a)' }} />

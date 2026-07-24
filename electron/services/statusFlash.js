@@ -9,6 +9,7 @@
 function buildPayload() {
   const watcher = require('./processWatcher')
   const achievementsQ = require('../db/queries/achievements')
+  const gamesQ = require('../db/queries/games')
 
   const sessions = [...watcher.getActiveSessions().values()]
   const now = Date.now()
@@ -25,11 +26,21 @@ function buildPayload() {
       unlocked = achs.filter(a => a.unlocked_at).length
     } catch { /* no achievements is fine */ }
 
+    // Cover art for the card — same fields the session/achievement toasts use.
+    let artPath = null, artUrl = null
+    try {
+      const game = gamesQ.getGame(sess.game_id)
+      artPath = game?.banner_local_path || game?.hero_local_path || null
+      artUrl  = game?.banner_url || null
+    } catch { /* icon fallback */ }
+
     return {
       gameName: sess.game_name || 'Now Playing',
       elapsedSec,
       unlocked,
       total,
+      artPath,
+      artUrl,
     }
   })
 
