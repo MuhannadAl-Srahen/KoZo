@@ -979,10 +979,22 @@ const WATCH_NAMES = new Set([
 ])
 
 function watchGame(gameId) {
-  if (fileWatchers.has(gameId)) return
   let game
   try { game = require('../db/queries/games').getGame(gameId) } catch { return }
   if (!game || game.is_cracked !== 1) return  // SQLite boolean
+
+  // No Steam emulator (and not GFWL) means nothing is EVER written to disk
+  // when an achievement pops — file-watching below has nothing to watch.
+  // Fall back to screenshotting + OCR-matching the game's own on-screen
+  // popup against its imported achievement list. Independent of the
+  // file-watch path below (which can legitimately have nothing to watch).
+  try {
+    const emu = detectEmulator(game.install_path)
+    if (!emu || emu === 'GFWL') require('./achievementOcr').start(gameId)
+    else require('./achievementOcr').stop(gameId)
+  } catch {}
+
+  if (fileWatchers.has(gameId)) return
 
   const { existing, pending } = dirsToWatch(game)
   if (!existing.length && !pending.length) return
@@ -1063,6 +1075,7 @@ function unwatchGame(gameId) {
   if (w) { try { w.close() } catch {} ; fileWatchers.delete(gameId) }
   clearInterval(pendingPollers.get(gameId)); pendingPollers.delete(gameId)
   clearTimeout(scanDebounce.get(gameId)); scanDebounce.delete(gameId)
+  try { require('./achievementOcr').stop(gameId) } catch {}
 }
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
@@ -1076,6 +1089,9 @@ function startWatching() {
 function stopWatching() {
   if (scanTimer) { clearInterval(scanTimer); scanTimer = null }
   for (const id of [...fileWatchers.keys()]) unwatchGame(id)
+  // Games with no file-watch dirs at all (nothing but OCR watching them,
+  // e.g. our GTA IV case) never end up in fileWatchers — stop OCR directly.
+  try { require('./achievementOcr').stopAll() } catch {}
 }
 
 module.exports = {

@@ -1066,6 +1066,7 @@ const FEATURE_GROUPS = [
     items: [
       { Icon: IconChartBar,  name: 'Statistics',    desc: 'Playtime trends with an hourly 24h view, daily/monthly charts, and click-a-day (or hour) to focus it.' },
       { Icon: IconBell,      name: 'In-game status (Alt+K)', desc: 'Press Alt+K while playing to flash your live session time and achievement progress over the game.' },
+      { Icon: IconTrophy,    name: 'On-screen achievement detection', desc: 'For cracks with no Steam-emulator backend at all (GFWL, stub steam_api, or a non-Steam launcher like Social Club) — KoZo reads the game\'s own unlock popups off the screen while you play and marks them automatically.' },
       { Icon: IconRocket,    name: 'Tray & startup',desc: 'Runs quietly in the system tray and can launch with Windows.' },
     ],
   },
@@ -1105,12 +1106,23 @@ function AboutTab() {
   const [version, setVersion] = useState('')
   const [updState, setUpdState] = useState('idle')     // idle | checking | done
   const [updResult, setUpdResult] = useState(null)
+  const [ocrWatch, setOcrWatch] = useState(true)
+  const [ocrLoaded, setOcrLoaded] = useState(false)
 
   useEffect(() => {
     window.kozo?.api?.app?.getVersion?.().then(res => {
       if (res?.ok) setVersion(res.data)
     })
+    window.kozo?.api?.settings?.get?.('ocr_achievement_watch').then(res => {
+      setOcrWatch(res?.data !== '0')
+      setOcrLoaded(true)
+    })
   }, [])
+
+  async function toggleOcrWatch(next) {
+    setOcrWatch(next)
+    await window.kozo?.api?.settings?.set?.('ocr_achievement_watch', next ? '1' : '0')
+  }
 
   async function runTrackingTest() {
     setTesting(true)
@@ -1201,6 +1213,26 @@ function AboutTab() {
           runs the real scanner on it, records the unlock in the database, and fires the
           real in-game overlay toast — then cleans everything up.
         </p>
+        <div className={s.toggleList} style={{ marginBottom: 12 }}>
+          <label className={s.toggleRow}>
+            <div className={s.toggleInfo}>
+              <div className={s.toggleLabel}>Auto-detect achievements with no emulator (OCR)</div>
+              <div className={s.toggleDesc}>
+                For cracks with no Steam-emulator backend at all (GFWL, stub steam_api, non-Steam
+                launchers) — screenshots + reads the game's own on-screen achievement popup and
+                auto-marks a match. Only runs while such a game is being played.
+              </div>
+            </div>
+            {ocrLoaded ? (
+              <button className={`${s.toggle} ${ocrWatch ? s.toggleOn : ''}`}
+                onClick={() => toggleOcrWatch(!ocrWatch)} type="button">
+                <span className={s.toggleThumb} />
+              </button>
+            ) : (
+              <IconLoader2 size={16} className={s.spin} style={{ color: 'var(--text-muted)' }} />
+            )}
+          </label>
+        </div>
         <div className={s.keyRow} style={{ flexWrap: 'wrap' }}>
           <button className={s.testBtn} onClick={runTrackingTest} disabled={testing}>
             {testing
