@@ -21,6 +21,7 @@ export default function EditGameModal({ game, onClose, onSaved }) {
   const [isCracked, setIsCracked]     = useState(game.is_cracked ? 1 : 0)
   const [source, setSource]           = useState(game.source || 'manual')
   const [steamAppId, setSteamAppId]   = useState(game.steam_app_id ? String(game.steam_app_id) : '')
+  const [runAsAdmin, setRunAsAdmin]   = useState(game.run_as_admin ? 1 : 0)
   const [errors, setErrors]           = useState({})
   const [exeWarn, setExeWarn]         = useState(false)
   const [saving, setSaving]           = useState(false)
@@ -58,6 +59,7 @@ export default function EditGameModal({ game, onClose, onSaved }) {
         is_cracked: isCracked,
         source,
         steam_app_id: sid ? Number(sid) : null,
+        run_as_admin: runAsAdmin,
       })
       setSaving(false)
       if (res?.ok) {
@@ -297,6 +299,32 @@ export default function EditGameModal({ game, onClose, onSaved }) {
         <div className={s.inputHint}>
           Cracked games launch the local .exe (never Steam) and pull achievements from crack
           emulator files (Goldberg, CODEX, online-fix, etc) instead of the Steam API.
+        </div>
+      </div>
+
+      {/* Run as administrator — some repacks/copies need elevation to launch at
+          all; KoZo also sets this automatically the first time Play needs it. */}
+      <div className={s.field}>
+        <label className={s.label}>Launch</label>
+        <div className={s.pills}>
+          <button
+            type="button"
+            className={`${s.pill} ${!runAsAdmin ? s.pillActive : ''}`}
+            onClick={() => setRunAsAdmin(0)}
+          >
+            Normal
+          </button>
+          <button
+            type="button"
+            className={`${s.pill} ${runAsAdmin ? s.pillActive : ''}`}
+            onClick={() => setRunAsAdmin(1)}
+          >
+            Run as administrator
+          </button>
+        </div>
+        <div className={s.inputHint}>
+          Turn this on if Play doesn't seem to do anything — some copies (especially
+          repacks installed under Program Files) need admin rights to launch at all.
         </div>
       </div>
       </>}

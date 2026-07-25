@@ -341,6 +341,8 @@ export default function GameDetail() {
         variant: 'error', title: 'Could not launch',
         message: res?.error || 'Unknown error.',
       })
+    } else if (res?.data?.warning) {
+      setInfo({ variant: 'warning', title: game?.name || 'Launched', message: res.data.warning })
     }
   }
 
@@ -468,6 +470,17 @@ export default function GameDetail() {
           variant: 'warning',
           title: 'Your crack never saves achievements to disk',
           message: `${emu} created its achievements file but has never written a single unlock to it — even though the game shows popups. KoZo can't read what the crack doesn't save. You can mark achievements manually (click any achievement below → "Mark as Unlocked"), or replace the emulator with Goldberg/GSE, which does save unlocks.`,
+          lines,
+        })
+        break
+      }
+
+      case 'unreadable-format': {
+        const emu = diag.emulator || 'This crack\'s emulator'
+        setInfo({
+          variant: 'warning',
+          title: 'KoZo can\'t read this crack\'s achievement file yet',
+          message: `${emu} IS saving to its achievements file — it's been modified since it was created — but in a layout KoZo's parser doesn't recognize. This isn't "never saves to disk"; it's a format gap on KoZo's end. You can mark achievements manually below for now while this gets sorted out.`,
           lines,
         })
         break

@@ -71,6 +71,9 @@ function initDatabase() {
     try { db.exec('ALTER TABLE game_list ADD COLUMN release_date TEXT') } catch (_) {}
     // Set once the "it's out now!" notification has fired for an upcoming game.
     try { db.exec('ALTER TABLE game_list ADD COLUMN release_notified INTEGER DEFAULT 0') } catch (_) {}
+    // Launch this game's exe elevated (UAC) every time — set manually, or auto-set
+    // the first time a non-elevated launch fails/silently no-ops (see games:launch).
+    try { db.exec('ALTER TABLE games ADD COLUMN run_as_admin INTEGER DEFAULT 0') } catch (_) {}
 
     migrateCategoriesToCustomLists()
     dedupeGameList()
