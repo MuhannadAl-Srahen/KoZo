@@ -34,6 +34,26 @@ app.commandLine.appendSwitch('disable-features', 'AutofillServerCommunication')
 
 let mainWindow = null
 
+// How long the main window can sit hidden in the tray before its whole
+// renderer (React tree + every decoded banner bitmap) is unloaded. This is
+// the bulk of KoZo's idle RAM — the window is only ~1s to recreate, and
+// tracking/achievements/overlay toasts/Alt+K all run from the main process
+// regardless of whether this window currently exists.
+const UNLOAD_AFTER_HIDDEN_MS = 60 * 1000
+let destroyTimer = null
+function clearDestroyTimer() {
+  if (destroyTimer) { clearTimeout(destroyTimer); destroyTimer = null }
+}
+function armDestroyTimer() {
+  clearDestroyTimer()
+  destroyTimer = setTimeout(() => {
+    destroyTimer = null
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      mainWindow.destroy()
+    }
+  }, UNLOAD_AFTER_HIDDEN_MS)
+}
+
 Menu.setApplicationMenu(null)
 
 function createWindow() {
@@ -83,6 +103,7 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => {
     // When startMin is true the window stays hidden — only the tray icon is visible.
     if (!startMin) mainWindow.show()
+    else armDestroyTimer()   // never shown at all — still eligible to unload
   })
 
   // Minimize to tray instead of quitting (wired up fully in tray step)
@@ -92,6 +113,11 @@ function createWindow() {
       mainWindow.hide()
     }
   })
+  mainWindow.on('hide', () => { if (!app.isQuitting) armDestroyTimer() })
+  mainWindow.on('show', clearDestroyTimer)
+  // destroy() (the unload-in-tray path below) skips 'close' but still fires
+  // 'closed' — clear the module ref so getOrCreateMainWindow knows to recreate.
+  mainWindow.on('closed', () => { mainWindow = null })
 
   // Open external links in the OS browser, not in the app
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -100,14 +126,33 @@ function createWindow() {
   })
 }
 
-// Focus the existing window if a second instance is launched.
-app.on('second-instance', () => {
-  if (mainWindow) {
+// Bring the main window to front, recreating it first if it was unloaded
+// while hidden in the tray. `afterShow(win)` runs once the window is actually
+// visible and (for a fresh recreate) finished loading — callers that need to
+// touch webContents/navigate should do it there, not immediately after this
+// call returns, since a recreate is asynchronous.
+function getOrCreateMainWindow(afterShow) {
+  clearDestroyTimer()
+  if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.show()
     mainWindow.focus()
+    if (afterShow) afterShow(mainWindow)
+    return mainWindow
   }
-})
+  createWindow()
+  const win = mainWindow
+  win.once('ready-to-show', () => {
+    win.show()
+    win.focus()
+  })
+  win.webContents.once('did-finish-load', () => { if (afterShow) afterShow(win) })
+  return win
+}
+
+// Focus the existing window if a second instance is launched (recreating it
+// first if it was unloaded while sitting hidden in the tray).
+app.on('second-instance', () => { getOrCreateMainWindow() })
 
 app.whenReady().then(() => {
   // Serve local cached images securely: kozo://local/<url-encoded absolute path>.
@@ -161,6 +206,19 @@ app.whenReady().then(() => {
     require('./logger').warn('globalShortcut Alt+K error: ' + e.message)
   }
 
+  // Global hotkey: flash the current game's achievement list over the game.
+  // Read-only — there is deliberately no way to mark anything from here (an
+  // earlier manual-marking panel on this same hotkey was removed on purpose;
+  // this is a display-only successor, see achievementListFlash.js).
+  try {
+    const ok = globalShortcut.register('Alt+J', () => {
+      try { require('./services/achievementListFlash').flash() } catch {}
+    })
+    if (!ok) require('./logger').warn('globalShortcut Alt+J registration failed (in use by another app)')
+  } catch (e) {
+    require('./logger').warn('globalShortcut Alt+J error: ' + e.message)
+  }
+
   // Periodic safety-net for automatic backup (no-op unless the user enabled it)
   require('./services/autoBackup').startPeriodic()
 
@@ -198,7 +256,7 @@ app.whenReady().then(() => {
     }
   } catch {}
 
-  const trayHandle = setupTray(mainWindow, watcher)
+  const trayHandle = setupTray(watcher)
   watcher.onChange(() => trayHandle?.refreshMenu())
 
   // "New game detected" is a notification now: it goes to the overlay window
@@ -220,16 +278,17 @@ app.on('will-quit', () => {
 })
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
+  // The main window is deliberately destroyed while parked in the tray to
+  // free RAM (see armDestroyTimer) — that leaves zero windows without
+  // meaning to quit. Only actually quit if the user chose to (Quit from tray
+  // / an OS quit sets isQuitting before any window closes).
+  if (app.isQuitting) app.quit()
 })
 
 app.on('before-quit', () => {
   app.isQuitting = true
 })
 
-app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow()
-  else mainWindow?.show()
-})
+app.on('activate', () => { getOrCreateMainWindow() })
 
-module.exports = { getMainWindow: () => mainWindow }
+module.exports = { getMainWindow: () => mainWindow, getOrCreateMainWindow }

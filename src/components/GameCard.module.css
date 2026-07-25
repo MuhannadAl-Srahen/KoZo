@@ -6,6 +6,15 @@
   overflow: hidden;
   cursor: pointer;
   transition: border-color 0.15s, transform 0.12s;
+  /* Skip layout/paint/style for cards scrolled out of view, and let Chromium
+     drop their decoded banner bitmaps from memory — a big library's grid (2
+     <img> per card, one blurred) is the main renderer RAM driver. The
+     intrinsic-size pair is only a placeholder used before a card has ever
+     been rendered once; `auto` means the real measured size is remembered
+     and reused after that, so this doesn't need to be exact per grid density
+     (4 vs 6 columns). */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 230px auto 400px;
 }
 
 .card:hover { border-color: var(--ab); transform: translateY(-2px); }
@@ -253,6 +262,10 @@
   cursor: pointer;
   min-height: 88px;
   transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
+  /* No contain-intrinsic-size needed — min-height already gives the browser
+     a placeholder size for offscreen rows, and width comes from the flex
+     column parent regardless of containment. */
+  content-visibility: auto;
 }
 
 .listCard:hover {

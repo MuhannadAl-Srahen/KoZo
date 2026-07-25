@@ -13,6 +13,9 @@ const emitter = new EventEmitter()
 const POLL_MS              = 5000
 const ORPHAN_CAP_MS        = 4 * 60 * 60 * 1000
 const SLEEP_GAP_MS         = 5 * 60 * 1000
+// How often the in-session heartbeat persists games.last_played_at (each write
+// fsyncs SQLite — see heartbeatSession for why this isn't every tick).
+const HEARTBEAT_WRITE_MS   = 30 * 1000
 
 // How often to check for new unlocks while a game is running. No longer user-
 // configurable — we just poll fast (30s). Cracked games are also caught instantly
@@ -30,11 +33,18 @@ function getAchievementSyncMs() {
 }
 
 // Runs both unlock sources for one game: Steam Web API + local crack files.
-// Crack files update instantly on unlock; the Steam Web API has its own
-// server-side cache (a freshly unlocked achievement can take a short while to
-// appear), so frequent polling catches it as soon as Steam exposes it. Errors
-// are logged, never swallowed silently, so sync problems are diagnosable.
-function runAchievementSync(gameId, gameName) {
+// Crack files update instantly on unlock via crackWatcher's own live chokidar
+// watcher (started alongside the session — see watchGame), and crackWatcher
+// also runs its own slower safety-net rescan (scanActiveSessions). So the
+// crack-file half of THIS function — a synchronous fs.existsSync/readFileSync
+// pass over every candidate path — only needs to run on one-off events (session
+// start/end), not on the hot 10s heartbeat cadence too; doing it there on top
+// of crackWatcher's own timer was pure redundant disk I/O on a hot path.
+// `skipCrackScan` lets the periodic heartbeat caller opt out of that half
+// while still polling Steam's Web API every 10s (network-only, no sync fs
+// calls, worth keeping fast — see achievement sync docs for why).
+function runAchievementSync(gameId, gameName, opts = {}) {
+  const { skipCrackScan = false } = opts
   setImmediate(async () => {
     try {
       const { syncPlayerUnlocks } = require('./achievementSync')
@@ -44,6 +54,7 @@ function runAchievementSync(gameId, gameName) {
     } catch (e) {
       logger.warn(`achievement sync (Steam) failed for "${gameName}"`, { message: e.message })
     }
+    if (skipCrackScan) return
     try {
       const { scanGameForCrackAchievements } = require('./crackWatcher')
       const r = await scanGameForCrackAchievements(gameId)
@@ -197,29 +208,59 @@ function looksLikeGamePath(exePath) {
   return false
 }
 
-/**
- * Look up the executable path of a running process by name.
- * Returns null if not found or query fails. Cached per session.
- */
+// Look up the executable paths of running processes by name — batched, one
+// PowerShell spawn resolves every never-before-seen exe name in a single
+// tick instead of one spawn per exe. Spawning a process is the expensive part
+// (see the fastlist.exe comment above lightTick); doing it once per candidate
+// name, sequentially, could mean a dozen spawns back to back right after a
+// game's launcher/helper processes all start up at once.
 const pathCache = new Map()  // exe_lower → path (only positives cached forever)
-async function getProcessPath(exeName) {
-  const key = exeName.toLowerCase()
-  const cached = pathCache.get(key)
-  if (cached) return cached  // Only cache successful lookups
-
-  const nameNoExt = exeName.replace(/\.exe$/i, '').replace(/'/g, "''")
-  const ps = `Get-Process -Name '${nameNoExt}' -ErrorAction SilentlyContinue | Where-Object { $_.Path } | Select-Object -First 1 -ExpandProperty Path`
+async function getProcessPathsBatch(exeNames) {
+  const results = new Map()  // exe_lower (with .exe) → path
+  if (!exeNames.length) return results
+  const nameList = exeNames
+    .map(n => n.replace(/\.exe$/i, '').replace(/'/g, "''"))
+    .map(n => `'${n}'`)
+    .join(',')
+  const ps = `Get-Process -Name ${nameList} -ErrorAction SilentlyContinue | Where-Object { $_.Path } | Select-Object Name,Path | ConvertTo-Json -Compress`
   try {
     const { stdout } = await execP(
       `powershell.exe -NoProfile -NonInteractive -Command "${ps}"`,
-      { timeout: 4000, windowsHide: true, maxBuffer: 256 * 1024 }
+      { timeout: 5000, windowsHide: true, maxBuffer: 512 * 1024 }
     )
-    const path = stdout.trim() || null
-    if (path) pathCache.set(key, path)
-    return path
-  } catch {
-    return null
-  }
+    const raw = stdout.trim()
+    if (!raw) return results
+    let arr = JSON.parse(raw)
+    if (!Array.isArray(arr)) arr = [arr]
+    for (const item of arr) {
+      const key = `${(item.Name || '').toLowerCase()}.exe`
+      if (item.Path && !results.has(key)) {
+        results.set(key, item.Path)
+        pathCache.set(key, item.Path)
+      }
+    }
+  } catch {}
+  return results
+}
+
+// evaluatedExes persistence — without this, every app restart re-evaluates
+// (and re-spawns PowerShell for) every non-game exe already running on the
+// machine, all over again. Loaded once in start(), saved debounced whenever
+// new entries are added.
+const EVALUATED_EXES_SETTING = 'pw_evaluated_exes'
+let saveEvaluatedTimer = null
+function loadEvaluatedExes() {
+  try {
+    const raw = settingsQ.getSetting(EVALUATED_EXES_SETTING)
+    if (raw) for (const name of JSON.parse(raw)) evaluatedExes.add(name)
+  } catch {}
+}
+function scheduleSaveEvaluatedExes() {
+  if (saveEvaluatedTimer) return
+  saveEvaluatedTimer = setTimeout(() => {
+    saveEvaluatedTimer = null
+    try { settingsQ.setSetting(EVALUATED_EXES_SETTING, JSON.stringify([...evaluatedExes])) } catch {}
+  }, 5000)
 }
 
 function sendToRenderer(channel, data) {
@@ -242,6 +283,139 @@ async function getRunningProcesses() {
   return await fn()
 }
 
+// Cross-platform "is this PID still alive" check with no process spawn — signal
+// 0 is the documented way to test existence (works on Windows too, via libuv).
+// This is what lets lightTick() avoid ps-list's helper-process spawn on most
+// ticks (see below).
+function isPidAlive(pid) {
+  if (!pid) return false
+  try { process.kill(pid, 0); return true }
+  catch (e) { return e.code === 'EPERM' }  // exists, just not signalable by us
+}
+
+// Gap > sleep threshold → the OS was suspended. Don't count the suspended
+// period as playtime. Forcefully end every active session at the timestamp
+// we last confirmed the game was running. Shared by tick() and lightTick().
+// Returns true if it fired (caller should bail out of the rest of the tick).
+function capSessionsForSleepGap(gapMs, prevTickAt) {
+  if (gapMs <= SLEEP_GAP_MS) return false
+  logger.warn('processWatcher: long gap detected, capping active sessions', { gapMs })
+  for (const [gameId, session] of activeSessions) {
+    const lastSeenMs = session.last_seen_at || prevTickAt
+    endSession(gameId, session, new Date(lastSeenMs).toISOString())
+  }
+  detectionBuffer.clear()
+  return true
+}
+
+// Per-tick heartbeat for a game with an already-active session: idle/AFK
+// accounting, last_played_at, and the periodic achievement/XP checks. Shared
+// by the full tick() (fresh ps-list every time) and lightTick() (PID-liveness
+// only, no spawn) so the two poll paths can't drift out of sync.
+function heartbeatSession(game, session, gapMs, now) {
+  session.last_seen_at = now
+
+  // Idle/AFK: if there's been no input (keyboard/mouse, plus gamepad when
+  // controller tracking is on) beyond the threshold, count this tick's
+  // elapsed time as idle (subtracted from playtime when the session ends).
+  const idleThresh = getIdlePauseSec()
+  const isIdleNow  = idleThresh > 0 && effectiveIdleSeconds() >= idleThresh
+  if (isIdleNow) {
+    session.idle_seconds = (session.idle_seconds || 0) + Math.round(gapMs / 1000)
+  }
+  // Broadcast idle state EVERY tick while idle (not just on transitions):
+  // the renderer computes the live timer as now − started_at − idle_seconds,
+  // so a stale idle_seconds would keep the visible counter climbing during
+  // AFK even though the recorded time is correct. Fresh values each tick
+  // make the timer visibly freeze. One transition event fires on wake too.
+  const wasIdle = !!session.idle
+  if (wasIdle !== isIdleNow) {
+    session.idle = isIdleNow
+    logger.info(`Session ${isIdleNow ? 'idle (AFK) — pausing playtime' : 'active again'}`, { gameId: game.id })
+  }
+  if (isIdleNow || wasIdle !== isIdleNow) {
+    sendToRenderer('session:idle', { gameId: game.id, idle: isIdleNow, idle_seconds: session.idle_seconds || 0 })
+  }
+
+  // Persist the heartbeat, but not every tick — each UPDATE fsyncs the DB, and
+  // doing that every 5s while the game may be streaming assets from the same
+  // disk is needless I/O on a hot path. 30s granularity only matters if KoZo
+  // itself hard-crashes mid-session (orphan capping falls back to this value);
+  // a clean quit keeps sessions open and resumes them exactly (§ resolveOrphanSessions).
+  if (now - (session._lastHeartbeatWriteAt || 0) >= HEARTBEAT_WRITE_MS) {
+    session._lastHeartbeatWriteAt = now
+    try {
+      require('../db/database').getDb()
+        .prepare('UPDATE games SET last_played_at = ? WHERE id = ?')
+        .run(new Date(now).toISOString(), game.id)
+    } catch {}
+  }
+
+  // Periodic achievement sync — Steam Web API only (see runAchievementSync
+  // for why the crack-file half is skipped here: crackWatcher's own live
+  // watch + safety-net timer already cover it without duplicating the
+  // sync-fs-I/O pass on this hot cadence).
+  const lastSync = midSessionSyncAt.get(game.id) || 0
+  if (now - lastSync >= getAchievementSyncMs()) {
+    midSessionSyncAt.set(game.id, now)
+    runAchievementSync(game.id, game.name, { skipCrackScan: true })
+  }
+
+  // Periodic XP check — level-ups from accumulated playtime toast mid-session.
+  const lastXp = xpCheckAt.get(game.id) || 0
+  if (now - lastXp >= XP_CHECK_MS) {
+    xpCheckAt.set(game.id, now)
+    try {
+      require('./xpTracker').check({
+        reason: 'session_tick',
+        gameName: game.name,
+        artPath: game.banner_local_path || game.hero_local_path || null,
+        artUrl: game.banner_url || null,
+      })
+    } catch {}
+  }
+}
+
+// Start/stop the gamepad probe based on whether it's wanted right now. Cheap
+// (no spawn of its own — controllerInput keeps one persistent process), safe
+// to call from both tick() and lightTick().
+function syncControllerProbe() {
+  const wantController = controllerTrackingOn() && activeSessions.size > 0
+  const ci = require('./controllerInput')
+  if (wantController && !ci.isRunning())      ci.start()
+  else if (!wantController && ci.isRunning()) ci.stop()
+}
+
+// Cheap heartbeat for ticks between full scans (see FULL_SCAN_EVERY_TICKS):
+// no ps-list call at all, just a free PID-liveness check per already-tracked
+// session. This is the fix for games stuttering every ~5s while KoZo runs —
+// ps-list spawns a helper process (fastlist.exe) to enumerate every running
+// process, and creating a process (plus AV real-time scanning it) is enough
+// to visibly hitch a fullscreen game's frame pacing on a regular cadence.
+// Only known-active sessions are touched here; detecting brand-new games or
+// unknown processes still happens on the periodic full tick().
+async function lightTick() {
+  if (paused) return
+  const now        = Date.now()
+  const prevTickAt = lastTickAt
+  const gapMs      = now - prevTickAt
+  lastTickAt       = now
+
+  if (capSessionsForSleepGap(gapMs, prevTickAt)) return
+
+  for (const [gameId, session] of [...activeSessions]) {
+    if (!isPidAlive(session.pid)) {
+      endSession(gameId, session)
+      continue
+    }
+    const game = gamesQ.getGame(gameId)
+    if (!game) continue
+    heartbeatSession(game, session, gapMs, now)
+  }
+
+  syncControllerProbe()
+}
+
 async function tick() {
   if (paused) return
 
@@ -250,18 +424,7 @@ async function tick() {
   const gapMs         = now - prevTickAt
   lastTickAt          = now
 
-  // Gap > sleep threshold → the OS was suspended. Don't count the suspended
-  // period as playtime. Forcefully end every active session at the timestamp
-  // we last confirmed the game was running.
-  if (gapMs > SLEEP_GAP_MS) {
-    logger.warn('processWatcher: long gap detected, capping active sessions', { gapMs })
-    for (const [gameId, session] of activeSessions) {
-      const lastSeenMs = session.last_seen_at || prevTickAt
-      endSession(gameId, session, new Date(lastSeenMs).toISOString())
-    }
-    detectionBuffer.clear()
-    return
-  }
+  if (capSessionsForSleepGap(gapMs, prevTickAt)) return
 
   let procList
   try {
@@ -272,12 +435,20 @@ async function tick() {
   }
 
   const runningExes     = new Set(procList.map(p => (p.name || '').toLowerCase()))
+  // First-seen PID per exe name — lets lightTick() confirm liveness later
+  // without spawning anything (see isPidAlive).
+  const procByName      = new Map()
+  for (const p of procList) {
+    const n = (p.name || '').toLowerCase()
+    if (n && !procByName.has(n)) procByName.set(n, p)
+  }
   const games           = gamesQ.listGames()
   const knownGameIds    = new Set(games.map(g => g.id))
   const sensitivitySecs = getSensitivitySeconds()
   // Detection counts consecutive sightings — base the tick count on the CURRENT
-  // poll cadence (adaptive: 5s in-session, 12s idle) so sensitivity stays honest.
-  const currentPollMs   = activeSessions.size > 0 ? POLL_MS : POLL_IDLE_MS
+  // poll cadence (adaptive: 5s in-session/detecting, 20s fully idle) so
+  // sensitivity stays honest.
+  const currentPollMs   = (activeSessions.size > 0 || detectingGames.size > 0) ? POLL_MS : POLL_IDLE_MS
   const ticksNeeded     = Math.max(1, Math.ceil(sensitivitySecs / (currentPollMs / 1000)))
 
   // ── Track registered games ─────────────────────────────────────────────────
@@ -310,7 +481,8 @@ async function tick() {
 
       if (buf.ticks >= ticksNeeded) {
         const session = sessionsQ.resumeOrStartSession(game.id)
-        const enriched = { ...session, game_name: game.name, exe_name: game.exe_name, last_seen_at: now, idle_seconds: 0 }
+        const pid = procByName.get(exeLower)?.pid || null
+        const enriched = { ...session, game_name: game.name, exe_name: game.exe_name, last_seen_at: now, idle_seconds: 0, pid }
         activeSessions.set(game.id, enriched)
         detectionBuffer.delete(game.id)
         detectingGames.delete(game.id)
@@ -347,58 +519,13 @@ async function tick() {
 
     } else if (isRunning && hasSession) {
       // Heartbeat: keep `last_seen_at` fresh so an unexpected crash / sleep
-      // still records playtime up to the last successful poll.
+      // still records playtime up to the last successful poll. Also refresh
+      // the tracked PID (matched by exe name from this tick's real scan) so
+      // lightTick()'s liveness check stays correct even if the game restarted
+      // under a new PID without an intervening session end.
       const s = activeSessions.get(game.id)
-      s.last_seen_at = now
-
-      // Idle/AFK: if there's been no input (keyboard/mouse, plus gamepad when
-      // controller tracking is on) beyond the threshold, count this tick's
-      // elapsed time as idle (subtracted from playtime when the session ends).
-      const idleThresh = getIdlePauseSec()
-      const isIdleNow  = idleThresh > 0 && effectiveIdleSeconds() >= idleThresh
-      if (isIdleNow) {
-        s.idle_seconds = (s.idle_seconds || 0) + Math.round(gapMs / 1000)
-      }
-      // Broadcast idle state EVERY tick while idle (not just on transitions):
-      // the renderer computes the live timer as now − started_at − idle_seconds,
-      // so a stale idle_seconds would keep the visible counter climbing during
-      // AFK even though the recorded time is correct. Fresh values each tick
-      // make the timer visibly freeze. One transition event fires on wake too.
-      const wasIdle = !!s.idle
-      if (wasIdle !== isIdleNow) {
-        s.idle = isIdleNow
-        logger.info(`Session ${isIdleNow ? 'idle (AFK) — pausing playtime' : 'active again'}`, { gameId: game.id })
-      }
-      if (isIdleNow || wasIdle !== isIdleNow) {
-        sendToRenderer('session:idle', { gameId: game.id, idle: isIdleNow, idle_seconds: s.idle_seconds || 0 })
-      }
-
-      try {
-        require('../db/database').getDb()
-          .prepare('UPDATE games SET last_played_at = ? WHERE id = ?')
-          .run(new Date(now).toISOString(), game.id)
-      } catch {}
-
-      // Periodic achievement sync — interval is user-configurable in Settings
-      const lastSync = midSessionSyncAt.get(game.id) || 0
-      if (now - lastSync >= getAchievementSyncMs()) {
-        midSessionSyncAt.set(game.id, now)
-        runAchievementSync(game.id, game.name)
-      }
-
-      // Periodic XP check — level-ups from accumulated playtime toast mid-session.
-      const lastXp = xpCheckAt.get(game.id) || 0
-      if (now - lastXp >= XP_CHECK_MS) {
-        xpCheckAt.set(game.id, now)
-        try {
-          require('./xpTracker').check({
-            reason: 'session_tick',
-            gameName: game.name,
-            artPath: game.banner_local_path || game.hero_local_path || null,
-            artUrl: game.banner_url || null,
-          })
-        } catch {}
-      }
+      s.pid = procByName.get(exeLower)?.pid || s.pid
+      heartbeatSession(game, s, gapMs, now)
 
     } else if (!isRunning && hasSession) {
       endSession(game.id, activeSessions.get(game.id))
@@ -424,12 +551,7 @@ async function tick() {
     }
   }
 
-  // Run the gamepad activity probe only while a game is being tracked AND the
-  // user enabled controller tracking — so it doesn't poll at idle.
-  const wantController = controllerTrackingOn() && activeSessions.size > 0
-  const ci = require('./controllerInput')
-  if (wantController && !ci.isRunning())      ci.start()
-  else if (!wantController && ci.isRunning()) ci.stop()
+  syncControllerProbe()
 
   // ── Detect unknown game-like processes (not in library) ────────────────────
   const gameExeLower = new Set(games.map(g => (g.exe_name || '').toLowerCase()))
@@ -449,22 +571,32 @@ async function tick() {
     if (count >= ticksNeeded) candidates.push(proc)
   }
 
-  // Lazy-check candidate paths via PowerShell (one call per never-before-seen exe).
-  for (const proc of candidates) {
-    const name = (proc.name || '').toLowerCase()
-    evaluatedExes.add(name)
-    unknownExeBuffer.delete(name)
+  // Check candidate paths via ONE batched PowerShell call (never one spawn per
+  // exe — see getProcessPathsBatch). Deferred entirely while a session is
+  // active: this is background bookkeeping, not detection of the game already
+  // playing, so it can wait for the next idle full scan rather than spawn a
+  // process on top of a running game (perf invariant — nothing on the hot
+  // in-session cadence may spawn a process). Left-alone candidates simply stay
+  // in unknownExeBuffer and get re-evaluated once the session ends.
+  if (candidates.length && activeSessions.size === 0) {
+    const pathsByName = await getProcessPathsBatch(candidates.map(p => p.name || ''))
+    for (const proc of candidates) {
+      const name = (proc.name || '').toLowerCase()
+      evaluatedExes.add(name)
+      unknownExeBuffer.delete(name)
 
-    const exePath = await getProcessPath(proc.name || name)
-    if (looksLikeGamePath(exePath)) {
-      logger.info(`Unknown game detected: ${proc.name} @ ${exePath}`)
-      emitter.emit('unknownProcess', {
-        exe_name: proc.name || name,
-        install_path: exePath ? exePath.replace(/\\[^\\]+$/, '') : null,
-      })
-    } else {
-      logger.debug(`Rejected as non-game: ${proc.name} @ ${exePath || '(no path)'}`)
+      const exePath = pathsByName.get(name) || null
+      if (looksLikeGamePath(exePath)) {
+        logger.info(`Unknown game detected: ${proc.name} @ ${exePath}`)
+        emitter.emit('unknownProcess', {
+          exe_name: proc.name || name,
+          install_path: exePath ? exePath.replace(/\\[^\\]+$/, '') : null,
+        })
+      } else {
+        logger.debug(`Rejected as non-game: ${proc.name} @ ${exePath || '(no path)'}`)
+      }
     }
+    scheduleSaveEvaluatedExes()
   }
 
   // Clean up buffer for processes that stopped running
@@ -587,14 +719,47 @@ function endSession(gameId, session, forcedEndAt) {
 
 // Adaptive polling: every process-list read spawns a helper process on Windows,
 // so ticking at full speed 24/7 wastes CPU. Poll fast only while a session is
-// live (precise playtime/AFK); idle KoZo relaxes — detection latency is bounded
-// by the sensitivity window (default 15s) anyway.
-const POLL_IDLE_MS = 12000
+// live (precise playtime/AFK) or a launch is being confirmed; idle KoZo relaxes
+// — detection latency is bounded by the sensitivity window (default 15s) anyway.
+const POLL_IDLE_MS = 20000
+
+// While a session is already active, only 1 tick in this many does the real
+// ps-list scan (spawns fastlist.exe) — the rest use lightTick()'s free PID
+// check instead. This is the actual fix for games stuttering periodically
+// while KoZo runs: repeatedly spawning a process every 5s (plus AV scanning
+// it) was enough to hitch a fullscreen game's frame pacing on that cadence.
+// The schedule stays on POLL_MS so AFK/heartbeat timing is unaffected — only
+// the expensive scan itself is throttled.
+//
+// 12 (= every 60s at the 5s schedule) rather than 4 (= 20s) — 20s was still
+// frequent enough to be a noticeable, regular hitch. The real scan's only two
+// jobs during an active session are (a) noticing a SECOND game launched while
+// the first is still playing, and (b) re-resolving the tracked PID if the
+// game's process restarted under a new PID without an intervening session end
+// (e.g. a launcher stub that spawns the real game exe as a child) — both are
+// rare, and (b)'s worst case is a session ending up to 60s early (lightTick
+// sees the old PID die) followed by a fresh detection once the real scan
+// catches the new PID — `resumeOrStartSession`'s 3-min reopen window merges
+// that gap back into one continuous session either way.
+const FULL_SCAN_EVERY_TICKS = 12
+let ticksSinceFullScan = 0
 
 function scheduleNextTick() {
-  const delay = activeSessions.size > 0 ? POLL_MS : POLL_IDLE_MS
+  // Fast cadence while a session is live OR a launch is mid-confirmation
+  // (detectingGames non-empty) — a just-launched game still gets checked at
+  // 5s so its session starts on time even though full idle scans back off.
+  const delay = (activeSessions.size > 0 || detectingGames.size > 0) ? POLL_MS : POLL_IDLE_MS
   pollTimer = setTimeout(async () => {
-    try { await tick() } catch (err) {
+    try {
+      const useLight = activeSessions.size > 0 && ticksSinceFullScan < FULL_SCAN_EVERY_TICKS - 1
+      if (useLight) {
+        ticksSinceFullScan++
+        await lightTick()
+      } else {
+        ticksSinceFullScan = 0
+        await tick()
+      }
+    } catch (err) {
       logger.error('processWatcher tick error', { message: err.message })
     }
     scheduleNextTick()
@@ -604,6 +769,7 @@ function scheduleNextTick() {
 function start() {
   if (pollTimer) return
   lastTickAt = Date.now()
+  loadEvaluatedExes()
 
   // Resolve sessions left open by a previous quit/crash based on whether the
   // game is running RIGHT NOW (not a fixed time window) — see below.
@@ -624,9 +790,14 @@ async function resolveOrphanSessions() {
   if (!orphans.length) return
 
   let running = new Set()
+  let procByName = new Map()
   try {
     const procList = await getRunningProcesses()
     running = new Set(procList.map(p => (p.name || '').toLowerCase()))
+    for (const p of procList) {
+      const n = (p.name || '').toLowerCase()
+      if (n && !procByName.has(n)) procByName.set(n, p)
+    }
   } catch (e) {
     logger.warn('resolveOrphanSessions: process list failed', { message: e.message })
   }
@@ -645,6 +816,7 @@ async function resolveOrphanSessions() {
         game_name: orphan.game_name,
         exe_name: orphan.exe_name,
         last_seen_at: now,
+        pid: procByName.get(exe)?.pid || null,
       })
       midSessionSyncAt.set(orphan.game_id, now)
       try { require('./crackWatcher').watchGame(orphan.game_id) } catch {}
@@ -682,6 +854,7 @@ function stop() {
   detectionBuffer.clear()
   detectingGames.clear()
   midSessionSyncAt.clear()
+  ticksSinceFullScan = 0
   logger.info('processWatcher stopped (open sessions left for resume)')
 }
 

@@ -63,9 +63,10 @@ export default function Sidebar() {
   }, [])
 
   // Refresh active session from the source of truth: the watcher's
-  // in-memory active-session map exposed via IPC. We do this on mount,
-  // on every session event, and on a slow poll so the indicator can't
-  // drift out of sync with reality (e.g. a game removed mid-session).
+  // in-memory active-session map exposed via IPC. We do this on mount, on
+  // every session event, and whenever the window becomes visible again — that
+  // last one is a safety net for drift while hidden (e.g. a game removed
+  // mid-session) without running a poll every 15s forever, hidden or not.
   useEffect(() => {
     if (!window.kozo?.api?.sessions?.active) return
     let cancelled = false
@@ -76,7 +77,8 @@ export default function Sidebar() {
       setActiveSession(first || null)
     }
     refresh()
-    const poll = setInterval(refresh, 15000)
+    const onVisible = () => { if (document.visibilityState === 'visible') refresh() }
+    document.addEventListener('visibilitychange', onVisible)
     if (window.kozo?.events) {
       window.kozo.events.onSessionStarted(() => refresh())
       window.kozo.events.onSessionEnded(() => refresh())
@@ -92,7 +94,7 @@ export default function Sidebar() {
     }
     return () => {
       cancelled = true
-      clearInterval(poll)
+      document.removeEventListener('visibilitychange', onVisible)
       if (window.kozo?.events) {
         window.kozo.events.removeAll('session:started')
         window.kozo.events.removeAll('session:ended')
