@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { IconTrophy, IconPlayerPlay, IconX, IconClock, IconDeviceGamepad2, IconSparkles, IconArrowBigUpLines, IconPlus } from '@tabler/icons-react'
+import { IconTrophy, IconPlayerPlay, IconX, IconClock, IconDeviceGamepad2, IconSparkles, IconArrowBigUpLines, IconPlus, IconCheck } from '@tabler/icons-react'
 import { applyAccent } from './context/AccentColorContext'
 import { fileUrl } from './lib/utils'
 import { playAchievement, playLevelUp, playSessionStart } from './lib/sounds'
@@ -149,6 +149,57 @@ function StatusToast({ toast, onDismiss }) {
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── Achievement list toast (Alt+J, read-only) ─────────────────────────────────
+// A glance at the current game's achievement list while playing — locked ones
+// first (what you'd actually check this for). Deliberately no way to mark
+// anything from here; that's the whole point of it being read-only.
+
+function AchListToast({ toast, onDismiss }) {
+  const { leaving, close } = useAutoClose(onDismiss, 9000)
+  const { gameName, unlocked, total, achievements, idle } = toast
+  return (
+    <div className={`${s.toast} ${s.achListToast} ${leaving ? s.toastOut : s.toastIn}`}
+      {...toastInteractions(close)}>
+      <CloseButton close={close} />
+      <div className={s.toastHeader}>
+        <IconTrophy size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
+        <span className={s.toastHeaderText}>{idle ? 'KoZo' : `Achievements — ${gameName}`}</span>
+      </div>
+      {idle ? (
+        <div className={s.toastBody}>
+          <div className={s.toastIcon}>
+            <IconTrophy size={22} stroke={1.5} style={{ color: 'var(--a)' }} />
+          </div>
+          <div className={s.toastInfo}>
+            <div className={s.toastDesc}>No game is being tracked right now</div>
+          </div>
+        </div>
+      ) : !total ? (
+        <div className={s.toastBody}>
+          <div className={s.toastInfo}>
+            <div className={s.toastDesc}>No achievement list for this game yet</div>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className={s.achListSummary}>{unlocked}/{total} unlocked</div>
+          <div className={s.achListRows}>
+            {achievements.map((a, i) => (
+              <div key={i} className={`${s.achListRow} ${a.unlocked ? s.achListRowDone : ''}`}>
+                {a.icon_url
+                  ? <img className={s.achListIcon} src={a.icon_url} alt="" onError={e => { e.target.style.visibility = 'hidden' }} />
+                  : <IconTrophy size={14} stroke={1.5} className={s.achListIconFallback} />}
+                <span className={s.achListName}>{a.name}</span>
+                {a.unlocked && <IconCheck size={13} stroke={2.4} className={s.achListCheck} />}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -391,6 +442,13 @@ export default function OverlayApp() {
       setToasts(q => [...q.filter(t => t.type !== 'status'), ...list].slice(-4))
     })
 
+    // Global-hotkey achievement list (Alt+J), read-only. Replaces any existing
+    // list toast so repeated presses refresh in place instead of stacking.
+    window.kozo?.events?.onAchListOverlay?.((data) => {
+      const toast = { id: ++nextId.current, type: 'achList', ...data }
+      setToasts(q => [...q.filter(t => t.type !== 'achList'), toast].slice(-4))
+    })
+
     window.kozo?.events?.onAchievementOverlay?.(({ achievements, gameName, artPath, artUrl }) => {
       const list = achievements || []
       if (!list.length) return
@@ -432,6 +490,7 @@ export default function OverlayApp() {
       window.kozo?.events?.removeAll?.('session:overlay')
       window.kozo?.events?.removeAll?.('achievement:overlay')
       window.kozo?.events?.removeAll?.('status:overlay')
+      window.kozo?.events?.removeAll?.('achList:overlay')
       window.kozo?.events?.removeAll?.('xp:overlay')
       window.kozo?.events?.removeAll?.('sessionEnd:overlay')
       window.kozo?.events?.removeAll?.('unknownGame:overlay')
@@ -454,6 +513,8 @@ export default function OverlayApp() {
           ? <SessionToast    key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
           : t.type === 'status'
           ? <StatusToast     key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
+          : t.type === 'achList'
+          ? <AchListToast    key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
           : t.type === 'levelup'
           ? <LevelUpToast    key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
           : t.type === 'sessionEnd'

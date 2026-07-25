@@ -175,6 +175,9 @@ contextBridge.exposeInMainWorld('kozo', {
     onStatusOverlay: (cb) => {
       ipcRenderer.on('status:overlay', (_, data) => cb(data))
     },
+    onAchListOverlay: (cb) => {
+      ipcRenderer.on('achList:overlay', (_, data) => cb(data))
+    },
     onUnknownGameOverlay: (cb) => {
       ipcRenderer.on('unknownGame:overlay', (_, data) => cb(data))
     },

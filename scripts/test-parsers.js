@@ -91,6 +91,14 @@ console.log('\nparseCodexIni')
   const r4 = cw.parseCodexIni(meta)
   check('meta sections skipped', r4.length === 1 && r4[0].name === 'ACH_REAL')
 
+  // online-fix: boolean-word value + `timestamp=` key (real captured sample —
+  // NOT `Achieved=1`/`UnlockTime=`, which is why it silently read as 0 unlocks
+  // before this was added).
+  const onlinefix = '[TROPHY_10]\nachieved=true\ntimestamp=1782324898\n\n[TROPHY_1]\nachieved=false\n'
+  const r5 = cw.parseCodexIni(onlinefix)
+  check('online-fix achieved=true + timestamp=', r5.length === 1 && r5[0].name === 'TROPHY_10' && r5[0].unlocktime === 1782324898)
+  check('online-fix achieved=false excluded', !r5.some(u => u.name === 'TROPHY_1'))
+
   check('empty text → []', cw.parseCodexIni('').length === 0)
 }
 
@@ -141,6 +149,7 @@ console.log('\nbuildCandidates')
   check('install-relative CODEX ini', has(path.join('C:\\FakeGame', 'achievements.ini')))
   check('CODEX/EMPRESS keyed by appid somewhere', has(path.join('480', 'achievements.ini')))
   check('SSE stats.bin candidate', has('stats.bin'))
+  check('online-fix Stats\\Achievements.ini candidate', has(path.join('OnlineFix', '480', 'Stats', 'Achievements.ini')))
 
   // manual_appid fallback — the unzipped-game case with no steam_app_id
   const cands2 = cw.buildCandidates({ steam_app_id: null, manual_appid: 1234, install_path: 'C:\\FakeGame' })

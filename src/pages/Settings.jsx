@@ -1106,15 +1106,17 @@ function AboutTab() {
   const [version, setVersion] = useState('')
   const [updState, setUpdState] = useState('idle')     // idle | checking | done
   const [updResult, setUpdResult] = useState(null)
-  const [ocrWatch, setOcrWatch] = useState(true)
+  const [ocrWatch, setOcrWatch] = useState(false)
   const [ocrLoaded, setOcrLoaded] = useState(false)
 
   useEffect(() => {
     window.kozo?.api?.app?.getVersion?.().then(res => {
       if (res?.ok) setVersion(res.data)
     })
+    // Default OFF — the periodic screen capture can stutter fullscreen games,
+    // so it's strictly opt-in (matches achievementOcr.isEnabled).
     window.kozo?.api?.settings?.get?.('ocr_achievement_watch').then(res => {
-      setOcrWatch(res?.data !== '0')
+      setOcrWatch(res?.data === '1')
       setOcrLoaded(true)
     })
   }, [])
@@ -1220,7 +1222,9 @@ function AboutTab() {
               <div className={s.toggleDesc}>
                 For cracks with no Steam-emulator backend at all (GFWL, stub steam_api, non-Steam
                 launchers) — screenshots + reads the game's own on-screen achievement popup and
-                auto-marks a match. Only runs while such a game is being played.
+                auto-marks a match. Only runs while such a game is being played. Off by default:
+                the periodic screen capture can cause a brief stutter in some fullscreen games,
+                so enable it only if a game needs it.
               </div>
             </div>
             {ocrLoaded ? (

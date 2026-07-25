@@ -255,6 +255,67 @@
   font-family: 'DM Sans', system-ui, sans-serif;
 }
 
+/* ── Achievement list flash (Alt+J, read-only) ──────────────── */
+.achListToast .toastHeader {
+  background: var(--ad);
+  border-bottom-color: var(--ab);
+}
+
+.achListSummary {
+  padding: 9px 12px 5px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--a);
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+/* Capped so the list never grows past what fits inside the fixed-size overlay
+   window — scrolls internally instead. Scrolling only works while the toast
+   is interactive (hovered), same as any other click-through toast. */
+.achListRows {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 2px 6px 8px 12px;
+}
+
+.achListRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 0;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.65);
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+.achListRowDone { color: rgba(255, 255, 255, 0.92); }
+
+.achListIcon {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  object-fit: cover;
+}
+
+.achListIconFallback {
+  flex-shrink: 0;
+  color: rgba(255, 255, 255, 0.25);
+}
+
+.achListName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.achListCheck {
+  color: var(--a);
+  flex-shrink: 0;
+}
+
 /* ── Level-up toast ─────────────────────────────────────────── */
 .levelUpToast {
   border-color: var(--ab, rgba(167, 139, 250, 0.35));

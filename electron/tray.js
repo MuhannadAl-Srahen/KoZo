@@ -26,7 +26,7 @@ function fmtDur(sec) {
 
 // ── Tray setup ───────────────────────────────────────────────────────────────
 
-function setupTray(mainWindow, processWatcher) {
+function setupTray(processWatcher) {
   if (tray) return
 
   try {
@@ -36,14 +36,22 @@ function setupTray(mainWindow, processWatcher) {
     return
   }
 
-  function show() { mainWindow.show(); mainWindow.focus() }
+  // Lazy require — main.js requires tray.js at module-load time (before
+  // getOrCreateMainWindow exists), but every use here happens later, from a
+  // click handler, by which point main.js has finished loading (§ services
+  // require up a level / gotcha pattern used elsewhere for the same reason).
+  // getOrCreateMainWindow recreates the window if it was unloaded while
+  // hidden in the tray (see main.js armDestroyTimer) — it may not be
+  // instantly ready, hence the callback for anything past show/focus.
+  function show(afterShow) { require('./main').getOrCreateMainWindow(afterShow) }
 
   // Reveal the window AND route it to a page (HashRouter → set location.hash).
   function openAt(hash) {
-    show()
-    try {
-      mainWindow.webContents.executeJavaScript(`window.location.hash = ${JSON.stringify('#' + hash)}`)
-    } catch {}
+    show((win) => {
+      try {
+        win.webContents.executeJavaScript(`window.location.hash = ${JSON.stringify('#' + hash)}`)
+      } catch {}
+    })
   }
 
   // Real played time for a live session = wall time minus accumulated AFK idle.
@@ -119,8 +127,11 @@ function setupTray(mainWindow, processWatcher) {
   }
 
   refreshMenu()
-  tray.on('click',        show)
-  tray.on('double-click', show)
+  // Wrapped (not passed directly) — Tray's 'click'/'double-click' events pass
+  // (event, bounds) to the listener, which would otherwise land in show()'s
+  // `afterShow` parameter and get called as a function.
+  tray.on('click',        () => show())
+  tray.on('double-click', () => show())
   // Rebuild right before the menu opens so durations + "today" are current.
   tray.on('right-click',  refreshMenu)
 

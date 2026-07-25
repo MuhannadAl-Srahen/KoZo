@@ -29,9 +29,13 @@ let scanBusy = false       // single-flight: a slow OCR pass must never stack
 function isEnabled() {
   try {
     const v = require('../db/queries/settings').getSetting('ocr_achievement_watch')
-    return v !== '0'   // default ON — this is the whole point of the feature
+    // Default OFF. desktopCapturer's screen grab is a GPU/compositor readback —
+    // doing it every 6s visibly hitches a fullscreen game (brief mouse freeze on
+    // exactly that cadence). Users who need it for a no-emulator crack opt in
+    // via Settings → About, where the toggle warns about the cost.
+    return v === '1'
   } catch {
-    return true
+    return false
   }
 }
 
@@ -149,6 +153,14 @@ function start(gameId) {
 function stop(gameId) {
   const t = active.get(gameId)
   if (t) { clearInterval(t); active.delete(gameId) }
+  // No game left watching → release the worker now instead of waiting for app
+  // quit. It holds a WASM instance + worker_thread (~100MB+); previously a
+  // single OCR-enabled session leaked that for the rest of the app's run.
+  if (active.size === 0 && worker) {
+    try { worker.terminate() } catch {}
+    worker = null
+    workerPromise = null
+  }
 }
 
 // Full teardown (app quit) — stop every poll loop and release the OCR worker

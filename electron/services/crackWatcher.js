@@ -17,7 +17,14 @@ const path = require('path')
 const os   = require('os')
 const logger = require('../logger')
 
-const SCAN_INTERVAL_MS = 15_000
+// Pure safety net — the live chokidar watcher (watchGame) re-scans instantly
+// on every file write, so this periodic pass only exists to catch anything a
+// watcher somehow missed. 60s (was 15s) cuts the redundant synchronous
+// fs.existsSync/readFileSync sweep over every candidate path to a quarter of
+// its previous frequency — that sweep, running every 15s on top of the live
+// watch AND processWatcher's own periodic sync, was contributing to the
+// in-session stutter without adding any real detection speed.
+const SCAN_INTERVAL_MS = 60_000
 let scanTimer = null
 
 // ── Tiny helpers ─────────────────────────────────────────────────────────────
@@ -75,10 +82,16 @@ function parseGoldbergJson(text) {
   } catch { return [] }
 }
 
-// CODEX / EMPRESS / ALI213 / SKIDROW INI:
+// CODEX / EMPRESS / ALI213 / SKIDROW / online-fix INI:
 //   [ACH_NAME]
 //   Achieved=1      (or HaveAchieved=1, Unlocked=1, State=1, State=0101, earned=1)
 //   UnlockTime=1700000000   (or HaveAchievedTime=..., Time=...)
+//
+//   online-fix writes the boolean as the literal word `true`/`false` instead
+//   of 1/0, and its timestamp key is `timestamp=` — e.g.:
+//   [TROPHY_10]
+//   achieved=true
+//   timestamp=1782324898
 function parseCodexIni(text) {
   const out = []
   // Split on section headers
@@ -96,6 +109,7 @@ function parseCodexIni(text) {
     const achieved =
       /^Achieved\s*=\s*1/im.test(body)        ||   // CODEX
       /^achieved\s*=\s*1/im.test(body)        ||
+      /^achieved\s*=\s*true/im.test(body)     ||   // online-fix
       /^HaveAchieved\s*=\s*1/im.test(body)    ||   // SSE INI
       /^Unlocked\s*=\s*1/im.test(body)        ||   // Skidrow alt
       /^State\s*=\s*0101/im.test(body)        ||   // ALI213 hex state
@@ -109,6 +123,7 @@ function parseCodexIni(text) {
     const timeMatch =
       body.match(/^UnlockTime\s*=\s*(\d+)/im) ||
       body.match(/^HaveAchievedTime\s*=\s*(\d+)/im) ||
+      body.match(/^timestamp\s*=\s*(\d+)/im)  ||   // online-fix
       body.match(/^Time\s*=\s*(\d+)/im)
 
     out.push({ name, unlocktime: timeMatch ? parseInt(timeMatch[1]) : 0 })
@@ -242,6 +257,13 @@ function buildCandidates(game) {
   // ── 9. online-fix ─────────────────────────────────────────────────────────
   add(path.join(appdata, 'OnlineFix', id, 'achievements.json'),                J, 'online-fix')
   add(path.join(pub, 'Documents', 'OnlineFix', id, 'achievements.json'),       J, 'online-fix')
+  // Real-world online-fix layout: an INI at Stats\Achievements.ini, one
+  // per-achievement section (`[TROPHY_10]`) with `achieved=true`/`timestamp=`
+  // — see parseCodexIni. Also put its Stats dir on our radar directly (rather
+  // than relying only on a previously-discovered crack_dir) so detection and
+  // the live chokidar watch work from the very first scan.
+  add(path.join(pub, 'Documents', 'OnlineFix', id, 'Stats', 'Achievements.ini'), I, 'online-fix')
+  add(path.join(appdata, 'OnlineFix', id, 'Stats', 'Achievements.ini'),          I, 'online-fix')
 
   // ── 10. In-game install folder (various layouts) ──────────────────────────
   if (ip) {
@@ -850,7 +872,17 @@ async function diagnoseGame(gameId) {
     else verdict = mismatch ? 'appid-mismatch' : 'no-files'
   }
   else if (mismatch)                                 verdict = 'appid-mismatch'
-  else                                               verdict = 'emu-not-persisting'
+  else {
+    // Files exist and parse to zero unlocks. Only call this "never saves to
+    // disk" when that's actually true (every file's mtime === birthtime, i.e.
+    // untouched since creation) — otherwise the file HAS been written to since
+    // (achievements almost certainly ARE in there) and the honest verdict is
+    // that our parser doesn't understand this emulator's format yet, not that
+    // the crack never persists anything.
+    const contentCandidates = candidates.filter(c => c.parsedUnlockCount === 0)
+    const allUntouched = contentCandidates.length > 0 && contentCandidates.every(c => c.neverModified)
+    verdict = allUntouched ? 'emu-not-persisting' : 'unreadable-format'
+  }
 
   return {
     emulator, storedAppId, configAppIds, mismatch, candidates, verdict,

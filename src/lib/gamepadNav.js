@@ -162,17 +162,30 @@ function stopPolling() {
 export function initGamepadNav({ navigate }) {
   _navigate = navigate
 
-  const onConnect = () => startPolling()
+  const onConnect = () => { if (document.visibilityState === 'visible') startPolling() }
   const onDisconnect = () => { if (!connected()) stopPolling() }
   // Any mouse/keyboard input hides the controller focus ring.
   const onHumanInput = () => clearFocus()
+  // The window is very often hidden behind a fullscreen game while a
+  // controller stays connected — there is no reason to run an 11Hz
+  // getGamepads()+DOM poll for navigation nobody can see or use. Pause on
+  // hide/blur, resume on show/focus (only if a gamepad is still there).
+  const onHidden = () => stopPolling()
+  const onVisible = () => { if (connected()) startPolling() }
+  const onVisibilityChange = () => {
+    if (document.visibilityState === 'visible') onVisible()
+    else onHidden()
+  }
 
   window.addEventListener('gamepadconnected', onConnect)
   window.addEventListener('gamepaddisconnected', onDisconnect)
   window.addEventListener('mousemove', onHumanInput, { passive: true })
   window.addEventListener('keydown', onHumanInput, { passive: true })
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  window.addEventListener('blur', onHidden)
+  window.addEventListener('focus', onVisible)
 
-  if (connected()) startPolling()
+  if (connected() && document.visibilityState === 'visible') startPolling()
 
   return () => {
     stopPolling()
@@ -181,5 +194,8 @@ export function initGamepadNav({ navigate }) {
     window.removeEventListener('gamepaddisconnected', onDisconnect)
     window.removeEventListener('mousemove', onHumanInput)
     window.removeEventListener('keydown', onHumanInput)
+    document.removeEventListener('visibilitychange', onVisibilityChange)
+    window.removeEventListener('blur', onHidden)
+    window.removeEventListener('focus', onVisible)
   }
 }

@@ -43,6 +43,7 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
   const src      = sourceBadge(game)
   const genres   = parseGenres(game)
   const [launchError, setLaunchError] = React.useState(null)
+  const [launchWarning, setLaunchWarning] = React.useState(null)
 
   function handleClick() {
     if (selectionMode) { onToggle?.(game.id) } else { navigate(`/game/${game.id}`) }
@@ -52,6 +53,7 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
     e.stopPropagation()
     const res = await window.kozo?.api?.games?.launch(game.id)
     if (!res?.ok) setLaunchError(res?.error || 'Failed to launch')
+    else if (res?.data?.warning) setLaunchWarning(res.data.warning)
   }
 
   return (
@@ -194,6 +196,16 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
           />
         </div>
       )}
+      {launchWarning && (
+        <div onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()} onContextMenu={e => e.stopPropagation()}>
+          <InfoModal
+            variant="warning"
+            title={game.name}
+            message={launchWarning}
+            onClose={() => setLaunchWarning(null)}
+          />
+        </div>
+      )}
     </div>
   )
 }
@@ -210,6 +222,7 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite, onConte
   const achPct   = total > 0 ? Math.round((unlocked / total) * 100) : 0
   const genres   = parseGenres(game)
   const [launchError, setLaunchError] = React.useState(null)
+  const [launchWarning, setLaunchWarning] = React.useState(null)
 
   function handleClick() {
     if (selectionMode) { onToggle?.(game.id) } else { navigate(`/game/${game.id}`) }
@@ -219,6 +232,7 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite, onConte
     e.stopPropagation()
     const res = await window.kozo?.api?.games?.launch(game.id)
     if (!res?.ok) setLaunchError(res?.error || 'Failed to launch')
+    else if (res?.data?.warning) setLaunchWarning(res.data.warning)
   }
 
   return (
@@ -343,6 +357,16 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite, onConte
             title="Couldn't launch"
             message={`${game.name}: ${launchError}`}
             onClose={() => setLaunchError(null)}
+          />
+        </div>
+      )}
+      {launchWarning && (
+        <div onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()} onContextMenu={e => e.stopPropagation()}>
+          <InfoModal
+            variant="warning"
+            title={game.name}
+            message={launchWarning}
+            onClose={() => setLaunchWarning(null)}
           />
         </div>
       )}

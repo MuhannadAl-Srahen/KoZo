@@ -265,6 +265,10 @@
   transition:
     border-color 0.12s,
     transform 0.1s;
+  /* Skip layout/paint and let decoded banner bitmaps drop for offscreen
+     cards — see GameCard.module.css .card for the full rationale. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 230px auto 400px;
 }
 
 .card:hover {
@@ -466,6 +470,8 @@
     border-color 0.12s,
     background 0.12s,
     box-shadow 0.12s;
+  /* min-height above already gives a placeholder size for offscreen rows. */
+  content-visibility: auto;
 }
 
 .listRow:hover {

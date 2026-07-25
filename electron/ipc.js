@@ -245,6 +245,33 @@ handle('games:launch', async (id) => {
   if (hasUsableLocalExe) {
     const fullPath = path.join(game.install_path, game.exe_name)
     const { spawn } = require('child_process')
+
+    // ShellExecute with -Verb RunAs — the only way to force the UAC elevation
+    // prompt regardless of the exe's own manifest. Needed because a plain
+    // CreateProcess (what spawn() uses) never shows that prompt itself: if the
+    // manifest demands elevation it just fails, and if it doesn't but the exe
+    // still needs admin (common with repacks writing into Program Files) it
+    // launches "successfully" and then silently does nothing — which is what
+    // made Play look like a dead button instead of an error.
+    async function launchElevated() {
+      logger.warn(`launching elevated (UAC) via ShellExecute: ${fullPath}`)
+      const psPath = fullPath.replace(/'/g, "''")
+      const psCwd  = game.install_path.replace(/'/g, "''")
+      await new Promise((resolve, reject) => {
+        const ps = spawn('powershell.exe',
+          ['-NoProfile', '-WindowStyle', 'Hidden', '-Command',
+           `Start-Process -FilePath '${psPath}' -WorkingDirectory '${psCwd}' -Verb RunAs`],
+          { detached: true, stdio: 'ignore', windowsHide: true })
+        ps.once('spawn', () => { ps.unref(); resolve() })
+        ps.once('error', reject)
+      })
+      return { launched: 'shell-elevated', path: fullPath }
+    }
+
+    // Remembered from a previous launch that needed elevation — skip straight
+    // to it instead of repeating a doomed plain launch every time.
+    if (game.run_as_admin) return await launchElevated()
+
     try {
       await new Promise((resolve, reject) => {
         const child = spawn(fullPath, [], {
@@ -252,42 +279,78 @@ handle('games:launch', async (id) => {
           stdio: 'ignore',
           cwd: game.install_path,
         })
-        child.once('spawn', () => { child.unref(); resolve() })
-        child.once('error', reject)
+        let settled = false
+        child.once('spawn', () => {
+          // Don't resolve yet — an elevation-requiring exe can still spawn
+          // "successfully" via CreateProcess and then exit right back out
+          // with no window ever shown and no 'error' event. Give it a beat
+          // to prove it's actually staying up.
+          setTimeout(() => {
+            if (!settled) { settled = true; child.unref(); resolve() }
+          }, 1200)
+        })
+        child.once('exit', (code) => {
+          if (settled) return
+          settled = true
+          if (code === 0 || code === null) { child.unref(); resolve() }
+          else reject(Object.assign(new Error(`exited immediately (code ${code})`), { code: 'EARLY_EXIT' }))
+        })
+        child.once('error', (e) => {
+          if (settled) return
+          settled = true
+          reject(e)
+        })
       })
       return { launched: 'spawn', path: fullPath }
     } catch (e) {
-      // EACCES/EPERM here usually means the exe's manifest demands elevation
-      // (common with repacks) — spawn can't show a UAC prompt. Relaunch through
-      // ShellExecute (Start-Process), which can, keeping the game's own folder
-      // as the working directory. Before this, the async spawn 'error' event
-      // had no listener and crashed main with an uncaught-exception dialog.
-      logger.warn(`spawn failed (${e.code || e.message}) — retrying via ShellExecute: ${fullPath}`)
-      const psPath = fullPath.replace(/'/g, "''")
-      const psCwd  = game.install_path.replace(/'/g, "''")
-      await new Promise((resolve, reject) => {
-        const ps = spawn('powershell.exe',
-          ['-NoProfile', '-WindowStyle', 'Hidden', '-Command',
-           `Start-Process -FilePath '${psPath}' -WorkingDirectory '${psCwd}'`],
-          { detached: true, stdio: 'ignore', windowsHide: true })
-        ps.once('spawn', () => { ps.unref(); resolve() })
-        ps.once('error', reject)
-      })
-      return { launched: 'shell-elevated', path: fullPath }
+      // EACCES/EPERM/EARLY_EXIT all point the same way here: the exe needs
+      // admin rights. Fall back to the elevated launch now, and remember it
+      // so future Play clicks go straight there.
+      logger.warn(`spawn failed (${e.code || e.message}) — retrying elevated: ${fullPath}`)
+      const result = await launchElevated()
+      try { gamesQ.updateGame(game.id, { run_as_admin: 1 }) } catch {}
+      return result
     }
   }
 
   // Cracked games: never fall back to Steam — that's the wrong client.
   if (game.is_cracked) {
+    // Distinguish "never configured" from "was configured but the file is
+    // gone now" (moved install, renamed exe after an update, or the drive
+    // it lives on isn't connected) — the generic message reads like Play is
+    // just broken when really the path on disk changed out from under it.
+    if (!game.install_path || !game.exe_name) {
+      throw new Error(
+        'No executable is set for this game. Edit the game → Browse to point at the .exe.'
+      )
+    }
+    if (!fs.existsSync(game.install_path)) {
+      throw new Error(
+        `Can't find the game's folder anymore: ${game.install_path} — the game may have been moved/uninstalled, ` +
+        'or it lives on a drive that isn\'t connected right now. Edit the game → Browse to re-point it.'
+      )
+    }
     throw new Error(
-      'This game is marked as cracked but no usable executable is set. ' +
-      'Edit the game → Browse to point at the actual .exe.'
+      `Found the folder, but not "${game.exe_name}" inside it: ${game.install_path} — ` +
+      'the game may have been updated/reinstalled with a different exe. Edit the game → Browse to re-point it.'
     )
   }
 
   if (game.steam_app_id) {
     await shell.openExternal(`steam://run/${game.steam_app_id}`)
-    return { launched: 'steam', via: 'steam://run' }
+    // steam://run always "succeeds" from KoZo's side — Electron hands the URI
+    // to the OS and gets no feedback on whether Steam actually found/launched
+    // anything, so a game that isn't really there any more looks exactly like
+    // Play doing nothing. When KoZo's OWN cached path is also stale (not just
+    // unset — the folder/exe genuinely isn't there), surface that as a soft
+    // heads-up rather than silence: Steam has its own install tracking and
+    // may well launch it fine regardless, but if nothing happens this is why.
+    const pathWasConfigured = !!game.install_path && !!game.exe_name
+    const pathIsStale = pathWasConfigured && !fs.existsSync(game.install_path)
+    const warning = pathIsStale
+      ? `Sent to Steam. Heads up: KoZo's saved path for this game (${game.install_path}) no longer exists — if nothing launches, the game may need reinstalling, or its files moved to a new location. Try Scan PC, or Edit → Browse to re-point it.`
+      : undefined
+    return { launched: 'steam', via: 'steam://run', warning }
   }
 
   throw new Error('No way to launch — set the install path and executable (Edit → Browse).')
@@ -1090,14 +1153,14 @@ handle('overlay:applyAccent', (hex) => {
 // main window to the front and hand the exe to its add-game flow (the renderer
 // prefills the Add modal from this event).
 handle('overlay:addUnknownGame', (data) => {
-  const { BrowserWindow } = require('electron')
-  const overlayWin = require('./overlayWindow').getWindow()
-  const target = BrowserWindow.getAllWindows().find(w => !w.isDestroyed() && w !== overlayWin)
-  if (!target) return false
-  if (target.isMinimized()) target.restore()
-  target.show()
-  target.focus()
-  target.webContents.send('unknown-process:add', data || {})
+  // getOrCreateMainWindow (not a getAllWindows() scan) — the main window may
+  // have been unloaded while sitting hidden in the tray to save RAM, and this
+  // click comes from the OVERLAY window, which is always alive independently
+  // of it. Recreates on demand and waits for it to finish loading before the
+  // renderer's prefill listener could possibly miss the send.
+  require('./main').getOrCreateMainWindow((win) => {
+    win.webContents.send('unknown-process:add', data || {})
+  })
   return true
 })
 
