@@ -41,6 +41,12 @@ function exists(p) {
   try { return fs.existsSync(p) } catch { return false }
 }
 
+// True while a game is playing (or launching). Gates the expensive directory
+// walking — see collectCandidates and watchGame's deep scan.
+function sessionActive() {
+  try { return require('./processWatcher').isSessionActive() } catch { return false }
+}
+
 // ── CRC32 for SSE binary matching ────────────────────────────────────────────
 // Inline standard CRC-32 (IEEE 802.3) — the previously-required `crc-32`
 // package was never actually installed, which silently disabled ALL SmartSteamEmu
@@ -561,7 +567,15 @@ const DEEP_SKIP = new Set([
 const DEEP_MAX_ENTRIES = 6000
 const DEEP_MAX_DEPTH   = 4
 
-function deepScanForAppIds(appids) {
+// ASYNC and yielding. This walks thousands of directories across seven roots;
+// done synchronously it blocks the main process (and therefore every IPC reply,
+// timer and window paint) for however long the disk takes. Using fs.promises
+// plus an explicit yield every DEEP_YIELD_EVERY entries keeps the event loop
+// responsive throughout, so even when this does run it can't be felt.
+const DEEP_YIELD_EVERY = 200
+const yieldToLoop = () => new Promise(r => setImmediate(r))
+
+async function deepScanForAppIds(appids) {
   const ids = new Set((appids || []).filter(Boolean).map(String))
   const dirs = []
   const files = []
@@ -582,11 +596,14 @@ function deepScanForAppIds(appids) {
   const seenDirs = new Set()
   for (const root of roots) {
     let visited = 0
-    const walk = (dir, depth) => {
+    let sinceYield = 0
+    const walk = async (dir, depth) => {
       if (depth > DEEP_MAX_DEPTH || visited > DEEP_MAX_ENTRIES) return
       let entries
-      try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+      try { entries = await fs.promises.readdir(dir, { withFileTypes: true }) } catch { return }
       visited += entries.length
+      sinceYield += entries.length
+      if (sinceYield >= DEEP_YIELD_EVERY) { sinceYield = 0; await yieldToLoop() }
       for (const ent of entries) {
         if (!ent.isDirectory()) continue
         const full = path.join(dir, ent.name)
@@ -595,14 +612,15 @@ function deepScanForAppIds(appids) {
           if (!seenDirs.has(k)) {
             seenDirs.add(k)
             dirs.push(full)
-            for (const h of recursiveScan(full, ent.name)) files.push({ ...h, source: 'deep-scan' })
+            // Small, appid-keyed folder — the sync walk is bounded and fine here.
+            for (const h of recursiveScan(full, ent.name, true)) files.push({ ...h, source: 'deep-scan' })
           }
           continue
         }
-        if (!DEEP_SKIP.has(ent.name.toLowerCase())) walk(full, depth + 1)
+        if (!DEEP_SKIP.has(ent.name.toLowerCase())) await walk(full, depth + 1)
       }
     }
-    walk(root, 1)
+    await walk(root, 1)
   }
   return { dirs, files }
 }
@@ -627,7 +645,19 @@ const BINARY_SUBDIRS = new Set([
 function collectCandidates(game, fresh = false) {
   const gameAppid = game.steam_app_id || game.manual_appid
   const fixed     = buildCandidates(game)
-  const recursive = recursiveScan(game.install_path, gameAppid, fresh)
+
+  // While a game is running, do NOT walk the install tree. Directory walking is
+  // DISCOVERY — finding save files in a layout we don't have a fixed path for —
+  // and a layout doesn't appear mid-session. Detection of a fresh unlock during
+  // play comes from the live chokidar watcher and the fixed candidate paths,
+  // neither of which needs this. Skipping it keeps the in-session safety poll
+  // down to a handful of stat() calls instead of a recursive readdir over a
+  // game install, on the exact disk the game is streaming from.
+  // `fresh` (manual "Check achievements" / diagnostics) always walks.
+  const walkOk = fresh || !sessionActive()
+  const scan = (p) => (walkOk && p ? recursiveScan(p, gameAppid, fresh) : [])
+
+  const recursive = scan(game.install_path)
 
   // The install folder's own emu config may declare a DIFFERENT appid than the
   // one KoZo stored (repacks do this) — emulator save folders are keyed by the
@@ -650,14 +680,16 @@ function collectCandidates(game, fresh = false) {
     const parent2 = path.dirname(parent1)
     const root    = path.parse(game.install_path).root
     if (parent1 !== game.install_path && parent1 !== root) {
-      extraRecursive = [...extraRecursive, ...recursiveScan(parent1, gameAppid, fresh)]
+      extraRecursive = [...extraRecursive, ...scan(parent1)]
     }
     if (parent2 !== parent1 && parent2 !== root) {
-      extraRecursive = [...extraRecursive, ...recursiveScan(parent2, gameAppid, fresh)]
+      extraRecursive = [...extraRecursive, ...scan(parent2)]
     }
   }
 
-  // Save folder a previous deep scan discovered — always included.
+  // Save folder a previous deep scan discovered. Always scanned, session or
+  // not: it's one small appid-keyed folder (not a game install), and it is the
+  // most likely place a live unlock lands.
   const crackDirHits = game.crack_dir ? recursiveScan(game.crack_dir, gameAppid, fresh) : []
 
   const all = [...fixed, ...configCandidates, ...recursive, ...extraRecursive, ...crackDirHits]
@@ -687,7 +719,11 @@ async function scanGameForCrackAchievements(gameId, opts = {}) {
   // games still carry a steam_app_id (for art + name matching), so the schema can
   // be fetched from Steam even though the player doesn't own the game on Steam.
   // forceSchema (manual "Check achievements") bypasses the failed-fetch backoff.
-  try { await require('./achievementSync').ensureSchema(gameId, { force: !!opts.forceSchema }) } catch {}
+  // Never swallow this silently: with no schema, `localAchs` is empty and every
+  // unlock found on disk is skipped, which looks exactly like "the crack isn't
+  // saving achievements" while the real cause is a failed schema fetch.
+  try { await require('./achievementSync').ensureSchema(gameId, { force: !!opts.forceSchema }) }
+  catch (e) { logger.warn(`crackWatcher: ensureSchema failed for game ${gameId}`, { message: e.message }) }
 
   const { unique } = collectCandidates(game, !!opts.fresh)
 
@@ -838,7 +874,7 @@ async function diagnoseGame(gameId) {
   let deepDirs = []
   let crackDir = game.crack_dir || null
   if (!candidates.some(c => c.parsedUnlockCount > 0)) {
-    const deep = deepScanForAppIds([storedAppId, ...configAppIds].filter(Boolean))
+    const deep = await deepScanForAppIds([storedAppId, ...configAppIds].filter(Boolean))
     deepDirs = deep.dirs
     for (const h of deep.files) {
       const row = examine(h)
@@ -1033,16 +1069,15 @@ function watchGame(gameId) {
   try { game = require('../db/queries/games').getGame(gameId) } catch { return }
   if (!game || game.is_cracked !== 1) return  // SQLite boolean
 
-  // No Steam emulator (and not GFWL) means nothing is EVER written to disk
-  // when an achievement pops — file-watching below has nothing to watch.
-  // Fall back to screenshotting + OCR-matching the game's own on-screen
-  // popup against its imported achievement list. Independent of the
-  // file-watch path below (which can legitimately have nothing to watch).
-  try {
-    const emu = detectEmulator(game.install_path)
-    if (!emu || emu === 'GFWL') require('./achievementOcr').start(gameId)
-    else require('./achievementOcr').stop(gameId)
-  } catch {}
+  // A game with no Steam emulator at all (detectEmulator === null, or GFWL)
+  // never writes an unlock to disk, so there is genuinely nothing to watch and
+  // nothing KoZo can detect automatically — its achievements are marked by hand
+  // (§20). A screen-capture + OCR fallback used to run here; it was removed
+  // because it (a) fired a full desktopCapturer GPU readback every 6s, which is
+  // the periodic in-game stutter, and (b) matched an achievement whenever its
+  // NAME appeared anywhere on screen, so games that title missions after their
+  // achievements (GTA IV) auto-unlocked dozens of them from mission cards.
+  // Do not reintroduce screen-scraped unlocks.
 
   if (fileWatchers.has(gameId)) return
 
@@ -1103,20 +1138,41 @@ function watchGame(gameId) {
   // save folder yet, sweep the machine's save roots for a folder named after
   // its appid(s) and watch whatever turns up — covers emulators/layouts the
   // fixed candidate list doesn't know.
+  //
+  // DEFERRED UNTIL THE SESSION ENDS. This used to fire 3 seconds after the
+  // session started, which is precisely the worst moment: the sweep walks up to
+  // seven save roots four levels deep with synchronous readdir, on the main
+  // process, while the game is loading and hammering the same disk. That was a
+  // large part of the "lag when I enter a game". Nothing is lost by waiting —
+  // the deep scan is folder DISCOVERY, and once it finds a dir it's persisted
+  // to games.crack_dir, so from the next launch onward the folder is watched
+  // live from the very first second.
   if (!game.crack_dir && !deepScanned.has(gameId)) {
     deepScanned.add(gameId)
-    setTimeout(() => {
-      try {
-        const ids = [game.steam_app_id || game.manual_appid,
-                     ...readEmuConfigAppIds(game.install_path)].filter(Boolean)
-        const best = bestDeepDir(deepScanForAppIds(ids))
-        if (!best) return
-        try { require('../db/queries/games').updateGame(gameId, { crack_dir: best }) } catch {}
-        try { watcher.add(best) } catch {}
-        scheduleScan(gameId)
-        logger.info(`crackWatcher: deep scan found save folder for "${game.name}": ${best}`)
-      } catch {}
-    }, 3000)
+    try {
+      require('./processWatcher').runWhenIdle(`deepScan:${gameId}`, () => runDeepScan(gameId))
+    } catch {}
+  }
+}
+
+// The install-folder/save-root sweep for one game. Only ever called when no
+// session is running (see watchGame).
+async function runDeepScan(gameId) {
+  let game
+  try { game = require('../db/queries/games').getGame(gameId) } catch { return }
+  if (!game || game.crack_dir) return
+  try {
+    const ids = [game.steam_app_id || game.manual_appid,
+                 ...readEmuConfigAppIds(game.install_path)].filter(Boolean)
+    const best = bestDeepDir(await deepScanForAppIds(ids))
+    if (!best) return
+    try { require('../db/queries/games').updateGame(gameId, { crack_dir: best }) } catch {}
+    const w = fileWatchers.get(gameId)
+    if (w) { try { w.add(best) } catch {} }
+    scheduleScan(gameId)
+    logger.info(`crackWatcher: deep scan found save folder for "${game.name}": ${best}`)
+  } catch (e) {
+    logger.warn(`crackWatcher: deep scan failed for game ${gameId}`, { message: e.message })
   }
 }
 
@@ -1125,7 +1181,6 @@ function unwatchGame(gameId) {
   if (w) { try { w.close() } catch {} ; fileWatchers.delete(gameId) }
   clearInterval(pendingPollers.get(gameId)); pendingPollers.delete(gameId)
   clearTimeout(scanDebounce.get(gameId)); scanDebounce.delete(gameId)
-  try { require('./achievementOcr').stop(gameId) } catch {}
 }
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
@@ -1133,15 +1188,12 @@ function unwatchGame(gameId) {
 function startWatching() {
   if (scanTimer) return
   scanTimer = setInterval(() => { scanActiveSessions().catch(() => {}) }, SCAN_INTERVAL_MS)
-  logger.info('crackWatcher started (live file-watch + 15s safety poll)')
+  logger.info(`crackWatcher started (live file-watch + ${SCAN_INTERVAL_MS / 1000}s safety poll)`)
 }
 
 function stopWatching() {
   if (scanTimer) { clearInterval(scanTimer); scanTimer = null }
   for (const id of [...fileWatchers.keys()]) unwatchGame(id)
-  // Games with no file-watch dirs at all (nothing but OCR watching them,
-  // e.g. our GTA IV case) never end up in fileWatchers — stop OCR directly.
-  try { require('./achievementOcr').stopAll() } catch {}
 }
 
 module.exports = {
