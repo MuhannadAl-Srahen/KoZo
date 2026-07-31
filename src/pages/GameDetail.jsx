@@ -929,7 +929,7 @@ export default function GameDetail() {
                 <IconAlertTriangle size={14} stroke={1.8} />
                 {syncPrivacyError === 'profile_not_found'
                   ? 'Your Steam profile could not be read — check the Steam ID in Settings → Steam.'
-                  : 'Your Steam profile\'s Game details are private, so KoZo can\'t read your unlocks. Set Steam Privacy → Game details to Public, or add an API key in Settings → Steam.'}
+                  : 'Your Steam profile\'s Game details are private, so Steam won\'t serve your unlocks over the web. KoZo still reads them from the Steam app on this PC — set Steam Privacy → Game details to Public to also get Steam\'s real unlock dates.'}
               </div>
             )}
             {total === 0 ? (

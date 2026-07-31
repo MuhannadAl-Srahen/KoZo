@@ -166,6 +166,11 @@ contextBridge.exposeInMainWorld('kozo', {
     onBannerRefreshProgress: (cb) => {
       ipcRenderer.on('banners:refreshProgress', (_, state) => cb(state))
     },
+    // Steam refused (or resumed allowing) a player-unlock read — library-wide,
+    // driven by achievementSync.recordSyncError.
+    onSteamPrivacyChanged: (cb) => {
+      ipcRenderer.on('steam:privacy-changed', (_, reason) => cb(reason))
+    },
     onAchievementOverlay: (cb) => {
       ipcRenderer.on('achievement:overlay', (_, data) => cb(data))
     },
