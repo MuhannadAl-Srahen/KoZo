@@ -228,11 +228,29 @@ app.whenReady().then(() => {
     require('./services/steamApi').runGenreBackfill().catch(() => {})
   }, 8000)
 
-  // Automatic achievement catch-up: scan every cracked game's emulator files
-  // once on startup so unlocks earned while KoZo was closed appear on their
-  // own — no manual sync button needed, ever.
+  // Automatic achievement catch-up on startup, so unlocks earned while KoZo was
+  // closed appear on their own — no manual sync button needed, ever. Both
+  // sweeps walk the disk, so both are deferred until nothing is playing (KoZo
+  // is often launched *by* a game session, or starts minimized while one is
+  // already running).
+  // Tell the truth about what's actually installed. Cheap (one fs.access per
+  // game), and the UI already renders is_installed=0 properly — it just was
+  // never being updated after a drive change or reinstall.
   setTimeout(() => {
-    require('./services/crackWatcher').scanAllCrackedGames().catch(() => {})
+    watcher.runWhenIdle('installCheck', () => {
+      require('./services/installCheck').reconcile().catch(() => {})
+    })
+  }, 6000)
+
+  setTimeout(() => {
+    watcher.runWhenIdle('startupCatchUp', () => {
+      // Cracked games: emulator save files.
+      require('./services/crackWatcher').scanAllCrackedGames().catch(() => {})
+      // Steam games: the Steam client's own local stats files. This needs no
+      // API key and — unlike the Web API — works with a private profile, which
+      // is why it's the primary path rather than a fallback.
+      require('./services/steamStatsWatcher').scanAllSteamGames().catch(() => {})
+    })
   }, 20000)
 
   // "It's out now!" — notify when a tracked upcoming game's release date passes.

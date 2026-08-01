@@ -225,7 +225,44 @@ handle('shell:openPath', async (p) => {
 // Launch the game. Steam-linked games go through `steam://run/<appid>` which
 // uses the Steam client (handles auth, cloud saves, achievements). Manual games
 // fall back to spawning the .exe directly from install_path.
+// Is a process with this exe name running right now? Returns null when we
+// genuinely can't tell (PowerShell unavailable/blocked), so callers can
+// distinguish "definitely not running" from "no idea". One spawn, only ever on
+// an explicit Play click — never on the in-session polling cadence.
+async function isExeRunning(exeName) {
+  const base = String(exeName || '').replace(/\.exe$/i, '').replace(/'/g, "''")
+  if (!base) return null
+  try {
+    const { stdout } = await require('util').promisify(require('child_process').exec)(
+      `powershell.exe -NoProfile -NonInteractive -Command "@(Get-Process -Name '${base}' -ErrorAction SilentlyContinue).Count"`,
+      { timeout: 5000, windowsHide: true }
+    )
+    const n = parseInt(String(stdout).trim(), 10)
+    return Number.isFinite(n) ? n > 0 : null
+  } catch { return null }
+}
+
+// One launch in flight per game. Without this, a Play click that appears to do
+// nothing (an elevated launch waiting on the UAC prompt, or a slow-starting
+// game) invites more clicks — and each one raised ANOTHER consent dialog. The
+// logs show seven inside two seconds. Repeat clicks now join the first attempt.
+const launchInFlight = new Map()   // gameId → Promise
+
 handle('games:launch', async (id) => {
+  const existing = launchInFlight.get(id)
+  if (existing) return existing
+  const p = (async () => doLaunch(id))()
+  launchInFlight.set(id, p)
+  try {
+    const r = await p
+    // Pull the next process scan forward so "Now Playing" lights up in a couple
+    // of seconds instead of waiting out the idle poll.
+    try { require('./services/processWatcher').nudge() } catch {}
+    return r
+  } finally { launchInFlight.delete(id) }
+})
+
+async function doLaunch(id) {
   const game = gamesQ.getGame(id)
   if (!game) throw new Error('Game not found')
 
@@ -253,19 +290,58 @@ handle('games:launch', async (id) => {
     // still needs admin (common with repacks writing into Program Files) it
     // launches "successfully" and then silently does nothing — which is what
     // made Play look like a dead button instead of an error.
+    //
+    // This USED to resolve the moment powershell.exe itself spawned, with
+    // stdio ignored — so it reported success no matter what happened next.
+    // Declining the UAC prompt, a blocked elevation, or a broken path all came
+    // back as "launched" and Play looked dead (the logs show seven Play clicks
+    // in two seconds). Now we run PowerShell to completion, ask Start-Process
+    // for the real process via -PassThru, and report what actually happened.
     async function launchElevated() {
       logger.warn(`launching elevated (UAC) via ShellExecute: ${fullPath}`)
       const psPath = fullPath.replace(/'/g, "''")
       const psCwd  = game.install_path.replace(/'/g, "''")
-      await new Promise((resolve, reject) => {
+      const script =
+        `$ErrorActionPreference='Stop'; ` +
+        `try { ` +
+          `$p = Start-Process -FilePath '${psPath}' -WorkingDirectory '${psCwd}' -Verb RunAs -PassThru; ` +
+          `if ($p) { [Console]::Out.WriteLine('KOZO_PID=' + $p.Id) }; exit 0 ` +
+        `} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }`
+
+      const { code, out, err } = await new Promise((resolve, reject) => {
         const ps = spawn('powershell.exe',
-          ['-NoProfile', '-WindowStyle', 'Hidden', '-Command',
-           `Start-Process -FilePath '${psPath}' -WorkingDirectory '${psCwd}' -Verb RunAs`],
-          { detached: true, stdio: 'ignore', windowsHide: true })
-        ps.once('spawn', () => { ps.unref(); resolve() })
-        ps.once('error', reject)
+          ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', script],
+          { windowsHide: true })
+        let out = '', err = ''
+        ps.stdout.on('data', d => { out += d })
+        ps.stderr.on('data', d => { err += d })
+        // The UAC consent dialog blocks Start-Process until the user answers,
+        // so this genuinely can sit for a while. Cap it, and treat a timeout as
+        // "probably fine, prompt still open" rather than an error.
+        const t = setTimeout(() => { resolve({ code: null, out, err, timedOut: true }) }, 90_000)
+        ps.once('close', c => { clearTimeout(t); resolve({ code: c, out, err }) })
+        ps.once('error', e => { clearTimeout(t); reject(e) })
       })
-      return { launched: 'shell-elevated', path: fullPath }
+
+      if (code === 0 || code === null) {
+        const pid = out.match(/KOZO_PID=(\d+)/)?.[1]
+        return { launched: 'shell-elevated', path: fullPath, pid: pid ? Number(pid) : undefined }
+      }
+
+      // Win32 error 1223 = ERROR_CANCELLED, i.e. the user dismissed the prompt.
+      // Worth naming exactly: it's the single most common reason Play "does
+      // nothing", and it's not a bug the user can fix by clicking again.
+      const msg = String(err || '').trim()
+      logger.warn(`elevated launch failed for "${game.name}": ${msg || 'exit ' + code}`)
+      if (/cancell?ed by the user|operation was cancell?ed|1223/i.test(msg)) {
+        throw new Error(
+          `"${game.name}" needs administrator rights, and the Windows permission prompt was dismissed. ` +
+          'Click Play again and choose Yes. If no prompt appears at all, your account may not be allowed to elevate.'
+        )
+      }
+      throw new Error(
+        `Windows refused to start "${game.name}" with administrator rights.\n\n${msg || `PowerShell exited with code ${code}.`}`
+      )
     }
 
     // Remembered from a previous launch that needed elevation — skip straight
@@ -289,11 +365,21 @@ handle('games:launch', async (id) => {
             if (!settled) { settled = true; child.unref(); resolve() }
           }, 1200)
         })
-        child.once('exit', (code) => {
+        child.once('exit', async (code) => {
           if (settled) return
           settled = true
-          if (code === 0 || code === null) { child.unref(); resolve() }
-          else reject(Object.assign(new Error(`exited immediately (code ${code})`), { code: 'EARLY_EXIT' }))
+          // It exited within 1.2s. That's either (a) a launcher stub that
+          // handed off to the real game exe and quit — completely normal, lots
+          // of repacks do this — or (b) the game dying instantly because it
+          // couldn't write where it needed to without admin. Exit code doesn't
+          // distinguish them (a silent admin-death is usually code 0), so ask
+          // Windows whether anything named like this game is actually running.
+          const alive = await isExeRunning(game.exe_name).catch(() => null)
+          child.unref()
+          if (alive !== false) resolve()   // running, or we couldn't tell — assume fine
+          else reject(Object.assign(
+            new Error(`exited immediately (code ${code}) and no "${game.exe_name}" process is running`),
+            { code: 'EARLY_EXIT' }))
         })
         child.once('error', (e) => {
           if (settled) return
@@ -354,7 +440,7 @@ handle('games:launch', async (id) => {
   }
 
   throw new Error('No way to launch — set the install path and executable (Edit → Browse).')
-})
+}
 
 // ── Sessions ─────────────────────────────────────────────────────────────────
 handle('sessions:list', (filters) => sessionsQ.listSessions(filters))
@@ -1330,7 +1416,9 @@ handle('sync:setup', async () => {
   settingsQ.setSetting('auto_backup_enabled', '1')
   settingsQ.setSetting('auto_save_backup_enabled', '1')
   saveBackup.migrateRoot(oldSavesRoot, savesDir)
-  require('./services/autoBackup').writeNow()
+  // force: the user just picked a folder and expects a file to appear in it,
+  // so this one bypasses the "don't write while a game is running" gate.
+  require('./services/autoBackup').writeNow({ force: true })
   return getSyncStatus()
 })
 

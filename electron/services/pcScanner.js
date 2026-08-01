@@ -13,6 +13,13 @@ const NOT_GAME_EXES = new Set([
   'redist.exe','prerequisites.exe','physxinstaller.exe','oalinst.exe',
   'unarc.exe','arc.exe','7z.exe','winrar.exe','7zfm.exe',
   'cheatengine-x86_64.exe','cheatengine.exe',
+  // Android emulators. These live in Program Files, ship a big exe, and look
+  // game-shaped to a folder scan — one of them got picked up as a real game and
+  // stored as that game's executable, so every launch of the emulator would
+  // have been tracked as playing it.
+  'hd-player.exe','hd-multiinstancemanager.exe','hd-adbserver.exe',
+  'bluestacks.exe','bstkservice.exe','ldplayer.exe','dnplayer.exe',
+  'nox.exe','noxvmhandle.exe','memu.exe','memuheadless.exe',
   'git.exe','git-cmd.exe','gitbash.exe',
   'node.exe','npm.cmd','npx.cmd','pnpm.exe','yarn.exe',
   'python.exe','pythonw.exe','pip.exe',
@@ -39,6 +46,9 @@ const SKIP_FOLDERS = new Set([
   'cheat engine','cheatengine','autohotkey','7-zip','winrar','notepad++',
   'ruxim','ruxim folderwatcher','trcccap','tcno account switcher',
   'malwarebytes','avast','avira','kaspersky',
+  // Android emulators — see NOT_GAME_EXES above
+  'bluestacks','bluestacks_nxt','bluestacks x','ldplayer','ldplayer9',
+  'nox','noxplayer','memu','microvirt','gameloop','tencent',
   // Steam/launchers themselves (not games)
   'steam','steam controller configs',
   'epic games launcher','epic games','gog galaxy','ubisoft connect',
