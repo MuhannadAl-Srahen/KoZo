@@ -930,6 +930,40 @@ handle('scanner:scan', async (paths) => {
     g.alreadyInLibrary = existingPaths.has(g.install_path.toLowerCase()) ||
       (g.steam_app_id && existingAppIds.has(String(g.steam_app_id)))
   }
+
+  // Re-point games that MOVED. A scan that finds a library game at a new path
+  // used to just flag it "already in library" and walk away, leaving the dead
+  // path in place — so a game you relocated stayed dimmed and unplayable no
+  // matter how many times you rescanned. Match on appid (exact) or name, and
+  // only ever rewrite a path that is genuinely gone from disk, so this can
+  // never move a game that's sitting happily where it is.
+  try {
+    const fsx = require('fs')
+    const rows = db.prepare('SELECT id, name, install_path, exe_name, steam_app_id FROM games').all()
+    const setPath = db.prepare('UPDATE games SET install_path = ?, exe_name = COALESCE(?, exe_name), is_installed = 1 WHERE id = ?')
+    const norm = (s) => String(s || '').trim().toLowerCase()
+    const relocated = []
+
+    for (const row of rows) {
+      if (!row.install_path) continue
+      if (fsx.existsSync(row.install_path)) continue        // still there — leave alone
+      const hit = results.find(g =>
+        (row.steam_app_id && g.steam_app_id && String(g.steam_app_id) === String(row.steam_app_id)) ||
+        norm(g.name) === norm(row.name))
+      if (!hit || norm(hit.install_path) === norm(row.install_path)) continue
+      setPath.run(hit.install_path, hit.exe_name || null, row.id)
+      hit.relocatedGameId = row.id
+      hit.alreadyInLibrary = true
+      relocated.push(`${row.name}: ${row.install_path} -> ${hit.install_path}`)
+      broadcast('game:updated', row.id)
+    }
+    if (relocated.length) {
+      logger.info(`scanner: re-pointed ${relocated.length} moved game(s)`, { moves: relocated })
+    }
+  } catch (e) {
+    logger.warn('scanner: relocate pass failed', { message: e.message })
+  }
+
   return results
 })
 
