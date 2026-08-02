@@ -169,14 +169,25 @@ function rarityLabel(pct) {
   return null            // common — not worth the ink
 }
 
-function AchRow({ a, done }) {
+function AchRow({ a, done, showHint }) {
   const rare = rarityLabel(a.rarity)
   return (
     <div className={`${s.achListRow} ${done ? s.achListRowDone : ''}`}>
       {a.icon_url
         ? <img className={s.achListIcon} src={a.icon_url} alt="" onError={e => { e.target.style.visibility = 'hidden' }} />
         : <IconTrophy size={14} stroke={1.5} className={s.achListIconFallback} />}
-      <span className={s.achListName}>{a.name}</span>
+      <span className={s.achListText}>
+        <span className={s.achListName}>{a.name}</span>
+        {/* The requirement, straight from Steam's own description — the whole
+            point of glancing at this mid-game is "what do I actually have to do
+            for this one", and alt-tabbing to find out defeats the purpose.
+            Locked rows only; an unlocked one needs no instructions. */}
+        {showHint && !done && (
+          <span className={s.achListHint}>
+            {a.description || 'Hidden until unlocked'}
+          </span>
+        )}
+      </span>
       {done
         ? <IconCheck size={13} stroke={2.4} className={s.achListCheck} />
         : a.rarity != null && (
@@ -228,7 +239,7 @@ function AchListToast({ toast, onDismiss }) {
             <>
               <div className={s.achListLabel}>Still locked — rarest first</div>
               <div className={s.achListRows}>
-                {remaining.map((a, i) => <AchRow key={`r${i}`} a={a} done={false} />)}
+                {remaining.map((a, i) => <AchRow key={`r${i}`} a={a} done={false} showHint />)}
               </div>
             </>
           ) : (

@@ -1,5 +1,8 @@
 import React, { useState } from 'react'
-import { IconTrophy, IconLock, IconCheck, IconStar } from '@tabler/icons-react'
+import {
+  IconTrophy, IconLock, IconCheck, IconStar,
+  IconBulb, IconBook, IconSearch, IconExternalLink,
+} from '@tabler/icons-react'
 import Modal from '../ui/Modal'
 import { rarityLabel, formatDateTime } from '../../lib/utils'
 import s from './AchievementModal.module.css'
@@ -8,7 +11,16 @@ export default function AchievementModal({ achievement: initialAch, game, onClos
   const [ach, setAch] = useState(initialAch)
   const [busy, setBusy] = useState(false)
   const unlocked = !!ach.unlocked_at
+  const hidden = ach.is_hidden === 1
   const rarity = rarityLabel(ach.global_unlock_percent)
+
+  // Cracked and foreign-launcher games keep their matched appid in manual_appid,
+  // so guides still work for them.
+  const appId = game?.steam_app_id || game?.manual_appid || null
+  const achName = ach.display_name || ach.steam_api_name || ''
+  const guidesUrl = `https://steamcommunity.com/app/${appId}/guides/?searchText=${encodeURIComponent(achName)}`
+  const webUrl = `https://duckduckgo.com/?q=${encodeURIComponent(`${game?.name || ''} "${achName}" achievement how to unlock`)}`
+  const open = (url) => window.kozo?.api?.shell?.openExternal?.(url)
 
   async function toggle() {
     setBusy(true)
@@ -69,8 +81,31 @@ export default function AchievementModal({ achievement: initialAch, game, onClos
           )}
         </div>
 
-        {ach.description && (
-          <p className={s.desc}>{ach.description}</p>
+        {ach.description
+          ? <p className={s.desc}>{ach.description}</p>
+          : hidden && <p className={s.descHidden}>Steam hides this achievement's description until you unlock it.</p>}
+
+        {/* How to unlock. KoZo has no guide database of its own and inventing
+            hints would be worse than useless, so this points at the two places
+            that actually have answers: the game's own Steam guides (searched
+            for this achievement by name) and the open web. Shown for locked
+            achievements, and for hidden ones where the description is no help. */}
+        {(!unlocked || !ach.description) && appId && (
+          <div className={s.howTo}>
+            <div className={s.howToTitle}>
+              <IconBulb size={13} stroke={1.8} /> How to unlock
+            </div>
+            <div className={s.howToActions}>
+              <button className={s.howToBtn} onClick={() => open(guidesUrl)}>
+                <IconBook size={13} stroke={1.8} /> Steam guides
+                <IconExternalLink size={11} stroke={1.8} className={s.howToExt} />
+              </button>
+              <button className={s.howToBtn} onClick={() => open(webUrl)}>
+                <IconSearch size={13} stroke={1.8} /> Search the web
+                <IconExternalLink size={11} stroke={1.8} className={s.howToExt} />
+              </button>
+            </div>
+          </div>
         )}
 
         <div className={s.meta}>
