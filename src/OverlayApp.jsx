@@ -154,13 +154,43 @@ function StatusToast({ toast, onDismiss }) {
 }
 
 // ── Achievement list toast (Alt+J, read-only) ─────────────────────────────────
-// A glance at the current game's achievement list while playing — locked ones
-// first (what you'd actually check this for). Deliberately no way to mark
-// anything from here; that's the whole point of it being read-only.
+// "Where am I, and what's left" — NOT a dump of the whole list. Nobody reads
+// fifty rows in the nine seconds this is up, and mixing unlocked ones in made
+// it look like an arbitrary sample of completed achievements. So: progress bar,
+// then the LOCKED ones rarest-first (the ones actually worth chasing), then a
+// short strip of what you most recently earned.
+// Deliberately no way to mark anything from here — this stays read-only.
+
+function rarityLabel(pct) {
+  if (pct == null) return null
+  if (pct < 5)  return 'ultra rare'
+  if (pct < 15) return 'rare'
+  if (pct < 40) return 'uncommon'
+  return null            // common — not worth the ink
+}
+
+function AchRow({ a, done }) {
+  const rare = rarityLabel(a.rarity)
+  return (
+    <div className={`${s.achListRow} ${done ? s.achListRowDone : ''}`}>
+      {a.icon_url
+        ? <img className={s.achListIcon} src={a.icon_url} alt="" onError={e => { e.target.style.visibility = 'hidden' }} />
+        : <IconTrophy size={14} stroke={1.5} className={s.achListIconFallback} />}
+      <span className={s.achListName}>{a.name}</span>
+      {done
+        ? <IconCheck size={13} stroke={2.4} className={s.achListCheck} />
+        : a.rarity != null && (
+            <span className={`${s.achListRarity} ${rare ? s.achListRarityHot : ''}`}>
+              {a.rarity < 10 ? a.rarity.toFixed(1) : Math.round(a.rarity)}%
+            </span>
+          )}
+    </div>
+  )
+}
 
 function AchListToast({ toast, onDismiss }) {
   const { leaving, close } = useAutoClose(onDismiss, 9000)
-  const { gameName, unlocked, total, achievements, idle } = toast
+  const { gameName, unlocked, total, percent, remaining = [], recent = [], idle } = toast
   return (
     <div className={`${s.toast} ${s.achListToast} ${leaving ? s.toastOut : s.toastIn}`}
       {...toastInteractions(close)}>
@@ -186,18 +216,35 @@ function AchListToast({ toast, onDismiss }) {
         </div>
       ) : (
         <>
-          <div className={s.achListSummary}>{unlocked}/{total} unlocked</div>
-          <div className={s.achListRows}>
-            {achievements.map((a, i) => (
-              <div key={i} className={`${s.achListRow} ${a.unlocked ? s.achListRowDone : ''}`}>
-                {a.icon_url
-                  ? <img className={s.achListIcon} src={a.icon_url} alt="" onError={e => { e.target.style.visibility = 'hidden' }} />
-                  : <IconTrophy size={14} stroke={1.5} className={s.achListIconFallback} />}
-                <span className={s.achListName}>{a.name}</span>
-                {a.unlocked && <IconCheck size={13} stroke={2.4} className={s.achListCheck} />}
-              </div>
-            ))}
+          <div className={s.achListProgress}>
+            <div className={s.achListProgressTop}>
+              <span className={s.achListCount}>{unlocked}<span className={s.achListCountTotal}>/{total}</span></span>
+              <span className={s.achListPct}>{percent}%</span>
+            </div>
+            <div className={s.achListBar}><div className={s.achListFill} style={{ width: `${percent}%` }} /></div>
           </div>
+
+          {remaining.length > 0 ? (
+            <>
+              <div className={s.achListLabel}>Still locked — rarest first</div>
+              <div className={s.achListRows}>
+                {remaining.map((a, i) => <AchRow key={`r${i}`} a={a} done={false} />)}
+              </div>
+            </>
+          ) : (
+            <div className={s.achListAllDone}>
+              <IconCheck size={14} stroke={2.4} /> Every achievement unlocked
+            </div>
+          )}
+
+          {recent.length > 0 && (
+            <>
+              <div className={s.achListLabel}>Recently unlocked</div>
+              <div className={s.achListRecent}>
+                {recent.map((a, i) => <AchRow key={`d${i}`} a={a} done />)}
+              </div>
+            </>
+          )}
         </>
       )}
     </div>
@@ -290,6 +337,11 @@ function OverlayToast({ toast, onDismiss }) {
   const title = summary
     ? `${summary.count} Achievements Unlocked`
     : 'Achievement Unlocked'
+  // XP earned, tagged on by achievementSync (rarity-weighted). Unlocks are the
+  // most frequent XP event by far, so this is where the system becomes visible.
+  const gainedXp = summary
+    ? (summary.totalXp || 0)
+    : (ach?.xp || 0)
 
   return (
     <div className={`${s.toast} ${leaving ? s.toastOut : s.toastIn}`}
@@ -299,6 +351,7 @@ function OverlayToast({ toast, onDismiss }) {
       <div className={s.toastHeader}>
         <IconTrophy size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
         <span className={s.toastHeaderText}>{title}</span>
+        {gainedXp > 0 && <span className={s.toastXp}>+{gainedXp} XP</span>}
       </div>
 
       {/* Body — game cover first (all toasts lead with the cover), the
@@ -455,7 +508,15 @@ export default function OverlayApp() {
       playAchievement()   // one chime per event, even when batched below
       // Batch many at once into a summary so we don't flood the screen
       const newToasts = list.length > 3
-        ? [{ id: ++nextId.current, summary: { count: list.length, first: list[0] }, gameName, artPath, artUrl }]
+        ? [{
+            id: ++nextId.current,
+            summary: {
+              count: list.length,
+              first: list[0],
+              totalXp: list.reduce((n, a) => n + (a.xp || 0), 0),
+            },
+            gameName, artPath, artUrl,
+          }]
         : list.map(ach => ({ id: ++nextId.current, ach, gameName, artPath, artUrl }))
       setToasts(q => [...q, ...newToasts].slice(-4))
     })

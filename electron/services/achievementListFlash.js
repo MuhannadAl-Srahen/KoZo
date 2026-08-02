@@ -25,22 +25,41 @@ function buildPayload() {
   const total = achievements.length
   const unlocked = achievements.filter(a => a.unlocked_at).length
 
-  // Locked-first (what you'd actually check the overlay to see), each keeping
-  // its original list position as a stable tiebreaker.
-  const ordered = achievements
+  const shape = (a) => ({
+    name: a.display_name || a.steam_api_name,
+    description: a.description || null,
+    icon_url: a.icon_url || null,
+    // 0–100, null when Steam never reported a global rate.
+    rarity: typeof a.global_unlock_percent === 'number' ? a.global_unlock_percent : null,
+  })
+
+  // "What's left", not a dump of the whole list. A 9-second toast can't be read
+  // end to end, so it shows only LOCKED achievements, rarest first — the ones
+  // worth knowing about while you're still in the game. Unknown rarity sorts
+  // last (it's usually a brand-new or unlisted game), original list order breaks
+  // ties so the toast is stable between presses.
+  const rank = (a) => (typeof a.global_unlock_percent === 'number' ? a.global_unlock_percent : 1e9)
+  const remaining = achievements
     .map((a, i) => ({ ...a, _i: i }))
-    .sort((a, b) => (!!a.unlocked_at - !!b.unlocked_at) || (a._i - b._i))
+    .filter(a => !a.unlocked_at)
+    .sort((a, b) => (rank(a) - rank(b)) || (a._i - b._i))
+    .map(shape)
+
+  // A short "you just got these" strip, newest first. Rows with no timestamp
+  // (Steam returned unlocktime 0) sort last rather than pretending to be recent.
+  const recent = achievements
+    .filter(a => a.unlocked_at)
+    .sort((a, b) => new Date(b.unlocked_at || 0) - new Date(a.unlocked_at || 0))
+    .slice(0, 3)
+    .map(shape)
 
   return {
     gameName: sess.game_name || game?.name || 'Now Playing',
     unlocked,
     total,
-    achievements: ordered.map(a => ({
-      name: a.display_name || a.steam_api_name,
-      description: a.description || null,
-      icon_url: a.icon_url || null,
-      unlocked: !!a.unlocked_at,
-    })),
+    percent: total > 0 ? Math.round((unlocked / total) * 100) : 0,
+    remaining,
+    recent,
   }
 }
 

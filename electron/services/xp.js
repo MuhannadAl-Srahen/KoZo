@@ -14,6 +14,17 @@ const XP_PER_UNLOCK = 30
 const XP_PER_STREAK_DAY = 50
 const XP_PER_FINISH = 250   // completing a game is a big, deliberate milestone
 
+// XP a single unlock is worth, from its global unlock rate (0–100, null when
+// Steam never reported one). Rarity-weighted: a 2%-rare unlock is ~+79, a
+// 90%-common one ~+35. Exported so the unlock toasts can show the exact number
+// the profile will credit — one formula, one source of truth.
+function xpForUnlock(globalUnlockPercent) {
+  const pct = (globalUnlockPercent == null)
+    ? 50
+    : Math.max(0, Math.min(100, globalUnlockPercent))
+  return XP_PER_UNLOCK + Math.round((100 - pct) / 2)
+}
+
 function levelForXp(totalXp) {
   // Largest L with 50*(L-1)*L <= totalXp.
   let level = 1
@@ -196,4 +207,4 @@ function xpHistory(limit = 25) {
   return rows.filter(r => r.xp > 0)
 }
 
-module.exports = { computeXp, xpHistory, levelForXp, tierForLevel, nextTierInfo }
+module.exports = { computeXp, xpHistory, levelForXp, tierForLevel, nextTierInfo, xpForUnlock }
