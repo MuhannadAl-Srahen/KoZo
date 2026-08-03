@@ -296,6 +296,16 @@ function buildCandidates(game) {
     add(path.join(ip, 'EMPRESS', 'remote', id, 'achievements.ini'),            I, 'EMPRESS')
     // SKIDROW / RLD in-game
     add(path.join(ip, 'RUNE', id, 'achievements.ini'),                         I, 'RUNE')
+    // DARKSiDERS / Hoodlum / Skidrow keep their stats in a SteamEmu folder
+    // beside the exe rather than under a user directory.
+    add(path.join(ip, 'SteamEmu', 'UserStats', 'achievements.ini'),            I, 'SteamEmu')
+    add(path.join(ip, 'SteamEmu', 'achievements.ini'),                         I, 'SteamEmu')
+    add(path.join(ip, 'UserStats', 'achievements.ini'),                        I, 'SteamEmu')
+    // ALI213 writes per-profile; the unnamed variant is the common one.
+    add(path.join(ip, 'Profile', 'Stats', 'achievements.ini'),                 I, 'ALI213')
+    add(path.join(ip, 'ALI213', 'Profile', 'Stats', 'achievements.ini'),       I, 'ALI213')
+    // Hoodlum profile layout
+    add(path.join(ip, 'Profile', 'VALVE', 'Stats', 'achievements.ini'),        I, 'Hoodlum')
     // SSE inside game
     cands.push({ path: path.join(ip, 'SmartSteamEmu', 'stats.bin'), parse: 'sse', source: 'SSE' })
   }

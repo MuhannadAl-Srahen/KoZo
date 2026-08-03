@@ -4,10 +4,12 @@ import {
   IconPlus, IconLayoutGrid, IconList, IconLayoutColumns,
   IconDeviceGamepad2, IconScan, IconLoader2, IconCheckbox, IconSquare,
   IconTrash, IconX, IconCheck, IconSearch, IconEyeOff, IconChevronRight, IconChevronDown,
+  IconSparkles,
 } from '@tabler/icons-react'
 import GameCard, { formatPlaytime, STATUS_META } from '../components/GameCard'
 import AddGameModal from '../components/modals/AddGameModal'
 import ScanResultModal from '../components/modals/ScanResultModal'
+import DiscoveredGamesModal from '../components/modals/DiscoveredGamesModal'
 import SearchableSelect from '../components/ui/SearchableSelect'
 import CardContextMenu from '../components/ui/CardContextMenu'
 import s from './Library.module.css'
@@ -90,6 +92,20 @@ export default function Library() {
   const [prefillInstallPath, setPrefillInstallPath] = useState('')
   const [scanning, setScanning]     = useState(false)
   const [scanModal, setScanModal]   = useState(null)  // null | scan results[]
+  // Emulator achievement data on disk for games not in the library.
+  const [discovered, setDiscovered]     = useState([])
+  const [discoverModal, setDiscoverModal] = useState(false)
+
+  // One look on mount. The scan itself is ~20 shallow directory reads in the
+  // main process, and it skips anything already in the library or dismissed —
+  // so it stays quiet once you've answered it.
+  useEffect(() => {
+    let cancelled = false
+    window.kozo?.api?.crack?.discover?.().then(res => {
+      if (!cancelled && res?.ok && Array.isArray(res.data)) setDiscovered(res.data)
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [])
   const [search, setSearch]         = useState('')
   const [sortBy, setSortBy]         = useState(() => {
     const saved = localStorage.getItem('kozo:sort:library')
@@ -449,6 +465,32 @@ export default function Library() {
         </div>
       )}
 
+      {/* Cracked games with achievement data on disk that aren't in the library.
+          Surfaced, never auto-added — see crackDiscovery.js. */}
+      {discovered.length > 0 && (
+        <div className={s.discoverBanner}>
+          <IconSparkles size={15} stroke={1.7} style={{ flexShrink: 0, color: 'var(--a)' }} />
+          <span className={s.discoverText}>
+            Found achievements for <strong>{discovered.length}</strong> game
+            {discovered.length === 1 ? '' : 's'} you haven't added
+            {discovered.some(g => g.unlocked > 0) && (
+              <> — including <strong>{discovered.find(g => g.unlocked > 0).name}</strong> with{' '}
+                {discovered.find(g => g.unlocked > 0).unlocked} already unlocked</>
+            )}
+          </span>
+          <button className={s.discoverBtn} onClick={() => setDiscoverModal(true)}>Review</button>
+          <button className={s.discoverDismiss} title="Not now"
+            onClick={async () => {
+              for (const g of discovered) {
+                try { await window.kozo?.api?.crack?.dismissDiscovered?.(g.appId) } catch {}
+              }
+              setDiscovered([])
+            }}>
+            <IconX size={14} stroke={2} />
+          </button>
+        </div>
+      )}
+
       {/* Game grid */}
       <div className={s.content}>
         {loading && (
@@ -556,6 +598,14 @@ export default function Library() {
           results={scanModal}
           onClose={() => setScanModal(null)}
           onAdd={() => { setScanModal(null); loadGames() }}
+        />
+      )}
+
+      {discoverModal && (
+        <DiscoveredGamesModal
+          games={discovered}
+          onClose={() => setDiscoverModal(false)}
+          onAdded={() => { setDiscovered([]); loadGames() }}
         />
       )}
 

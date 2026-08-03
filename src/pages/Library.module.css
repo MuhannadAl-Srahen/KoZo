@@ -278,6 +278,50 @@
 }
 
 /* ── Game grid ──────────────────────────────────────────────── */
+/* "We found achievements for games you haven't added." Sits between the toolbar
+   and the grid so it's noticed once and then gone — dismissing remembers the
+   app ids, so it never nags about the same games twice. */
+.discoverBanner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 20px 0;
+  padding: 9px 12px;
+  border-radius: var(--r-input);
+  border: 1px solid var(--ab);
+  background: var(--ad);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.discoverText { flex: 1; min-width: 0; line-height: 1.45; }
+.discoverText strong { color: var(--text-primary); font-weight: 500; }
+
+.discoverBtn {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border-radius: var(--r-input);
+  border: 1px solid var(--a);
+  background: var(--a);
+  color: #09090f;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.discoverDismiss {
+  flex-shrink: 0;
+  display: flex;
+  padding: 4px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.discoverDismiss:hover { background: var(--surface-3); color: var(--text-primary); }
+
 .content {
   flex: 1;
   overflow-y: auto;
