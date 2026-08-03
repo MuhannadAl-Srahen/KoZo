@@ -206,10 +206,13 @@ app.whenReady().then(() => {
     require('./logger').warn('globalShortcut Alt+K error: ' + e.message)
   }
 
-  // Global hotkey: flash the current game's achievement list over the game.
-  // Read-only — there is deliberately no way to mark anything from here (an
-  // earlier manual-marking panel on this same hotkey was removed on purpose;
-  // this is a display-only successor, see achievementListFlash.js).
+  // Global hotkey: show the current game's achievement list over the game, and
+  // press again to dismiss it. Read-only — there is deliberately no way to mark
+  // anything from here (an earlier manual-marking panel on this same hotkey was
+  // removed on purpose; this is a display-only successor).
+  // While the list is open, achievementListFlash also binds Alt+Down / Alt+Up
+  // to scroll it — those are registered only for as long as it's on screen,
+  // since the overlay can never take keyboard focus itself.
   try {
     const ok = globalShortcut.register('Alt+J', () => {
       try { require('./services/achievementListFlash').flash() } catch {}

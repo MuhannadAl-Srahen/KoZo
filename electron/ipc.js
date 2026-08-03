@@ -442,6 +442,17 @@ async function doLaunch(id) {
   throw new Error('No way to launch — set the install path and executable (Edit → Browse).')
 }
 
+// ── Crack discovery ──────────────────────────────────────────────────────────
+// Games with emulator achievement data on this PC that aren't in the library.
+// Read-only: it lists what it found, the user decides what (if anything) to add.
+handle('crack:discover', async () => {
+  return require('./services/crackDiscovery').discover()
+})
+
+handle('crack:dismissDiscovered', (appId) => {
+  return require('./services/crackDiscovery').dismiss(appId)
+})
+
 // ── Sessions ─────────────────────────────────────────────────────────────────
 handle('sessions:list', (filters) => sessionsQ.listSessions(filters))
 handle('sessions:get', (id) => sessionsQ.getSession(id))
@@ -945,8 +956,11 @@ handle('scanner:scan', async (paths) => {
     const relocated = []
 
     for (const row of rows) {
-      if (!row.install_path) continue
-      if (fsx.existsSync(row.install_path)) continue        // still there — leave alone
+      // Adopt a path for a game that has NONE as well as re-pointing one whose
+      // path died. A game added from crack discovery arrives with an app id and
+      // no exe (its unlocks are read by app id), so this is how a later scan
+      // gives it an executable and makes it session-trackable.
+      if (row.install_path && fsx.existsSync(row.install_path)) continue   // still there — leave alone
       const hit = results.find(g =>
         (row.steam_app_id && g.steam_app_id && String(g.steam_app_id) === String(row.steam_app_id)) ||
         norm(g.name) === norm(row.name))
@@ -954,7 +968,9 @@ handle('scanner:scan', async (paths) => {
       setPath.run(hit.install_path, hit.exe_name || null, row.id)
       hit.relocatedGameId = row.id
       hit.alreadyInLibrary = true
-      relocated.push(`${row.name}: ${row.install_path} -> ${hit.install_path}`)
+      relocated.push(row.install_path
+        ? `${row.name}: ${row.install_path} -> ${hit.install_path}`
+        : `${row.name}: (no path) -> ${hit.install_path}`)
       broadcast('game:updated', row.id)
     }
     if (relocated.length) {
@@ -1246,6 +1262,15 @@ handle('dialog:pickFolder', async () => {
 // ── Overlay window ────────────────────────────────────────────────────────────
 handle('overlay:hide', () => {
   try { require('./overlayWindow').hideOverlay() } catch {}
+  return true
+})
+
+// The achievement-list toast went away — by its safety timeout, a click, or the
+// X. Alt+Down / Alt+Up are only bound while it's on screen (they're far too
+// common to hold globally), so this is what releases them. Must fire for EVERY
+// close route, not just the hotkey one.
+handle('overlay:achListClosed', () => {
+  try { require('./services/achievementListFlash').markClosed() } catch {}
   return true
 })
 

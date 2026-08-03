@@ -346,6 +346,62 @@
   padding: 2px 6px 8px 12px;
 }
 
+/* How many are left, so a scrolled list doesn't feel bottomless. */
+.achListCounter {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 9.5px;
+  letter-spacing: 0;
+}
+
+/* Fade at the bottom of the scroll area — the only cue that there's more below,
+   since there's no visible scrollbar thumb to read at a glance. */
+.achListFade {
+  height: 0;
+  margin-top: -22px;
+  padding-top: 22px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, rgba(16, 16, 26, 0.92));
+}
+
+/* Hotkey legend. These are global shortcuts with no other affordance, and the
+   mouse can't reach this window while a game is focused, so the controls have
+   to be written on the toast itself. */
+.achListKeys {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 12px 9px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+.key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 9.5px;
+  font-family: inherit;
+  line-height: 1;
+}
+
+.achListKeysLabel {
+  margin: 0 8px 0 3px;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.38);
+}
+.achListKeysLabel:last-child { margin-right: 0; }
+
 .achListAllDone {
   display: flex;
   align-items: center;

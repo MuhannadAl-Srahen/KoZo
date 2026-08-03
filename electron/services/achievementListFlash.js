@@ -63,13 +63,68 @@ function buildPayload() {
   }
 }
 
-function flash() {
-  try {
-    const payload = buildPayload()
-    require('../overlayWindow').sendAchievementListFlash(payload)
-  } catch (e) {
-    try { require('../logger').warn('achievementListFlash.flash: ' + e.message) } catch {}
+// ── Open/closed state + scroll hotkeys ───────────────────────────────────────
+// The overlay is click-through and never takes keyboard focus (showInactive +
+// setIgnoreMouseEvents), and a fullscreen game captures the cursor — so the
+// mouse can never scroll this list while you're actually playing, which is the
+// only time it matters. Global shortcuts are the one input channel that still
+// reaches KoZo, so scrolling is driven by Alt+Down / Alt+Up.
+//
+// Those two combos are registered ONLY while the list is on screen. Holding
+// them for the whole app lifetime would hijack two very common keys system-wide,
+// which is not acceptable for something that lives in the tray.
+
+const SCROLL_KEYS = { 'Alt+Down': 90, 'Alt+Up': -90 }   // px per press (~2 rows)
+let listOpen = false
+
+function logger() { return require('../logger') }
+
+function registerScrollKeys() {
+  const { globalShortcut } = require('electron')
+  for (const [accel, delta] of Object.entries(SCROLL_KEYS)) {
+    try {
+      const ok = globalShortcut.register(accel, () => {
+        try { require('../overlayWindow').sendAchListControl({ action: 'scroll', delta }) } catch {}
+      })
+      if (!ok) logger().warn(`achievementListFlash: ${accel} unavailable (in use by another app)`)
+    } catch (e) {
+      logger().warn(`achievementListFlash: ${accel} registration error: ${e.message}`)
+    }
   }
 }
 
-module.exports = { flash, buildPayload }
+function unregisterScrollKeys() {
+  const { globalShortcut } = require('electron')
+  for (const accel of Object.keys(SCROLL_KEYS)) {
+    try { globalShortcut.unregister(accel) } catch {}
+  }
+}
+
+// Called when the toast goes away by ANY route — the safety timeout, a click,
+// or the X. Without this the scroll keys would stay bound after the list is
+// gone and swallow Alt+Down everywhere.
+function markClosed() {
+  if (!listOpen) return
+  listOpen = false
+  unregisterScrollKeys()
+}
+
+// Alt+J toggles: open the list and leave it up, or close it if it's already up.
+function flash() {
+  try {
+    const overlay = require('../overlayWindow')
+    if (listOpen) {
+      overlay.sendAchListControl({ action: 'close' })
+      markClosed()
+      return
+    }
+    overlay.sendAchievementListFlash(buildPayload())
+    listOpen = true
+    registerScrollKeys()
+  } catch (e) {
+    try { logger().warn('achievementListFlash.flash: ' + e.message) } catch {}
+    markClosed()
+  }
+}
+
+module.exports = { flash, buildPayload, markClosed }

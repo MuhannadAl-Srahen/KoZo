@@ -54,12 +54,20 @@ function useAutoClose(onDismiss, ms) {
     setTimeout(onDismiss, 300)
   }
 
+  // Push the auto-dismiss back — used by the achievement list, which stays up
+  // while you're actively scrolling it with the hotkeys.
+  const bump = () => {
+    if (goneRef.current) return
+    clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(close, ms)
+  }
+
   useEffect(() => {
     timerRef.current = setTimeout(close, ms)
     return () => clearTimeout(timerRef.current)
   }, [])
 
-  return { leaving, close }
+  return { leaving, close, bump }
 }
 
 // Props shared by every toast so hovering captures the mouse and the card is
@@ -199,9 +207,44 @@ function AchRow({ a, done, showHint }) {
   )
 }
 
+// Stays up for a whole minute rather than 9s, because it's now something you
+// read and scroll rather than glance at. Not "forever" though — if it's left
+// open it has to clear itself off the game on its own.
+const ACH_LIST_MS = 60_000
+
 function AchListToast({ toast, onDismiss }) {
-  const { leaving, close } = useAutoClose(onDismiss, 9000)
+  const { leaving, close, bump } = useAutoClose(onDismiss, ACH_LIST_MS)
   const { gameName, unlocked, total, percent, remaining = [], recent = [], idle } = toast
+  const rowsRef = useRef(null)
+  const [atEnd, setAtEnd] = useState(false)
+  const [scrollable, setScrollable] = useState(false)
+
+  // Alt+Down / Alt+Up arrive from the main process as control messages, because
+  // this window can't receive key events itself — it's click-through and never
+  // focused, which is the whole reason the list couldn't be scrolled in-game.
+  useEffect(() => {
+    window.kozo?.events?.onAchListControl?.(({ action, delta }) => {
+      if (action === 'close') { close(); return }
+      if (action !== 'scroll') return
+      const el = rowsRef.current
+      if (!el) return
+      el.scrollBy({ top: delta, behavior: 'smooth' })
+      bump()                       // reading it counts as still wanting it up
+    })
+    return () => window.kozo?.events?.removeAll?.('achList:control')
+  }, [])
+
+  const onScroll = () => {
+    const el = rowsRef.current
+    if (!el) return
+    setAtEnd(el.scrollTop + el.clientHeight >= el.scrollHeight - 4)
+  }
+  useEffect(() => {
+    const el = rowsRef.current
+    if (!el) return
+    setScrollable(el.scrollHeight > el.clientHeight + 4)
+    onScroll()
+  }, [remaining.length])
   return (
     <div className={`${s.toast} ${s.achListToast} ${leaving ? s.toastOut : s.toastIn}`}
       {...toastInteractions(close)}>
@@ -237,10 +280,14 @@ function AchListToast({ toast, onDismiss }) {
 
           {remaining.length > 0 ? (
             <>
-              <div className={s.achListLabel}>Still locked — rarest first</div>
-              <div className={s.achListRows}>
+              <div className={s.achListLabel}>
+                Still locked — rarest first
+                {scrollable && <span className={s.achListCounter}>{remaining.length}</span>}
+              </div>
+              <div className={s.achListRows} ref={rowsRef} onScroll={onScroll}>
                 {remaining.map((a, i) => <AchRow key={`r${i}`} a={a} done={false} showHint />)}
               </div>
+              {scrollable && !atEnd && <div className={s.achListFade} aria-hidden="true" />}
             </>
           ) : (
             <div className={s.achListAllDone}>
@@ -256,6 +303,17 @@ function AchListToast({ toast, onDismiss }) {
               </div>
             </>
           )}
+
+          {/* The controls have to be on screen: they're global hotkeys with no
+              other affordance, and the mouse cannot reach this window while a
+              game is focused. */}
+          <div className={s.achListKeys}>
+            {scrollable && <><kbd className={s.key}>Alt</kbd>+<kbd className={s.key}>↓</kbd>
+              <kbd className={s.key}>Alt</kbd>+<kbd className={s.key}>↑</kbd>
+              <span className={s.achListKeysLabel}>scroll</span></>}
+            <kbd className={s.key}>Alt</kbd>+<kbd className={s.key}>J</kbd>
+            <span className={s.achListKeysLabel}>close</span>
+          </div>
         </>
       )}
     </div>
@@ -572,6 +630,14 @@ export default function OverlayApp() {
   function dismiss(id) {
     setToasts(q => {
       const next = q.filter(t => t.id !== id)
+      // Tell main the achievement list is gone, whatever closed it (Alt+J, the
+      // safety timeout, a click, the X), so its Alt+Down/Alt+Up hotkeys are
+      // released. This lives here rather than in an unmount cleanup on purpose:
+      // StrictMode double-mounts every component in dev, and an unmount handler
+      // would report "closed" while the list was still very much open.
+      if (q.some(t => t.id === id && t.type === 'achList')) {
+        window.kozo?.api?.overlay?.achListClosed?.()
+      }
       // Hide the overlay window when all toasts are gone
       if (next.length === 0) window.kozo?.api?.overlay?.hide?.()
       return next

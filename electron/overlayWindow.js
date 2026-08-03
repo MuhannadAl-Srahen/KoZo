@@ -166,6 +166,11 @@ function sendAchievements(data)   { _send('achievement:overlay',     data) }
 function sendSessionStarted(data) { _send('session:overlay',         data) }
 function sendStatusFlash(data)    { _send('status:overlay',          data) }
 function sendAchievementListFlash(data) { _send('achList:overlay',   data) }
+// Drive the already-open achievement list from a global hotkey. The overlay is
+// click-through and never takes keyboard focus, and a fullscreen game owns the
+// cursor, so hotkeys are the ONLY way to reach it while you're playing —
+// see achievementListFlash.js.
+function sendAchListControl(data) { _send('achList:control',         data) }
 function sendLevelUp(data)        { _send('xp:overlay',              data) }
 function sendSessionEnded(data)   { _send('sessionEnd:overlay',      data) }
 function sendUnknownGame(data)    { _send('unknownGame:overlay',      data) }
@@ -197,4 +202,4 @@ function applyAccent(hex) {
 
 // getWindow lets ipc.js tell the overlay apart from the main window (e.g. to
 // focus the main window when an overlay notification is clicked).
-module.exports = { getOrCreate, getWindow: () => _win, sendAchievements, sendSessionStarted, sendStatusFlash, sendAchievementListFlash, sendLevelUp, sendSessionEnded, sendUnknownGame, hideOverlay, markReady, setInteractive, applyAccent }
+module.exports = { getOrCreate, getWindow: () => _win, sendAchievements, sendSessionStarted, sendStatusFlash, sendAchievementListFlash, sendAchListControl, sendLevelUp, sendSessionEnded, sendUnknownGame, hideOverlay, markReady, setInteractive, applyAccent }
