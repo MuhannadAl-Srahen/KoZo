@@ -245,6 +245,20 @@ app.whenReady().then(() => {
     })
   }, 6000)
 
+  // Re-test the Steam profile's readability once per launch. The private-profile
+  // warning is persisted, and nothing else clears it — set Game details back to
+  // Public and the banner would otherwise keep warning about a solved problem.
+  // One request, and only when the flag is actually set.
+  setTimeout(() => {
+    try {
+      const flag = require('./db/queries/settings').getSetting('steam_profile_private')
+      if (!flag) return
+      watcher.runWhenIdle('steamPrivacyRecheck', () => {
+        require('./services/achievementSync').revalidateProfilePrivacy().catch(() => {})
+      })
+    } catch {}
+  }, 10000)
+
   setTimeout(() => {
     watcher.runWhenIdle('startupCatchUp', () => {
       // Cracked games: emulator save files.

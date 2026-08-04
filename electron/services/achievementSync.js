@@ -74,19 +74,105 @@ function setProfilePrivateFlag(error) {
   } catch {}
 }
 
+// IMPORTANT: "Profile is not public" is NOT a reliable statement about the
+// profile. Steam returns it for any app it won't discuss for this account —
+// including, very commonly, a game the user simply DOESN'T OWN on Steam. On a
+// library full of cracked copies marked as Steam games, most titles answer that
+// way while the account is perfectly public. Setting an account-wide flag from
+// one game's refusal produced a permanent, wrong "your profile is private"
+// warning. So a single failure is recorded per-GAME only; the account-level
+// verdict comes from revalidateProfilePrivacy(), which requires EVERY game it
+// tries to refuse before it will believe it.
+let _revalidateAt = 0
+const REVALIDATE_EVERY_MS = 60 * 60_000
+
 function recordSyncError(gameId, error) {
   if (PRIVACY_ERRORS.has(error)) {
     lastSyncErrors.set(gameId, error)
-    setProfilePrivateFlag(error)
+    // Ask the account-level question, at most hourly — never conclude from here.
+    if (Date.now() - _revalidateAt > REVALIDATE_EVERY_MS) {
+      _revalidateAt = Date.now()
+      setTimeout(() => { revalidateProfilePrivacy().catch(() => {}) }, 2000)
+    }
   } else {
     lastSyncErrors.delete(gameId)
-    // Only a genuinely clean read proves the profile is readable — an unrelated
-    // failure (network blip, no_stats_for_game) says nothing either way.
+    // A clean read is proof the account is readable, whatever any other game says.
     if (!error) setProfilePrivateFlag(null)
   }
 }
 function getLastSyncError(gameId) {
   return lastSyncErrors.get(gameId) || null
+}
+
+/**
+ * Decide, at the ACCOUNT level, whether Steam will serve unlocks — and correct
+ * the stored flag either way.
+ *
+ * Two separate bugs made this necessary:
+ *   1. The flag was write-mostly. It got set the moment any sync hit "private",
+ *      but only a later CLEAN sync cleared it — and a failing game's in-session
+ *      poll parks itself after the first permanent failure, so no such sync ever
+ *      came. Setting Game details back to Public left the warning up forever.
+ *   2. Worse, the conclusion itself was wrong. Steam answers "Profile is not
+ *      public" for any app it won't discuss, very much including games the user
+ *      doesn't OWN. A library of cracked copies tagged as Steam games therefore
+ *      looked like a private profile even when it was fully public.
+ *
+ * So: try several games, prefer ones Steam has demonstrably served before (they
+ * carry steam_api unlocks, which proves ownership), and only conclude "private"
+ * if every one of them refuses. One success anywhere means the account is fine.
+ */
+const REVALIDATE_SAMPLE = 5
+
+async function revalidateProfilePrivacy() {
+  const settingsQ = require('../db/queries/settings')
+  const steamId = settingsQ.getSetting('steam_user_id')
+  if (!steamId) return { checked: false, reason: 'no_steam_id' }
+
+  let games = []
+  try {
+    games = require('../db/database').getDb().prepare(`
+      SELECT g.steam_app_id, g.name,
+             (SELECT COUNT(*) FROM achievement_unlocks au
+                JOIN achievements a ON a.id = au.achievement_id
+               WHERE a.game_id = g.id AND au.source = 'steam_api') AS served,
+             (SELECT COUNT(*) FROM achievements a WHERE a.game_id = g.id) AS total
+      FROM games g
+      WHERE g.steam_app_id IS NOT NULL AND IFNULL(g.is_cracked,0) != 1
+        AND IFNULL(g.source,'') NOT IN ('epic','gog','xbox','ea','ubisoft')
+      ORDER BY served DESC, total DESC
+      LIMIT ?
+    `).all(REVALIDATE_SAMPLE)
+  } catch {}
+  if (!games.length) return { checked: false, reason: 'no_steam_game' }
+
+  const apiKey = settingsQ.getSetting('steam_api_key')
+  const { getPlayerAchievements, getPlayerAchievementsXml } = require('./steamApi')
+  const was = settingsQ.getSetting('steam_profile_private') || ''
+  const refused = []
+
+  for (const g of games) {
+    let result
+    try {
+      result = apiKey
+        ? await getPlayerAchievements(g.steam_app_id, apiKey, steamId)
+        : await getPlayerAchievementsXml(g.steam_app_id, steamId)
+    } catch {
+      continue                              // network blip proves nothing either way
+    }
+    if (!PRIVACY_ERRORS.has(result.error)) {
+      // Steam talked to us about this account. Whatever the other games say,
+      // they're saying it about ownership, not privacy.
+      setProfilePrivateFlag(null)
+      if (was) logger.info(`Steam profile is readable (confirmed via "${g.name}") — clearing the private-profile warning`)
+      return { checked: true, private: false, changed: !!was, via: g.name }
+    }
+    refused.push(g.name)
+  }
+
+  if (!refused.length) return { checked: false, reason: 'no_conclusive_answer' }
+  setProfilePrivateFlag('private')
+  return { checked: true, private: true, tried: refused }
 }
 
 // Foreign-launcher games (Xbox/Epic/GOG/EA/Ubisoft) have no Steam-readable
@@ -470,4 +556,4 @@ async function syncPlayerUnlocks(gameId) {
   return { added, total: steamUnlocks.length, newUnlocks }
 }
 
-module.exports = { fetchAndStoreAchievements, syncAfterSession, syncPlayerUnlocks, ensureSchema, importSchemaFromAppId, autoImportSchemaByName, emitNewUnlocks, isForeignLauncher, getLastSyncError }
+module.exports = { fetchAndStoreAchievements, syncAfterSession, syncPlayerUnlocks, ensureSchema, importSchemaFromAppId, autoImportSchemaByName, emitNewUnlocks, isForeignLauncher, getLastSyncError, revalidateProfilePrivacy }

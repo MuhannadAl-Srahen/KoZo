@@ -733,6 +733,11 @@ handle('steam:getStoreArt', async (appId) => {
 
 // Privacy-class failure from the game's last Steam sync, so GameDetail can show
 // an inline "profile is private" warning without a manual diagnose.
+// Re-test whether Steam will serve unlocks and correct the stored privacy flag.
+// Used by the Settings banner's re-check button.
+handle('steam:recheckPrivacy', () =>
+  require('./services/achievementSync').revalidateProfilePrivacy())
+
 handle('steam:lastSyncError', (gameId) =>
   require('./services/achievementSync').getLastSyncError(gameId))
 
@@ -1170,21 +1175,66 @@ handle('steam:refreshAllBanners', async () => {
 
 // ── App system settings (startup, minimize) ───────────────────────────────────
 const TASK_NAME = 'KoZo_AutoStart'
+const RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
+
+// Every Run-key value that could be KoZo, found by ENUMERATING the key rather
+// than guessing names.
+//
+// This is why "turn startup off" didn't work: Electron names the Run value after
+// the AppUserModelID when one is set, so the real entry was
+// `com.kozo.gametracker`, while the cleanup only ever tried deleting "KoZo" and
+// app.getName(). It also verified only the registry, never Task Scheduler, so it
+// happily reported success while the entry sat there and the app kept starting.
+// Names differ between dev and packaged builds too (electron.app.* forms), so
+// matching on a fixed list can never be reliable — read what's actually there.
+function findRunEntries() {
+  const { app } = require('electron')
+  const { execSync } = require('child_process')
+  const out = []
+  let raw = ''
+  try { raw = execSync(`reg query "${RUN_KEY}"`, { encoding: 'utf8', stdio: 'pipe' }) } catch { return out }
+
+  const selfExe  = String(process.execPath || '').toLowerCase()
+  const selfPath = String(app.getAppPath?.() || '').toLowerCase()
+  const knownNames = new Set([
+    'kozo', String(app.getName?.() || '').toLowerCase(),
+    'com.kozo.gametracker',                        // the AppUserModelID (main.js)
+    'electron.app.kozo', 'electron.app.electron',  // Electron's default naming
+  ].filter(Boolean))
+
+  for (const line of raw.split(/\r?\n/)) {
+    // "    <name>    REG_SZ    <data>"
+    const m = line.match(/^\s{4}(.+?)\s{4,}REG_[A-Z_]+\s{4,}(.*)$/)
+    if (!m) continue
+    const name = m[1].trim()
+    const data = String(m[2] || '').toLowerCase()
+    const isOurs =
+      knownNames.has(name.toLowerCase()) ||
+      (selfExe && data.includes(selfExe)) ||
+      (selfPath && data.includes(selfPath)) ||
+      /\bkozo\.exe/.test(data)
+    if (isOurs) out.push(name)
+  }
+  return out
+}
+
+function hasScheduledTask() {
+  try {
+    require('child_process').execSync(`schtasks /query /tn "${TASK_NAME}"`, { stdio: 'ignore' })
+    return true
+  } catch { return false }
+}
 
 handle('app:getStartup', () => {
-  const { app } = require('electron')
-  // Check Task Scheduler first (used when app runs as admin), then registry
-  try {
-    const { execSync } = require('child_process')
-    execSync(`schtasks /query /tn "${TASK_NAME}"`, { stdio: 'ignore' })
-    return { openAtLogin: true, method: 'task_scheduler' }
-  } catch {}
-  // Must query with the SAME path + args that setStartup wrote, otherwise Windows
-  // compares against the bare exec path (empty args) and reports false even though
-  // the Run-key entry exists — which made the toggle keep flipping itself off.
-  const launchArgs = app.isPackaged ? [] : [app.getAppPath()]
-  const s = app.getLoginItemSettings({ path: process.execPath, args: launchArgs })
-  return { openAtLogin: s.openAtLogin, method: 'registry' }
+  // Report the union of both mechanisms. Checking only one is how the toggle
+  // ended up disagreeing with what Windows actually does at boot.
+  const task = hasScheduledTask()
+  const runValues = findRunEntries()
+  return {
+    openAtLogin: task || runValues.length > 0,
+    method: task ? 'task_scheduler' : (runValues.length ? 'registry' : 'none'),
+    entries: runValues,
+  }
 })
 
 handle('app:setStartup', (enable) => {
@@ -1199,18 +1249,33 @@ handle('app:setStartup', (enable) => {
   const launchArgs = app.isPackaged ? [] : [app.getAppPath()]
 
   if (!enable) {
-    // Remove from every place an entry might live. setLoginItemSettings must be
-    // called with the SAME path+args used when enabling — bare it computes a
-    // different Run value name and the real entry survives (toggle showed off
-    // but the app kept auto-starting).
+    // Remove EVERY entry that is actually there, then verify BOTH mechanisms.
+    // The old version guessed at value names and only re-checked the registry,
+    // so a surviving scheduled task — or a Run value under a name it didn't
+    // guess — reported "off" while Windows kept starting the app.
     try { execSync(`schtasks /delete /tn "${TASK_NAME}" /f`, { stdio: 'pipe' }) } catch {}
     try { app.setLoginItemSettings({ openAtLogin: false, path: execPath, args: launchArgs }) } catch {}
-    // Belt and braces: kill any installer/legacy Run values keyed by app name too.
-    for (const name of new Set(['KoZo', app.getName()])) {
-      try { execSync(`reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v "${name}" /f`, { stdio: 'pipe' }) } catch {}
+    for (const name of findRunEntries()) {
+      try { execSync(`reg delete "${RUN_KEY}" /v "${name}" /f`, { stdio: 'pipe' }) } catch {}
     }
-    const verify = app.getLoginItemSettings({ path: execPath, args: launchArgs })
-    return { ok: true, openAtLogin: verify.openAtLogin }
+
+    const stillTask = hasScheduledTask()
+    const stillRun  = findRunEntries()
+    const stillOn   = stillTask || stillRun.length > 0
+    if (stillOn) {
+      logger.warn('app:setStartup(false): entries survived removal', { task: stillTask, run: stillRun })
+    }
+    return {
+      ok: !stillOn,
+      openAtLogin: stillOn,
+      // A scheduled task created with /rl HIGHEST can need elevation to delete;
+      // say so instead of silently claiming success.
+      error: stillOn
+        ? (stillTask
+            ? 'A Windows scheduled task for KoZo could not be removed — it may need administrator rights.'
+            : `Windows startup entries could not be removed: ${stillRun.join(', ')}`)
+        : undefined,
+    }
   }
 
   // Try Task Scheduler — works even when app runs as admin, no UAC at boot.

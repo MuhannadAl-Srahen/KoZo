@@ -63,14 +63,34 @@ function GeneralTab() {
     setStartupMsg('')
     setStartupErr('')
     const res = await window.kozo?.api?.app?.setStartup?.(val)
-    if (!val) return
-    if (res?.ok === false) {
+    // IPC replies are enveloped as { ok, data } — the handler's own result is in
+    // `data`. Reading res.method directly (as this used to) is always undefined,
+    // so neither the success message nor a failure ever surfaced.
+    const r = res?.ok ? (res.data || {}) : null
+
+    if (!val) {
+      // Turning it OFF can genuinely fail — a scheduled task made with /rl
+      // HIGHEST may need admin to delete. Saying nothing left the toggle
+      // reading "off" while Windows kept launching KoZo at boot.
+      if (!r || r.openAtLogin) {
+        setOpenAtLogin(true)
+        if (generalTabCache) generalTabCache.openAtLogin = true
+        setStartupErr(r?.error || 'Could not remove KoZo from Windows startup.')
+      }
+      return
+    }
+
+    if (!r) {
       setOpenAtLogin(false)
       if (generalTabCache) generalTabCache.openAtLogin = false
       setStartupErr('Could not register startup: ' + (res?.error || 'unknown error'))
-    } else if (res?.method === 'task_scheduler') {
+    } else if (r.ok === false) {
+      setOpenAtLogin(false)
+      if (generalTabCache) generalTabCache.openAtLogin = false
+      setStartupErr('Could not register startup: ' + (r.error || 'unknown error'))
+    } else if (r.method === 'task_scheduler') {
       setStartupMsg('Registered via Task Scheduler — works even when KoZo runs as administrator.')
-    } else if (res?.method === 'registry') {
+    } else if (r.method === 'registry') {
       setStartupMsg('Registered in Windows startup registry.')
     }
   }
@@ -174,6 +194,7 @@ function SteamTab() {
   // Persisted by achievementSync whenever Steam refuses to hand over unlocks.
   // Library-wide, so it belongs here rather than only on one game's page.
   const [privacyError, setPrivacyError] = useState('')
+  const [privacyChecking, setPrivacyChecking] = useState(false)
 
   useEffect(() => {
     window.kozo?.events?.onSteamPrivacyChanged?.(v => setPrivacyError(v || ''))
@@ -347,16 +368,30 @@ function SteamTab() {
               {privacyError === 'profile_not_found'
                 ? <>KoZo couldn't read your Steam profile. Check the Steam ID above.</>
                 : <>
-                    Your Steam profile's <strong>Game details</strong> are private, so Steam refuses to
-                    hand over your unlocks — this affects <strong>every</strong> Steam game in your
-                    library, not just one. KoZo still reads unlocks straight from the Steam app on this
-                    PC, so achievements keep working; setting Game details to Public just adds Steam's
-                    real unlock dates on top.
+                    Steam wouldn't return unlocks for any game KoZo tried, which usually means your
+                    profile's <strong>Game details</strong> are private. KoZo still reads unlocks
+                    straight from the Steam app on this PC, so achievements keep working — this only
+                    costs you Steam's real unlock dates. If you've already set Game details to Public,
+                    hit Re-check.
                   </>}
-              <div style={{ marginTop: 8 }}>
+              <div className={s.keyRow} style={{ marginTop: 8 }}>
                 <button className={s.testBtn}
                   onClick={() => window.kozo?.api?.shell?.openExternal?.('https://steamcommunity.com/my/edit/settings')}>
                   Open Steam privacy settings
+                </button>
+                {/* Steam caches privacy changes for a moment, and KoZo only
+                    re-tests on launch — so give it a way to confirm now. */}
+                <button className={s.testBtn} disabled={privacyChecking}
+                  onClick={async () => {
+                    setPrivacyChecking(true)
+                    const res = await window.kozo?.api?.steam?.recheckPrivacy?.()
+                    setPrivacyChecking(false)
+                    const d = res?.ok ? res.data : null
+                    if (d?.checked && !d.private) setPrivacyError('')
+                  }}>
+                  {privacyChecking
+                    ? <><IconLoader2 size={13} stroke={1.8} className={s.spin} /> Checking…</>
+                    : <><IconRefresh size={13} stroke={1.8} /> Re-check now</>}
                 </button>
               </div>
             </div>
