@@ -70,10 +70,10 @@ function statsFilesFor(appid) {
   }
 }
 
-// Parse both files → Set of unlocked api-names, or null if either file is
-// missing/unparseable (caller decides on the Web API fallback).
+// Parse both files → Map<apiName, unlockUnixSeconds|0>, or null if either file
+// is missing/unparseable (caller decides on the Web API fallback).
 function readUnlockedSet(files) {
-  const { parseBinaryKV, unlockedApiNames } = require('./binaryKV')
+  const { parseBinaryKV, unlockedWithTimes } = require('./binaryKV')
   let statsBuf, schemaBuf
   try {
     statsBuf = fs.readFileSync(files.statsFile)
@@ -82,7 +82,7 @@ function readUnlockedSet(files) {
   const statsRoot = parseBinaryKV(statsBuf)
   const schemaRoot = parseBinaryKV(schemaBuf)
   if (!statsRoot || !schemaRoot) return null
-  return unlockedApiNames(schemaRoot, statsRoot)
+  return unlockedWithTimes(schemaRoot, statsRoot)
 }
 
 // Web API fallback when the local parse fails: sync now, then a short burst —
@@ -111,7 +111,10 @@ async function scanGame(gameId) {
   const unlockedSet = readUnlockedSet(entry)
   if (unlockedSet === null) {
     logger.debug(`steamStatsWatcher: local parse unavailable for "${game.name}" — Web API burst fallback`)
-    webApiBurst(gameId)
+    // Only worth a network fallback for a game actually being played (a live
+    // watcher). A library-wide sweep must not fire a burst per game — most
+    // misses there are simply "you never launched this one on this machine".
+    if (entry.watcher) webApiBurst(gameId)
     return { added: 0, fallback: true }
   }
 
@@ -127,17 +130,20 @@ async function scanGame(gameId) {
   for (const ach of localAchs) {
     if (ach.unlocked_at) continue
     if (!ach.steam_api_name || !unlockedSet.has(ach.steam_api_name)) continue
+    // Steam records the real unlock time in the same file (AchievementTimes),
+    // so a locally-detected unlock carries its true date — no need to stamp
+    // "now" and hope the Web API corrects it later (it can't, on a private
+    // profile). Falls back to now only when the file has no time for that bit.
+    const ts = unlockedSet.get(ach.steam_api_name)
+    const unlocked_at = ts > 0 ? new Date(ts * 1000).toISOString() : now
     try {
       achievementsQ.addUnlock({
         achievement_id: ach.id,
         session_id: entry.sessionId ?? null,
-        // The file just changed, so "now" is accurate for live unlocks; older
-        // unlocks caught on the initial scan get corrected later by the Web
-        // API reconciliation (which carries Steam's real unlock timestamps).
-        unlocked_at: now,
+        unlocked_at,
         source: 'steam_stats',
       })
-      newUnlocks.push({ ...ach, unlocked_at: now })
+      newUnlocks.push({ ...ach, unlocked_at })
       added++
     } catch {}
   }
@@ -209,11 +215,67 @@ function unwatchGame(gameId) {
   watchers.delete(gameId)
   clearTimeout(scanDebounce.get(gameId))
   scanDebounce.delete(gameId)
-  try { entry.watcher.close() } catch {}
+  try { entry.watcher?.close() } catch {}
 }
 
 function unwatchAll() {
   for (const gameId of [...watchers.keys()]) unwatchGame(gameId)
+}
+
+// ── Library-wide catch-up ────────────────────────────────────────────────────
+// Reconcile one game against Steam's local stats files WITHOUT needing a live
+// watcher. Two small file reads, no network, and — the important part — no
+// dependence on the Steam profile being public. A private profile makes the Web
+// API return `private` for every request, which used to mean a Steam game's
+// unlocks simply never appeared; this path doesn't care.
+async function scanGameOnce(gameId, sessionId = null) {
+  const gamesQ = require('../db/queries/games')
+  let game
+  try { game = gamesQ.getGame(gameId) } catch { return { added: 0 } }
+  if (!game || !game.steam_app_id || game.is_cracked === 1) return { added: 0 }
+  try {
+    if (require('./achievementSync').isForeignLauncher(game)) return { added: 0 }
+  } catch { return { added: 0 } }
+
+  const files = statsFilesFor(game.steam_app_id)
+  if (!files) return { added: 0 }
+  // No watcher for this game (not in a session) — scanGame reads its file paths
+  // from the watchers map, so register a watcher-less entry for the call.
+  const had = watchers.has(gameId)
+  if (!had) watchers.set(gameId, { watcher: null, ...files, sessionId })
+  try {
+    return await scanGame(gameId)
+  } finally {
+    if (!had) watchers.delete(gameId)
+  }
+}
+
+/**
+ * Sweep every Steam game in the library against the local stats files. Run at
+ * startup (deferred until nothing is playing) so unlocks earned while KoZo was
+ * closed show up on their own. Cheap: a couple of small reads per game, and it
+ * bails immediately if Steam or the account id can't be resolved.
+ */
+async function scanAllSteamGames() {
+  if (!getSteamPath() || !getAccountId()) {
+    logger.debug('steamStatsWatcher: no Steam path or account id — skipping library sweep')
+    return { totalAdded: 0, gamesScanned: 0 }
+  }
+  let games = []
+  try {
+    games = require('../db/database').getDb()
+      .prepare('SELECT id FROM games WHERE steam_app_id IS NOT NULL AND IFNULL(is_cracked,0) != 1')
+      .all()
+  } catch { return { totalAdded: 0, gamesScanned: 0 } }
+
+  let totalAdded = 0
+  for (const g of games) {
+    try { totalAdded += (await scanGameOnce(g.id))?.added || 0 } catch {}
+  }
+  if (totalAdded > 0) {
+    logger.info(`steamStatsWatcher: library sweep recorded ${totalAdded} unlock(s) from local Steam stats`)
+  }
+  return { totalAdded, gamesScanned: games.length }
 }
 
 // Read the logged-in Steam account (SteamID64 + persona name) from Steam's
@@ -246,4 +308,7 @@ function detectLoggedInUser() {
   }
 }
 
-module.exports = { watchGame, unwatchGame, unwatchAll, scanGame, getSteamPath, detectLoggedInUser }
+module.exports = {
+  watchGame, unwatchGame, unwatchAll, scanGame, scanGameOnce, scanAllSteamGames,
+  getSteamPath, detectLoggedInUser,
+}

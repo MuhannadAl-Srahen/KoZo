@@ -14,6 +14,7 @@ import Profile from './pages/Profile'
 import Settings from './pages/Settings'
 import UnknownGamePrompt from './components/UnknownGamePrompt'
 import OnboardingModal from './components/OnboardingModal'
+import LevelUpCelebration from './components/LevelUpCelebration'
 
 // Controller navigation — must live under the router so useNavigate works.
 function GamepadNav() {
@@ -76,6 +77,7 @@ export default function App() {
             window — an in-app copy here would show duplicates. */}
         <GamepadNav />
         <UnknownGamePrompt />
+        <LevelUpCelebration />
         {showOnboarding && <OnboardingModal onDone={() => setShowOnboarding(false)} />}
       </HashRouter>
     </AccentColorProvider>

@@ -34,7 +34,15 @@ function emitNewUnlocks(game, newUnlocks) {
       artUrl  = row?.banner_url ?? null
     } catch {}
   }
-  const payload = { gameId: game.id, achievements: newUnlocks, gameName: game.name, artPath, artUrl }
+  // Tag each unlock with the XP it just earned. Unlocks are by far the most
+  // frequent XP event — showing the number on the toast is what makes the XP
+  // system visible day to day, instead of only at a level-up tens of hours apart.
+  let withXp = newUnlocks
+  try {
+    const { xpForUnlock } = require('./xp')
+    withXp = newUnlocks.map(a => ({ ...a, xp: xpForUnlock(a.global_unlock_percent) }))
+  } catch {}
+  const payload = { gameId: game.id, achievements: withXp, gameName: game.name, artPath, artUrl }
   broadcastToRenderers('achievement:unlocked', payload)
   // Show over the running game in the overlay window
   try { require('../overlayWindow').sendAchievements(payload) } catch {}
@@ -46,15 +54,125 @@ function emitNewUnlocks(game, newUnlocks) {
 // Last Steam-sync failure per game (privacy-class errors only) so the UI can
 // show "your profile is private" inline instead of silently syncing nothing.
 const lastSyncErrors = new Map()
+
+// The same state, PERSISTED and library-wide. A private profile isn't a
+// per-game problem — it blocks Web-API unlock sync for every Steam game the
+// user owns — and the in-memory map above only tells the UI about it after a
+// sync has already failed in the current run, which is exactly when nobody is
+// looking. Persisting it lets Settings → Steam show the one thing that fixes
+// the whole library. Cleared automatically the moment any sync succeeds.
+const PRIVACY_ERRORS = new Set(['private_profile', 'private', 'profile_not_found'])
+function setProfilePrivateFlag(error) {
+  try {
+    const settingsQ = require('../db/queries/settings')
+    const current = settingsQ.getSetting('steam_profile_private') || ''
+    const next = error && PRIVACY_ERRORS.has(error) ? error : ''
+    if (current !== next) {
+      settingsQ.setSetting('steam_profile_private', next)
+      broadcastToRenderers('steam:privacy-changed', next || null)
+    }
+  } catch {}
+}
+
+// IMPORTANT: "Profile is not public" is NOT a reliable statement about the
+// profile. Steam returns it for any app it won't discuss for this account —
+// including, very commonly, a game the user simply DOESN'T OWN on Steam. On a
+// library full of cracked copies marked as Steam games, most titles answer that
+// way while the account is perfectly public. Setting an account-wide flag from
+// one game's refusal produced a permanent, wrong "your profile is private"
+// warning. So a single failure is recorded per-GAME only; the account-level
+// verdict comes from revalidateProfilePrivacy(), which requires EVERY game it
+// tries to refuse before it will believe it.
+let _revalidateAt = 0
+const REVALIDATE_EVERY_MS = 60 * 60_000
+
 function recordSyncError(gameId, error) {
-  if (error === 'private_profile' || error === 'private' || error === 'profile_not_found') {
+  if (PRIVACY_ERRORS.has(error)) {
     lastSyncErrors.set(gameId, error)
+    // Ask the account-level question, at most hourly — never conclude from here.
+    if (Date.now() - _revalidateAt > REVALIDATE_EVERY_MS) {
+      _revalidateAt = Date.now()
+      setTimeout(() => { revalidateProfilePrivacy().catch(() => {}) }, 2000)
+    }
   } else {
     lastSyncErrors.delete(gameId)
+    // A clean read is proof the account is readable, whatever any other game says.
+    if (!error) setProfilePrivateFlag(null)
   }
 }
 function getLastSyncError(gameId) {
   return lastSyncErrors.get(gameId) || null
+}
+
+/**
+ * Decide, at the ACCOUNT level, whether Steam will serve unlocks — and correct
+ * the stored flag either way.
+ *
+ * Two separate bugs made this necessary:
+ *   1. The flag was write-mostly. It got set the moment any sync hit "private",
+ *      but only a later CLEAN sync cleared it — and a failing game's in-session
+ *      poll parks itself after the first permanent failure, so no such sync ever
+ *      came. Setting Game details back to Public left the warning up forever.
+ *   2. Worse, the conclusion itself was wrong. Steam answers "Profile is not
+ *      public" for any app it won't discuss, very much including games the user
+ *      doesn't OWN. A library of cracked copies tagged as Steam games therefore
+ *      looked like a private profile even when it was fully public.
+ *
+ * So: try several games, prefer ones Steam has demonstrably served before (they
+ * carry steam_api unlocks, which proves ownership), and only conclude "private"
+ * if every one of them refuses. One success anywhere means the account is fine.
+ */
+const REVALIDATE_SAMPLE = 5
+
+async function revalidateProfilePrivacy() {
+  const settingsQ = require('../db/queries/settings')
+  const steamId = settingsQ.getSetting('steam_user_id')
+  if (!steamId) return { checked: false, reason: 'no_steam_id' }
+
+  let games = []
+  try {
+    games = require('../db/database').getDb().prepare(`
+      SELECT g.steam_app_id, g.name,
+             (SELECT COUNT(*) FROM achievement_unlocks au
+                JOIN achievements a ON a.id = au.achievement_id
+               WHERE a.game_id = g.id AND au.source = 'steam_api') AS served,
+             (SELECT COUNT(*) FROM achievements a WHERE a.game_id = g.id) AS total
+      FROM games g
+      WHERE g.steam_app_id IS NOT NULL AND IFNULL(g.is_cracked,0) != 1
+        AND IFNULL(g.source,'') NOT IN ('epic','gog','xbox','ea','ubisoft')
+      ORDER BY served DESC, total DESC
+      LIMIT ?
+    `).all(REVALIDATE_SAMPLE)
+  } catch {}
+  if (!games.length) return { checked: false, reason: 'no_steam_game' }
+
+  const apiKey = settingsQ.getSetting('steam_api_key')
+  const { getPlayerAchievements, getPlayerAchievementsXml } = require('./steamApi')
+  const was = settingsQ.getSetting('steam_profile_private') || ''
+  const refused = []
+
+  for (const g of games) {
+    let result
+    try {
+      result = apiKey
+        ? await getPlayerAchievements(g.steam_app_id, apiKey, steamId)
+        : await getPlayerAchievementsXml(g.steam_app_id, steamId)
+    } catch {
+      continue                              // network blip proves nothing either way
+    }
+    if (!PRIVACY_ERRORS.has(result.error)) {
+      // Steam talked to us about this account. Whatever the other games say,
+      // they're saying it about ownership, not privacy.
+      setProfilePrivateFlag(null)
+      if (was) logger.info(`Steam profile is readable (confirmed via "${g.name}") — clearing the private-profile warning`)
+      return { checked: true, private: false, changed: !!was, via: g.name }
+    }
+    refused.push(g.name)
+  }
+
+  if (!refused.length) return { checked: false, reason: 'no_conclusive_answer' }
+  setProfilePrivateFlag('private')
+  return { checked: true, private: true, tried: refused }
 }
 
 // Foreign-launcher games (Xbox/Epic/GOG/EA/Ubisoft) have no Steam-readable
@@ -78,6 +196,47 @@ function isForeignLauncher(game) {
 const SCHEMA_RETRY_MS = 10 * 60_000
 const schemaFailAt = new Map()   // `${gameId}:${appid}` → last failed fetch ms
 
+// Some appids simply have no achievement schema at all — an unreleased title, a
+// demo, or a game that never shipped any. Steam answers those with 403/an empty
+// list, and the in-memory backoff above resets on every restart, so KoZo asked
+// again on every single launch: one guaranteed-failing request and a WARN in the
+// log, forever. Persist "this appid has nothing" and back off for a week, so a
+// game that later adds achievements is still picked up without the noise.
+const NO_SCHEMA_RETRY_MS = 7 * 24 * 60 * 60_000
+const NO_SCHEMA_SETTING = 'schema_empty_appids'   // { appid: lastCheckedMs }
+let _noSchema = null
+
+function noSchemaMap() {
+  if (_noSchema) return _noSchema
+  try {
+    const raw = require('../db/queries/settings').getSetting(NO_SCHEMA_SETTING)
+    _noSchema = raw ? JSON.parse(raw) : {}
+  } catch { _noSchema = {} }
+  return _noSchema
+}
+
+function isKnownEmptySchema(appid) {
+  const at = noSchemaMap()[String(appid)]
+  return !!at && Date.now() - at < NO_SCHEMA_RETRY_MS
+}
+
+function markEmptySchema(appid) {
+  try {
+    const m = noSchemaMap()
+    m[String(appid)] = Date.now()
+    require('../db/queries/settings').setSetting(NO_SCHEMA_SETTING, JSON.stringify(m))
+  } catch {}
+}
+
+function clearEmptySchema(appid) {
+  try {
+    const m = noSchemaMap()
+    if (m[String(appid)] === undefined) return
+    delete m[String(appid)]
+    require('../db/queries/settings').setSetting(NO_SCHEMA_SETTING, JSON.stringify(m))
+  } catch {}
+}
+
 async function ensureSchema(gameId, { force = false } = {}) {
   const { getDb }     = require('../db/database')
   const settingsQ     = require('../db/queries/settings')
@@ -94,6 +253,8 @@ async function ensureSchema(gameId, { force = false } = {}) {
 
   const bk = `${gameId}:${appid}`
   if (!force && Date.now() - (schemaFailAt.get(bk) || 0) < SCHEMA_RETRY_MS) return local
+  // Persisted across restarts — this appid has no schema to fetch.
+  if (!force && isKnownEmptySchema(appid)) return local
 
   const apiKey = settingsQ.getSetting('steam_api_key')
   const steamId = settingsQ.getSetting('steam_user_id')
@@ -129,8 +290,13 @@ async function ensureSchema(gameId, { force = false } = {}) {
       logger.info(`ensureSchema: fetched ${achievements.length} achievements for "${game.name}"`)
       local = achievementsQ.listAchievementsForGame(gameId)
       schemaFailAt.delete(bk)
+      clearEmptySchema(appid)
     } else {
+      // Steam has nothing for this appid — remember it so we don't ask again on
+      // every launch (see NO_SCHEMA_RETRY_MS).
       schemaFailAt.set(bk, Date.now())
+      markEmptySchema(appid)
+      logger.info(`ensureSchema: no achievements published for "${game.name}" (appid ${appid}) — not retrying for 7 days`)
     }
   } catch (e) {
     logger.warn(`ensureSchema failed for game ${gameId}`, { message: e.message })
@@ -390,4 +556,4 @@ async function syncPlayerUnlocks(gameId) {
   return { added, total: steamUnlocks.length, newUnlocks }
 }
 
-module.exports = { fetchAndStoreAchievements, syncAfterSession, syncPlayerUnlocks, ensureSchema, importSchemaFromAppId, autoImportSchemaByName, emitNewUnlocks, isForeignLauncher, getLastSyncError }
+module.exports = { fetchAndStoreAchievements, syncAfterSession, syncPlayerUnlocks, ensureSchema, importSchemaFromAppId, autoImportSchemaByName, emitNewUnlocks, isForeignLauncher, getLastSyncError, revalidateProfilePrivacy }

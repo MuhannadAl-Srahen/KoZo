@@ -81,30 +81,47 @@ function child(obj, key) {
   return undefined
 }
 
+// An achievement-carrying stat. Steam writes this field either as the numeric
+// enum (4) or — in every current schema file — as the literal string
+// "ACHIEVEMENTS". Only the numeric form used to be accepted, so `Number(type)`
+// was NaN for real files, no bits were ever extracted, and the whole local
+// stats path silently fell back to the Web API on every game. Accept both.
+function isAchievementStat(type) {
+  if (type == null) return false
+  if (Number(type) === 4) return true
+  return String(type).trim().toUpperCase() === 'ACHIEVEMENTS'
+}
+
+// Root is keyed by appid (sometimes wrapped once more) — find the "stats" node.
+// Returned separately from the bit extraction so callers can tell "this schema
+// is unreadable" apart from "this schema is fine and the game has no
+// achievements" — two very different answers.
+function findSchemaStatsNode(schemaRoot) {
+  const queue = [schemaRoot]
+  while (queue.length) {
+    const node = queue.shift()
+    if (!node || typeof node !== 'object') continue
+    const s = child(node, 'stats')
+    if (s && typeof s === 'object') return s
+    for (const v of Object.values(node)) if (v && typeof v === 'object') queue.push(v)
+  }
+  return null
+}
+
 /**
  * Extract the achievement bit layout from a parsed UserGameStatsSchema_<appid>
- * object: [{ statId, bit, apiName }]. Achievement bits live in stats whose
- * type is 4 (ACHIEVEMENTS), under a "bits" subtree keyed by bit index.
+ * object: [{ statId, bit, apiName }]. Achievement bits live in ACHIEVEMENTS-type
+ * stats, under a "bits" subtree keyed by bit index.
  */
 function extractAchievementBits(schemaRoot) {
   const out = []
   if (!schemaRoot) return out
-  // Root is keyed by appid (sometimes wrapped once more) — find a "stats" node.
-  let statsNode = null
-  const queue = [schemaRoot]
-  while (queue.length && !statsNode) {
-    const node = queue.shift()
-    if (!node || typeof node !== 'object') continue
-    const s = child(node, 'stats')
-    if (s && typeof s === 'object') { statsNode = s; break }
-    for (const v of Object.values(node)) if (v && typeof v === 'object') queue.push(v)
-  }
+  const statsNode = findSchemaStatsNode(schemaRoot)
   if (!statsNode) return out
 
   for (const [statKey, stat] of Object.entries(statsNode)) {
     if (!stat || typeof stat !== 'object') continue
-    const type = Number(child(stat, 'type'))
-    if (type !== 4) continue   // 4 = ACHIEVEMENTS stat
+    if (!isAchievementStat(child(stat, 'type'))) continue
     const bits = child(stat, 'bits')
     if (!bits || typeof bits !== 'object') continue
     for (const [bitKey, bitNode] of Object.entries(bits)) {
@@ -119,49 +136,104 @@ function extractAchievementBits(schemaRoot) {
   return out
 }
 
-/**
- * Extract the player's stat values from a parsed UserGameStats_<acct>_<appid>
- * object: { statId → int32 }. Values live under a "stats" node keyed by stat id.
- */
-function extractStatValues(statsRoot) {
-  const out = {}
-  if (!statsRoot) return out
+// The player-values node. Real UserGameStats files put it under "cache";
+// "stats" is accepted too for older/other layouts. Looking only for "stats"
+// was the second half of why local parsing never produced anything.
+const VALUE_NODE_KEYS = ['cache', 'stats']
+
+function findValueNode(statsRoot) {
   const queue = [statsRoot]
   while (queue.length) {
     const node = queue.shift()
     if (!node || typeof node !== 'object') continue
-    const s = child(node, 'stats')
-    if (s && typeof s === 'object') {
-      for (const [k, v] of Object.entries(s)) {
-        if (typeof v === 'number' && /^\d+$/.test(k)) out[k] = v
-        else if (v && typeof v === 'object') {
-          // Some files nest the value one level deeper: { "1": { "data": 3 } }
-          const data = child(v, 'data')
-          if (typeof data === 'number' && /^\d+$/.test(k)) out[k] = data
-        }
-      }
-      continue
+    for (const key of VALUE_NODE_KEYS) {
+      const s = child(node, key)
+      if (s && typeof s === 'object') return s
     }
     for (const v of Object.values(node)) if (v && typeof v === 'object') queue.push(v)
+  }
+  return null
+}
+
+/**
+ * Extract the player's stat values from a parsed UserGameStats_<acct>_<appid>
+ * object: { statId → int32 bitfield }.
+ */
+function extractStatValues(statsRoot) {
+  const out = {}
+  if (!statsRoot) return out
+  const s = findValueNode(statsRoot)
+  if (!s) return out
+  for (const [k, v] of Object.entries(s)) {
+    if (!/^\d+$/.test(k)) continue          // skips crc / PendingChanges
+    if (typeof v === 'number') out[k] = v
+    else if (v && typeof v === 'object') {
+      // Real layout: { "3": { data: <bitfield>, AchievementTimes: {...} } }
+      const data = child(v, 'data')
+      if (typeof data === 'number') out[k] = data
+    }
   }
   return out
 }
 
 /**
- * Combine schema bits + player stat values into the set of unlocked
- * achievement api-names. Returns null if the schema yielded no bits
+ * Per-stat unlock timestamps: { statId → { bitIndex → unixSeconds } }.
+ * Steam records exactly when each achievement popped, right here in the local
+ * file — so a local read can carry the real unlock date instead of stamping
+ * "now" and waiting for the Web API to correct it later.
+ */
+function extractAchievementTimes(statsRoot) {
+  const out = {}
+  if (!statsRoot) return out
+  const s = findValueNode(statsRoot)
+  if (!s) return out
+  for (const [k, v] of Object.entries(s)) {
+    if (!/^\d+$/.test(k) || !v || typeof v !== 'object') continue
+    const times = child(v, 'AchievementTimes')
+    if (!times || typeof times !== 'object') continue
+    const perBit = {}
+    for (const [bitKey, t] of Object.entries(times)) {
+      const n = Number(t)
+      if (/^\d+$/.test(bitKey) && Number.isFinite(n) && n > 0) perBit[bitKey] = n
+    }
+    if (Object.keys(perBit).length) out[k] = perBit
+  }
+  return out
+}
+
+/**
+ * Combine schema bits + player stat values into the unlocked achievements, as
+ * Map<apiName, unlockUnixSeconds|0>. Returns null if the schema yielded no bits
  * (signals the caller to use the Web API fallback instead).
  */
-function unlockedApiNames(schemaRoot, statsRoot) {
+function unlockedWithTimes(schemaRoot, statsRoot) {
   const bits = extractAchievementBits(schemaRoot)
-  if (!bits.length) return null
+  if (!bits.length) {
+    // No bits, but the schema itself read fine → the game genuinely publishes
+    // no achievements (a demo, an unreleased title). That's a complete answer:
+    // an empty result, not a parse failure. Returning null here instead made
+    // the caller fall back to a Web API burst for a game with nothing to sync.
+    return findSchemaStatsNode(schemaRoot) ? new Map() : null
+  }
   const values = extractStatValues(statsRoot)
-  const unlocked = new Set()
+  const times  = extractAchievementTimes(statsRoot)
+  const unlocked = new Map()
   for (const { statId, bit, apiName } of bits) {
     const v = values[statId]
-    if (typeof v === 'number' && ((v >>> bit) & 1) === 1) unlocked.add(apiName)
+    // >>> coerces to uint32 first, so a negative int32 bitfield still reads right.
+    if (typeof v !== 'number' || ((v >>> bit) & 1) !== 1) continue
+    unlocked.set(apiName, times[statId]?.[String(bit)] || 0)
   }
   return unlocked
 }
 
-module.exports = { parseBinaryKV, extractAchievementBits, extractStatValues, unlockedApiNames }
+/** Set-only view of unlockedWithTimes, for callers that don't need timestamps. */
+function unlockedApiNames(schemaRoot, statsRoot) {
+  const m = unlockedWithTimes(schemaRoot, statsRoot)
+  return m === null ? null : new Set(m.keys())
+}
+
+module.exports = {
+  parseBinaryKV, extractAchievementBits, extractStatValues,
+  extractAchievementTimes, unlockedWithTimes, unlockedApiNames,
+}

@@ -12,8 +12,12 @@
 // refreshes `lastInputAt`; `msSinceInput()` is then the controller's idle time.
 //
 // The C# is compiled once at process start, then the loop is cheap. The probe
-// only runs while a game session is active AND the user enabled controller
-// tracking (see processWatcher), so it isn't burning cycles at idle.
+// is also started LAZILY (see syncControllerProbe in processWatcher): it only
+// spins up once the keyboard/mouse have already gone quiet for a while, and is
+// killed the moment real input returns. During normal keyboard-and-mouse play
+// there is no probe process at all — the OS idle timer already proves you're
+// active, so a second PowerShell process polling XInput would tell us nothing
+// we don't know and would sit resident for the whole session.
 
 const { spawn } = require('child_process')
 const fs   = require('fs')
@@ -57,11 +61,19 @@ public static class XIProbe {
 while ($true) {
   if ($ParentPid -gt 0 -and -not (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue)) { break }
   if ([XIProbe]::ActiveNow()) { [Console]::Out.WriteLine("C"); [Console]::Out.Flush() }
-  Start-Sleep -Milliseconds 1000
+  Start-Sleep -Milliseconds 2000
 }
 `.trim()
 
-function start() {
+/**
+ * Start the probe. `idleMs` seeds how long the controller is ASSUMED to have
+ * been idle already — it must be passed when starting lazily mid-session.
+ * Without it the probe would report "input just now" the instant it starts, so
+ * a user who genuinely walked away would never be flagged AFK. Seeding with the
+ * keyboard/mouse idle time makes the two sources agree until the probe has real
+ * evidence; the first actual gamepad input (within one 2s poll) overrides it.
+ */
+function start({ idleMs = 0 } = {}) {
   if (proc) return
   if (process.platform !== 'win32') return   // XInput is Windows-only
   try {
@@ -72,7 +84,7 @@ function start() {
     proc = spawn('powershell.exe',
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, String(process.pid)],
       { windowsHide: true })
-    lastInputAt = Date.now()                 // grace: treat as active at startup
+    lastInputAt = Date.now() - Math.max(0, idleMs)
     proc.stdout.on('data', () => { lastInputAt = Date.now() })
     proc.stderr.on('data', () => {})
     proc.on('exit', () => { proc = null })

@@ -250,7 +250,16 @@ async function getSchemaKeyless(appId) {
       return { name: a.name, displayName: display, description: null, icon: null, icongray: null, hidden: 0 }
     })
   } catch (e) {
-    logger.warn(`getSchemaKeyless failed for ${appId}`, { message: e.message })
+    // 403/400 from the global-percentages endpoint is Steam's way of saying
+    // "this app publishes no achievements" (unreleased title, demo, or a game
+    // that simply has none). That's an answer, not a failure — logging it as a
+    // WARN made every launch look like something had broken.
+    const status = e.response?.status
+    if (status === 403 || status === 400 || status === 404) {
+      logger.debug(`getSchemaKeyless: no public achievement stats for ${appId} (HTTP ${status})`)
+    } else {
+      logger.warn(`getSchemaKeyless failed for ${appId}`, { message: e.message })
+    }
     return []
   }
 }

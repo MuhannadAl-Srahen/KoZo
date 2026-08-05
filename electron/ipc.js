@@ -225,7 +225,44 @@ handle('shell:openPath', async (p) => {
 // Launch the game. Steam-linked games go through `steam://run/<appid>` which
 // uses the Steam client (handles auth, cloud saves, achievements). Manual games
 // fall back to spawning the .exe directly from install_path.
+// Is a process with this exe name running right now? Returns null when we
+// genuinely can't tell (PowerShell unavailable/blocked), so callers can
+// distinguish "definitely not running" from "no idea". One spawn, only ever on
+// an explicit Play click — never on the in-session polling cadence.
+async function isExeRunning(exeName) {
+  const base = String(exeName || '').replace(/\.exe$/i, '').replace(/'/g, "''")
+  if (!base) return null
+  try {
+    const { stdout } = await require('util').promisify(require('child_process').exec)(
+      `powershell.exe -NoProfile -NonInteractive -Command "@(Get-Process -Name '${base}' -ErrorAction SilentlyContinue).Count"`,
+      { timeout: 5000, windowsHide: true }
+    )
+    const n = parseInt(String(stdout).trim(), 10)
+    return Number.isFinite(n) ? n > 0 : null
+  } catch { return null }
+}
+
+// One launch in flight per game. Without this, a Play click that appears to do
+// nothing (an elevated launch waiting on the UAC prompt, or a slow-starting
+// game) invites more clicks — and each one raised ANOTHER consent dialog. The
+// logs show seven inside two seconds. Repeat clicks now join the first attempt.
+const launchInFlight = new Map()   // gameId → Promise
+
 handle('games:launch', async (id) => {
+  const existing = launchInFlight.get(id)
+  if (existing) return existing
+  const p = (async () => doLaunch(id))()
+  launchInFlight.set(id, p)
+  try {
+    const r = await p
+    // Pull the next process scan forward so "Now Playing" lights up in a couple
+    // of seconds instead of waiting out the idle poll.
+    try { require('./services/processWatcher').nudge() } catch {}
+    return r
+  } finally { launchInFlight.delete(id) }
+})
+
+async function doLaunch(id) {
   const game = gamesQ.getGame(id)
   if (!game) throw new Error('Game not found')
 
@@ -253,19 +290,58 @@ handle('games:launch', async (id) => {
     // still needs admin (common with repacks writing into Program Files) it
     // launches "successfully" and then silently does nothing — which is what
     // made Play look like a dead button instead of an error.
+    //
+    // This USED to resolve the moment powershell.exe itself spawned, with
+    // stdio ignored — so it reported success no matter what happened next.
+    // Declining the UAC prompt, a blocked elevation, or a broken path all came
+    // back as "launched" and Play looked dead (the logs show seven Play clicks
+    // in two seconds). Now we run PowerShell to completion, ask Start-Process
+    // for the real process via -PassThru, and report what actually happened.
     async function launchElevated() {
       logger.warn(`launching elevated (UAC) via ShellExecute: ${fullPath}`)
       const psPath = fullPath.replace(/'/g, "''")
       const psCwd  = game.install_path.replace(/'/g, "''")
-      await new Promise((resolve, reject) => {
+      const script =
+        `$ErrorActionPreference='Stop'; ` +
+        `try { ` +
+          `$p = Start-Process -FilePath '${psPath}' -WorkingDirectory '${psCwd}' -Verb RunAs -PassThru; ` +
+          `if ($p) { [Console]::Out.WriteLine('KOZO_PID=' + $p.Id) }; exit 0 ` +
+        `} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }`
+
+      const { code, out, err } = await new Promise((resolve, reject) => {
         const ps = spawn('powershell.exe',
-          ['-NoProfile', '-WindowStyle', 'Hidden', '-Command',
-           `Start-Process -FilePath '${psPath}' -WorkingDirectory '${psCwd}' -Verb RunAs`],
-          { detached: true, stdio: 'ignore', windowsHide: true })
-        ps.once('spawn', () => { ps.unref(); resolve() })
-        ps.once('error', reject)
+          ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', script],
+          { windowsHide: true })
+        let out = '', err = ''
+        ps.stdout.on('data', d => { out += d })
+        ps.stderr.on('data', d => { err += d })
+        // The UAC consent dialog blocks Start-Process until the user answers,
+        // so this genuinely can sit for a while. Cap it, and treat a timeout as
+        // "probably fine, prompt still open" rather than an error.
+        const t = setTimeout(() => { resolve({ code: null, out, err, timedOut: true }) }, 90_000)
+        ps.once('close', c => { clearTimeout(t); resolve({ code: c, out, err }) })
+        ps.once('error', e => { clearTimeout(t); reject(e) })
       })
-      return { launched: 'shell-elevated', path: fullPath }
+
+      if (code === 0 || code === null) {
+        const pid = out.match(/KOZO_PID=(\d+)/)?.[1]
+        return { launched: 'shell-elevated', path: fullPath, pid: pid ? Number(pid) : undefined }
+      }
+
+      // Win32 error 1223 = ERROR_CANCELLED, i.e. the user dismissed the prompt.
+      // Worth naming exactly: it's the single most common reason Play "does
+      // nothing", and it's not a bug the user can fix by clicking again.
+      const msg = String(err || '').trim()
+      logger.warn(`elevated launch failed for "${game.name}": ${msg || 'exit ' + code}`)
+      if (/cancell?ed by the user|operation was cancell?ed|1223/i.test(msg)) {
+        throw new Error(
+          `"${game.name}" needs administrator rights, and the Windows permission prompt was dismissed. ` +
+          'Click Play again and choose Yes. If no prompt appears at all, your account may not be allowed to elevate.'
+        )
+      }
+      throw new Error(
+        `Windows refused to start "${game.name}" with administrator rights.\n\n${msg || `PowerShell exited with code ${code}.`}`
+      )
     }
 
     // Remembered from a previous launch that needed elevation — skip straight
@@ -289,11 +365,21 @@ handle('games:launch', async (id) => {
             if (!settled) { settled = true; child.unref(); resolve() }
           }, 1200)
         })
-        child.once('exit', (code) => {
+        child.once('exit', async (code) => {
           if (settled) return
           settled = true
-          if (code === 0 || code === null) { child.unref(); resolve() }
-          else reject(Object.assign(new Error(`exited immediately (code ${code})`), { code: 'EARLY_EXIT' }))
+          // It exited within 1.2s. That's either (a) a launcher stub that
+          // handed off to the real game exe and quit — completely normal, lots
+          // of repacks do this — or (b) the game dying instantly because it
+          // couldn't write where it needed to without admin. Exit code doesn't
+          // distinguish them (a silent admin-death is usually code 0), so ask
+          // Windows whether anything named like this game is actually running.
+          const alive = await isExeRunning(game.exe_name).catch(() => null)
+          child.unref()
+          if (alive !== false) resolve()   // running, or we couldn't tell — assume fine
+          else reject(Object.assign(
+            new Error(`exited immediately (code ${code}) and no "${game.exe_name}" process is running`),
+            { code: 'EARLY_EXIT' }))
         })
         child.once('error', (e) => {
           if (settled) return
@@ -354,6 +440,17 @@ handle('games:launch', async (id) => {
   }
 
   throw new Error('No way to launch — set the install path and executable (Edit → Browse).')
+}
+
+// ── Crack discovery ──────────────────────────────────────────────────────────
+// Games with emulator achievement data on this PC that aren't in the library.
+// Read-only: it lists what it found, the user decides what (if anything) to add.
+handle('crack:discover', async () => {
+  return require('./services/crackDiscovery').discover()
+})
+
+handle('crack:dismissDiscovered', (appId) => {
+  return require('./services/crackDiscovery').dismiss(appId)
 })
 
 // ── Sessions ─────────────────────────────────────────────────────────────────
@@ -636,6 +733,11 @@ handle('steam:getStoreArt', async (appId) => {
 
 // Privacy-class failure from the game's last Steam sync, so GameDetail can show
 // an inline "profile is private" warning without a manual diagnose.
+// Re-test whether Steam will serve unlocks and correct the stored privacy flag.
+// Used by the Settings banner's re-check button.
+handle('steam:recheckPrivacy', () =>
+  require('./services/achievementSync').revalidateProfilePrivacy())
+
 handle('steam:lastSyncError', (gameId) =>
   require('./services/achievementSync').getLastSyncError(gameId))
 
@@ -844,6 +946,45 @@ handle('scanner:scan', async (paths) => {
     g.alreadyInLibrary = existingPaths.has(g.install_path.toLowerCase()) ||
       (g.steam_app_id && existingAppIds.has(String(g.steam_app_id)))
   }
+
+  // Re-point games that MOVED. A scan that finds a library game at a new path
+  // used to just flag it "already in library" and walk away, leaving the dead
+  // path in place — so a game you relocated stayed dimmed and unplayable no
+  // matter how many times you rescanned. Match on appid (exact) or name, and
+  // only ever rewrite a path that is genuinely gone from disk, so this can
+  // never move a game that's sitting happily where it is.
+  try {
+    const fsx = require('fs')
+    const rows = db.prepare('SELECT id, name, install_path, exe_name, steam_app_id FROM games').all()
+    const setPath = db.prepare('UPDATE games SET install_path = ?, exe_name = COALESCE(?, exe_name), is_installed = 1 WHERE id = ?')
+    const norm = (s) => String(s || '').trim().toLowerCase()
+    const relocated = []
+
+    for (const row of rows) {
+      // Adopt a path for a game that has NONE as well as re-pointing one whose
+      // path died. A game added from crack discovery arrives with an app id and
+      // no exe (its unlocks are read by app id), so this is how a later scan
+      // gives it an executable and makes it session-trackable.
+      if (row.install_path && fsx.existsSync(row.install_path)) continue   // still there — leave alone
+      const hit = results.find(g =>
+        (row.steam_app_id && g.steam_app_id && String(g.steam_app_id) === String(row.steam_app_id)) ||
+        norm(g.name) === norm(row.name))
+      if (!hit || norm(hit.install_path) === norm(row.install_path)) continue
+      setPath.run(hit.install_path, hit.exe_name || null, row.id)
+      hit.relocatedGameId = row.id
+      hit.alreadyInLibrary = true
+      relocated.push(row.install_path
+        ? `${row.name}: ${row.install_path} -> ${hit.install_path}`
+        : `${row.name}: (no path) -> ${hit.install_path}`)
+      broadcast('game:updated', row.id)
+    }
+    if (relocated.length) {
+      logger.info(`scanner: re-pointed ${relocated.length} moved game(s)`, { moves: relocated })
+    }
+  } catch (e) {
+    logger.warn('scanner: relocate pass failed', { message: e.message })
+  }
+
   return results
 })
 
@@ -1034,21 +1175,66 @@ handle('steam:refreshAllBanners', async () => {
 
 // ── App system settings (startup, minimize) ───────────────────────────────────
 const TASK_NAME = 'KoZo_AutoStart'
+const RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
+
+// Every Run-key value that could be KoZo, found by ENUMERATING the key rather
+// than guessing names.
+//
+// This is why "turn startup off" didn't work: Electron names the Run value after
+// the AppUserModelID when one is set, so the real entry was
+// `com.kozo.gametracker`, while the cleanup only ever tried deleting "KoZo" and
+// app.getName(). It also verified only the registry, never Task Scheduler, so it
+// happily reported success while the entry sat there and the app kept starting.
+// Names differ between dev and packaged builds too (electron.app.* forms), so
+// matching on a fixed list can never be reliable — read what's actually there.
+function findRunEntries() {
+  const { app } = require('electron')
+  const { execSync } = require('child_process')
+  const out = []
+  let raw = ''
+  try { raw = execSync(`reg query "${RUN_KEY}"`, { encoding: 'utf8', stdio: 'pipe' }) } catch { return out }
+
+  const selfExe  = String(process.execPath || '').toLowerCase()
+  const selfPath = String(app.getAppPath?.() || '').toLowerCase()
+  const knownNames = new Set([
+    'kozo', String(app.getName?.() || '').toLowerCase(),
+    'com.kozo.gametracker',                        // the AppUserModelID (main.js)
+    'electron.app.kozo', 'electron.app.electron',  // Electron's default naming
+  ].filter(Boolean))
+
+  for (const line of raw.split(/\r?\n/)) {
+    // "    <name>    REG_SZ    <data>"
+    const m = line.match(/^\s{4}(.+?)\s{4,}REG_[A-Z_]+\s{4,}(.*)$/)
+    if (!m) continue
+    const name = m[1].trim()
+    const data = String(m[2] || '').toLowerCase()
+    const isOurs =
+      knownNames.has(name.toLowerCase()) ||
+      (selfExe && data.includes(selfExe)) ||
+      (selfPath && data.includes(selfPath)) ||
+      /\bkozo\.exe/.test(data)
+    if (isOurs) out.push(name)
+  }
+  return out
+}
+
+function hasScheduledTask() {
+  try {
+    require('child_process').execSync(`schtasks /query /tn "${TASK_NAME}"`, { stdio: 'ignore' })
+    return true
+  } catch { return false }
+}
 
 handle('app:getStartup', () => {
-  const { app } = require('electron')
-  // Check Task Scheduler first (used when app runs as admin), then registry
-  try {
-    const { execSync } = require('child_process')
-    execSync(`schtasks /query /tn "${TASK_NAME}"`, { stdio: 'ignore' })
-    return { openAtLogin: true, method: 'task_scheduler' }
-  } catch {}
-  // Must query with the SAME path + args that setStartup wrote, otherwise Windows
-  // compares against the bare exec path (empty args) and reports false even though
-  // the Run-key entry exists — which made the toggle keep flipping itself off.
-  const launchArgs = app.isPackaged ? [] : [app.getAppPath()]
-  const s = app.getLoginItemSettings({ path: process.execPath, args: launchArgs })
-  return { openAtLogin: s.openAtLogin, method: 'registry' }
+  // Report the union of both mechanisms. Checking only one is how the toggle
+  // ended up disagreeing with what Windows actually does at boot.
+  const task = hasScheduledTask()
+  const runValues = findRunEntries()
+  return {
+    openAtLogin: task || runValues.length > 0,
+    method: task ? 'task_scheduler' : (runValues.length ? 'registry' : 'none'),
+    entries: runValues,
+  }
 })
 
 handle('app:setStartup', (enable) => {
@@ -1063,18 +1249,33 @@ handle('app:setStartup', (enable) => {
   const launchArgs = app.isPackaged ? [] : [app.getAppPath()]
 
   if (!enable) {
-    // Remove from every place an entry might live. setLoginItemSettings must be
-    // called with the SAME path+args used when enabling — bare it computes a
-    // different Run value name and the real entry survives (toggle showed off
-    // but the app kept auto-starting).
+    // Remove EVERY entry that is actually there, then verify BOTH mechanisms.
+    // The old version guessed at value names and only re-checked the registry,
+    // so a surviving scheduled task — or a Run value under a name it didn't
+    // guess — reported "off" while Windows kept starting the app.
     try { execSync(`schtasks /delete /tn "${TASK_NAME}" /f`, { stdio: 'pipe' }) } catch {}
     try { app.setLoginItemSettings({ openAtLogin: false, path: execPath, args: launchArgs }) } catch {}
-    // Belt and braces: kill any installer/legacy Run values keyed by app name too.
-    for (const name of new Set(['KoZo', app.getName()])) {
-      try { execSync(`reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v "${name}" /f`, { stdio: 'pipe' }) } catch {}
+    for (const name of findRunEntries()) {
+      try { execSync(`reg delete "${RUN_KEY}" /v "${name}" /f`, { stdio: 'pipe' }) } catch {}
     }
-    const verify = app.getLoginItemSettings({ path: execPath, args: launchArgs })
-    return { ok: true, openAtLogin: verify.openAtLogin }
+
+    const stillTask = hasScheduledTask()
+    const stillRun  = findRunEntries()
+    const stillOn   = stillTask || stillRun.length > 0
+    if (stillOn) {
+      logger.warn('app:setStartup(false): entries survived removal', { task: stillTask, run: stillRun })
+    }
+    return {
+      ok: !stillOn,
+      openAtLogin: stillOn,
+      // A scheduled task created with /rl HIGHEST can need elevation to delete;
+      // say so instead of silently claiming success.
+      error: stillOn
+        ? (stillTask
+            ? 'A Windows scheduled task for KoZo could not be removed — it may need administrator rights.'
+            : `Windows startup entries could not be removed: ${stillRun.join(', ')}`)
+        : undefined,
+    }
   }
 
   // Try Task Scheduler — works even when app runs as admin, no UAC at boot.
@@ -1126,6 +1327,15 @@ handle('dialog:pickFolder', async () => {
 // ── Overlay window ────────────────────────────────────────────────────────────
 handle('overlay:hide', () => {
   try { require('./overlayWindow').hideOverlay() } catch {}
+  return true
+})
+
+// The achievement-list toast went away — by its safety timeout, a click, or the
+// X. Alt+Down / Alt+Up are only bound while it's on screen (they're far too
+// common to hold globally), so this is what releases them. Must fire for EVERY
+// close route, not just the hotkey one.
+handle('overlay:achListClosed', () => {
+  try { require('./services/achievementListFlash').markClosed() } catch {}
   return true
 })
 
@@ -1330,7 +1540,9 @@ handle('sync:setup', async () => {
   settingsQ.setSetting('auto_backup_enabled', '1')
   settingsQ.setSetting('auto_save_backup_enabled', '1')
   saveBackup.migrateRoot(oldSavesRoot, savesDir)
-  require('./services/autoBackup').writeNow()
+  // force: the user just picked a folder and expects a file to appear in it,
+  // so this one bypasses the "don't write while a game is running" gate.
+  require('./services/autoBackup').writeNow({ force: true })
   return getSyncStatus()
 })
 

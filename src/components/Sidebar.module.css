@@ -157,6 +157,43 @@
   text-overflow: ellipsis;
 }
 .profileLink { font-size: 11px; color: var(--text-muted); }
+
+/* Live level + progress on the chip — the XP system's only always-visible
+   surface. Levels take tens of hours near the top of the curve, so without
+   this the whole thing is invisible between level-up toasts. */
+.profileXpRow {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.profileLevel { color: var(--a); font-weight: 500; }
+
+.profileTier {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profileXpBar {
+  display: block;
+  height: 3px;
+  margin-top: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.profileXpFill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--a);
+  transition: width 0.45s ease;
+}
 .profileChipActive .profileLink { color: var(--a); }
 
 .settingsLink {

@@ -63,14 +63,34 @@ function GeneralTab() {
     setStartupMsg('')
     setStartupErr('')
     const res = await window.kozo?.api?.app?.setStartup?.(val)
-    if (!val) return
-    if (res?.ok === false) {
+    // IPC replies are enveloped as { ok, data } — the handler's own result is in
+    // `data`. Reading res.method directly (as this used to) is always undefined,
+    // so neither the success message nor a failure ever surfaced.
+    const r = res?.ok ? (res.data || {}) : null
+
+    if (!val) {
+      // Turning it OFF can genuinely fail — a scheduled task made with /rl
+      // HIGHEST may need admin to delete. Saying nothing left the toggle
+      // reading "off" while Windows kept launching KoZo at boot.
+      if (!r || r.openAtLogin) {
+        setOpenAtLogin(true)
+        if (generalTabCache) generalTabCache.openAtLogin = true
+        setStartupErr(r?.error || 'Could not remove KoZo from Windows startup.')
+      }
+      return
+    }
+
+    if (!r) {
       setOpenAtLogin(false)
       if (generalTabCache) generalTabCache.openAtLogin = false
       setStartupErr('Could not register startup: ' + (res?.error || 'unknown error'))
-    } else if (res?.method === 'task_scheduler') {
+    } else if (r.ok === false) {
+      setOpenAtLogin(false)
+      if (generalTabCache) generalTabCache.openAtLogin = false
+      setStartupErr('Could not register startup: ' + (r.error || 'unknown error'))
+    } else if (r.method === 'task_scheduler') {
       setStartupMsg('Registered via Task Scheduler — works even when KoZo runs as administrator.')
-    } else if (res?.method === 'registry') {
+    } else if (r.method === 'registry') {
       setStartupMsg('Registered in Windows startup registry.')
     }
   }
@@ -171,6 +191,15 @@ function SteamTab() {
   const [detectMsg, setDetectMsg]   = useState('')
   const [signingIn, setSigningIn]   = useState(false)
   const [steamPersona, setSteamPersona] = useState(steamTabCache?.steamPersona ?? '')
+  // Persisted by achievementSync whenever Steam refuses to hand over unlocks.
+  // Library-wide, so it belongs here rather than only on one game's page.
+  const [privacyError, setPrivacyError] = useState('')
+  const [privacyChecking, setPrivacyChecking] = useState(false)
+
+  useEffect(() => {
+    window.kozo?.events?.onSteamPrivacyChanged?.(v => setPrivacyError(v || ''))
+    return () => window.kozo?.events?.removeAll?.('steam:privacy-changed')
+  }, [])
 
   useEffect(() => {
     async function load() {
@@ -183,6 +212,7 @@ function SteamTab() {
         setApiKey(key)
         setSteamUserId(sid)
         setSteamPersona(persona)
+        setPrivacyError(res.data?.steam_profile_private || '')
         steamTabCache = { ...(steamTabCache || {}), apiKey: key, steamUserId: sid, steamPersona: persona }
         // Only re-fetch the profile card if we don't already have it cached.
         if (key && sid && !steamTabCache.profile) loadProfile(key, sid)
@@ -329,6 +359,42 @@ function SteamTab() {
           <div className={s.testResult + ' ' + s.testValid} style={{ marginBottom: 8 }}>
             <IconCheck size={13} stroke={2.5} />
             Connected{steamPersona ? <> as <strong>&nbsp;{steamPersona}</strong></> : <> — {steamUserId}</>}
+          </div>
+        )}
+        {privacyError && (
+          <div className={s.privacyBanner}>
+            <IconAlertTriangle size={15} stroke={1.8} style={{ flexShrink: 0 }} />
+            <div>
+              {privacyError === 'profile_not_found'
+                ? <>KoZo couldn't read your Steam profile. Check the Steam ID above.</>
+                : <>
+                    Steam wouldn't return unlocks for any game KoZo tried, which usually means your
+                    profile's <strong>Game details</strong> are private. KoZo still reads unlocks
+                    straight from the Steam app on this PC, so achievements keep working — this only
+                    costs you Steam's real unlock dates. If you've already set Game details to Public,
+                    hit Re-check.
+                  </>}
+              <div className={s.keyRow} style={{ marginTop: 8 }}>
+                <button className={s.testBtn}
+                  onClick={() => window.kozo?.api?.shell?.openExternal?.('https://steamcommunity.com/my/edit/settings')}>
+                  Open Steam privacy settings
+                </button>
+                {/* Steam caches privacy changes for a moment, and KoZo only
+                    re-tests on launch — so give it a way to confirm now. */}
+                <button className={s.testBtn} disabled={privacyChecking}
+                  onClick={async () => {
+                    setPrivacyChecking(true)
+                    const res = await window.kozo?.api?.steam?.recheckPrivacy?.()
+                    setPrivacyChecking(false)
+                    const d = res?.ok ? res.data : null
+                    if (d?.checked && !d.private) setPrivacyError('')
+                  }}>
+                  {privacyChecking
+                    ? <><IconLoader2 size={13} stroke={1.8} className={s.spin} /> Checking…</>
+                    : <><IconRefresh size={13} stroke={1.8} /> Re-check now</>}
+                </button>
+              </div>
+            </div>
           </div>
         )}
         <div className={s.keyRow} style={{ flexWrap: 'wrap' }}>
@@ -1066,7 +1132,7 @@ const FEATURE_GROUPS = [
     items: [
       { Icon: IconChartBar,  name: 'Statistics',    desc: 'Playtime trends with an hourly 24h view, daily/monthly charts, and click-a-day (or hour) to focus it.' },
       { Icon: IconBell,      name: 'In-game status (Alt+K)', desc: 'Press Alt+K while playing to flash your live session time and achievement progress over the game.' },
-      { Icon: IconTrophy,    name: 'On-screen achievement detection', desc: 'For cracks with no Steam-emulator backend at all (GFWL, stub steam_api, or a non-Steam launcher like Social Club) — KoZo reads the game\'s own unlock popups off the screen while you play and marks them automatically.' },
+      { Icon: IconTrophy,    name: 'Achievement list (Alt+J)', desc: 'Press Alt+J while playing to flash your progress and the rarest achievements you still have left, right over the game.' },
       { Icon: IconRocket,    name: 'Tray & startup',desc: 'Runs quietly in the system tray and can launch with Windows.' },
     ],
   },
@@ -1106,25 +1172,12 @@ function AboutTab() {
   const [version, setVersion] = useState('')
   const [updState, setUpdState] = useState('idle')     // idle | checking | done
   const [updResult, setUpdResult] = useState(null)
-  const [ocrWatch, setOcrWatch] = useState(false)
-  const [ocrLoaded, setOcrLoaded] = useState(false)
 
   useEffect(() => {
     window.kozo?.api?.app?.getVersion?.().then(res => {
       if (res?.ok) setVersion(res.data)
     })
-    // Default OFF — the periodic screen capture can stutter fullscreen games,
-    // so it's strictly opt-in (matches achievementOcr.isEnabled).
-    window.kozo?.api?.settings?.get?.('ocr_achievement_watch').then(res => {
-      setOcrWatch(res?.data === '1')
-      setOcrLoaded(true)
-    })
   }, [])
-
-  async function toggleOcrWatch(next) {
-    setOcrWatch(next)
-    await window.kozo?.api?.settings?.set?.('ocr_achievement_watch', next ? '1' : '0')
-  }
 
   async function runTrackingTest() {
     setTesting(true)
@@ -1215,28 +1268,6 @@ function AboutTab() {
           runs the real scanner on it, records the unlock in the database, and fires the
           real in-game overlay toast — then cleans everything up.
         </p>
-        <div className={s.toggleList} style={{ marginBottom: 12 }}>
-          <label className={s.toggleRow}>
-            <div className={s.toggleInfo}>
-              <div className={s.toggleLabel}>Auto-detect achievements with no emulator (OCR)</div>
-              <div className={s.toggleDesc}>
-                For cracks with no Steam-emulator backend at all (GFWL, stub steam_api, non-Steam
-                launchers) — screenshots + reads the game's own on-screen achievement popup and
-                auto-marks a match. Only runs while such a game is being played. Off by default:
-                the periodic screen capture can cause a brief stutter in some fullscreen games,
-                so enable it only if a game needs it.
-              </div>
-            </div>
-            {ocrLoaded ? (
-              <button className={`${s.toggle} ${ocrWatch ? s.toggleOn : ''}`}
-                onClick={() => toggleOcrWatch(!ocrWatch)} type="button">
-                <span className={s.toggleThumb} />
-              </button>
-            ) : (
-              <IconLoader2 size={16} className={s.spin} style={{ color: 'var(--text-muted)' }} />
-            )}
-          </label>
-        </div>
         <div className={s.keyRow} style={{ flexWrap: 'wrap' }}>
           <button className={s.testBtn} onClick={runTrackingTest} disabled={testing}>
             {testing

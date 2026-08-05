@@ -188,6 +188,24 @@
   color: #f87171;
 }
 
+/* Steam refuses to serve unlocks (private profile / unreadable ID). Warning
+   amber, not error red — achievements still work via the local Steam stats
+   files; this is an "you're missing the extras" notice, not a failure. */
+.privacyBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border-radius: var(--r-input);
+  border: 1px solid rgba(251, 146, 60, 0.35);
+  background: rgba(251, 146, 60, 0.08);
+  color: #fb923c;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.privacyBanner strong { color: #fdba74; }
+
 /* ── Sensitivity ── */
 .sensitivityRow {
   display: flex;

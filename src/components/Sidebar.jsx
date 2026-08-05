@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import {
   IconLayoutGrid,
@@ -42,7 +42,34 @@ export default function Sidebar() {
   const [activeSession, setActiveSession] = useState(null)
   const [sessionTick, setSessionTick] = useState(0)
   const [profile, setProfile] = useState({ name: 'Player', avatar: '' })
+  const [xp, setXp] = useState(null)
   const location = useLocation()
+
+  // Live level progress on the profile chip. Levelling takes tens of hours at
+  // higher levels, so the level-up toast alone made the whole XP system feel
+  // dead between celebrations — this keeps progress visible all the time.
+  //
+  // NOTE: the XP-moving events (session:ended, game:updated) are already owned
+  // by the session effect below, whose cleanup calls removeAll() on those
+  // channels. Registering a second listener here would get torn down with it,
+  // so the refresh is triggered FROM that effect via this ref instead — one
+  // owner per channel.
+  const refreshXp = useRef(() => {})
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      const res = await window.kozo?.api?.stats?.xp?.()
+      if (!cancelled && res?.ok) setXp(res.data)
+    }
+    refreshXp.current = run
+    run()
+    window.addEventListener('kozo:profile-updated', run)
+    return () => {
+      cancelled = true
+      refreshXp.current = () => {}
+      window.removeEventListener('kozo:profile-updated', run)
+    }
+  }, [])
 
   // Load the profile chip (name + avatar) and refresh when the Profile page saves.
   useEffect(() => {
@@ -75,6 +102,7 @@ export default function Sidebar() {
       if (cancelled) return
       const first = res?.ok ? (res.data?.[0] ?? null) : null
       setActiveSession(first || null)
+      refreshXp.current()   // same events move XP — see refreshXp above
     }
     refresh()
     const onVisible = () => { if (document.visibilityState === 'visible') refresh() }
@@ -171,7 +199,19 @@ export default function Sidebar() {
           </span>
           <span className={s.profileMeta}>
             <span className={s.profileName}>{profile.name}</span>
-            <span className={s.profileLink}>View profile</span>
+            {xp ? (
+              <>
+                <span className={s.profileXpRow}>
+                  <span className={s.profileLevel}>Lv {xp.level}</span>
+                  <span className={s.profileTier}>{xp.tier}</span>
+                </span>
+                <span className={s.profileXpBar} title={`${xp.toNextLevel.toLocaleString()} XP to level ${xp.level + 1}`}>
+                  <span className={s.profileXpFill} style={{ width: `${xp.progress}%` }} />
+                </span>
+              </>
+            ) : (
+              <span className={s.profileLink}>View profile</span>
+            )}
           </span>
         </NavLink>
 

@@ -206,10 +206,13 @@ app.whenReady().then(() => {
     require('./logger').warn('globalShortcut Alt+K error: ' + e.message)
   }
 
-  // Global hotkey: flash the current game's achievement list over the game.
-  // Read-only — there is deliberately no way to mark anything from here (an
-  // earlier manual-marking panel on this same hotkey was removed on purpose;
-  // this is a display-only successor, see achievementListFlash.js).
+  // Global hotkey: show the current game's achievement list over the game, and
+  // press again to dismiss it. Read-only — there is deliberately no way to mark
+  // anything from here (an earlier manual-marking panel on this same hotkey was
+  // removed on purpose; this is a display-only successor).
+  // While the list is open, achievementListFlash also binds Alt+Down / Alt+Up
+  // to scroll it — those are registered only for as long as it's on screen,
+  // since the overlay can never take keyboard focus itself.
   try {
     const ok = globalShortcut.register('Alt+J', () => {
       try { require('./services/achievementListFlash').flash() } catch {}
@@ -228,11 +231,43 @@ app.whenReady().then(() => {
     require('./services/steamApi').runGenreBackfill().catch(() => {})
   }, 8000)
 
-  // Automatic achievement catch-up: scan every cracked game's emulator files
-  // once on startup so unlocks earned while KoZo was closed appear on their
-  // own — no manual sync button needed, ever.
+  // Automatic achievement catch-up on startup, so unlocks earned while KoZo was
+  // closed appear on their own — no manual sync button needed, ever. Both
+  // sweeps walk the disk, so both are deferred until nothing is playing (KoZo
+  // is often launched *by* a game session, or starts minimized while one is
+  // already running).
+  // Tell the truth about what's actually installed. Cheap (one fs.access per
+  // game), and the UI already renders is_installed=0 properly — it just was
+  // never being updated after a drive change or reinstall.
   setTimeout(() => {
-    require('./services/crackWatcher').scanAllCrackedGames().catch(() => {})
+    watcher.runWhenIdle('installCheck', () => {
+      require('./services/installCheck').reconcile().catch(() => {})
+    })
+  }, 6000)
+
+  // Re-test the Steam profile's readability once per launch. The private-profile
+  // warning is persisted, and nothing else clears it — set Game details back to
+  // Public and the banner would otherwise keep warning about a solved problem.
+  // One request, and only when the flag is actually set.
+  setTimeout(() => {
+    try {
+      const flag = require('./db/queries/settings').getSetting('steam_profile_private')
+      if (!flag) return
+      watcher.runWhenIdle('steamPrivacyRecheck', () => {
+        require('./services/achievementSync').revalidateProfilePrivacy().catch(() => {})
+      })
+    } catch {}
+  }, 10000)
+
+  setTimeout(() => {
+    watcher.runWhenIdle('startupCatchUp', () => {
+      // Cracked games: emulator save files.
+      require('./services/crackWatcher').scanAllCrackedGames().catch(() => {})
+      // Steam games: the Steam client's own local stats files. This needs no
+      // API key and — unlike the Web API — works with a private profile, which
+      // is why it's the primary path rather than a fallback.
+      require('./services/steamStatsWatcher').scanAllSteamGames().catch(() => {})
+    })
   }, 20000)
 
   // "It's out now!" — notify when a tracked upcoming game's release date passes.

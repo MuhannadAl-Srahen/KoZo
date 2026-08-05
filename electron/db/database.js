@@ -79,6 +79,9 @@ function initDatabase() {
     dedupeGameList()
     seedDefaults()
     fixOrphanedSessions()
+    // After fixOrphanedSessions — it re-baselines XP, which counts still-open
+    // sessions as live playtime, so crash leftovers must be closed first.
+    purgeOcrUnlocks()
 
     return db
   } catch (err) {
@@ -192,6 +195,60 @@ function migrateCategoriesToCustomLists() {
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('categories_migrated_v1', 'true')").run()
   })
   migrate()
+}
+
+// One-time migration: delete every unlock the removed screen-OCR watcher wrote.
+//
+// That watcher marked an achievement unlocked whenever its NAME appeared as a
+// substring of any text it read off the screen — with no requirement that an
+// "achievement unlocked" banner was showing. Games that title their missions
+// after their achievements (GTA IV is the worst case) therefore auto-unlocked
+// dozens of them straight off mission cards, which is why the achievement list
+// showed random completed entries. The feature is gone (see crackWatcher
+// watchGame); this clears the bad rows it left behind.
+//
+// XP is always derived from the raw tables, so it corrects itself — but
+// xpTracker's remembered baseline (xp_last_total / xp_last_level) has to move
+// down with it, otherwise the user would have to re-earn the removed XP before
+// any future gain registered. Unlocks from every other source (steam_api,
+// steam_stats, crack, manual) are untouched.
+function purgeOcrUnlocks() {
+  const done = db.prepare("SELECT value FROM settings WHERE key = 'ocr_unlocks_purged_v1'").get()
+  if (done) return
+
+  const run = db.transaction(() => {
+    const removed = db.prepare("DELETE FROM achievement_unlocks WHERE source = 'ocr'").run().changes
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('ocr_unlocks_purged_v1', '1')").run()
+    // The OCR toggle no longer exists — drop its orphaned setting too.
+    db.prepare("DELETE FROM settings WHERE key = 'ocr_achievement_watch'").run()
+    return removed
+  })
+
+  let removed = 0
+  try { removed = run() } catch (e) {
+    console.error('purgeOcrUnlocks failed:', e.message)
+    return
+  }
+  if (!removed) return
+
+  // Re-baseline XP so the next xpTracker.check() diffs against reality.
+  try {
+    const xp = require('../services/xp').computeXp()
+    const set = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+    set.run('xp_last_total', String(xp.totalXp))
+    set.run('xp_last_level', String(xp.level))
+  } catch (e) {
+    console.error('purgeOcrUnlocks: XP re-baseline failed:', e.message)
+  }
+
+  // Tesseract's cached language data is dead weight now that OCR is gone.
+  try {
+    fs.rmSync(path.join(app.getPath('userData'), 'ocr-cache'), { recursive: true, force: true })
+  } catch (_) {}
+
+  try {
+    require('../logger').info(`purgeOcrUnlocks: removed ${removed} screen-OCR achievement unlock(s)`)
+  } catch (_) {}
 }
 
 // Close sessions left open from a previous crash. We don't know exactly when

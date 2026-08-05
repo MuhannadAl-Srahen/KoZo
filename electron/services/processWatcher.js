@@ -16,6 +16,8 @@ const SLEEP_GAP_MS         = 5 * 60 * 1000
 // How often the in-session heartbeat persists games.last_played_at (each write
 // fsyncs SQLite — see heartbeatSession for why this isn't every tick).
 const HEARTBEAT_WRITE_MS   = 30 * 1000
+// How long lightTick() may reuse a cached games row for the heartbeat.
+const GAME_ROW_TTL_MS      = 60 * 1000
 
 // How often to check for new unlocks while a game is running. No longer user-
 // configurable — we just poll fast (30s). Cracked games are also caught instantly
@@ -43,14 +45,31 @@ function getAchievementSyncMs() {
 // `skipCrackScan` lets the periodic heartbeat caller opt out of that half
 // while still polling Steam's Web API every 10s (network-only, no sync fs
 // calls, worth keeping fast — see achievement sync docs for why).
+// Reasons that will NOT resolve themselves by polling again in 10 seconds:
+// the profile is private, the Steam ID is wrong, or the game genuinely has no
+// achievement stats. Before this, a private profile meant six failing HTTPS
+// requests a minute for the entire session, forever — noise in the log and
+// pointless wakeups on the one cadence that must stay quiet. Once a game hits
+// one of these, its periodic poll is parked for the rest of the session; the
+// session-end sync still runs once (that's where a fixed setting is noticed).
+const PERMANENT_SYNC_REASONS = new Set([
+  'private', 'private_profile', 'profile_not_found',
+  'no_stats_for_game', 'no_steam_id', 'no_steam_app_id', 'foreign_launcher',
+])
+const syncParked = new Map()   // gameId → reason
+
 function runAchievementSync(gameId, gameName, opts = {}) {
   const { skipCrackScan = false } = opts
+  const parked = syncParked.get(gameId)
   setImmediate(async () => {
-    try {
+    if (!parked) try {
       const { syncPlayerUnlocks } = require('./achievementSync')
       const r = await syncPlayerUnlocks(gameId)
       if (r?.added > 0) logger.info(`achievement sync: +${r.added} Steam unlock(s) for "${gameName}"`)
-      else if (r?.reason && r.reason !== 'no_steam_app_id' && r.reason !== 'foreign_launcher') logger.debug(`achievement sync (Steam) "${gameName}": ${r.reason}`)
+      else if (r?.reason && PERMANENT_SYNC_REASONS.has(r.reason)) {
+        syncParked.set(gameId, r.reason)
+        logger.info(`achievement sync (Steam) parked for "${gameName}" this session: ${r.reason}`)
+      } else if (r?.reason) logger.debug(`achievement sync (Steam) "${gameName}": ${r.reason}`)
     } catch (e) {
       logger.warn(`achievement sync (Steam) failed for "${gameName}"`, { message: e.message })
     }
@@ -376,14 +395,32 @@ function heartbeatSession(game, session, gapMs, now) {
   }
 }
 
-// Start/stop the gamepad probe based on whether it's wanted right now. Cheap
-// (no spawn of its own — controllerInput keeps one persistent process), safe
-// to call from both tick() and lightTick().
+// Start/stop the gamepad probe. Safe to call from both tick() and lightTick().
+//
+// The probe is a persistent PowerShell process, so it is started LAZILY: while
+// the keyboard/mouse are being used the OS idle timer already proves the player
+// is active and the gamepad can't change that answer — running a second process
+// for the whole session to learn nothing is exactly the kind of background cost
+// that shows up as in-game stutter. It spins up only once input has been quiet
+// for half the AFK threshold (still leaving plenty of margin to catch a
+// controller-only player before AFK would fire) and is killed the moment real
+// keyboard/mouse input returns.
 function syncControllerProbe() {
-  const wantController = controllerTrackingOn() && activeSessions.size > 0
   const ci = require('./controllerInput')
-  if (wantController && !ci.isRunning())      ci.start()
-  else if (!wantController && ci.isRunning()) ci.stop()
+  const threshold = getIdlePauseSec()
+  if (threshold <= 0 || activeSessions.size === 0) {
+    if (ci.isRunning()) ci.stop()
+    return
+  }
+  const sysIdleSec = powerMonitor.getSystemIdleTime()
+  if (!ci.isRunning()) {
+    if (sysIdleSec >= Math.max(15, Math.floor(threshold / 2))) {
+      // Seed the probe with the keyboard/mouse idle time — see start()'s note.
+      ci.start({ idleMs: sysIdleSec * 1000 })
+    }
+  } else if (sysIdleSec < 2) {
+    ci.stop()   // real kb/mouse input is back; the gamepad adds nothing
+  }
 }
 
 // Cheap heartbeat for ticks between full scans (see FULL_SCAN_EVERY_TICKS):
@@ -408,8 +445,16 @@ async function lightTick() {
       endSession(gameId, session)
       continue
     }
-    const game = gamesQ.getGame(gameId)
-    if (!game) continue
+    // The heartbeat only reads name/art off the row, which never changes
+    // mid-session in practice — cache it briefly instead of re-reading every
+    // 5s tick. The full tick() below always passes a fresh row.
+    let game = session._gameRow
+    if (!game || now - (session._gameRowAt || 0) >= GAME_ROW_TTL_MS) {
+      game = gamesQ.getGame(gameId)
+      if (!game) continue
+      session._gameRow = game
+      session._gameRowAt = now
+    }
     heartbeatSession(game, session, gapMs, now)
   }
 
@@ -525,6 +570,8 @@ async function tick() {
       // under a new PID without an intervening session end.
       const s = activeSessions.get(game.id)
       s.pid = procByName.get(exeLower)?.pid || s.pid
+      s._gameRow = game            // this scan already read a fresh row
+      s._gameRowAt = now
       heartbeatSession(game, s, gapMs, now)
 
     } else if (!isRunning && hasSession) {
@@ -611,6 +658,10 @@ function endSession(gameId, session, forcedEndAt) {
   detectionBuffer.delete(gameId)
   midSessionSyncAt.delete(gameId)
   xpCheckAt.delete(gameId)
+  // Un-park the Steam poll: a parked reason (private profile, wrong ID) is
+  // usually fixed between sessions, and the session-end sync below is exactly
+  // where we want to find out.
+  syncParked.delete(gameId)
   try { require('./crackWatcher').unwatchGame(gameId) } catch {}
   try { require('./steamStatsWatcher').unwatchGame(gameId) } catch {}
 
@@ -660,6 +711,9 @@ function endSession(gameId, session, forcedEndAt) {
       .prepare('UPDATE games SET total_playtime_seconds=MAX(0,total_playtime_seconds-?) WHERE id=?')
       .run(ended.duration_seconds || 0, session.game_id)
     logger.debug('Dropped sub-3s session', { id: session.id, duration: ended?.duration_seconds })
+    // Still an end — deferred jobs must be released even for a dropped session,
+    // otherwise a stray short launch would strand them until the next real one.
+    if (activeSessions.size === 0) emitter.emit('idle')
     return
   }
 
@@ -676,6 +730,10 @@ function endSession(gameId, session, forcedEndAt) {
     })
   } catch {}
   emitter.emit('change')
+  // Nothing is playing any more — release every job that was deferred to keep
+  // the in-session cadence quiet (crack deep scans, the app-data backup flush,
+  // the cracked-library catch-up sweep). See isSessionActive().
+  if (activeSessions.size === 0) emitter.emit('idle')
 
   // XP check: award the session's XP visibly. Shows a "+N XP" summary in the
   // overlay (with a near-level nudge when close), and fires the level-up toast
@@ -711,6 +769,13 @@ function endSession(gameId, session, forcedEndAt) {
   if (game?.steam_app_id) {
     const endedSession = ended
     const gid = session.game_id
+    // Local Steam stats FIRST — the client writes the unlock to disk within
+    // seconds, so this catches the last minutes of play immediately and works
+    // even when the Web API can't (private profile, no key). The Web API pass
+    // below is then reconciliation: it backfills Steam's real unlock times.
+    setImmediate(() => {
+      require('./steamStatsWatcher').scanGameOnce(gid, endedSession?.id).catch(() => {})
+    })
     const runSync = () => { try { require('./achievementSync').syncAfterSession(gid, endedSession?.id) } catch {} }
     setImmediate(runSync)
     for (const sec of [20, 45, 90, 150, 240]) setTimeout(runSync, sec * 1000)
@@ -764,6 +829,19 @@ function scheduleNextTick() {
     }
     scheduleNextTick()
   }, delay)
+}
+
+// Bring the next full scan forward — called right after the user hits Play.
+// Without it a launch from inside KoZo can wait out the whole 20s idle poll
+// before "Now Playing" lights up, which reads as the app not noticing.
+function nudge() {
+  if (!pollTimer || paused) return
+  clearTimeout(pollTimer)
+  ticksSinceFullScan = FULL_SCAN_EVERY_TICKS   // force the real scan, not lightTick
+  pollTimer = setTimeout(async () => {
+    try { await tick() } catch (err) { logger.error('processWatcher nudge error', { message: err.message }) }
+    scheduleNextTick()
+  }, 2000)
 }
 
 function start() {
@@ -867,6 +945,42 @@ function isPaused() { return paused }
 function onChange(cb)         { emitter.on('change', cb) }
 function onUnknownProcess(cb) { emitter.on('unknownProcess', cb) }
 
+// ── The "nothing expensive while a game runs" invariant ──────────────────────
+// A game is playing (or is one poll away from starting) → the main process must
+// not spawn a process, walk a directory tree synchronously, or do a blocking
+// write. Every background job asks this before running and defers to onIdle()
+// if it's true. Detecting games count: a launch is exactly when the machine is
+// busiest (shader compilation, asset streaming), and it's the moment the user
+// described as laggy.
+function isSessionActive() {
+  return activeSessions.size > 0 || detectingGames.size > 0
+}
+
+// Fires when the last active session ends. Deferred jobs subscribe here.
+function onIdle(cb) { emitter.on('idle', cb) }
+
+// Run `fn` now if nothing is playing, otherwise once the last session ends.
+// Coalesced: queuing the same job repeatedly during a session runs it once.
+const deferredJobs = new Map()   // key → fn
+function runWhenIdle(key, fn) {
+  if (!isSessionActive()) { fn(); return }
+  deferredJobs.set(key, fn)
+}
+emitter.on('idle', () => {
+  if (!deferredJobs.size) return
+  // Let the session-end work settle before starting disk-heavy jobs, and
+  // re-check: another game may have been detected in the meantime, in which
+  // case everything stays queued for the next idle.
+  setTimeout(() => {
+    if (isSessionActive()) return
+    const jobs = [...deferredJobs.entries()]
+    deferredJobs.clear()
+    for (const [key, fn] of jobs) {
+      try { fn() } catch (e) { logger.warn(`deferred job "${key}" failed`, { message: e.message }) }
+    }
+  }, 3000)
+})
+
 /**
  * Returns all running .exe processes with their disk paths.
  * Used by AddGame/EditGame "Pick running" feature so the user
@@ -915,8 +1029,9 @@ async function listRunningProcesses() {
 }
 
 module.exports = {
-  start, stop, pause, resume,
+  start, stop, pause, resume, nudge,
   getActiveSessions, getDetectingGames, isPaused,
+  isSessionActive, onIdle, runWhenIdle,
   onChange, onUnknownProcess,
   listRunningProcesses,
 }

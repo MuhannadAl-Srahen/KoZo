@@ -64,8 +64,14 @@ contextBridge.exposeInMainWorld('kozo', {
       signIn: () => ipcRenderer.invoke('steam:signIn'),
       storeDetails: (appId) => ipcRenderer.invoke('steam:storeDetails', appId),
       lastSyncError: (gameId) => ipcRenderer.invoke('steam:lastSyncError', gameId),
+      recheckPrivacy: () => ipcRenderer.invoke('steam:recheckPrivacy'),
       getProfile: (overrides) => ipcRenderer.invoke('steam:getProfile', overrides),
       diagnose: (gameId) => ipcRenderer.invoke('steam:diagnose', gameId),
+    },
+    crack: {
+      // Cracked games with achievement data on disk that aren't in the library.
+      discover: () => ipcRenderer.invoke('crack:discover'),
+      dismissDiscovered: (appId) => ipcRenderer.invoke('crack:dismissDiscovered', appId),
     },
     scanner: {
       getDefaultPaths: () => ipcRenderer.invoke('scanner:getDefaultPaths'),
@@ -130,6 +136,8 @@ contextBridge.exposeInMainWorld('kozo', {
       setInteractive: (v) => ipcRenderer.invoke('overlay:setInteractive', v),
       applyAccent: (hex) => ipcRenderer.invoke('overlay:applyAccent', hex),
       addUnknownGame: (data) => ipcRenderer.invoke('overlay:addUnknownGame', data),
+      // The achievement list toast is gone — release its scroll hotkeys.
+      achListClosed: () => ipcRenderer.invoke('overlay:achListClosed'),
     },
     app: {
       getStartup: () => ipcRenderer.invoke('app:getStartup'),
@@ -166,6 +174,11 @@ contextBridge.exposeInMainWorld('kozo', {
     onBannerRefreshProgress: (cb) => {
       ipcRenderer.on('banners:refreshProgress', (_, state) => cb(state))
     },
+    // Steam refused (or resumed allowing) a player-unlock read — library-wide,
+    // driven by achievementSync.recordSyncError.
+    onSteamPrivacyChanged: (cb) => {
+      ipcRenderer.on('steam:privacy-changed', (_, reason) => cb(reason))
+    },
     onAchievementOverlay: (cb) => {
       ipcRenderer.on('achievement:overlay', (_, data) => cb(data))
     },
@@ -177,6 +190,11 @@ contextBridge.exposeInMainWorld('kozo', {
     },
     onAchListOverlay: (cb) => {
       ipcRenderer.on('achList:overlay', (_, data) => cb(data))
+    },
+    // Scroll/close commands for the open achievement list, driven by the
+    // Alt+Down / Alt+Up / Alt+J global hotkeys.
+    onAchListControl: (cb) => {
+      ipcRenderer.on('achList:control', (_, data) => cb(data))
     },
     onUnknownGameOverlay: (cb) => {
       ipcRenderer.on('unknownGame:overlay', (_, data) => cb(data))
