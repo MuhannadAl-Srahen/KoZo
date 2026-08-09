@@ -126,6 +126,10 @@ async function runSelfTest() {
           .prepare('SELECT name, install_path FROM games WHERE id = ?').get(gameId)
         if (row && row.name === TEST_GAME_NAME && tempDir && row.install_path === tempDir) {
           require('../db/queries/games').deleteGame(gameId)
+          // The synthetic unlock's XP died with the row, so xpTracker's baseline
+          // has to move back down — a stale higher level would swallow the next
+          // REAL level-up at that same boundary. Decrease can't fire a toast.
+          try { require('./xpTracker').check({ reason: 'selftest_cleanup' }) } catch {}
         } else if (row) {
           logger.warn(`trackingSelfTest: refusing to delete game ${gameId} — row does not match the test fixture`)
         }

@@ -134,11 +134,21 @@ function createWindow() {
 function getOrCreateMainWindow(afterShow) {
   clearDestroyTimer()
   if (mainWindow && !mainWindow.isDestroyed()) {
-    if (mainWindow.isMinimized()) mainWindow.restore()
-    mainWindow.show()
-    mainWindow.focus()
-    if (afterShow) afterShow(mainWindow)
-    return mainWindow
+    const win = mainWindow   // the module ref can be nulled before the load ends
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+    // An existing window can still be mid-load (a recreate triggered moments ago
+    // by a caller that passed no callback) — a send into a loading renderer is
+    // dropped on the floor, which is why the recreate path below waits too.
+    if (afterShow) {
+      if (win.webContents.isLoading()) {
+        win.webContents.once('did-finish-load', () => { if (!win.isDestroyed()) afterShow(win) })
+      } else {
+        afterShow(win)
+      }
+    }
+    return win
   }
   createWindow()
   const win = mainWindow
@@ -168,7 +178,12 @@ app.whenReady().then(() => {
       const url = new URL(request.url)
       const filePath = path.resolve(decodeURIComponent(url.pathname.replace(/^\//, '')))
       const ext = path.extname(filePath).toLowerCase()
-      const underData = filePath.toLowerCase().startsWith(app.getPath('userData').toLowerCase())
+      // The separator matters: a bare startsWith would also accept siblings that
+      // merely share the prefix ("…\KoZo Saves", "…\KoZo-backup") and serve any
+      // file type out of them.
+      const base = app.getPath('userData').toLowerCase().replace(/[\\/]+$/, '')
+      const fp = filePath.toLowerCase()
+      const underData = fp === base || fp.startsWith(base + path.sep)
       if (!underData && !MIME[ext]) return new Response('Forbidden', { status: 403 })
       const data = await fs.promises.readFile(filePath)
       return new Response(data, { status: 200, headers: { 'content-type': MIME[ext] || 'application/octet-stream' } })
@@ -309,6 +324,8 @@ app.on('will-quit', () => {
   require('./services/processWatcher').stop()
   require('./services/crackWatcher').stopWatching()
   try { require('./services/autoBackup').flush() } catch {}
+  // Save snapshots deferred to idle would otherwise die with the process.
+  try { require('./services/autoSaveBackup').flushPending() } catch {}
   try { globalShortcut.unregisterAll() } catch {}
 })
 

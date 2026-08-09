@@ -36,6 +36,8 @@ function getOrCreate() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      webSecurity: true,              // as in the main window — never disable
+      allowRunningInsecureContent: false,
     },
   })
 
@@ -71,6 +73,15 @@ function getOrCreate() {
     logger.warn(`Overlay renderer gone: ${details.reason}`)
     _ready = false
     clearTimeout(_fallback); _fallback = null
+    // Click capture is WINDOW state, not renderer state — it survives the
+    // reload. A crash while the cursor sat on a toast would otherwise leave an
+    // invisible, always-on-top, NON-click-through window swallowing every click
+    // in that corner of the game, with no toast left to ever turn it back off.
+    try { _win.setIgnoreMouseEvents(true, { forward: true }) } catch {}
+    // The reloaded renderer starts with zero toasts, so nothing in it will ever
+    // ask for the hide (or release the achievement list's scroll hotkeys) —
+    // hideOverlay does both and re-arms the idle teardown.
+    hideOverlay()
     if (_win && !_win.isDestroyed()) _win.webContents.reload()
   })
   _win.webContents.on('did-fail-load', (_e, errorCode, errorDesc) => {
@@ -82,6 +93,7 @@ function getOrCreate() {
   _win.on('closed', () => {
     _win = null; _ready = false; _pending = []
     clearTimeout(_fallback); _fallback = null
+    releaseAchListKeys()
   })
 
   return _win
@@ -174,6 +186,9 @@ function sendAchListControl(data) { _send('achList:control',         data) }
 function sendLevelUp(data)        { _send('xp:overlay',              data) }
 function sendSessionEnded(data)   { _send('sessionEnd:overlay',      data) }
 function sendUnknownGame(data)    { _send('unknownGame:overlay',      data) }
+// "It's out now" for a tracked upcoming game. The overlay is the app's ONLY
+// notification surface (§6) — never a native Notification.
+function sendReleaseFlash(data)   { _send('release:overlay',          data) }
 
 // Toggle whether the overlay captures mouse clicks. The window is click-through
 // by default (events pass to the game). When the cursor is over a toast the
@@ -185,8 +200,17 @@ function setInteractive(interactive) {
   _win.setIgnoreMouseEvents(!interactive, { forward: true })
 }
 
+// Alt+Down / Alt+Up are registered globally only while the achievement list is
+// on screen. The renderer normally reports the close itself, but it can't when
+// its window is going away underneath it — so every teardown route here releases
+// them too, rather than leaving two very common combos hijacked system-wide.
+function releaseAchListKeys() {
+  try { require('./services/achievementListFlash').markClosed() } catch {}
+}
+
 function hideOverlay() {
   if (_win && !_win.isDestroyed()) _win.hide()
+  releaseAchListKeys()
   scheduleIdleDestroy()
 }
 
@@ -202,4 +226,4 @@ function applyAccent(hex) {
 
 // getWindow lets ipc.js tell the overlay apart from the main window (e.g. to
 // focus the main window when an overlay notification is clicked).
-module.exports = { getOrCreate, getWindow: () => _win, sendAchievements, sendSessionStarted, sendStatusFlash, sendAchievementListFlash, sendAchListControl, sendLevelUp, sendSessionEnded, sendUnknownGame, hideOverlay, markReady, setInteractive, applyAccent }
+module.exports = { getOrCreate, getWindow: () => _win, sendAchievements, sendSessionStarted, sendStatusFlash, sendAchievementListFlash, sendAchListControl, sendLevelUp, sendSessionEnded, sendUnknownGame, sendReleaseFlash, hideOverlay, markReady, setInteractive, applyAccent }

@@ -577,9 +577,14 @@ handle('gameList:add', async (data) => {
   const r = gameListQ.addGameListItem(data); bk(); return r
 })
 handle('gameList:update', (id, data) => {
+  const prev = data?.status ? gameListQ.getGameListItem(id) : null
   const r = gameListQ.updateGameListItem(id, data)
   // Mirror a status change onto the linked library game (and vice versa elsewhere).
-  if (data?.status) { try { require('./services/statusSync').syncFromGameList(id, data.status) } catch (e) { logger.warn('statusSync from game list failed', { message: e.message }) } }
+  // Only on a real CHANGE: re-asserting the same status would clear a linked
+  // game's Finished flag on any unrelated edit (rename, rating, list membership).
+  if (data?.status && data.status !== prev?.status) {
+    try { require('./services/statusSync').syncFromGameList(id, data.status) } catch (e) { logger.warn('statusSync from game list failed', { message: e.message }) }
+  }
   // Newly marked "upcoming" with no stored release date → fetch it right away so
   // the Upcoming tab shows the countdown immediately (not on the next backfill).
   if (data?.status === 'upcoming' && r?.steam_app_id && !r?.release_date) {
@@ -1592,8 +1597,11 @@ handle('stats:get', (period) => {
     GROUP BY g.id ORDER BY seconds DESC LIMIT 5
   `).all(since)
 
+  // Local days, like every other day-based surface (hourly chart, streaks, the
+  // Sessions timeline). Grouping by UTC put an after-midnight session on the
+  // previous bar for anyone east of Greenwich.
   const dailyActivity = db.prepare(`
-    SELECT DATE(started_at) AS day, SUM(duration_seconds) AS seconds
+    SELECT DATE(started_at, 'localtime') AS day, SUM(duration_seconds) AS seconds
     FROM sessions WHERE ended_at IS NOT NULL AND started_at >= ?
     GROUP BY day ORDER BY day ASC
   `).all(since)
@@ -1651,7 +1659,7 @@ handle('stats:get', (period) => {
 })
 
 // Drill-down for one calendar day (clicked in the Daily Activity chart).
-// `day` is a UTC YYYY-MM-DD key (same basis as dailyActivity's DATE(started_at)).
+// `day` is a LOCAL YYYY-MM-DD key (same basis as dailyActivity above).
 handle('stats:dayActivity', (day) => {
   const db = require('./db/database').getDb()
 
@@ -1660,7 +1668,7 @@ handle('stats:dayActivity', (day) => {
     SELECT g.id, g.name, g.banner_local_path, g.source, g.is_cracked,
            SUM(s.duration_seconds) AS seconds, COUNT(*) AS sessions
     FROM sessions s JOIN games g ON g.id = s.game_id
-    WHERE s.ended_at IS NOT NULL AND DATE(s.started_at) = ?
+    WHERE s.ended_at IS NOT NULL AND DATE(s.started_at, 'localtime') = ?
     GROUP BY g.id ORDER BY seconds DESC
   `).all(day)
 
@@ -1672,7 +1680,7 @@ handle('stats:dayActivity', (day) => {
     FROM achievement_unlocks au
     JOIN achievements a ON a.id = au.achievement_id
     JOIN games g ON g.id = a.game_id
-    WHERE au.unlocked_at IS NOT NULL AND DATE(au.unlocked_at) = ?
+    WHERE au.unlocked_at IS NOT NULL AND DATE(au.unlocked_at, 'localtime') = ?
     ORDER BY au.unlocked_at DESC
   `).all(day)
 
@@ -1680,7 +1688,7 @@ handle('stats:dayActivity', (day) => {
   const sessions = db.prepare(`
     SELECT s.id, s.duration_seconds, g.name AS game_name, s.started_at
     FROM sessions s JOIN games g ON g.id = s.game_id
-    WHERE s.ended_at IS NOT NULL AND DATE(s.started_at) = ?
+    WHERE s.ended_at IS NOT NULL AND DATE(s.started_at, 'localtime') = ?
     ORDER BY s.duration_seconds DESC LIMIT 8
   `).all(day)
 

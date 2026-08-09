@@ -44,10 +44,19 @@ async function downloadFile(url, destPath) {
 
   const file = fs.createWriteStream(destPath)
   return new Promise((resolve, reject) => {
+    // axios's timeout disarms once headers arrive — an alive-but-stalled body
+    // stream would otherwise pend forever and wedge the sequential fallback
+    // chain (and steam:refreshAllBanners' running guard). Inactivity watchdog:
+    // destroy the stream if no data for 30s so the 'error' handler rejects.
+    let t = null
+    const arm = () => { clearTimeout(t); t = setTimeout(() => res.data.destroy(new Error('download stalled')), 30000) }
+    arm()
+    res.data.on('data', arm)
     res.data.pipe(file)
-    file.on('finish', () => file.close(resolve))
-    file.on('error', (e) => { try { fs.unlinkSync(destPath) } catch {} ; reject(e) })
-    res.data.on('error', (e) => { try { fs.unlinkSync(destPath) } catch {} ; reject(e) })
+    file.on('finish', () => { clearTimeout(t); file.close(resolve) })
+    const fail = (e) => { clearTimeout(t); file.destroy(); try { fs.unlinkSync(destPath) } catch {} ; reject(e) }
+    file.on('error', fail)
+    res.data.on('error', fail)
   })
 }
 
@@ -257,10 +266,13 @@ async function getSchemaKeyless(appId) {
     const status = e.response?.status
     if (status === 403 || status === 400 || status === 404) {
       logger.debug(`getSchemaKeyless: no public achievement stats for ${appId} (HTTP ${status})`)
-    } else {
-      logger.warn(`getSchemaKeyless failed for ${appId}`, { message: e.message })
+      return []
     }
-    return []
+    // Anything else (timeout, DNS, 5xx) is "we couldn't ask", not "there is
+    // nothing" — returning [] here made callers persist a 7-day no-achievements
+    // backoff for a game that simply had no network at the wrong moment.
+    logger.warn(`getSchemaKeyless failed for ${appId}`, { message: e.message })
+    throw e
   }
 }
 
@@ -406,11 +418,15 @@ async function refreshGameData(gameId) {
   const game = getDb().prepare('SELECT * FROM games WHERE id = ?').get(gameId)
   if (!game?.steam_app_id) return null
 
+  // No API key is not a failure: the banner, hero and genre work below never
+  // needed one, and throwing here used to abort all of it (plus the caller's
+  // unlock import) for keyless users. The schema itself is left to
+  // ensureSchema, which owns the keyless ladder (owned-game XML first, global
+  // endpoints second) and never overwrites richer existing metadata with it.
   const apiKey = settingsQ.getSetting('steam_api_key')
-  if (!apiKey) throw new Error('Steam API key not set')
 
   const [schema, pcts] = await Promise.all([
-    getSchemaForGame(game.steam_app_id, apiKey),
+    apiKey ? getSchemaForGame(game.steam_app_id, apiKey) : Promise.resolve([]),
     getGlobalAchievementPercentages(game.steam_app_id),
   ])
 

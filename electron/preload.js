@@ -68,11 +68,6 @@ contextBridge.exposeInMainWorld('kozo', {
       getProfile: (overrides) => ipcRenderer.invoke('steam:getProfile', overrides),
       diagnose: (gameId) => ipcRenderer.invoke('steam:diagnose', gameId),
     },
-    crack: {
-      // Cracked games with achievement data on disk that aren't in the library.
-      discover: () => ipcRenderer.invoke('crack:discover'),
-      dismissDiscovered: (appId) => ipcRenderer.invoke('crack:dismissDiscovered', appId),
-    },
     scanner: {
       getDefaultPaths: () => ipcRenderer.invoke('scanner:getDefaultPaths'),
       scan: (paths) => ipcRenderer.invoke('scanner:scan', paths),
@@ -83,6 +78,9 @@ contextBridge.exposeInMainWorld('kozo', {
       scanAll: () => ipcRenderer.invoke('crack:scanAll'),
       diagnose: (gameId) => ipcRenderer.invoke('crack:diagnose', gameId),
       enableAchievements: (gameId) => ipcRenderer.invoke('crack:enableAchievements', gameId),
+      // Cracked games with achievement data on disk that aren't in the library.
+      discover: () => ipcRenderer.invoke('crack:discover'),
+      dismissDiscovered: (appId) => ipcRenderer.invoke('crack:dismissDiscovered', appId),
     },
     shell: {
       openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
@@ -149,73 +147,46 @@ contextBridge.exposeInMainWorld('kozo', {
     },
   },
 
-  events: {
-    onSessionStarted: (cb) => {
-      ipcRenderer.on('session:started', (_, data) => cb(data))
-    },
-    onSessionEnded: (cb) => {
-      ipcRenderer.on('session:ended', (_, data) => cb(data))
-    },
-    onSessionIdle: (cb) => {
-      ipcRenderer.on('session:idle', (_, data) => cb(data))
-    },
-    onSessionDetected: (cb) => {
-      ipcRenderer.on('session:detected', (_, data) => cb(data))
-    },
-    onSessionUndetected: (cb) => {
-      ipcRenderer.on('session:undetected', (_, data) => cb(data))
-    },
-    onAchievementUnlocked: (cb) => {
-      ipcRenderer.on('achievement:unlocked', (_, data) => cb(data))
-    },
-    onGameUpdated: (cb) => {
-      ipcRenderer.on('game:updated', (_, gameId) => cb(gameId))
-    },
-    onBannerRefreshProgress: (cb) => {
-      ipcRenderer.on('banners:refreshProgress', (_, state) => cb(state))
-    },
-    // Steam refused (or resumed allowing) a player-unlock read — library-wide,
-    // driven by achievementSync.recordSyncError.
-    onSteamPrivacyChanged: (cb) => {
-      ipcRenderer.on('steam:privacy-changed', (_, reason) => cb(reason))
-    },
-    onAchievementOverlay: (cb) => {
-      ipcRenderer.on('achievement:overlay', (_, data) => cb(data))
-    },
-    onSessionOverlay: (cb) => {
-      ipcRenderer.on('session:overlay', (_, data) => cb(data))
-    },
-    onStatusOverlay: (cb) => {
-      ipcRenderer.on('status:overlay', (_, data) => cb(data))
-    },
-    onAchListOverlay: (cb) => {
-      ipcRenderer.on('achList:overlay', (_, data) => cb(data))
-    },
-    // Scroll/close commands for the open achievement list, driven by the
-    // Alt+Down / Alt+Up / Alt+J global hotkeys.
-    onAchListControl: (cb) => {
-      ipcRenderer.on('achList:control', (_, data) => cb(data))
-    },
-    onUnknownGameOverlay: (cb) => {
-      ipcRenderer.on('unknownGame:overlay', (_, data) => cb(data))
-    },
-    onXpOverlay: (cb) => {
-      ipcRenderer.on('xp:overlay', (_, data) => cb(data))
-    },
-    onSessionEndOverlay: (cb) => {
-      ipcRenderer.on('sessionEnd:overlay', (_, data) => cb(data))
-    },
-    onXpLevelUp: (cb) => {
-      ipcRenderer.on('xp:levelup', (_, data) => cb(data))
-    },
-    onAccentChanged: (cb) => {
-      ipcRenderer.on('accent:changed', (_, hex) => cb(hex))
-    },
-    onUnknownProcessAdd: (cb) => {
-      ipcRenderer.on('unknown-process:add', (_, data) => cb(data))
-    },
-    removeAll: (channel) => {
-      ipcRenderer.removeAllListeners(channel)
-    },
-  },
+  // Every on* returns an unsubscribe for THAT listener — cleanups must use it.
+  // removeAll(channel) is process-wide for the window and tears down other
+  // components' listeners on the same channel (it killed the Sidebar's live
+  // session card after the first page navigation) — kept only as a last resort.
+  events: (() => {
+    const sub = (channel, wrap) => (cb) => {
+      const handler = (_, payload) => wrap(cb, payload)
+      ipcRenderer.on(channel, handler)
+      return () => ipcRenderer.removeListener(channel, handler)
+    }
+    const pass = (cb, payload) => cb(payload)
+    return {
+      onSessionStarted: sub('session:started', pass),
+      onSessionEnded: sub('session:ended', pass),
+      onSessionIdle: sub('session:idle', pass),
+      onSessionDetected: sub('session:detected', pass),
+      onSessionUndetected: sub('session:undetected', pass),
+      onAchievementUnlocked: sub('achievement:unlocked', pass),
+      onGameUpdated: sub('game:updated', pass),
+      onBannerRefreshProgress: sub('banners:refreshProgress', pass),
+      // Steam refused (or resumed allowing) a player-unlock read — library-wide,
+      // driven by achievementSync.recordSyncError.
+      onSteamPrivacyChanged: sub('steam:privacy-changed', pass),
+      onAchievementOverlay: sub('achievement:overlay', pass),
+      onSessionOverlay: sub('session:overlay', pass),
+      onStatusOverlay: sub('status:overlay', pass),
+      onAchListOverlay: sub('achList:overlay', pass),
+      // Scroll/close commands for the open achievement list, driven by the
+      // Alt+Down / Alt+Up / Alt+J global hotkeys.
+      onAchListControl: sub('achList:control', pass),
+      onUnknownGameOverlay: sub('unknownGame:overlay', pass),
+      onReleaseOverlay: sub('release:overlay', pass),
+      onXpOverlay: sub('xp:overlay', pass),
+      onSessionEndOverlay: sub('sessionEnd:overlay', pass),
+      onXpLevelUp: sub('xp:levelup', pass),
+      onAccentChanged: sub('accent:changed', pass),
+      onUnknownProcessAdd: sub('unknown-process:add', pass),
+      removeAll: (channel) => {
+        ipcRenderer.removeAllListeners(channel)
+      },
+    }
+  })(),
 })

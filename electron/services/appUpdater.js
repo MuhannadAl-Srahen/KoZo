@@ -43,7 +43,9 @@ function setupAutoUpdate() {
   if (!app.isPackaged) return
   setTimeout(() => {
     try {
-      getAutoUpdater().checkForUpdatesAndNotify().catch((e) => {
+      // checkForUpdates, NOT checkForUpdatesAndNotify — the latter fires a
+      // native OS toast on download (§6: overlay/dialog are the only surfaces).
+      getAutoUpdater().checkForUpdates().catch((e) => {
         logger.warn('appUpdater: startup check failed', { message: e?.message })
       })
     } catch (e) {

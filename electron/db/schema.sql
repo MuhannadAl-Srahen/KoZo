@@ -42,7 +42,9 @@ CREATE TABLE IF NOT EXISTS achievement_unlocks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   achievement_id INTEGER NOT NULL,
   session_id INTEGER,
-  unlocked_at TIMESTAMP NOT NULL,
+  -- Nullable: Steam reports unlocktime 0 for achievements it has no date for.
+  -- The row's existence means unlocked; this column is only the display date.
+  unlocked_at TIMESTAMP,
   source TEXT NOT NULL,
   FOREIGN KEY (achievement_id) REFERENCES achievements(id) ON DELETE CASCADE,
   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE SET NULL,

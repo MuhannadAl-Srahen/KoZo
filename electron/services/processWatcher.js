@@ -139,7 +139,7 @@ const activeSessions  = new Map()
 const detectingGames  = new Map()
 
 // ── Unknown process detection (game not in library) ──────────────────────────
-// exe_name → tick count
+// exe_name → { count, firstSeen }
 const unknownExeBuffer = new Map()
 // exe names we've already evaluated this session (avoid re-checking)
 const evaluatedExes = new Set()
@@ -490,11 +490,13 @@ async function tick() {
   const games           = gamesQ.listGames()
   const knownGameIds    = new Set(games.map(g => g.id))
   const sensitivitySecs = getSensitivitySeconds()
-  // Detection counts consecutive sightings — base the tick count on the CURRENT
-  // poll cadence (adaptive: 5s in-session/detecting, 20s fully idle) so
-  // sensitivity stays honest.
-  const currentPollMs   = (activeSessions.size > 0 || detectingGames.size > 0) ? POLL_MS : POLL_IDLE_MS
-  const ticksNeeded     = Math.max(1, Math.ceil(sensitivitySecs / (currentPollMs / 1000)))
+  // Sensitivity is a DURATION, not a sighting count: at the 20s idle cadence a
+  // sighting count of ceil(15/20) = 1 meant the very first sighting started a
+  // session, so a launcher stub or an instantly-crashing exe logged real
+  // playtime. Gate on elapsed time since first sighting instead, and still
+  // require a second confirming sighting (detection flips the poll to 5s, so
+  // that costs nothing extra).
+  const sensitivityMs   = sensitivitySecs * 1000
 
   // ── Track registered games ─────────────────────────────────────────────────
   for (const game of games) {
@@ -524,10 +526,12 @@ async function tick() {
         }
       }
 
-      if (buf.ticks >= ticksNeeded) {
+      if (buf.ticks >= 2 && now - buf.firstSeen >= sensitivityMs) {
         const session = sessionsQ.resumeOrStartSession(game.id)
         const pid = procByName.get(exeLower)?.pid || null
-        const enriched = { ...session, game_name: game.name, exe_name: game.exe_name, last_seen_at: now, idle_seconds: 0, pid }
+        // A merged session carries the idle time already excluded from its first
+        // leg — endSession recomputes duration from the raw timestamps.
+        const enriched = { ...session, game_name: game.name, exe_name: game.exe_name, last_seen_at: now, idle_seconds: session.prev_excluded || 0, pid }
         activeSessions.set(game.id, enriched)
         detectionBuffer.delete(game.id)
         detectingGames.delete(game.id)
@@ -598,6 +602,20 @@ async function tick() {
     }
   }
 
+  // Same for a game deleted while it was still mid-detection: the per-game loop
+  // above only walks games that still exist, so its entry would never be cleared
+  // and isSessionActive() would stay true forever, stranding every deferred job.
+  let clearedDetecting = false
+  for (const gameId of [...detectingGames.keys()]) {
+    if (knownGameIds.has(gameId)) continue
+    detectingGames.delete(gameId)
+    detectionBuffer.delete(gameId)
+    clearedDetecting = true
+    sendToRenderer('session:undetected', { gameId })
+    try { require('./crackWatcher').unwatchGame(gameId) } catch {}
+  }
+  if (clearedDetecting && activeSessions.size === 0 && detectingGames.size === 0) emitter.emit('idle')
+
   syncControllerProbe()
 
   // ── Detect unknown game-like processes (not in library) ────────────────────
@@ -613,9 +631,12 @@ async function tick() {
     if (gameExeLower.has(name))   continue
     if (evaluatedExes.has(name))  continue
 
-    const count = (unknownExeBuffer.get(name) || 0) + 1
-    unknownExeBuffer.set(name, count)
-    if (count >= ticksNeeded) candidates.push(proc)
+    const buf = unknownExeBuffer.get(name) || { count: 0, firstSeen: now }
+    buf.count++
+    unknownExeBuffer.set(name, buf)
+    // Same duration-not-sighting-count rule as game detection above, so a
+    // one-off installer seen on a single idle scan is never marked evaluated.
+    if (buf.count >= 2 && now - buf.firstSeen >= sensitivityMs) candidates.push(proc)
   }
 
   // Check candidate paths via ONE batched PowerShell call (never one spawn per
@@ -827,6 +848,11 @@ function scheduleNextTick() {
     } catch (err) {
       logger.error('processWatcher tick error', { message: err.message })
     }
+    // Single choke point for releasing deferred work: a detection can end
+    // without an endSession (launcher stub, crash on launch, sleep-wake), and
+    // those paths used to leave idle jobs queued forever. A Map size check, so
+    // it costs nothing on the in-session cadence.
+    if (deferredJobs.size && !isSessionActive()) emitter.emit('idle')
     scheduleNextTick()
   }, delay)
 }
@@ -837,8 +863,11 @@ function scheduleNextTick() {
 function nudge() {
   if (!pollTimer || paused) return
   clearTimeout(pollTimer)
-  ticksSinceFullScan = FULL_SCAN_EVERY_TICKS   // force the real scan, not lightTick
   pollTimer = setTimeout(async () => {
+    // This IS the full scan, so the counter restarts here — leaving it high made
+    // the next scheduled tick spawn fastlist.exe again seconds later, right while
+    // the freshly-launched game is loading.
+    ticksSinceFullScan = 0
     try { await tick() } catch (err) { logger.error('processWatcher nudge error', { message: err.message }) }
     scheduleNextTick()
   }, 2000)
@@ -886,35 +915,47 @@ async function resolveOrphanSessions() {
   for (const orphan of orphans) {
     if (activeSessions.has(orphan.game_id)) continue
     const exe = (orphan.exe_name || '').toLowerCase()
+    const game      = gamesQ.getGame(orphan.game_id)
+    const startMs   = new Date(orphan.started_at).getTime()
+    // The last moment we OBSERVED the game running. Everything after it is
+    // unobserved: KoZo was off, so it is not playtime we can honestly claim.
+    const beatMs    = Math.max(startMs, game?.last_played_at ? new Date(game.last_played_at).getTime() : startMs)
 
-    if (exe && running.has(exe)) {
-      // Still running → resume as one continuous session (keeps original started_at).
-      activeSessions.set(orphan.game_id, {
-        ...orphan,
-        game_name: orphan.game_name,
-        exe_name: orphan.exe_name,
-        last_seen_at: now,
-        pid: procByName.get(exe)?.pid || null,
-      })
-      midSessionSyncAt.set(orphan.game_id, now)
-      try { require('./crackWatcher').watchGame(orphan.game_id) } catch {}
-      try { require('./steamStatsWatcher').watchGame(orphan.game_id, orphan.id) } catch {}
-      logger.info(`Resumed open session for "${orphan.game_name}" — still running after KoZo restart`)
-    } else {
-      // Not running → cap at the last heartbeat (the game closed while KoZo was off).
-      const game       = gamesQ.getGame(orphan.game_id)
-      const startMs     = new Date(orphan.started_at).getTime()
-      const lastSeenMs  = game?.last_played_at ? new Date(game.last_played_at).getTime() : startMs
-      const endMs       = Math.max(startMs, lastSeenMs)
-      const dur         = Math.max(0, Math.floor((endMs - startMs) / 1000))
-      const endIso      = new Date(endMs).toISOString()
-      db.prepare('UPDATE sessions SET ended_at = ?, duration_seconds = ? WHERE id = ?').run(endIso, dur, orphan.id)
-      db.prepare('UPDATE games SET total_playtime_seconds = total_playtime_seconds + ? WHERE id = ?').run(dur, orphan.game_id)
-      if (dur < 3) {
-        db.prepare('DELETE FROM sessions WHERE id = ?').run(orphan.id)
-        db.prepare('UPDATE games SET total_playtime_seconds = MAX(0, total_playtime_seconds - ?) WHERE id = ?').run(dur, orphan.game_id)
+    try {
+      if (exe && running.has(exe)) {
+        // Still running → resume as ONE continuous session (keeps original
+        // started_at) so "quit KoZo while playing, reopen later" never splits.
+        // A matching exe name does not prove it is the SAME run though — the
+        // player may have quit and relaunched hours later — so the unobserved
+        // gap is seeded as idle and endSession subtracts it from the credit.
+        const gapSec = Math.max(0, Math.floor((now - beatMs) / 1000))
+        activeSessions.set(orphan.game_id, {
+          ...orphan,
+          game_name: orphan.game_name,
+          exe_name: orphan.exe_name,
+          last_seen_at: now,
+          idle_seconds: gapSec,
+          pid: procByName.get(exe)?.pid || null,
+        })
+        midSessionSyncAt.set(orphan.game_id, now)
+        try { require('./crackWatcher').watchGame(orphan.game_id) } catch {}
+        try { require('./steamStatsWatcher').watchGame(orphan.game_id, orphan.id) } catch {}
+        logger.info(`Resumed open session for "${orphan.game_name}" — still running after KoZo restart`, { unobservedGapSec: gapSec })
+      } else {
+        // Not running → cap at the last heartbeat (the game closed while KoZo was off).
+        const dur         = Math.max(0, Math.floor((beatMs - startMs) / 1000))
+        const endIso      = new Date(beatMs).toISOString()
+        db.prepare('UPDATE sessions SET ended_at = ?, duration_seconds = ? WHERE id = ?').run(endIso, dur, orphan.id)
+        db.prepare('UPDATE games SET total_playtime_seconds = total_playtime_seconds + ? WHERE id = ?').run(dur, orphan.game_id)
+        if (dur < 3) {
+          db.prepare('DELETE FROM sessions WHERE id = ?').run(orphan.id)
+          db.prepare('UPDATE games SET total_playtime_seconds = MAX(0, total_playtime_seconds - ?) WHERE id = ?').run(dur, orphan.game_id)
+        }
+        logger.info(`Capped orphan session for "${orphan.game_name}" at ${dur}s (game not running)`)
       }
-      logger.info(`Capped orphan session for "${orphan.game_name}" at ${dur}s (game not running)`)
+    } catch (e) {
+      // One bad row must not strand the rest.
+      logger.warn(`resolveOrphanSessions: could not resolve session ${orphan.id}`, { message: e.message })
     }
   }
 }

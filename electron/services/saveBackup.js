@@ -25,14 +25,108 @@ function rootDir() {
   return dir
 }
 
+// Names Windows refuses as a folder, whatever the extension.
+const RESERVED_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i
+
 // Windows-safe folder name from a game title.
 function sanitize(name) {
-  return (name || 'Game').replace(/[<>:"/\\|?*\x00-\x1f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Game'
+  let s = (name || 'Game').replace(/[<>:"/\\|?*\x00-\x1f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80)
+  // Trailing dots/spaces make a folder Explorer struggles to delete, and
+  // "." / ".." would walk out of the backups root entirely.
+  s = s.replace(/[. ]+$/, '')
+  if (!s || /^\.+$/.test(s)) return 'Game'
+  return RESERVED_NAMES.test(s) ? `${s} (game)` : s
 }
 
-function gameDir(gameName) {
-  const dir = path.join(rootDir(), sanitize(gameName))
+// sanitize() as it was before trailing dots were stripped — folders created by
+// older builds still carry that spelling ("F.E.A.R."), so they must be adopted
+// rather than abandoned. null when the old spelling is unusable (".", "..").
+function legacySanitize(name) {
+  const s = (name || 'Game').replace(/[<>:"/\\|?*\x00-\x1f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80)
+  if (!s || /^\.+$/.test(s)) return null
+  return s
+}
+
+// Which game a folder already holds snapshots for — `{ gameId, gameName }`, or
+// null when it's empty (claimable by anyone). gameId is the immutable games.id;
+// snapshots written before it was recorded carry a name only.
+function folderOwner(dir) {
+  let entries = []
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return null }
+  let byName = null
+  for (const e of entries) {
+    if (!e.isDirectory()) continue
+    const meta = readMeta(path.join(dir, e.name))
+    // An id settles it outright, whatever older snapshots in the folder say.
+    if (meta.gameId != null) return { gameId: String(meta.gameId), gameName: String(meta.gameName || '') }
+    if (!byName && meta.gameName) byName = { gameId: null, gameName: String(meta.gameName) }
+  }
+  return byName
+}
+
+// sanitize() decides which folder a title lands in, so it is also what makes two
+// titles the same folder.
+function nameKey(name) { return sanitize(name).toLowerCase() }
+
+// Does an existing folder belong to the game we're working with? Keyed on the
+// immutable games.id, because the title is both mutable and lossy: comparing raw
+// names made a rename that sanitize() normalises away (a doubled space, a stripped
+// ":", anything past the 80-char cut) look like a different game, which hid that
+// game's whole backup history behind a fresh "<name> (2)" folder. Snapshots taken
+// before meta.gameId existed have no id and fall back to the name comparison —
+// exactly the behaviour those folders already had.
+function ownedBy(owner, gameName, gameId) {
+  if (!owner) return true
+  if (owner.gameId != null && gameId != null) return owner.gameId === String(gameId)
+  return nameKey(owner.gameName) === nameKey(gameName)
+}
+
+// Callers identify a game by NAME (ipc's gameNameOf, autoSaveBackup), so the id
+// is resolved here. An ambiguous name (two library rows share it) or a game no
+// longer in the library resolves to null, and ownership falls back to names.
+function resolveGameId(gameName) {
+  const name = String(gameName || '').trim()
+  if (!name) return null
+  try {
+    const rows = require('../db/database').getDb()
+      .prepare('SELECT id FROM games WHERE name = ? COLLATE NOCASE').all(name)
+    return rows.length === 1 ? String(rows[0].id) : null
+  } catch { return null }
+}
+
+// sanitize() is lossy (punctuation stripped, 80-char cut) and Windows folders are
+// case-insensitive, so two DIFFERENT games can land on the same folder — which
+// would mix their snapshot lists and make them fight over the single rolling
+// `auto-latest` slot. A folder therefore belongs to the first game that wrote a
+// snapshot into it and any other game falls through to "<name> (2)". Existing
+// folders are never renamed.
+function gameDir(gameName, gameId = resolveGameId(gameName)) {
+  const root = rootDir()
+  let base = sanitize(gameName)
+  const legacy = legacySanitize(gameName)
+  if (legacy && legacy !== base && !fs.existsSync(path.join(root, base)) && fs.existsSync(path.join(root, legacy))) {
+    base = legacy
+  }
+  let dir = path.join(root, base)
+  for (let i = 2; i <= 20 && fs.existsSync(dir); i++) {
+    if (ownedBy(folderOwner(dir), gameName, gameId)) break
+    dir = path.join(root, `${base} (${i})`)
+  }
   fs.mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+// backupId comes from the renderer and the main process is the only place it is
+// checked: a "..", a separator or a drive letter would resolve outside the game's
+// folder and hand rmSync/cpSync a directory that isn't a backup at all.
+function backupDir(gameName, backupId) {
+  const id = String(backupId ?? '')
+  if (!id.trim() || id === '.' || id === '..' || /[\\/:]/.test(id) || path.basename(id) !== id) {
+    throw new Error('Invalid backup id')
+  }
+  const base = gameDir(gameName)
+  const dir  = path.join(base, id)
+  if (!path.resolve(dir).startsWith(path.resolve(base) + path.sep)) throw new Error('Invalid backup path')
   return dir
 }
 
@@ -62,27 +156,41 @@ function makeId() {
 
 function backupSave(gameName, sourcePath, label) {
   if (!sourcePath || !fs.existsSync(sourcePath)) throw new Error('Save folder no longer exists')
+  const gameId = resolveGameId(gameName)
   const id   = makeId() + (label ? `_${label}` : '')
-  const dest = path.join(gameDir(gameName), id)
+  const dest = path.join(gameDir(gameName, gameId), id)
   const dataDest = path.join(dest, 'data')
   fs.mkdirSync(dataDest, { recursive: true })
 
-  fs.cpSync(sourcePath, dataDest, { recursive: true })
-  const { files, bytes } = measure(dataDest)
-  const meta = { id, gameName: gameName || '', source: sourcePath, createdAt: new Date().toISOString(), files, bytes, label: label || null }
-  fs.writeFileSync(path.join(dest, 'meta.json'), JSON.stringify(meta, null, 2), 'utf8')
-  logger.info(`saveBackup: backed up "${gameName}" (${files} files) from ${sourcePath}`)
+  let meta
+  try {
+    fs.cpSync(sourcePath, dataDest, { recursive: true })
+    const { files, bytes } = measure(dataDest)
+    meta = { id, gameId, gameName: gameName || '', source: sourcePath, createdAt: new Date().toISOString(), files, bytes, label: label || null }
+    fs.writeFileSync(path.join(dest, 'meta.json'), JSON.stringify(meta, null, 2), 'utf8')
+  } catch (e) {
+    // A half-copied folder with no meta.json would list as a corrupt snapshot.
+    try { fs.rmSync(dest, { recursive: true, force: true }) } catch {}
+    throw e
+  }
+  logger.info(`saveBackup: backed up "${gameName}" (${meta.files} files) from ${sourcePath}`)
   return { ...meta, path: dataDest }
 }
 
 function listBackups(gameName) {
-  const dir = gameDir(gameName)
+  const gameId = resolveGameId(gameName)
+  const dir = gameDir(gameName, gameId)
   let entries = []
   try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return [] }
   const out = []
   for (const e of entries) {
     if (!e.isDirectory()) continue
     const meta = readMeta(path.join(dir, e.name))
+    // A folder written before the ownership rule can hold two colliding games'
+    // snapshots — never list (and so never restore/delete) another game's. Only
+    // an id proves that: a differing NAME is far more often this same game,
+    // renamed, and hiding its own history would be the worse mistake.
+    if (gameId != null && meta.gameId != null && String(meta.gameId) !== gameId) continue
     out.push({
       id: e.name,
       gameName: meta.gameName || gameName,
@@ -99,17 +207,24 @@ function listBackups(gameName) {
 }
 
 function restoreBackup(gameName, backupId, targetOverride) {
-  const dir     = path.join(gameDir(gameName), backupId)
+  const dir     = backupDir(gameName, backupId)
   const meta    = readMeta(dir)
   const dataDir = path.join(dir, 'data')
   if (!fs.existsSync(dataDir)) throw new Error('Backup data missing or corrupted')
   const target = targetOverride || meta.source
   if (!target) throw new Error('No restore destination recorded for this backup')
 
-  // Safety net: snapshot whatever is currently there before overwriting it.
+  // Safety net: snapshot whatever is currently there before overwriting it. If
+  // that snapshot can't be taken (full/locked backup drive) the restore would be
+  // irreversible, so abort rather than overwrite the live save with no way back.
   let safety = null
   if (fs.existsSync(target)) {
-    try { safety = backupSave(gameName, target, 'before-restore').id } catch {}
+    try {
+      safety = backupSave(gameName, target, 'before-restore').id
+    } catch (e) {
+      logger.warn(`saveBackup: before-restore snapshot failed for "${gameName}"`, { message: e.message })
+      throw new Error(`Could not snapshot the current save before restoring (${e.message}) — restore cancelled so nothing was overwritten`)
+    }
   }
 
   fs.mkdirSync(target, { recursive: true })
@@ -119,7 +234,7 @@ function restoreBackup(gameName, backupId, targetOverride) {
 }
 
 function deleteBackup(gameName, backupId) {
-  const dir = path.join(gameDir(gameName), backupId)
+  const dir = backupDir(gameName, backupId)
   fs.rmSync(dir, { recursive: true, force: true })
   return true
 }
@@ -155,9 +270,11 @@ function autoBackupGame(gameName, sourcePath) {
   const cur = measure(sourcePath)
   if (cur.files === 0) return { skipped: 'empty' }
 
-  const dest     = path.join(gameDir(gameName), AUTO_ID)
+  const gameId   = resolveGameId(gameName)
+  const dir      = gameDir(gameName, gameId)
+  const dest     = path.join(dir, AUTO_ID)
   const dataDest = path.join(dest, 'data')
-  const prevDest = path.join(gameDir(gameName), AUTO_PREV_ID)
+  const prevDest = path.join(dir, AUTO_PREV_ID)
 
   // Dedupe against the existing rolling snapshot.
   if (fs.existsSync(dataDest)) {
@@ -191,7 +308,7 @@ function autoBackupGame(gameName, sourcePath) {
   fs.cpSync(sourcePath, dataDest, { recursive: true })
   const { files, bytes } = measure(dataDest)
   const meta = {
-    id: AUTO_ID, gameName: gameName || '', source: sourcePath,
+    id: AUTO_ID, gameId, gameName: gameName || '', source: sourcePath,
     createdAt: new Date().toISOString(), files, bytes, label: 'auto',
   }
   fs.writeFileSync(path.join(dest, 'meta.json'), JSON.stringify(meta, null, 2), 'utf8')

@@ -71,27 +71,49 @@ function startSession(gameId) {
 // produce a flood of short split sessions.
 function resumeOrStartSession(gameId) {
   const db = getDb()
+  const MERGE_WINDOW_SEC = 3 * 60
 
-  // Any DB-level orphan (ended_at IS NULL) left from a crash — re-attach directly.
+  // Any DB-level orphan (ended_at IS NULL) left from a crash. Re-attach only if
+  // it is FRESH — its game's last heartbeat is inside the merge window. An older
+  // orphan is a crash leftover from a previous play; re-attaching it would count
+  // every hour since as playtime, so close it at the last observed moment first.
   const orphan = db.prepare(
     `SELECT * FROM sessions WHERE game_id = ? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1`
   ).get(gameId)
-  if (orphan) return orphan
+  if (orphan) {
+    const startMs = new Date(orphan.started_at).getTime()
+    const game = db.prepare('SELECT last_played_at FROM games WHERE id = ?').get(gameId)
+    const beatMs = Math.max(startMs, game?.last_played_at ? new Date(game.last_played_at).getTime() : startMs)
+    if (Date.now() - beatMs <= MERGE_WINDOW_SEC * 1000) return orphan
+
+    const dur = Math.max(0, Math.floor((beatMs - startMs) / 1000))
+    db.prepare('UPDATE sessions SET ended_at = ?, duration_seconds = ? WHERE id = ?')
+      .run(new Date(beatMs).toISOString(), dur, orphan.id)
+    if (dur >= 3) {
+      db.prepare('UPDATE games SET total_playtime_seconds = total_playtime_seconds + ? WHERE id = ?').run(dur, gameId)
+    } else {
+      db.prepare('DELETE FROM sessions WHERE id = ?').run(orphan.id)
+    }
+  }
 
   // Recently-ended session within the 3-minute merge window.
-  const MERGE_WINDOW_SEC = 3 * 60
   const cutoff = new Date(Date.now() - MERGE_WINDOW_SEC * 1000).toISOString()
   const recent = db.prepare(
     `SELECT * FROM sessions WHERE game_id = ? AND ended_at >= ? ORDER BY ended_at DESC LIMIT 1`
   ).get(gameId, cutoff)
 
   if (recent) {
+    // Idle/AFK seconds already excluded from this leg. Reopening recomputes the
+    // duration from the raw timestamps, so the caller has to carry the exclusion
+    // forward — otherwise a merge silently re-credits time spent away.
+    const rawSpanSec = Math.max(0, Math.floor((new Date(recent.ended_at) - new Date(recent.started_at)) / 1000))
+    const prevExcluded = Math.max(0, rawSpanSec - (recent.duration_seconds || 0))
     // Reverse the playtime credit then reopen the row so duration accumulates naturally.
     db.prepare(`UPDATE games SET total_playtime_seconds = MAX(0, total_playtime_seconds - ?) WHERE id = ?`)
       .run(recent.duration_seconds || 0, gameId)
     db.prepare(`UPDATE sessions SET ended_at = NULL, duration_seconds = NULL WHERE id = ?`)
       .run(recent.id)
-    return getSession(recent.id)
+    return { ...getSession(recent.id), prev_excluded: prevExcluded }
   }
 
   return startSession(gameId)

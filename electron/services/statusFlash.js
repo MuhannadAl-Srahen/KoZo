@@ -23,7 +23,9 @@ function buildPayload() {
     try {
       const achs = achievementsQ.listAchievementsForGame(sess.game_id) || []
       total = achs.length
-      unlocked = achs.filter(a => a.unlocked_at).length
+      // unlock_id, not unlocked_at — Steam reports some unlocks with no date at
+      // all (unlocktime 0, stored as NULL); they still count as unlocked.
+      unlocked = achs.filter(a => a.unlock_id != null).length
     } catch { /* no achievements is fine */ }
 
     // Cover art for the card — same fields the session/achievement toasts use.

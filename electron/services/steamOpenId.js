@@ -13,7 +13,7 @@
 const http = require('http')
 const logger = require('../logger')
 
-let _active = null   // the in-flight sign-in's server, so a second click reuses/cancels
+let _active = null   // { server, finish } of the in-flight sign-in, so a second click cancels it
 
 function settingsQ() { return require('../db/queries/settings') }
 
@@ -32,18 +32,27 @@ async function fetchPersona(steamId) {
 
 function signIn() {
   if (_active) {
-    try { _active.close() } catch {}
+    // Settle the superseded attempt NOW: closing its server fires nothing its
+    // promise listens for, so it would hang until its own 5-min timeout — and
+    // that late finish() would then null out the NEW attempt's _active.
+    const prev = _active
     _active = null
+    try { prev.server.close() } catch {}
+    prev.finish({ error: 'superseded' })
   }
 
   return new Promise((resolve) => {
     let settled = false
+    let timer = null
+    const attempt = {}
     const finish = (result) => {
       if (settled) return
       settled = true
-      _active = null
+      clearTimeout(timer)
+      if (_active === attempt) _active = null   // never clobber a newer attempt
       resolve(result)
     }
+    attempt.finish = finish
 
     const server = http.createServer(async (req, res) => {
       let valid = false
@@ -84,6 +93,7 @@ function signIn() {
         finish({ error: 'verify_failed' })
       }
     })
+    attempt.server = server
 
     server.on('error', (e) => {
       logger.warn('steamOpenId: local listener failed', { message: e.message })
@@ -91,7 +101,9 @@ function signIn() {
     })
 
     server.listen(0, '127.0.0.1', () => {
-      _active = server
+      // Superseded before it even bound — close it and stay out of _active.
+      if (settled) { try { server.close() } catch {} ; return }
+      _active = attempt
       const port = server.address().port
       const returnTo = `http://127.0.0.1:${port}/callback`
       const q = new URLSearchParams({
@@ -106,11 +118,11 @@ function signIn() {
     })
 
     // Give up after 5 minutes if the user abandons the browser tab.
-    const t = setTimeout(() => {
+    timer = setTimeout(() => {
       try { server.close() } catch {}
       finish({ error: 'timeout' })
     }, 5 * 60 * 1000)
-    t.unref?.()
+    timer.unref?.()
   })
 }
 
