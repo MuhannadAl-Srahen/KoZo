@@ -1,0 +1,229 @@
+/* Shared control vocabulary.
+   Consumers pull these in with `composes: btn btnPrimary btnMd from '../styles/controls.module.css'`
+   so a page keeps its own class name (and its own JSX) while the geometry and
+   colour live in exactly one place. Before this file the app had ~68 separate
+   button implementations — nine of them accent-filled "primary" buttons that
+   differed only in padding, radius and weight. */
+
+/* ── Button ──────────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-6);
+  font-family: inherit;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  line-height: var(--lh-tight);
+  border: 1px solid transparent;
+  border-radius: var(--r-input);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: var(--t-control);
+}
+
+.btn:active:not(:disabled):not([aria-disabled='true']) {
+  transform: scale(var(--press-scale));
+  transition: var(--t-transform);
+}
+
+.btn:disabled,
+.btn[aria-disabled='true'] {
+  opacity: var(--disabled-opacity);
+  cursor: not-allowed;
+}
+
+/* Busy, not disabled — the control still owns focus and still reads to AT. */
+.btnLoading {
+  cursor: progress;
+  pointer-events: none;
+}
+
+/* Sizes. btnMd is exactly the old Modal footer geometry, so the 32 call-sites
+   that already used it move zero pixels. */
+.btnSm { padding: 5px var(--sp-10); font-size: var(--fs-sm); gap: var(--sp-4); }
+.btnMd { padding: var(--sp-8) var(--sp-16); }
+.btnPill { border-radius: var(--r-pill); }
+.btnBlock { width: 100%; }
+
+.btnIcon {
+  padding: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-md);
+  gap: 0;
+}
+.btnIcon.btnSm { width: 24px; height: 24px; }
+.btnIcon:active:not(:disabled) { transform: scale(0.96); }
+
+/* ── Button variants ─────────────────────────────────────────────────── */
+.btnPrimary {
+  background: var(--a);
+  color: var(--accent-ink);
+  border-color: transparent;
+  /* box-shadow joins the control transition so the hover glow fades in rather
+     than popping — the accent lighting up is the "this is the action" cue. */
+  transition: var(--t-control), box-shadow var(--dur-base) var(--ease);
+}
+.btnPrimary:hover:not(:disabled):not([aria-disabled='true']) {
+  opacity: 0.88;
+  box-shadow: var(--glow-1);
+}
+
+.btnSecondary {
+  background: transparent;
+  color: var(--text-secondary);
+  border-color: var(--border);
+}
+.btnSecondary:hover:not(:disabled):not([aria-disabled='true']) {
+  background: var(--neutral-bg);
+  color: var(--text-primary);
+  border-color: var(--ab);
+}
+
+.btnGhost {
+  background: transparent;
+  color: var(--text-secondary);
+  border-color: transparent;
+}
+.btnGhost:hover:not(:disabled):not([aria-disabled='true']) {
+  background: var(--neutral-bg);
+  color: var(--text-primary);
+}
+
+.btnDanger {
+  background: var(--error-bg);
+  color: var(--error);
+  border-color: var(--error-border-strong);
+}
+.btnDanger:hover:not(:disabled):not([aria-disabled='true']) {
+  background: var(--error-bg-hover);
+  border-color: var(--error-border-hover);
+}
+
+/* Selected member of a segmented group (view toggles, period pickers). The
+   hairline is the crisper --border-accent-soft so the chosen segment reads as
+   lit rather than merely tinted. */
+.btnActive {
+  background: var(--ad);
+  color: var(--a);
+  border-color: var(--border-accent-soft);
+}
+
+/* ── Field / input ───────────────────────────────────────────────────── */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  min-width: 0;
+}
+
+.fieldLabel {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.fieldHint {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  line-height: var(--lh-snug);
+}
+
+.fieldError {
+  font-size: var(--fs-xs);
+  color: var(--error);
+  line-height: var(--lh-snug);
+}
+
+.input,
+.textarea {
+  width: 100%;
+  min-width: 0;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-input);
+  padding: 9px var(--sp-12);
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+  transition: var(--t-border);
+}
+.input::placeholder,
+.textarea::placeholder { color: var(--text-muted); }
+
+.input:hover:not(:disabled),
+.textarea:hover:not(:disabled) { border-color: var(--ab); }
+
+.input:disabled,
+.textarea:disabled { opacity: var(--disabled-opacity); cursor: not-allowed; }
+
+.textarea { resize: vertical; line-height: var(--lh-snug); }
+
+.inputMono { font-family: var(--font-mono); letter-spacing: 0.02em; }
+
+.inputInvalid { border-color: var(--error-border-strong); }
+
+/* A bordered wrapper holding an icon, a bare input and a clear button. The
+   wrapper carries `hasRing` (global.css) so the ring is drawn once, around the
+   whole control, instead of around the naked input inside it. */
+.inputWrap {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-input);
+  padding: 0 var(--sp-10);
+  min-width: 0;
+  transition: var(--t-border);
+}
+.inputWrap:focus-within { border-color: var(--ab); }
+
+.inputBare {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 0;
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+}
+.inputBare::placeholder { color: var(--text-muted); }
+
+/* ── Chip / badge ────────────────────────────────────────────────────── */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 2px var(--sp-8);
+  border-radius: var(--r-pill);
+  border: 1px solid transparent;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  line-height: var(--lh-tight);
+  white-space: nowrap;
+}
+
+.chipSm { padding: 1px var(--sp-6); font-size: var(--fs-2xs); }
+
+/* Sitting ON artwork: needs its own opaque plate, because artwork behind it is
+   arbitrary. A translucent tint is exactly how the old source badge became
+   unreadable over bright cover art. */
+.chipOnArt {
+  background: var(--scrim-chip);
+  color: var(--on-art);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.chipDot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: currentColor;
+}
+
+.chipAccent  { background: var(--ad);         color: var(--a);        border-color: var(--ab); }
+.chipSuccess { background: var(--success-bg); color: var(--success);  border-color: var(--success-border); }
+.chipError   { background: var(--error-bg);   color: var(--error);    border-color: var(--error-border); }
+.chipWarning { background: var(--warning-bg); color: var(--warning);  border-color: var(--warning-border); }
+.chipInfo    { background: var(--info-bg);    color: var(--info);     border-color: var(--info-border); }
+.chipNeutral { background: var(--neutral-bg); color: var(--text-secondary); border-color: var(--neutral-border); }

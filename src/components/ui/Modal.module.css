@@ -1,14 +1,22 @@
+/* The dialog surface, plus the four footer buttons that 11 files import as
+   `modalStyles` across 32 call-sites. Those four are now thin aliases over
+   controls.module.css — `.btnMd` is the exact geometry they already had, so the
+   call-sites move zero pixels while the colour and state logic collapses into
+   one place. Consumers keep importing `modalStyles`; none of them changed. */
+
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(2px);
+  /* --scrim replaces rgba(0,0,0,0.65) + backdrop-filter: blur(2px). The blur was
+     a per-frame full-viewport GPU readback for two pixels of separation; the
+     token is deliberately darker so the dialog still detaches from the page. */
+  background: var(--scrim);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
-  padding: 20px;
-  animation: overlayIn 0.16s ease;
+  z-index: var(--z-modal);
+  padding: var(--sp-20);
+  animation: overlayIn var(--dur-base) var(--ease);
 }
 
 @keyframes overlayIn {
@@ -20,13 +28,18 @@
   position: relative;   /* anchors consumer confirm-close overlays */
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  box-shadow: var(--shadow-modal);
+  border-radius: var(--r-lg);
+  /* The 1px inset is a top edge highlight — dialogs read as panes of glass
+     under light, without any backdrop-filter. */
+  box-shadow: var(--elev-3), inset 0 1px 0 rgba(255, 255, 255, 0.04);
   display: flex;
   flex-direction: column;
-  max-height: calc(100vh - 40px);
+  /* The consumer sets `width` inline; max-width keeps a 540px dialog inside the
+     960px minimum window once the overlay's own gutters are taken out. */
+  max-width: 100%;
+  max-height: calc(100vh - var(--sp-20) * 2);
   overflow: hidden;
-  animation: modalIn 0.15s ease;
+  animation: modalIn var(--dur-base) var(--ease-out);
 }
 
 @keyframes modalIn {
@@ -38,7 +51,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18px 20px 14px;
+  gap: var(--sp-10);
+  padding: var(--sp-16) var(--sp-20) var(--sp-12);
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
 }
@@ -46,122 +60,70 @@
 .headerLeft {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--sp-10);
+  min-width: 0;
 }
 
 .headerIcon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
   color: var(--a);
 }
 
 .title {
-  font-size: 15px;
+  font-size: var(--fs-base);
   font-weight: 500;
   color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .closeBtn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s;
-}
-
-.closeBtn:hover {
-  background: var(--surface-3);
-  color: var(--text-primary);
+  composes: btn btnGhost btnIcon from '../../styles/controls.module.css';
+  flex-shrink: 0;
 }
 
 .body {
   flex: 1;
   overflow-y: auto;
-  padding: 18px 20px;
+  padding: var(--sp-16) var(--sp-20);
+  transform: translateZ(0);
 }
 
 .footer {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
-  padding: 14px 20px;
+  gap: var(--sp-8);
+  padding: var(--sp-12) var(--sp-20);
   border-top: 1px solid var(--border-subtle);
   flex-shrink: 0;
 }
 
-.btnCancel {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  border-radius: var(--r-input);
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 13px;
-  cursor: pointer;
-  transition: border-color 0.12s, color 0.12s;
-}
+/* ── Footer buttons (the `modalStyles` contract) ──────────────────────────── */
+.btnPrimary { composes: btn btnPrimary   btnMd from '../../styles/controls.module.css'; }
+.btnCancel  { composes: btn btnSecondary btnMd from '../../styles/controls.module.css'; }
+.btnDanger  { composes: btn btnDanger    btnMd from '../../styles/controls.module.css'; }
 
-.btnCancel:hover {
-  border-color: var(--ab);
-  color: var(--text-primary);
-}
+/* Quiet destructive intent — the resting half of the two-step delete toggles in
+   CreateEditListModal / EditGameListModal (`confirmDelete ? btnDanger : btnGhost`).
+   Resting state is exactly `.btnSecondary`; only the hover differs, warming to
+   red so the first click reads as "this deletes something".
 
-.btnPrimary {
-  padding: 8px 18px;
-  border-radius: var(--r-input);
-  border: none;
-  background: var(--a);
-  color: #09090f;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: opacity 0.12s;
-}
-
-.btnPrimary:hover { opacity: 0.88; }
-.btnPrimary:disabled { opacity: 0.4; cursor: not-allowed; }
-
-.btnDanger {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  border-radius: var(--r-input);
-  border: 1px solid rgba(248, 113, 113, 0.35);
-  background: rgba(248, 113, 113, 0.10);
-  color: var(--status-dropped);
-  font-size: 13px;
-  cursor: pointer;
-  transition: background 0.12s, border-color 0.12s;
-}
-
-.btnDanger:hover {
-  background: rgba(248, 113, 113, 0.18);
-  border-color: rgba(248, 113, 113, 0.55);
-}
-
-.btnDanger:disabled { opacity: 0.4; cursor: not-allowed; }
-
+   The doubled class name is load-bearing, not a typo: Vite emits
+   controls.module.css AFTER the files that compose it, so an equal-specificity
+   local rule would lose the cascade. `.btnGhost.btnGhost` is 0,2,0 and wins in
+   either emission order — the same job `!important` would do, without taking a
+   sledgehammer to every future override. */
 .btnGhost {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  border-radius: var(--r-input);
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 13px;
-  cursor: pointer;
-  transition: color 0.12s, border-color 0.12s;
+  composes: btn btnSecondary btnMd from '../../styles/controls.module.css';
 }
 
-.btnGhost:hover {
-  color: var(--status-dropped);
-  border-color: rgba(248, 113, 113, 0.3);
+.btnGhost.btnGhost:hover:not(:disabled):not([aria-disabled='true']) {
+  background: transparent;
+  color: var(--error);
+  border-color: var(--error-border-strong);
 }

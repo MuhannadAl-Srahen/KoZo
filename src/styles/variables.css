@@ -1,5 +1,9 @@
 :root {
   /* ── Accent (changes with user preference) ──────────────────────── */
+  /* --a/--ad/--ab are ALSO written as inline styles on <html> by
+     AccentColorContext.applyAccent(). Anything derived from the accent must
+     therefore use color-mix(… var(--a) …) so it resolves against the live
+     value — a hardcoded rgba would freeze at the default purple. */
   --a: #a78bfa;
   --ad: rgba(167, 139, 250, 0.10);   /* dim  — 10% alpha */
   --ab: rgba(167, 139, 250, 0.22);   /* border — 22% alpha */
@@ -21,30 +25,204 @@
   --text-muted:     #7878a0;
   --text-disabled:  #4a4a66;
 
+  /* ── Raw hues ────────────────────────────────────────────────────── */
+  /* Every status colour in the app is one of these five. Naming them once is
+     what stops the same hex being retyped in a dozen files at a dozen alphas. */
+  --green:  #4ade80;
+  --red:    #f87171;
+  --amber:  #fbbf24;
+  --blue:   #60a5fa;
+  --orange: #fb923c;
+  --accent-ink: #09090f;   /* the only sanctioned ink on an accent fill */
+
   /* ── Status (never change with accent) ───────────────────────────── */
-  --status-playing:      #4ade80;
-  --status-finished:     #60a5fa;
-  --status-dropped:      #f87171;
-  --status-upcoming:     #fbbf24;
-  --status-onhold:       #fb923c;
+  --status-playing:      var(--green);
+  --status-finished:     var(--blue);
+  --status-dropped:      var(--red);
+  --status-upcoming:     var(--amber);
+  --status-onhold:       var(--orange);
   /* want-to-play uses var(--a) */
+
+  /* ── Semantic surfaces ───────────────────────────────────────────── */
+  /* One alpha ladder (10/18/22/38/55) replaces the ad-hoc .06–.45 spread that
+     had four different "success background" values across four files. */
+  --success:               var(--green);
+  --success-bg:            color-mix(in srgb, var(--green) 10%, transparent);
+  --success-bg-hover:      color-mix(in srgb, var(--green) 18%, transparent);
+  --success-border:        color-mix(in srgb, var(--green) 22%, transparent);
+  --success-border-strong: color-mix(in srgb, var(--green) 38%, transparent);
+
+  --error:                 var(--red);
+  --error-bg:              color-mix(in srgb, var(--red) 10%, transparent);
+  --error-bg-hover:        color-mix(in srgb, var(--red) 18%, transparent);
+  --error-border:          color-mix(in srgb, var(--red) 22%, transparent);
+  --error-border-strong:   color-mix(in srgb, var(--red) 38%, transparent);
+  --error-border-hover:    color-mix(in srgb, var(--red) 55%, transparent);
+
+  --warning:               var(--amber);
+  --warning-bg:            color-mix(in srgb, var(--amber) 10%, transparent);
+  --warning-bg-hover:      color-mix(in srgb, var(--amber) 18%, transparent);
+  --warning-border:        color-mix(in srgb, var(--amber) 22%, transparent);
+  --warning-border-strong: color-mix(in srgb, var(--amber) 38%, transparent);
+
+  --info:                  var(--blue);
+  --info-bg:               color-mix(in srgb, var(--blue) 10%, transparent);
+  --info-bg-hover:         color-mix(in srgb, var(--blue) 18%, transparent);
+  --info-border:           color-mix(in srgb, var(--blue) 22%, transparent);
+
+  /* "Unavailable / paused" — not-installed, AFK. Deliberately NOT orange:
+     those states are not warnings, and reusing the on-hold hue made two
+     unrelated meanings identical on the same card. */
+  --neutral:               var(--text-muted);
+  --neutral-bg:            rgba(255, 255, 255, 0.06);
+  --neutral-bg-hover:      rgba(255, 255, 255, 0.10);
+  --neutral-border:        rgba(255, 255, 255, 0.12);
+
+  --favorite: var(--amber);   /* the star, and only the star */
+
+  /* ── Achievement rarity (fixed — never follows the accent) ───────── */
+  --rarity-ultra:    #c084fc;
+  --rarity-very:     var(--blue);
+  --rarity-rare:     #34d399;
+  --rarity-uncommon: var(--amber);
+  --rarity-common:   var(--text-secondary);
+
+  /* ── On artwork ──────────────────────────────────────────────────── */
+  --on-art:       #fff;
+  --on-art-dim:   rgba(255, 255, 255, 0.72);
+  --on-art-muted: rgba(255, 255, 255, 0.55);
+
+  /* Scrims. Based on the ink rather than pure black to match the app's
+     blue-black; --scrim carries the separation that backdrop-filter used to. */
+  --scrim:        rgba(9, 9, 15, 0.68);   /* full-screen dimmer */
+  --scrim-strong: rgba(9, 9, 15, 0.88);   /* bottom stop of card-art gradients */
+  --scrim-soft:   rgba(9, 9, 15, 0.45);   /* top stop / hero wash */
+  --scrim-chip:   rgba(9, 9, 15, 0.75);   /* solid pill background ON artwork */
 
   /* ── Borders ─────────────────────────────────────────────────────── */
   --border:        rgba(255, 255, 255, 0.09);
   --border-subtle: rgba(255, 255, 255, 0.055);
 
+  /* ── Spacing ─────────────────────────────────────────────────────── */
+  /* Value-named on purpose: with ~700 spacing declarations and no design-system
+     owner, var(--sp-8) is greppable and a raw px in a diff is instantly a smell. */
+  --sp-2:  2px;
+  --sp-4:  4px;
+  --sp-6:  6px;
+  --sp-8:  8px;
+  --sp-10: 10px;
+  --sp-12: 12px;
+  --sp-16: 16px;
+  --sp-20: 20px;
+  --sp-24: 24px;
+  --sp-32: 32px;
+
   /* ── Layout ──────────────────────────────────────────────────────── */
   --sidebar-width: 205px;
+  --gutter:     20px;   /* page horizontal gutter — every page */
+  --toolbar-py: 12px;   /* toolbar: var(--toolbar-py) var(--gutter) */
+  --content-pt: 10px;   /* content: 10px 20px 20px (CLAUDE.md section 3) */
+  --content-pb: 20px;
+  --content-max: 1600px;  /* stops list rows stretching on an ultrawide monitor */
 
   /* ── Radii ───────────────────────────────────────────────────────── */
+  --r-xs:    2px;
+  --r-sm:    4px;
+  --r-md:    6px;
+  --r-input: 8px;
   --r-card:  10px;
-  --r-input:  8px;
+  --r-lg:    14px;   /* modal / dialog surfaces */
   --r-pill:  20px;
+  /* 50% stays a literal — it is semantic (circle), not a scale step. */
 
   /* ── Typography ──────────────────────────────────────────────────── */
-  --font: 'DM Sans', system-ui, -apple-system, sans-serif;
+  --font:      'DM Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', Consolas, 'Courier New', monospace;
 
-  /* ── Shadows ─────────────────────────────────────────────────────── */
-  --shadow-card: 0 2px 12px rgba(0, 0, 0, 0.4);
-  --shadow-modal: 0 8px 40px rgba(0, 0, 0, 0.7);
+  /* One step larger across the whole scale : the user runs a 2K
+     monitor and the old 15px-base scale read too small on it. Anything still
+     hardcoding the OLD values (10–15px literals) should migrate to these. */
+  --fs-2xs:  11px;   /* micro-labels */
+  --fs-xs:   12px;   /* meta / badges, lower band */
+  --fs-sm:   13px;   /* meta / badges, upper band */
+  --fs-md:   14px;   /* all control, button and input text */
+  --fs-base: 16px;   /* body; card names */
+  --fs-lg:   17px;   /* page titles */
+  --fs-xl:   21px;   /* stat values */
+  --fs-2xl:  24px;
+  --fs-3xl:  36px;
+
+  --lh-tight: 1.2;
+  --lh-snug:  1.35;
+  --lh-base:  1.5;
+  --lh-loose: 1.6;
+
+  /* ── Elevation ───────────────────────────────────────────────────── */
+  --elev-1: 0 2px 8px  rgba(0, 0, 0, 0.30);   /* raised control */
+  --elev-2: 0 8px 24px rgba(0, 0, 0, 0.45);   /* popover, dropdown, lifted card */
+  --elev-3: 0 8px 40px rgba(0, 0, 0, 0.70);   /* modal */
+  --elev-accent: 0 4px 14px var(--ab);        /* accent glow — follows the accent */
+
+  /* ── Ambient / glow (the "launcher" atmosphere) ──────────────────────── */
+  /* All derived from var(--a) via color-mix so a custom accent re-themes the
+     entire atmosphere — this is what makes the look user-customisable rather
+     than baked-in. Use sparingly: glow marks the ONE live/active thing on a
+     surface, never decoration on everything. */
+  --glow-1: 0 0 20px -6px color-mix(in srgb, var(--a) 45%, transparent);
+  --glow-2: 0 0 34px -6px color-mix(in srgb, var(--a) 62%, transparent);
+  --glow-live: 0 0 18px -4px color-mix(in srgb, var(--green) 55%, transparent);
+  --border-accent-soft: color-mix(in srgb, var(--a) 30%, transparent);
+  --surface-accent: color-mix(in srgb, var(--a) 5%, var(--surface-2));
+  --text-accent-bright: color-mix(in srgb, var(--a) 70%, #fff);
+
+  --shadow-modal: var(--elev-3);   /* deprecated alias, identical value */
+
+  /* ── Motion ──────────────────────────────────────────────────────── */
+  /* --dur-base is 120ms because that is already the app's dominant value —
+     adopting it moves 111 declarations by exactly zero. Never `transition: all`. */
+  --dur-fast:   100ms;
+  --dur-base:   120ms;
+  --dur-slow:   200ms;
+  --dur-slower: 300ms;
+  --dur-once:   600ms;
+
+  --ease:        ease;
+  --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in:     cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-spring: cubic-bezier(0.2, 0.9, 0.3, 1.3);
+  --ease-linear: linear;
+
+  --t-color:     color var(--dur-base) var(--ease);
+  --t-border:    border-color var(--dur-base) var(--ease);
+  --t-bg:        background var(--dur-base) var(--ease);
+  --t-opacity:   opacity var(--dur-base) var(--ease);
+  --t-transform: transform var(--dur-fast) var(--ease);
+  --t-control:   background var(--dur-base) var(--ease),
+                 border-color var(--dur-base) var(--ease),
+                 color var(--dur-base) var(--ease),
+                 opacity var(--dur-base) var(--ease);
+
+  /* ── Z-index ─────────────────────────────────────────────────────── */
+  /* Contract: a PORTALLED surface must outrank every surface it can be opened
+     from. SearchableSelect portals to <body> and opens from both page toolbars
+     and CardContextMenu, so --z-popover sits above --z-modal. */
+  --z-base:     0;
+  --z-raised:   1;    /* contained cover over its blurred fill */
+  --z-card:     2;    /* badges / scrims / checkboxes on card art */
+  --z-sticky:   10;
+  --z-dropdown: 100;  /* non-portalled dropdowns */
+  --z-scrim:    900;  /* full-screen dimmers */
+  --z-menu:     910;
+  --z-modal:    1000;
+  --z-popover:  1100; /* portalled popovers */
+  --z-toast:    1200;
+
+  /* ── Interaction state ───────────────────────────────────────────── */
+  --focus-color:  var(--a);
+  --focus-w:      2px;
+  --focus-offset: 2px;
+  --ring-select:  0 0 0 2px var(--ab);
+  --press-scale:      0.98;    /* buttons */
+  --press-scale-card: 0.985;   /* cards — the press effect CLAUDE.md section 3 documents */
+  --disabled-opacity: 0.45;
 }

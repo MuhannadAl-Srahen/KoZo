@@ -1,0 +1,119 @@
+/* The sweep is transform-only so it stays on the compositor — no per-frame
+   repaint while a whole grid of ghosts is on screen. */
+.sk {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  flex-shrink: 0;
+}
+
+.sk::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.045), transparent);
+  transform: translateX(-100%);
+  animation: skSweep 1.2s var(--ease) infinite;
+}
+
+@keyframes skSweep {
+  to { transform: translateX(100%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sk::after { animation: none; opacity: 0; }
+}
+
+/* ── Card ghost ──────────────────────────────────────────────────────── */
+.card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  overflow: hidden;
+}
+
+.cardArt {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border: none;
+  border-radius: 0;
+}
+
+.cardArtWide {
+  width: 100%;
+  aspect-ratio: 16 / 7;
+  border: none;
+  border-radius: 0;
+}
+
+.cardBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  padding: var(--sp-10);
+}
+
+/* ── Row ghost ───────────────────────────────────────────────────────── */
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+  padding: 0 var(--sp-12);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+}
+
+.rowThumb {
+  width: 42px;
+  height: 63px;
+  border-radius: var(--r-md);
+}
+
+.rowBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+/* ── Panel ghost ─────────────────────────────────────────────────────── */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+  padding: var(--sp-4) 0;
+}
+
+.panelLine {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-12);
+}
+
+/* ── Hero ghost ──────────────────────────────────────────────────────── */
+.hero {
+  position: relative;
+  width: 100%;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: flex-end;
+}
+
+.heroBottom {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-10);
+  padding: 0 var(--gutter) var(--sp-16);
+}

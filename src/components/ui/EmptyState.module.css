@@ -1,0 +1,54 @@
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-10);
+  min-height: 260px;
+  padding: 40px var(--sp-20);
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.emptySm {
+  min-height: 150px;
+  padding: var(--sp-24) var(--sp-16);
+  gap: var(--sp-8);
+}
+
+.emptyIcon {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--r-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Calmed from a flat --ad wash: the surface tint keeps the tile quiet so the
+     accent lives in the glyph — matching the Settings feature tiles. */
+  background: var(--surface-accent);
+  border: 1px solid var(--border-accent-soft);
+  color: var(--a);
+}
+
+.emptySm .emptyIcon { width: 44px; height: 44px; border-radius: var(--r-card); }
+
+.emptyTitle {
+  font-size: var(--fs-base);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.emptySm .emptyTitle { font-size: var(--fs-md); }
+
+.emptyDesc {
+  font-size: var(--fs-md);
+  line-height: var(--lh-loose);
+  max-width: 320px;
+}
+
+.emptySm .emptyDesc { font-size: var(--fs-sm); }
+
+.emptyAction {
+  composes: btn btnSecondary btnMd from '../../styles/controls.module.css';
+  margin-top: var(--sp-2);
+}

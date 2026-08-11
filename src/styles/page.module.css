@@ -1,0 +1,74 @@
+/* The page skeleton CLAUDE.md section 3 mandates, in one place.
+   Pages compose it so the four different toolbar paddings and the two pages
+   that skipped .content entirely can't drift apart again. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  flex-shrink: 0;
+  padding: var(--toolbar-py) var(--gutter);
+  border-bottom: 1px solid var(--border);
+  /* z-raised so the scroll shading below paints above .content (whose
+     translateZ(0) makes it a stacking context painted after the toolbar). */
+  position: relative;
+  z-index: var(--z-raised);
+}
+
+/* Barely-there scroll shading: content sliding under the toolbar picks up a
+   soft edge, the way a launcher's chrome sits above its page. Ink-based like
+   the scrims (rgba of #09090f, the sanctioned ink); pure paint, no filter,
+   and pointer-events off so it can never eat a click in the content area. */
+.toolbar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 8px;
+  pointer-events: none;
+  background: linear-gradient(rgba(9, 9, 15, 0.2), transparent);
+}
+
+.pageTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  font-size: var(--fs-lg);
+  font-weight: 500;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+  min-width: 0;
+}
+
+.toolbarGroup {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  min-width: 0;
+}
+
+.toolbarSpacer { flex: 1; min-width: var(--sp-8); }
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--content-pt) var(--gutter) var(--content-pb);
+  transform: translateZ(0);
+}
+
+/* Ultrawide guard: without it every list row and panel stretches to the full
+   window width, so a session row becomes a 2400px bar with a thumbnail at one
+   end and a duration at the other. */
+.contentInner {
+  max-width: var(--content-max);
+  margin: 0 auto;
+  width: 100%;
+}

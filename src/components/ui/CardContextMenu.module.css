@@ -1,36 +1,38 @@
 .backdrop {
   position: fixed;
   inset: 0;
-  z-index: 900;
+  z-index: var(--z-scrim);
 }
 
 .menu {
   position: fixed;
-  z-index: 901;
+  z-index: var(--z-menu);
   min-width: 200px;
   max-width: 260px;
-  padding: 5px;
+  padding: var(--sp-4);
   background: var(--surface-3);
-  border: 1px solid var(--border);
+  /* Accent-soft border — same edge treatment as SearchableSelect's dropdown, so
+     every floating chooser in the app shares one look. */
+  border: 1px solid var(--border-accent-soft);
   border-radius: var(--r-card);
-  box-shadow: var(--shadow-modal);
+  box-shadow: var(--elev-2);
 }
 
 .header {
-  padding: 6px 9px 5px;
-  font-size: 12px;
+  padding: var(--sp-6) 9px var(--sp-4);
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   border-bottom: 1px solid var(--border-subtle);
-  margin-bottom: 4px;
+  margin-bottom: var(--sp-4);
 }
 
 .sectionLabel {
-  padding: 4px 9px 2px;
-  font-size: 10px;
+  padding: var(--sp-4) 9px var(--sp-2);
+  font-size: var(--fs-2xs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -40,18 +42,18 @@
 .item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-8);
   width: 100%;
-  padding: 6px 9px;
+  padding: var(--sp-6) 9px;
   border: none;
   border-radius: var(--r-input);
   background: transparent;
   color: var(--text-secondary);
   font-family: inherit;
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   text-align: left;
   cursor: pointer;
-  transition: background 0.1s, color 0.1s;
+  transition: var(--t-control);
 }
 
 .item:hover {
@@ -59,34 +61,39 @@
   color: var(--text-primary);
 }
 
-.itemActive {
+/* The currently-set choice: same tint as hover but ACCENT text, so selection
+   and pointer feedback stay distinguishable (unified with SearchableSelect's
+   .optionActive). The :hover half keeps the accent while pointing at it —
+   .item:hover would otherwise outrank this class and flip it to primary. */
+.itemActive,
+.itemActive:hover {
   background: var(--ad);
-  color: var(--text-primary);
+  color: var(--a);
 }
 
 .divider {
   height: 1px;
   background: var(--border-subtle);
-  margin: 4px 2px;
+  margin: var(--sp-4) var(--sp-2);
 }
 
-.itemDanger { color: var(--status-dropped); }
+.itemDanger { color: var(--error); }
 .itemDanger:hover {
-  background: rgba(239, 68, 68, 0.12);
-  color: var(--status-dropped);
+  background: var(--error-bg-hover);
+  color: var(--error);
 }
 
 .statusDot {
-  width: 8px;
-  height: 8px;
+  width: var(--sp-8);
+  height: var(--sp-8);
   border-radius: 50%;
   flex-shrink: 0;
   margin: 0 2.5px;
 }
 
 .hint {
-  padding: 4px 9px 5px;
-  font-size: 10.5px;
-  line-height: 1.35;
+  padding: var(--sp-4) 9px var(--sp-4);
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-snug);
   color: var(--text-muted);
 }

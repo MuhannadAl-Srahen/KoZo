@@ -1,0 +1,97 @@
+/* Shared surface vocabulary — panels, section headings, HUD values.
+   Same contract as controls.module.css: consumers pull these in with
+   `composes: panel from '../styles/surface.module.css'` so the geometry and
+   colour live in exactly one place. The values match the incumbents
+   (Statistics' .section / .sectionTitle / .sectionHead) so composing an
+   existing page onto these moves zero pixels.
+
+   CSS-module gotcha (verified in this repo): this file's CSS is emitted AFTER
+   any file that composes from it, so a same-specificity override in the
+   consumer silently loses — scope consumer overrides with a doubled class
+   (.x.x) or a parent class. */
+
+/* ── Panel ───────────────────────────────────────────────────────────── */
+/* Body panels stay FLAT. The atmosphere (accent wash, tints, glow) only reads
+   as depth because it is scarce — a tint on every panel is just noise. */
+.panel {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  padding: var(--sp-16);
+  min-width: 0;
+}
+
+/* Interactive panel: crisp edges on hover — border toward the accent, one
+   elevation step. Border/shadow only; never a translateY. */
+.panelInteractive {
+  transition: var(--t-border), box-shadow var(--dur-base) var(--ease);
+}
+.panelInteractive:hover {
+  border-color: var(--border-accent-soft);
+  box-shadow: var(--elev-1);
+}
+
+/* Headline panel — the ONE card on a screen allowed the faint accent tint
+   (hero, featured, live). Compose alongside .panel; everything else stays
+   plain. Both tokens derive from var(--a), so a custom accent re-tints it. */
+.panelAccent {
+  background: var(--surface-accent);
+  border-color: var(--ab);
+}
+
+/* ── Headings ────────────────────────────────────────────────────────── */
+/* Named heading inside a panel — one step up from the micro-label. */
+.panelTitle {
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--text-primary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The uppercase micro-label every page hand-rolled its own copy of. */
+.sectionTitle {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-secondary);
+  margin-bottom: var(--sp-12);
+}
+
+/* Header row: title on the left, pill / hint / action on the right. */
+.sectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-10);
+  margin-bottom: var(--sp-12);
+}
+.sectionHead .sectionTitle,
+.sectionHead .panelTitle { margin-bottom: 0; }
+
+.sectionHint {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+/* ── HUD values ──────────────────────────────────────────────────────── */
+/* Numbers that matter (playtime, XP, counts) read as HUD values: tabular
+   figures so they never jitter as they tick, accent-bright so they read as
+   live data rather than body copy. Use on the number, not its label. */
+.hudValue {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--text-accent-bright);
+  letter-spacing: -0.01em;
+}
+
+/* Muted companion for a HUD value — the unit or denominator ("/ 40", "hrs").
+   Tabular too, so mixed runs like "23 / 40" stay aligned in columns. */
+.hudUnit {
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  color: var(--text-muted);
+}
