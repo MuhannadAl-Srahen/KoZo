@@ -1,33 +1,21 @@
 .page {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  overflow: hidden;
+  composes: page from '../styles/page.module.css';
 }
 
 /* ── Toolbar ───────────────────────────────────────────────── */
 .toolbar {
-  display: flex;
-  align-items: center;
+  composes: toolbar from '../styles/page.module.css';
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 14px 20px 10px;
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
+  gap: var(--sp-8);
 }
 
 .pageTitle {
-  font-size: 16px;
-  font-weight: 500;
-  color: var(--text-primary);
+  composes: pageTitle from '../styles/page.module.css';
   flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 
 .pageTitleCount {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
   background: var(--surface-3);
   border: 1px solid var(--border);
@@ -100,9 +88,12 @@
   color: var(--text-secondary);
 }
 
+/* Inset ring marks the selected segment inside the joined group — same recipe
+   as the Library view toggle so the two toolbars read as one control family. */
 .viewBtnActive {
   background: var(--ad);
   color: var(--a);
+  box-shadow: inset 0 0 0 1px var(--ab);
 }
 
 .btnSecondary {
@@ -141,12 +132,14 @@
   font-size: 12.5px;
   font-weight: 500;
   cursor: pointer;
-  transition: opacity 0.12s;
+  transition: opacity 0.12s, box-shadow 0.15s;
   white-space: nowrap;
 }
 
+/* Primary action hover earns the soft accent glow — matches the Library. */
 .btnPrimary:hover {
-  opacity: 0.88;
+  opacity: 0.92;
+  box-shadow: var(--glow-1);
 }
 
 /* ── Search box (matches Library's) ────────────────────────── */
@@ -176,7 +169,7 @@
 .searchInput {
   flex: 1;
   padding: 6px 0;
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: var(--text-primary);
   background: transparent;
   border: none;
@@ -205,10 +198,7 @@
 
 /* ── Content ───────────────────────────────────────────────── */
 .content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 10px 20px 20px;
-  transform: translateZ(0);
+  composes: content from '../styles/page.module.css';
 }
 
 .emptyState {
@@ -222,64 +212,75 @@
 }
 
 .emptyTitle {
-  font-size: 15px;
+  font-size: var(--fs-base);
   font-weight: 500;
   color: var(--text-secondary);
 }
 
 .emptyDesc {
-  font-size: 13px;
+  font-size: var(--fs-md);
   text-align: center;
   max-width: 280px;
   line-height: 1.6;
 }
 
 /* ── Grid views ────────────────────────────────────────────── */
-/* Fixed 4/6 columns — identical to the Library grids so cards match exactly */
+/* Intrinsic columns — must stay identical to the Library grids so the two
+   surfaces read as one family (they had drifted apart on ~20 axes). */
 .bigGrid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  /* 220px floor — must stay identical to Library's .bigGrid. */
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--sp-12);
+  contain: layout style;
 }
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 8px;
+  /* 168px floor — must stay identical to Library's .smallGrid. */
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: var(--sp-10);
+  contain: layout style;
 }
 
 /* ── List view ─────────────────────────────────────────────── */
 .list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--sp-6);
+  contain: layout style;
+  max-width: var(--content-max);
 }
 
 /* ── Grid card ─────────────────────────────────────────────── */
 .card {
+  position: relative;
+  /* Flex column — the footer absorbs grid-row stretch so its sub row stays
+     bottom-pinned when a neighbour's name wraps to two lines. */
+  display: flex;
+  flex-direction: column;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--r-card);
   overflow: hidden;
   cursor: pointer;
-  transition:
-    border-color 0.12s,
-    transform 0.1s;
+  transition: var(--t-border), box-shadow var(--dur-base) var(--ease);
   /* Skip layout/paint and let decoded banner bitmaps drop for offscreen
      cards — see GameCard.module.css .card for the full rationale. */
   content-visibility: auto;
-  contain-intrinsic-size: auto 230px auto 400px;
+  contain-intrinsic-size: auto 240px auto 500px;
 }
 
+/* Matches the Library card exactly: border + elevation + faint glow, never
+   translateY. */
 .card:hover {
-  border-color: var(--ab);
-  transform: translateY(-1px);
+  border-color: var(--border-accent-soft);
+  box-shadow: var(--elev-2), var(--glow-1);
 }
 
 .cardSelected {
-  border-color: var(--a) !important;
-  box-shadow: 0 0 0 2px var(--ab);
-  transform: none !important;
+  border-color: var(--a);
+  box-shadow: var(--ring-select);
 }
 
 /* Selection checkbox on grid card */
@@ -292,8 +293,7 @@
   height: 22px;
   border-radius: 50%;
   border: 2px solid rgba(255, 255, 255, 0.55);
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(4px);
+  background: rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -339,64 +339,90 @@
   transform: scale(1.18);
 }
 
-.cardStatusBadge {
+/* Name + genres overlaid on the cover — mirrors GameCard's on-art info. */
+.cardArtScrim {
   position: absolute;
-  top: 8px;
-  left: 8px;
-  padding: 3px 8px;
-  border-radius: var(--r-pill);
-  font-size: 11px;
-  font-weight: 500;
-  border: 1px solid;
-  z-index: 2;
+  left: 0; right: 0; bottom: 0;
+  height: 58%;
+  z-index: var(--z-card);
+  pointer-events: none;
+  background: linear-gradient(0deg, var(--scrim-strong) 0%, var(--scrim-soft) 45%, transparent 100%);
+}
+
+.cardArtInfo {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-10) var(--sp-10) 9px;
+  min-width: 0;
+}
+
+.cardTitleRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  min-width: 0;
+}
+
+.cardSubRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+  min-width: 0;
+  margin-top: auto;   /* bottom-pinned, matching the library card's stats row */
+  font-size: var(--fs-xs);
+  line-height: var(--lh-tight);
+}
+
+.cardStatusWord { font-weight: 500; }
+
+/* Status LED — top-left corner of the cover, matching GameCard's. */
+.cardStatusLed {
+  position: absolute;
+  top: 9px; left: 9px;
+  z-index: 3;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--state-color, var(--text-muted));
+  box-shadow: 0 0 0 3px var(--scrim-chip), 0 0 10px -1px var(--state-color, transparent);
 }
 
 .cardRating {
-  position: absolute;
-  bottom: 8px;
-  right: 8px;
-  padding: 3px 7px;
-  border-radius: var(--r-pill);
-  font-size: 11px;
+  color: var(--favorite);
   font-weight: 500;
-  background: rgba(0, 0, 0, 0.6);
-  color: #fbbf24;
-  backdrop-filter: blur(4px);
-  z-index: 3;
+  flex-shrink: 0;
 }
 
-/* Favorite star on the grid cover — top-right, hover-revealed, gold when set */
+/* Favourite star — in the footer title row, matching the library card. */
 .cardFavBtn {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 3;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-sm);
   border: none;
-  background: rgba(0, 0, 0, 0.7);
-  color: #fff;
+  background: transparent;
+  color: var(--on-art-muted);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   opacity: 0;
-  transition:
-    opacity 0.12s,
-    color 0.12s,
-    background 0.12s;
+  transition: var(--t-opacity), var(--t-color), transform var(--dur-fast) var(--ease);
 }
-.card:hover .cardFavBtn {
-  opacity: 1;
-}
-.cardFavBtn:hover {
-  background: rgba(0, 0, 0, 0.88);
-  color: #fbbf24;
-}
+.card:hover .cardFavBtn,
+.cardFavBtn:focus-visible { opacity: 1; }
+.cardFavBtn:hover { color: var(--favorite); transform: scale(1.12); }
 .cardFavBtnActive {
   opacity: 1;
-  color: #fbbf24;
+  color: var(--favorite);
+}
+/* Gold halo on the set star — mirrors GameCard's .favBtnActive. */
+.cardFavBtnActive svg {
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--favorite) 55%, transparent));
 }
 
 /* Favorite star in the list row meta */
@@ -417,13 +443,13 @@
     background 0.12s;
 }
 .listFavBtn:hover {
-  color: #fbbf24;
-  border-color: rgba(251, 191, 36, 0.4);
+  color: var(--favorite);
+  border-color: var(--warning-border-strong);
 }
 .listFavBtnActive {
-  color: #fbbf24;
-  border-color: rgba(251, 191, 36, 0.4);
-  background: rgba(251, 191, 36, 0.1);
+  color: var(--favorite);
+  border-color: var(--warning-border-strong);
+  background: var(--warning-bg);
 }
 
 /* Drop-target highlight while drag-reordering */
@@ -433,24 +459,39 @@
   border-radius: var(--r-card);
 }
 
-/* Name + genres info strip below the cover — art stays clean */
+/* Stats strip below the cover (status + rating) — same accent-whisper gradient
+   as the library card so the two grids read as one family. */
 .cardInfo {
-  padding: 8px 10px 9px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: var(--sp-6);
+  padding: var(--sp-8) var(--sp-10) 9px;
+  border-top: 1px solid var(--border-subtle);
+  background: linear-gradient(180deg, var(--surface-2) 0%, var(--surface-accent) 100%);
+  min-width: 0;
 }
 
+/* One line, ellipsised, on-art — must match GameCard's .bannerTitle exactly. */
 .cardName {
-  font-size: 13.5px;
-  font-weight: 500;
-  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: var(--lh-snug);
+  color: var(--on-art);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .cardGenresLine {
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--text-muted);
+  min-width: 0;
+  font-size: var(--fs-xs);
+  color: var(--on-art-dim);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -475,9 +516,9 @@
 }
 
 .listRow:hover {
-  border-color: var(--ab);
+  border-color: var(--border-accent-soft);
   background: var(--surface-3);
-  box-shadow: inset 3px 0 0 var(--a);
+  box-shadow: inset 3px 0 0 var(--a), var(--glow-1);
 }
 
 .listRowSelected {
@@ -560,7 +601,7 @@
 }
 
 .listName {
-  font-size: 15px;
+  font-size: var(--fs-base);
   font-weight: 500;
   color: var(--text-primary);
   overflow: hidden;
@@ -575,7 +616,7 @@
 }
 
 .listCategory {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -593,15 +634,15 @@
 .listStatusBadge {
   padding: 4px 12px;
   border-radius: var(--r-pill);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 500;
   border: 1px solid;
   white-space: nowrap;
 }
 
 .listRating {
-  font-size: 13px;
-  color: #fbbf24;
+  font-size: var(--fs-md);
+  color: var(--favorite);
   white-space: nowrap;
   font-weight: 500;
 }
@@ -609,7 +650,7 @@
 /* ── Selection toolbar ─────────────────────────────────────── */
 .selectionCount {
   flex: 1;
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: var(--text-muted);
 }
 
@@ -625,7 +666,7 @@
 }
 
 .confirmText {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--status-dropped);
   flex: 1;
   line-height: 1.4;
@@ -704,7 +745,7 @@
 }
 
 .pageInfo {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
 }
 
@@ -739,17 +780,25 @@
 
 .listChip:hover {
   border-color: var(--ab);
-  color: var(--text);
+  color: var(--text-primary);
 }
 
+/* Active chip = the app-wide btnActive recipe (accent tint + accent text) so
+   the chips row reads as the same control family as the segmented toggles.
+   Custom-list colours still win via their inline style. Declared hover lock
+   after .listChip:hover so an active chip doesn't flip back to primary text. */
 .listChipActive {
   border-color: var(--a);
-  background: var(--ab);
-  color: var(--text);
+  background: var(--ad);
+  color: var(--a);
+}
+.listChipActive:hover {
+  border-color: var(--a);
+  color: var(--a);
 }
 
 .listChipCount {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
 }
 

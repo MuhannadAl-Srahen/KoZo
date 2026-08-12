@@ -1,28 +1,16 @@
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
-import { IconTrophy, IconCheck, IconClock, IconPlayerPlayFilled, IconStar, IconCircleCheckFilled, IconPlayerPauseFilled, IconX, IconEyeOff } from '@tabler/icons-react'
-import { getBannerBg, getBannerIcon, formatPlaytime, formatDate, fileUrl, LAUNCHERS, parseGenres } from '../lib/utils'
+import { IconTrophy, IconCheck, IconClock, IconPlayerPlayFilled, IconStar, IconEyeOff } from '@tabler/icons-react'
+import { getBannerBg, getBannerIcon, formatPlaytime, formatDate, fileUrl, parseGenres } from '../lib/utils'
+import { LIBRARY_STATUSES, sourceOf, accentOf } from '../lib/cardModel'
 import InfoModal from './ui/InfoModal'
 import s from './GameCard.module.css'
 
 export { formatPlaytime }
 
-// Unified game statuses — shared vocabulary with the Game List page.
-export const STATUS_META = {
-  playing:  { label: 'Playing',  color: 'var(--status-playing)',  Icon: IconPlayerPlayFilled },
-  finished: { label: 'Finished', color: 'var(--status-finished)', Icon: IconCircleCheckFilled },
-  dropped:  { label: 'Dropped',  color: 'var(--status-dropped)',  Icon: IconX },
-  on_hold:  { label: 'On hold',  color: 'var(--status-onhold)',   Icon: IconPlayerPauseFilled },
-}
-
-// A game can be a Steam/Epic/Xbox… game (has steam_app_id for art/achievements)
-// AND a cracked copy at the same time. `is_cracked` takes priority for the badge
-// so a cracked game never displays as plain "Steam". Unknown sources fall back to
-// the neutral "Manual" badge instead of rendering nothing.
-function sourceBadge(game) {
-  if (game.is_cracked === 1) return LAUNCHERS.cracked
-  return LAUNCHERS[game.source] || LAUNCHERS.manual
-}
+// The status vocabulary now lives in src/lib/cardModel.js so the Library and the
+// Game List describe a card the same way. Re-exported for existing importers.
+export { LIBRARY_STATUSES as STATUS_META }
 
 // Toggle favorite. Prefer the parent's optimistic handler (instant star fill +
 // re-pin, no grid reload flash); fall back to the direct API + game:updated
@@ -40,7 +28,8 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
   const Icon     = getBannerIcon(game.name)
   const bg       = getBannerBg(game.id)
   const iconSize = variant === 'big' ? 40 : 24
-  const src      = sourceBadge(game)
+  const src      = sourceOf(game)
+  const accent   = accentOf(game)
   const genres   = parseGenres(game)
   const [launchError, setLaunchError] = React.useState(null)
   const [launchWarning, setLaunchWarning] = React.useState(null)
@@ -58,7 +47,7 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
 
   return (
     <div
-      className={`${s.card} ${(!game.is_installed || game.is_hidden) && !selectionMode ? s.cardDimmed : ''} ${selected ? s.cardSelected : ''}`}
+      className={`${s.card} ${variant === 'small' ? s.cardSmall : ''} ${(!game.is_installed || game.is_hidden) && !selectionMode ? s.cardDimmed : ''} ${game._isLive && !selectionMode ? s.cardLive : ''} ${selected ? s.cardSelected : ''}`}
       onClick={handleClick}
       onContextMenu={onContextMenu ? (e) => { e.preventDefault(); onContextMenu(e, game) } : undefined}
     >
@@ -94,39 +83,45 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
           )
         })()}
 
-        {/* Text badges — one top-left column so they never collide with the
-            round play/favorite buttons or the title overlay */}
-        {!selectionMode && (
-          <div className={s.badgeStack}>
-            {src && (
-              <div className={s.sourceBadge} style={{ color: src.color, borderColor: src.color + '44', background: src.color + '18' }}>
-                {src.label}
-              </div>
-            )}
-            {STATUS_META[game.completion_status] && (() => {
-              const st = STATUS_META[game.completion_status]
-              return (
-                <div
-                  className={`${s.statusBadge} ${variant === 'small' ? s.statusBadgeSmall : ''}`}
-                  style={{ color: st.color, borderColor: st.color + '44' }}
-                  title={`Status: ${st.label}`}
-                >
-                  <st.Icon size={variant === 'small' ? 10 : 12} />
-                  {st.label}
-                </div>
-              )
-            })()}
-            {game._isLive && (
-              <div className={s.liveBadge}><span className={s.liveDot} />LIVE</div>
-            )}
-            {!game.is_installed && (
-              <div className={s.notInstalledBadge}>Not installed</div>
-            )}
-            {!!game.is_hidden && (
-              <div className={s.hiddenBadge}><IconEyeOff size={10} stroke={1.8} />Hidden</div>
+        {/* Status LED — top-left corner of the cover, on a dark ring plate so it
+            reads over any art. Colour carries the state; words in the tooltip. */}
+        {accent && !selectionMode && (
+          <span
+            className={`${s.statusLed} ${accent.tone === 'live' ? s.stateDotLive : ''}`}
+            style={{ '--state-color': accent.color }}
+            title={src ? `${src.label} · ${accent.label}` : accent.label}
+          />
+        )}
+
+        {!selectionMode && !!game.is_hidden && (
+          <span className={s.hiddenBadge}><IconEyeOff size={10} stroke={1.8} />Hidden</span>
+        )}
+
+        {/* Name + genres overlaid on the cover's bottom scrim (the look the
+            user asked back for) — the stats strip stays below the art. */}
+        <div className={s.artScrim} aria-hidden="true" />
+        <div className={s.artInfo}>
+          <div className={s.artTitleRow}>
+            {/* title attr: the name can still truncate on narrow cards */}
+            <div className={s.bannerTitle} title={src ? `${game.name} — ${src.label}` : game.name}>
+              {game.name}
+            </div>
+            {!selectionMode && (
+              <button
+                className={`${s.favBtn} ${game.is_favorite ? s.favBtnActive : ''}`}
+                onClick={(e) => toggleFavorite(e, game, onFavorite)}
+                title={game.is_favorite ? 'Remove from favorites' : 'Pin to top (favorite)'}
+                aria-label={game.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
+              >
+                <IconStar size={14} stroke={1.8}
+                  fill={game.is_favorite === 1 ? 'currentColor' : 'none'} />
+              </button>
             )}
           </div>
-        )}
+          {genres.length > 0 && (
+            <div className={s.bannerGenres}>{genres.slice(0, 2).join(' · ')}</div>
+          )}
+        </div>
 
         {/* Selection checkbox — top-right */}
         {selectionMode && (
@@ -138,50 +133,43 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
           </>
         )}
 
-        {/* Favorite star — top-right corner; stays visible when starred */}
-        {!selectionMode && (
-          <button
-            className={`${s.favBtn} ${game.is_favorite ? s.favBtnActive : ''}`}
-            onClick={(e) => toggleFavorite(e, game, onFavorite)}
-            title={game.is_favorite ? 'Remove from favorites' : 'Pin to top (favorite)'}
-          >
-            <IconStar size={variant === 'small' ? 14 : 16} stroke={1.8}
-              fill={game.is_favorite === 1 ? 'currentColor' : 'none'} />
-          </button>
-        )}
-
-        {/* Play button — left of the star, only when installed */}
+        {/* Play — centred on the art, revealed on hover. The only thing that
+            ever appears over the cover, and only while pointing at it. */}
         {!selectionMode && !!game.is_installed && (
           <button
             className={s.playBtn}
             onClick={handlePlay}
             title={`Launch ${game.name}`}
+            aria-label={`Launch ${game.name}`}
           >
-            <IconPlayerPlayFilled size={variant === 'small' ? 14 : 16} />
+            <IconPlayerPlayFilled size={variant === 'small' ? 16 : 18} />
           </button>
         )}
-
-        {/* Name + genres overlay at bottom */}
-        <div className={`${s.bannerName} ${variant === 'small' ? s.bannerNameSmall : ''}`}>
-          <div className={s.bannerTitle}>{game.name}</div>
-          {variant !== 'small' && genres.length > 0 && (
-            <div className={s.bannerGenres}>{genres.slice(0, 3).join(' · ')}</div>
-          )}
-        </div>
       </div>
 
+      {/* Stats strip below the art: progress bar, then trophies | last played |
+          playtime — the date back in the middle, like the layout the user
+          asked to keep. */}
       <div className={`${s.gameInfo} ${variant === 'small' ? s.gameInfoSmall : ''}`}>
+        {game._total > 0 && (
+          <div className={s.achTrack} aria-hidden="true">
+            <div
+              className={s.achFill}
+              style={{ width: `${Math.min(100, Math.round(((game._unlocked ?? 0) / game._total) * 100))}%` }}
+            />
+          </div>
+        )}
         <div className={s.meta}>
-          <span className={s.trophies}>
-            <IconTrophy size={variant === 'small' ? 11 : 12} stroke={1.5} />
-            {game._unlocked ?? 0}/{game._total ?? 0}
+          <span className={`${s.trophies} ${!game._total ? s.metaEmpty : ''}`}>
+            <IconTrophy size={12} stroke={1.5} />
+            {game._total ? `${game._unlocked ?? 0}/${game._total}` : '—'}
           </span>
-          {variant !== 'small' && (
-            <span className={s.lastPlayed}>{formatDate(game.last_played_at)}</span>
-          )}
-          <span className={s.playtime}>
-            <IconClock size={variant === 'small' ? 11 : 12} stroke={1.6} />
-            {formatPlaytime(game.total_playtime_seconds) || '—'}
+          <span className={s.lastPlayed} title={game.last_played_at ? 'Last played' : 'Never played'}>
+            {formatDate(game.last_played_at) || '—'}
+          </span>
+          <span className={`${s.playtime} ${!game.total_playtime_seconds ? s.metaEmpty : ''}`}>
+            <IconClock size={12} stroke={1.6} />
+            {formatPlaytime(game.total_playtime_seconds)}
           </span>
         </div>
       </div>
@@ -216,7 +204,8 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite, onConte
   const navigate = useNavigate()
   const Icon     = getBannerIcon(game.name)
   const bg       = getBannerBg(game.id)
-  const src      = sourceBadge(game)
+  const src      = sourceOf(game)
+  const accent   = accentOf(game)
   const total    = game._total ?? 0
   const unlocked = game._unlocked ?? 0
   const achPct   = total > 0 ? Math.round((unlocked / total) * 100) : 0
@@ -237,7 +226,7 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite, onConte
 
   return (
     <div
-      className={`${s.listCard} ${(!game.is_installed || game.is_hidden) && !selectionMode ? s.cardDimmed : ''} ${selected ? s.listCardSelected : ''}`}
+      className={`${s.listCard} ${(!game.is_installed || game.is_hidden) && !selectionMode ? s.cardDimmed : ''} ${game._isLive && !selectionMode ? s.listCardLive : ''} ${selected ? s.listCardSelected : ''}`}
       onClick={handleClick}
       onContextMenu={onContextMenu ? (e) => { e.preventDefault(); onContextMenu(e, game) } : undefined}
     >
@@ -280,10 +269,11 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite, onConte
 
       {/* Center — name + badges + achievement bar */}
       <div className={s.listInfo}>
-        <div className={s.listName}>{game.name}</div>
+        <div className={s.listName} title={game.name}>{game.name}</div>
         <div className={s.listSub}>
           {src && (
-            <span className={s.listSourceBadge} style={{ color: src.color, borderColor: src.color + '44', background: src.color + '12' }}>
+            <span className={s.listSourceBadge}>
+              <span className={s.sourceDot} style={{ color: src.color }} />
               {src.label}
             </span>
           )}
@@ -293,8 +283,8 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite, onConte
           {!game.is_installed && !selectionMode && (
             <span className={s.listNotInstalledTag}>Not installed</span>
           )}
-          {STATUS_META[game.completion_status] && !selectionMode && (() => {
-            const st = STATUS_META[game.completion_status]
+          {LIBRARY_STATUSES[game.completion_status] && !selectionMode && (() => {
+            const st = LIBRARY_STATUSES[game.completion_status]
             return (
               <span className={s.listStatusTag} style={{ color: st.color }}>
                 <st.Icon size={11} />{st.label}
@@ -339,7 +329,7 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite, onConte
 
       {/* Right stats — fixed sub-columns (playtime | achievements | date) */}
       <div className={s.listStats}>
-        <span className={`${s.listStatItem} ${game.total_playtime_seconds ? '' : s.listStatItemDim}`}>
+        <span className={`${s.listStatItem} ${game.total_playtime_seconds ? '' : s.listStatItemDim} ${game._isLive && !selectionMode && game.total_playtime_seconds ? s.listStatLive : ''}`}>
           <IconClock size={11} stroke={1.5} />
           {formatPlaytime(game.total_playtime_seconds) || '—'}
         </span>

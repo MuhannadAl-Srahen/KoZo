@@ -1,25 +1,64 @@
 /* ── Portrait card ──────────────────────────────────────────── */
+/* Design contract: the card is CALM AT REST. The artwork carries one identity
+   chip and one status accent; play/favourite/menu appear on hover. It used to
+   stack up to five pills in one corner (~101px, a third of the cover) plus a
+   32px opaque black disc for the star. */
 .card {
+  position: relative;
+  /* Flex column so the footer can absorb any extra height the grid row gives
+     this card (a neighbour's two-line name) and keep its stats bottom-pinned. */
+  display: flex;
+  flex-direction: column;
   background: var(--surface-2);
   border-radius: var(--r-card);
   border: 1px solid var(--border);
   overflow: hidden;
   cursor: pointer;
-  transition: border-color 0.15s, transform 0.12s;
+  transition: var(--t-border), box-shadow var(--dur-base) var(--ease);
   /* Skip layout/paint/style for cards scrolled out of view, and let Chromium
      drop their decoded banner bitmaps from memory — a big library's grid (2
      <img> per card, one blurred) is the main renderer RAM driver. The
      intrinsic-size pair is only a placeholder used before a card has ever
      been rendered once; `auto` means the real measured size is remembered
-     and reused after that, so this doesn't need to be exact per grid density
-     (4 vs 6 columns). */
+     and reused after that, so this doesn't need to be exact per grid density. */
   content-visibility: auto;
-  contain-intrinsic-size: auto 230px auto 400px;
+  contain-intrinsic-size: auto 240px auto 500px;
 }
 
-.card:hover { border-color: var(--ab); transform: translateY(-2px); }
-.cardDimmed { opacity: 0.55; }
-.cardSelected { border-color: var(--a) !important; box-shadow: 0 0 0 2px var(--ab); transform: none !important; }
+/* No translateY on hover (CLAUDE.md section 3) — border + elevation instead.
+   The press transform on :active stays; that one is documented. */
+/* Hover carries a faint accent glow on top of the lift — the user liked the
+   glow language and asked for more of it. */
+.card:hover { border-color: var(--border-accent-soft); box-shadow: var(--elev-2), var(--glow-1); }
+
+/* Unavailable/hidden games dim the ARTWORK IMAGES only — the overlaid name and
+   the stats strip keep full contrast so half this library (not installed)
+   doesn't read as broken. */
+.cardDimmed .bannerImg,
+.cardDimmed .bannerBlur { opacity: 0.45; }
+.cardSelected {
+  border-color: var(--a);
+  box-shadow: var(--ring-select);
+}
+
+/* LIVE — the one card allowed to glow at rest, so the running game is findable
+   from across the room. Green (the app-wide "running now" colour), never the
+   accent: glow marks life, not decoration. Defined after .card:hover so the
+   live hover keeps the glow while adding the normal lift. */
+.cardLive {
+  border-color: var(--success-border);
+  box-shadow: var(--glow-live);
+}
+.cardLive:hover {
+  border-color: var(--success-border-strong);
+  box-shadow: var(--glow-live), var(--elev-2);
+}
+/* Its playtime is counting right now — read it as a HUD value. metaEmpty is
+   excluded so a just-started game's em-dash doesn't light up as data. */
+.cardLive .playtime:not(.metaEmpty) {
+  color: var(--text-accent-bright);
+  font-weight: 500;
+}
 
 /* ── Banner ─────────────────────────────────────────────────── */
 .banner {
@@ -58,120 +97,137 @@
 
 .bannerIcon { color: rgba(255,255,255,0.10); position: relative; z-index: 1; }
 
-/* Name + genres gradient overlay */
-.bannerName {
+/* ── On-art info (name + genres over the cover's bottom scrim) ── */
+/* The look the user asked back for: identity ON the art, stats below it. */
+.artScrim {
   position: absolute;
-  bottom: 0; left: 0; right: 0;
-  padding: 48px 10px 10px;
-  background: linear-gradient(to bottom, transparent, rgba(0,0,0,0.9));
-  color: #fff;
-  font-size: 16px;
-  font-weight: 500;
-  z-index: 2;
+  left: 0; right: 0; bottom: 0;
+  height: 58%;
+  z-index: var(--z-card);
+  pointer-events: none;
+  background: linear-gradient(0deg, var(--scrim-strong) 0%, var(--scrim-soft) 45%, transparent 100%);
 }
 
-.bannerNameSmall {
-  font-size: 13px;
-  padding: 24px 7px 7px;
-}
-
-.bannerTitle {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.bannerGenres {
-  margin-top: 1px;
-  font-size: 10.5px;
-  font-weight: 400;
-  color: rgba(255,255,255,0.65);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* ── Badges ─────────────────────────────────────────────────── */
-/* All text badges live in one top-left column so they can never collide with
-   the round play/favorite buttons, which own the top-right corner. */
-.badgeStack {
+.artInfo {
   position: absolute;
-  top: 7px; left: 7px;
+  left: 0; right: 0; bottom: 0;
   z-index: 3;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
+  gap: 2px;
+  padding: var(--sp-10) var(--sp-10) 9px;
+  min-width: 0;
 }
 
-.sourceBadge {
-  padding: 2px 7px;
-  border-radius: var(--r-pill);
-  font-size: 10px;
-  font-weight: 500;
-  border: 1px solid;
-  background: rgba(0,0,0,0.72);
+.artTitleRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  min-width: 0;
 }
 
-.liveBadge {
-  display: flex; align-items: center; gap: 5px;
-  background: rgba(0,0,0,0.82);
-  padding: 3px 8px 3px 6px;
-  border-radius: var(--r-pill);
-  font-size: 10.5px;
-  font-weight: 500;
-  color: var(--status-playing);
-  border: 1px solid rgba(74,222,128,0.25);
+/* One line, ellipsised — a wrapping name was tried and rejected:
+   two-line cards towered over their row. The title attribute reveals anything
+   the ellipsis cuts. On-art, so it carries a shadow instead of a plate. */
+.bannerTitle {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: var(--lh-snug);
+  color: var(--on-art);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardSmall .bannerTitle { font-size: var(--fs-md); }
+.cardSmall .artInfo { padding: var(--sp-8) var(--sp-8) 7px; }
+.cardSmall .bannerGenres { display: none; }
+
+.bannerGenres {
+  font-size: var(--fs-xs);
+  color: var(--on-art-dim);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Status LED — top-left corner of the cover on a dark ring plate, so state
+   reads over any art without a pill stack. */
+.statusLed {
+  position: absolute;
+  top: 9px; left: 9px;
+  z-index: 3;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--state-color, var(--text-muted));
+  box-shadow: 0 0 0 3px var(--scrim-chip), 0 0 10px -1px var(--state-color, transparent);
+}
+
+.stateDotLive {
+  --pulse-name: livePulse;
+  animation: var(--pulse-name) 1.4s var(--ease) infinite;
+}
+
+/* ── Stats strip below the art ──────────────────────────────── */
+/* The whisper of accent in the gradient ties the grid to the theme — it
+   derives from var(--a), so a custom accent re-tints every card. */
+.gameInfo {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: var(--sp-6);
+  padding: var(--sp-8) var(--sp-10) 9px;
+  border-top: 1px solid var(--border-subtle);
+  background: linear-gradient(180deg, var(--surface-2) 0%, var(--surface-accent) 100%);
+  min-width: 0;
+}
+
+.gameInfoSmall { padding: 7px var(--sp-8) var(--sp-8); gap: 5px; }
+
+/* ── Identity chip ──────────────────────────────────────────── */
+/* ONE chip, top-left. It always carries its own opaque plate: the previous
+   version let an inline style override the plate with a 9%-alpha tint, so over
+   bright cover art the chip dissolved into the artwork and looked half-drawn.
+   The launcher colour now shows as a 6px dot, not as the background — a
+   coloured dot reads at any size and can never fight the art behind it. */
+/* Nothing sits on the artwork. Identity, status and stats all live in the
+   footer below it — the cover is never covered. */
+.sourceDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: currentColor;
 }
 
 .liveDot {
   width: 5px; height: 5px;
   border-radius: 50%;
-  background: var(--status-playing);
-  animation: livePulse 1.4s ease-in-out infinite;
-}
-
-@keyframes livePulse { 0%,100%{opacity:1} 50%{opacity:0.2} }
-
-.notInstalledBadge {
-  background: rgba(0,0,0,0.82);
-  padding: 3px 8px;
-  border-radius: var(--r-pill);
-  font-size: 10px;
-  color: #fb923c;
-  border: 1px solid rgba(251,146,60,0.25);
+  flex-shrink: 0;
+  background: currentColor;
+  --pulse-name: livePulse;
+  animation: var(--pulse-name) 1.4s var(--ease) infinite;
 }
 
 .hiddenBadge {
+  position: absolute;
+  top: var(--sp-8);
+  right: var(--sp-8);
+  z-index: var(--z-card);
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  background: rgba(0,0,0,0.82);
-  padding: 3px 8px;
+  gap: var(--sp-4);
+  background: var(--scrim-chip);
+  padding: 2px var(--sp-6);
   border-radius: var(--r-pill);
-  font-size: 10px;
-  color: var(--text-muted);
-  border: 1px solid var(--border);
-}
-
-/* Status badge (Playing/Finished/Dropped/On hold) — lives in the top-left
-   badge stack so it can never cover the title overlay. */
-.statusBadge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px 2px 6px;
-  border-radius: var(--r-pill);
-  font-size: 10.5px;
-  font-weight: 600;
-  background: rgba(9,9,15,0.78);
-  border: 1px solid;
-}
-
-.statusBadgeSmall {
-  gap: 3px;
-  padding: 1px 6px 1px 5px;
-  font-size: 9.5px;
+  font-size: var(--fs-2xs);
+  color: var(--on-art-dim);
+  border: 1px solid rgba(255, 255, 255, 0.14);
 }
 
 /* ── Selection ──────────────────────────────────────────────── */
@@ -194,54 +250,63 @@
 
 .checkboxSelected { border-color: var(--a); background: var(--a); color: #09090f; }
 
-/* ── Info strip below banner ─────────────────────────────────── */
-.gameInfo {
-  padding: 8px 10px 9px;
-  display: flex; flex-direction: column; align-items: stretch;
+/* Achievement progress as a thin HUD line — earned ground in the accent
+   gradient, the rest a neutral track. Rendered only when the game actually
+   has an achievement list, so the footer never implies data that isn't there. */
+.achTrack {
+  width: 100%;
+  height: 3px;
+  border-radius: var(--r-xs);
+  background: var(--neutral-bg);
+  overflow: hidden;
 }
 
-.gameInfoSmall { padding: 5px 7px 7px; }
+.achFill {
+  height: 100%;
+  border-radius: var(--r-xs);
+  background: linear-gradient(90deg, var(--a), var(--text-accent-bright));
+  box-shadow: 0 0 8px -2px var(--a);
+}
 
+.gameInfoSmall .achTrack { height: 2px; }
+
+/* Three fixed zones — trophies | last-played date | playtime — so the date
+   sits dead-centre on every card. Tabular figures stop number jitter. */
 .meta {
-  display: flex; align-items: center; gap: 7px;
-  flex-wrap: wrap; width: 100%;
-}
-
-.playtime {
-  display: flex; align-items: center; gap: 3px;
-  color: var(--a);
-  font-weight: 500;
-  font-size: 13px;
-  margin-left: auto;
-}
-
-.gameInfoSmall .playtime { font-size: 11.5px; }
-
-.trophies {
-  display: flex; align-items: center; gap: 3px;
-  color: var(--text-secondary);
-  font-size: 13px;
-}
-
-.gameInfoSmall .trophies { font-size: 11.5px; }
-
-.cardSourceBadge {
-  font-size: 10px;
-  font-weight: 500;
-  padding: 1px 6px;
-  border-radius: var(--r-pill);
-  border: 1px solid;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--sp-6);
+  width: 100%;
+  font-variant-numeric: tabular-nums;
 }
 
 .lastPlayed {
+  font-size: var(--fs-xs);
   color: var(--text-muted);
-  font-size: 11px;
-  flex: 1;
-  text-align: center;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.playtime {
+  display: flex; align-items: center; gap: 4px;
+  justify-self: end;
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+/* "No playtime" must not read as data: the em-dash inherited the accent colour
+   and 500 weight, so an unplayed game showed a purple semi-bold dash. */
+.metaEmpty { color: var(--text-muted); font-weight: 400; }
+
+.trophies {
+  display: flex; align-items: center; gap: 4px;
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.trophies svg, .playtime svg { color: var(--text-muted); }
 
 /* ════════════════════════════════════════════════════════════
    LIST CARD — individual cards (same family as portrait cards)
@@ -269,14 +334,26 @@
 }
 
 .listCard:hover {
-  border-color: var(--ab);
-  box-shadow: inset 3px 0 0 var(--a);
+  border-color: var(--border-accent-soft);
+  box-shadow: inset 3px 0 0 var(--a), var(--glow-1);
   background: var(--surface-3);
 }
 
 .listCardSelected {
   border-color: var(--a) !important;
   box-shadow: 0 0 0 2px var(--ab), inset 3px 0 0 var(--a) !important;
+}
+
+/* LIVE row — same glow-at-rest treatment as the grid card, so the running game
+   is findable in either view. Hover keeps the glow and adds the accent bar. */
+.listCardLive {
+  border-color: var(--success-border);
+  box-shadow: var(--glow-live);
+}
+.listCardLive:hover {
+  border-color: var(--success-border-strong);
+  box-shadow: inset 3px 0 0 var(--a), var(--glow-live);
+  background: var(--surface-3);
 }
 
 /* Portrait thumbnail — flush to card left edge */
@@ -312,19 +389,23 @@
   transform: scale(1.2);
 }
 
-/* Green bar on left edge of thumbnail when LIVE */
+/* Green bar on left edge of thumbnail when LIVE.
+   Must out-rank .listThumbImg (z-index 1) — without it the bar paints under any
+   cover that fills the box, i.e. every true portrait. */
 .listLiveBar {
   position: absolute;
   left: 0; top: 0; bottom: 0;
   width: 3px;
+  z-index: 2;
   background: var(--status-playing);
   border-radius: 0 2px 2px 0;
 }
 
-/* Selection overlay sits on top of thumbnail */
+/* Selection overlay sits on top of thumbnail — same reason as .listLiveBar. */
 .listSelOverlay {
   position: absolute;
   inset: 0;
+  z-index: 3;
   background: rgba(0,0,0,0.4);
   display: flex;
   align-items: center;
@@ -340,8 +421,7 @@
   width: 22px; height: 22px;
   border-radius: 50%;
   border: 2px solid rgba(255,255,255,0.65);
-  background: rgba(0,0,0,0.45);
-  backdrop-filter: blur(3px);
+  background: rgba(0,0,0,0.6);
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
   transition: background 0.12s, border-color 0.12s;
@@ -360,7 +440,7 @@
 }
 
 .listName {
-  font-size: 14.5px;
+  font-size: var(--fs-base);
   font-weight: 500;
   color: var(--text-primary);
   overflow: hidden;
@@ -374,16 +454,20 @@
   gap: 6px;
 }
 
+/* The list row sits on a solid surface, not on artwork, so these read as plain
+   text rather than plated pills — but they use the same tokens as the grid card
+   so the two views stay one family. */
 .listSourceBadge {
-  font-size: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-2xs);
   font-weight: 500;
-  padding: 1px 7px;
-  border-radius: var(--r-pill);
-  border: 1px solid;
+  color: var(--text-secondary);
 }
 
 .listGenre {
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -391,27 +475,29 @@
 }
 
 .listLivePill {
-  display: flex; align-items: center; gap: 4px;
-  font-size: 10.5px;
+  display: flex; align-items: center; gap: var(--sp-4);
+  font-size: var(--fs-2xs);
   font-weight: 500;
   color: var(--status-playing);
 }
 
+/* Neutral, not orange: "not installed" is not a warning, and the orange it used
+   was the exact hex of the On-hold status. */
 .listNotInstalledTag {
-  font-size: 11px;
-  color: #fb923c;
+  font-size: var(--fs-xs);
+  color: var(--neutral);
 }
 
 .listStatusTag {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  font-weight: 600;
+  gap: var(--sp-4);
+  font-size: var(--fs-xs);
+  font-weight: 500;
 }
 
 .listHiddenTag {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
 }
 
@@ -433,12 +519,13 @@
 
 .listAchFill {
   height: 100%;
-  background: var(--a);
+  background: linear-gradient(90deg, var(--a), var(--text-accent-bright));
+  box-shadow: 0 0 8px -2px var(--a);
   border-radius: 2px;
 }
 
 .listAchText {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -446,17 +533,19 @@
 /* Right stats — simple inline, no column headers */
 .listStats {
   /* Fixed sub-columns (playtime | achievements | date), right-aligned so the
-     numbers line up vertically across rows. */
+     numbers line up vertically across rows. Tabular figures so the values
+     read as a HUD column instead of jittering between rows. */
   display: grid;
   grid-template-columns: 78px 64px 68px;
   column-gap: 10px;
   align-items: center;
   justify-items: end;
+  font-variant-numeric: tabular-nums;
 }
 
 .listStatItem {
   display: flex; align-items: center; gap: 4px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
   white-space: nowrap;
 }
@@ -465,66 +554,79 @@
 .listStatItemDim svg { color: var(--text-muted); }
 .listStatItemDim { color: var(--text-muted); }
 
+/* Playtime of the LIVE row only — it is ticking up right now. */
+.listStatLive { color: var(--text-accent-bright); font-weight: 500; }
+
 .listDate {
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   min-width: 64px;
   text-align: right;
 }
 
 /* ── Play button ─────────────────────────────────────────────── */
+/* Centred on the artwork and revealed on hover. It used to be a 32px opaque
+   black disc pinned in the corner next to an identical disc for the star. */
 .playBtn {
   position: absolute;
-  top: 7px; right: 45px;
-  z-index: 4;
-  width: 32px; height: 32px;
+  top: 50%; left: 50%;
+  z-index: 3;
+  width: 46px; height: 46px;
   border-radius: 50%;
-  border: none;
-  background: rgba(0,0,0,0.75);
-  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: var(--scrim-chip);
+  color: var(--on-art);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   opacity: 0;
-  transform: translateY(-2px);
-  transition: opacity 0.12s, background 0.12s, transform 0.12s;
+  transform: translate(-50%, -50%) scale(0.88);
+  transition: var(--t-opacity), transform var(--dur-base) var(--ease-out),
+              background var(--dur-base) var(--ease), color var(--dur-base) var(--ease),
+              box-shadow var(--dur-base) var(--ease);
 }
-.card:hover .playBtn {
+.card:hover .playBtn,
+.playBtn:focus-visible {
   opacity: 1;
-  transform: translateY(0);
+  transform: translate(-50%, -50%) scale(1);
 }
+/* Launching is the primary verb of the whole app — the accent fill gets the
+   strong glow so pointing at Play feels like arming it. */
 .playBtn:hover {
   background: var(--a);
-  color: #09090f;
+  color: var(--accent-ink);
+  border-color: transparent;
+  box-shadow: var(--glow-2);
 }
+.playBtn:active { transform: translate(-50%, -50%) scale(0.94); }
 
-/* Favorite star on the portrait cover — hidden until hover, but always shown
-   (gold) once starred so favorites read at a glance. */
+/* Favourite star — beside the on-art name. Hover-revealed until set; gold and
+   always visible once set (43% of this library is favourited, so no plate). */
 .favBtn {
-  position: absolute;
-  top: 7px; right: 7px;
-  z-index: 4;
-  width: 32px; height: 32px;
-  border-radius: 50%;
+  flex-shrink: 0;
+  width: 22px; height: 22px;
+  border-radius: var(--r-sm);
   border: none;
-  background: rgba(0,0,0,0.75);
-  color: #fff;
+  background: transparent;
+  color: var(--on-art-muted);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   opacity: 0;
-  transform: translateY(-2px);
-  transition: opacity 0.12s, background 0.12s, transform 0.12s, color 0.12s;
+  transition: var(--t-opacity), var(--t-color), transform var(--dur-fast) var(--ease);
 }
-.card:hover .favBtn { opacity: 1; transform: translateY(0); }
-.favBtn:hover { background: rgba(0,0,0,0.9); color: #fbbf24; }
+.card:hover .favBtn,
+.favBtn:focus-visible { opacity: 1; }
+.favBtn:hover { color: var(--favorite); transform: scale(1.12); }
 .favBtnActive {
   opacity: 1;
-  transform: translateY(0);
-  color: #fbbf24;
-  background: rgba(0,0,0,0.78);
+  color: var(--favorite);
+}
+/* The set star earns a soft gold halo — same glow language, its own colour. */
+.favBtnActive svg {
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--favorite) 55%, transparent));
 }
 
 /* Favorite star in the list row */
@@ -534,14 +636,14 @@
   justify-content: center;
   width: 30px; height: 30px;
   border-radius: var(--r-input);
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  transition: color 0.12s, border-color 0.12s, background 0.12s;
+  transition: var(--t-color), var(--t-border), var(--t-bg);
 }
-.listFavBtn:hover { color: #fbbf24; border-color: rgba(251,191,36,0.4); }
-.listFavBtnActive { color: #fbbf24; border-color: rgba(251,191,36,0.4); background: rgba(251,191,36,0.1); }
+.listFavBtn:hover { color: var(--favorite); border-color: var(--warning-border); }
+.listFavBtnActive { color: var(--favorite); }
 
 /* Star "pop" when a game is favorited — runs once as the active class is added.
    Applied to the icon so it doesn't fight the button's own positioning transform. */
@@ -569,13 +671,14 @@
   background: transparent;
   color: var(--text-secondary);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  transition: background 0.12s, color 0.12s, border-color 0.12s, box-shadow 0.12s;
 }
 .listPlayBtn:hover {
   background: var(--a);
-  color: #09090f;
+  color: var(--accent-ink);
   border-color: var(--a);
+  box-shadow: var(--glow-1);
 }
