@@ -1,7 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react'
-import { IconHistory, IconTrophy, IconDeviceGamepad2, IconClock } from '@tabler/icons-react'
-import { getBannerBg, formatPlaytime, fileUrl } from '../lib/utils'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
+import {
+  IconHistory, IconTrophy, IconDeviceGamepad2, IconClock, IconFilterOff,
+} from '@tabler/icons-react'
+import { getBannerBg, formatPlaytime, fileUrl, localDayKey } from '../lib/utils'
 import SearchableSelect from '../components/ui/SearchableSelect'
+import EmptyState from '../components/ui/EmptyState'
+import { RowSkeleton } from '../components/ui/Skeleton'
 import s from './Sessions.module.css'
 
 const PAGE_SIZE = 60
@@ -14,8 +18,10 @@ function sessionTimeRange(startedAt, durationSeconds) {
 }
 
 function dayLabel(dateStr) {
-  const today     = new Date().toISOString().slice(0, 10)
-  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+  const y = new Date()
+  y.setDate(y.getDate() - 1)          // setDate, not -86400000: DST-safe
+  const today     = localDayKey()
+  const yesterday = localDayKey(y)
   if (dateStr === today)     return 'Today'
   if (dateStr === yesterday) return 'Yesterday'
   const d = new Date(dateStr + 'T12:00:00')
@@ -23,6 +29,43 @@ function dayLabel(dateStr) {
   return d.toLocaleDateString([], isThisYear
     ? { weekday: 'long', month: 'short', day: 'numeric' }
     : { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+// Blurred-fill thumbnail: the cover is CONTAINED over a blurred copy of itself,
+// so a landscape header and a 2:3 portrait both sit in the same box uncropped.
+// Local file first, remote banner_url as the fallback (e.g. right after a backup
+// restore, when the cached file is gone but the URL still resolves).
+function SessionThumb({ session }) {
+  const chain = [
+    session.banner_local_path ? fileUrl(session.banner_local_path) : null,
+    session.banner_url || null,
+  ].filter(Boolean)
+
+  const [step, setStep] = useState(0)
+  const src = chain[step] || null
+  // Both <img>s carry the same src, so a broken image fires onError twice for
+  // the same URL. Without this guard the second one would skip the remote
+  // fallback entirely and blank a thumbnail that would have loaded.
+  const handledRef = useRef(null)
+
+  function handleError() {
+    if (handledRef.current === src) return
+    handledRef.current = src
+    setStep(i => i + 1)
+  }
+
+  return (
+    <div className={s.thumb} style={{ background: getBannerBg(session.game_id) }}>
+      <IconDeviceGamepad2 size={16} stroke={1.4} style={{ color: 'var(--on-art-muted)', zIndex: 0 }} />
+      {src && (
+        <>
+          <img className={s.thumbBlur} src={src} alt="" aria-hidden="true"
+            loading="lazy" decoding="async" onError={handleError} />
+          <img className={s.thumbImg} src={src} alt="" loading="lazy" decoding="async" onError={handleError} />
+        </>
+      )}
+    </div>
+  )
 }
 
 export default function Sessions() {
@@ -46,8 +89,10 @@ export default function Sessions() {
     const currentOffset = reset ? 0 : offset
     const filters = { limit: PAGE_SIZE + 1, offset: currentOffset }
     if (gId)  filters.gameId = Number(gId)
-    if (from) filters.from = from
-    if (to)   filters.to = to + 'T23:59:59'
+    // The date inputs are LOCAL days; started_at is a UTC ISO string compared
+    // lexicographically in SQL, so send UTC instants for the local day bounds.
+    if (from) filters.from = new Date(from + 'T00:00:00').toISOString()
+    if (to)   filters.to = new Date(to + 'T23:59:59.999').toISOString()
     const res = await window.kozo.api.sessions.list(filters)
     if (res?.ok) {
       const all  = res.data ?? []
@@ -66,13 +111,20 @@ export default function Sessions() {
   function handleFromDate(v)   { setFromDate(v);  setOffset(0); load(true, gameId, v, toDate) }
   function handleToDate(v)     { setToDate(v);    setOffset(0); load(true, gameId, fromDate, v) }
 
+  const filtered = !!(gameId || fromDate || toDate)
+
+  function clearFilters() {
+    setGameId(''); setFromDate(''); setToDate(''); setOffset(0)
+    load(true, '', '', '')
+  }
+
   // Summary stats
   const totalPlaytime = sessions.reduce((a, s) => a + (s.duration_seconds || 0), 0)
   const totalAchs     = sessions.reduce((a, s) => a + (s.achievements_unlocked || 0), 0)
 
   // Group by date
   const groups = sessions.reduce((acc, session) => {
-    const day = session.started_at.slice(0, 10)
+    const day = localDayKey(session.started_at)
     if (!acc[day]) acc[day] = []
     acc[day].push(session)
     return acc
@@ -84,129 +136,138 @@ export default function Sessions() {
       <div className={s.toolbar}>
         <h1 className={s.pageTitle}>Sessions</h1>
         <div className={s.filters}>
-          <SearchableSelect
-            value={gameId}
-            onChange={handleGameFilter}
-            placeholder="All games"
-            width={170}
-            options={games.map(g => ({ value: String(g.id), label: g.name }))}
-          />
-          <input type="date" className={s.dateInput} value={fromDate} onChange={e => handleFromDate(e.target.value)} />
-          <span className={s.dateSep}>→</span>
-          <input type="date" className={s.dateInput} value={toDate} onChange={e => handleToDate(e.target.value)} />
+          {/* The wrapper exists only to carry the focus ring around the whole
+              control — the trigger inside draws its own border. */}
+          <div className={`${s.selectWrap} hasRing`}>
+            <SearchableSelect
+              value={gameId}
+              onChange={handleGameFilter}
+              placeholder="All games"
+              width={170}
+              options={games.map(g => ({ value: String(g.id), label: g.name }))}
+            />
+          </div>
+          <div className={`${s.dateWrap} hasRing`}>
+            <input
+              type="date"
+              className={s.dateInput}
+              aria-label="Sessions from date"
+              title="Sessions from date"
+              value={fromDate}
+              onChange={e => handleFromDate(e.target.value)}
+            />
+          </div>
+          {/* Decorative: each field names its own end of the range, so the
+              separator carries no meaning of its own and is hidden from AT. */}
+          <span className={s.dateSep} aria-hidden="true">to</span>
+          <div className={`${s.dateWrap} hasRing`}>
+            <input
+              type="date"
+              className={s.dateInput}
+              aria-label="Sessions to date"
+              title="Sessions to date"
+              value={toDate}
+              onChange={e => handleToDate(e.target.value)}
+            />
+          </div>
         </div>
       </div>
 
       <div className={s.content}>
-        {/* Summary strip */}
-        {sessions.length > 0 && (
-          <div className={s.summaryStrip}>
-            <div className={s.summaryItem}>
-              <span className={s.summaryValue}>{sessions.length}{hasMore ? '+' : ''}</span>
-              <span className={s.summaryLabel}>sessions</span>
-            </div>
-            <div className={s.summaryDivider} />
-            <div className={s.summaryItem}>
-              <span className={s.summaryValue}>{formatPlaytime(totalPlaytime)}</span>
-              <span className={s.summaryLabel}>total playtime</span>
-            </div>
-            {totalAchs > 0 && (
-              <>
-                <div className={s.summaryDivider} />
-                <div className={s.summaryItem}>
-                  <span className={s.summaryValue}>{totalAchs}</span>
-                  <span className={s.summaryLabel}>achievements</span>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {loading && sessions.length === 0 && (
-          <div className={s.emptyState}>Loading…</div>
-        )}
-
-        {!loading && sessions.length === 0 && (
-          <div className={s.emptyState}>
-            <IconHistory size={44} stroke={1.2} />
-            <div className={s.emptyTitle}>No sessions found</div>
-            <div className={s.emptyHint}>
-              {gameId || fromDate || toDate
-                ? 'Try clearing the filters.'
-                : 'Sessions are recorded automatically when KoZo detects a game running.'}
-            </div>
-          </div>
-        )}
-
-        {/* Timeline groups */}
-        {sortedDays.map(day => {
-          const daySessions = groups[day]
-          const dayPlaytime = daySessions.reduce((a, s) => a + (s.duration_seconds || 0), 0)
-          return (
-            <div key={day} className={s.dayGroup}>
-              <div className={s.dayHeader}>
-                <span className={s.dayLabel}>{dayLabel(day)}</span>
-                <span className={s.dayTotal}>{formatPlaytime(dayPlaytime)}</span>
+        <div className={s.inner}>
+          {/* Summary strip */}
+          {sessions.length > 0 && (
+            <div className={s.summaryStrip}>
+              <div className={s.summaryItem}>
+                <span className={s.summaryValue}>{sessions.length}{hasMore ? '+' : ''}</span>
+                <span className={s.summaryLabel}>sessions</span>
               </div>
+              <div className={s.summaryDivider} />
+              <div className={s.summaryItem}>
+                <span className={s.summaryValue}>{formatPlaytime(totalPlaytime)}</span>
+                <span className={s.summaryLabel}>total playtime</span>
+              </div>
+              {totalAchs > 0 && (
+                <>
+                  <div className={s.summaryDivider} />
+                  <div className={s.summaryItem}>
+                    <span className={s.summaryValue}>{totalAchs}</span>
+                    <span className={s.summaryLabel}>achievements</span>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
-              <div className={s.dayRows}>
-                {daySessions.map(session => {
-                  const bg = getBannerBg(session.game_id)
-                  return (
+          {loading && sessions.length === 0 && <RowSkeleton count={7} height={85} />}
+
+          {!loading && sessions.length === 0 && (
+            <EmptyState
+              Icon={IconHistory}
+              title="No sessions found"
+              desc={filtered
+                ? 'No sessions match the current filters.'
+                : 'Sessions are recorded automatically when KoZo detects a game running.'}
+              action={filtered ? { label: 'Clear filters', onClick: clearFilters, Icon: IconFilterOff } : undefined}
+            />
+          )}
+
+          {/* Timeline groups */}
+          {sortedDays.map(day => {
+            const daySessions = groups[day]
+            const dayPlaytime = daySessions.reduce((a, x) => a + (x.duration_seconds || 0), 0)
+            return (
+              <div key={day} className={s.dayGroup}>
+                <div className={s.dayHeader}>
+                  <span className={s.dayLabel}>{dayLabel(day)}</span>
+                  <span className={s.dayTotal}>{formatPlaytime(dayPlaytime)}</span>
+                </div>
+
+                <div className={s.dayRows}>
+                  {daySessions.map(session => (
                     <div key={session.id} className={s.sessionRow}>
-                      {/* Thumbnail — local file first, remote banner_url if the
-                          file is missing (e.g. right after a backup restore) */}
-                      <div className={s.thumb} style={{ background: bg }}>
-                        {(session.banner_local_path || session.banner_url)
-                          ? <img
-                              src={session.banner_local_path ? fileUrl(session.banner_local_path) : session.banner_url}
-                              alt=""
-                              onError={e => {
-                                const img = e.target
-                                if (session.banner_local_path && session.banner_url && !img.dataset.fallbackTried) {
-                                  img.dataset.fallbackTried = '1'
-                                  img.src = session.banner_url
-                                  return
-                                }
-                                img.style.display = 'none'
-                              }}
-                            />
-                          : <IconDeviceGamepad2 size={16} stroke={1.4} style={{ color: 'rgba(255,255,255,0.2)' }} />
-                        }
-                      </div>
+                      <SessionThumb session={session} />
 
                       {/* Game + time range */}
                       <div className={s.sessionInfo}>
-                        <div className={s.sessionGame}>{session.game_name}</div>
+                        <div className={s.sessionGame} title={session.game_name}>{session.game_name}</div>
                         <div className={s.sessionTime}>{sessionTimeRange(session.started_at, session.duration_seconds)}</div>
                       </div>
 
                       {/* Duration */}
-                      <div className={s.sessionDur}>
+                      <div className={s.sessionDur} title="Session length">
                         <IconClock size={12} stroke={1.5} />
                         {formatPlaytime(session.duration_seconds) || '—'}
                       </div>
 
                       {/* Achievements */}
-                      <div className={`${s.sessionAch} ${session.achievements_unlocked > 0 ? s.sessionAchHas : ''}`}>
+                      <div
+                        className={`${s.sessionAch} ${session.achievements_unlocked > 0 ? s.sessionAchHas : ''}`}
+                        title={`${session.achievements_unlocked || 0} achievement${session.achievements_unlocked === 1 ? '' : 's'} unlocked`}
+                      >
                         <IconTrophy size={12} stroke={1.5} />
                         {session.achievements_unlocked > 0 ? session.achievements_unlocked : '—'}
                       </div>
                     </div>
-                  )
-                })}
+                  ))}
+                </div>
               </div>
-            </div>
-          )
-        })}
+            )
+          })}
 
-        {hasMore && (
-          <div className={s.loadMore}>
-            <button className={s.loadMoreBtn} onClick={() => load(false)} disabled={loading}>
-              {loading ? 'Loading…' : 'Load more'}
-            </button>
-          </div>
-        )}
+          {hasMore && (
+            <div className={s.loadMore}>
+              <button
+                type="button"
+                className={`${s.loadMoreBtn} ${loading ? s.loadMoreBtnBusy : ''}`}
+                aria-busy={loading}
+                onClick={() => load(false)}
+              >
+                {loading ? 'Loading…' : 'Load more'}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

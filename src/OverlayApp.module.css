@@ -108,7 +108,7 @@
   padding: 1px 7px;
   border-radius: var(--r-pill);
   background: var(--ad);
-  color: var(--a);
+  color: var(--text-accent-bright);   /* HUD value — brighter than plain accent on the dark plate */
   font-size: 10.5px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
@@ -150,6 +150,26 @@
   flex-shrink: 0;
   object-fit: cover;
   border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+/* ── Glow accents on the toast's leading visual ──────────────────────────
+   One glow per toast, on the one thing the toast is about. Static box-shadows
+   only — painted once, nothing animated, safe over a running game. Declared
+   AFTER .toastIcon/.toastArt so the border override wins the cascade. */
+.achGlow {
+  border-color: var(--border-accent-soft);
+  box-shadow: var(--glow-1);
+}
+
+.liveGlow {
+  border-color: color-mix(in srgb, var(--green) 35%, transparent);
+  box-shadow: var(--glow-live);
+}
+
+/* Level-up gets one step louder — it's the rarest event on this surface. */
+.levelGlow {
+  border-color: var(--border-accent-soft);
+  box-shadow: var(--glow-2);
 }
 
 .toastInfo {
@@ -206,6 +226,8 @@
   border-radius: 50%;
   background: #4ade80;
   flex-shrink: 0;
+  /* Light means life — the live dot carries its own small halo. */
+  box-shadow: 0 0 8px 0 color-mix(in srgb, var(--green) 60%, transparent);
   animation: pulse 1.4s ease-in-out infinite;
 }
 
@@ -214,6 +236,7 @@
 .sessionIcon {
   background: rgba(74, 222, 128, 0.10) !important;
   border-color: rgba(74, 222, 128, 0.20) !important;
+  box-shadow: var(--glow-live);
 }
 
 /* ── Status flash (global hotkey) ───────────────────────────── */
@@ -225,9 +248,10 @@
 .statusTime {
   font-size: 22px;
   font-weight: 600;
-  color: #ececf8;
+  color: var(--text-accent-bright);   /* the headline HUD value of the flash */
   line-height: 1.1;
   letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
   display: flex;
   align-items: baseline;
   gap: 7px;
@@ -259,7 +283,8 @@
 .statusAchFill {
   height: 100%;
   border-radius: 3px;
-  background: var(--a);
+  /* Same gradient as every accent bar on the overlay — dim tail, bright head. */
+  background: linear-gradient(90deg, color-mix(in srgb, var(--a) 45%, transparent), var(--a));
 }
 
 .statusAchText {
@@ -294,6 +319,7 @@
   font-weight: 500;
   color: var(--text-primary);
   letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
 }
 
 .achListCountTotal {
@@ -317,7 +343,7 @@
 .achListFill {
   height: 100%;
   border-radius: 2px;
-  background: var(--a);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--a) 45%, transparent), var(--a));
   transition: width 0.3s ease;
 }
 
@@ -484,7 +510,7 @@
 
 /* ── Level-up toast ─────────────────────────────────────────── */
 .levelUpToast {
-  border-color: var(--ab, rgba(167, 139, 250, 0.35));
+  border-color: var(--border-accent-soft);
 }
 
 .levelUpToast .toastHeader {
@@ -495,6 +521,7 @@
 .levelUpIcon {
   background: var(--ad, rgba(167, 139, 250, 0.12)) !important;
   border-color: var(--ab, rgba(167, 139, 250, 0.3)) !important;
+  box-shadow: var(--glow-2);   /* one step louder — the rarest moment here */
 }
 
 .levelUpNumber {
@@ -517,6 +544,17 @@
   font-weight: 700;
   color: var(--a, #a78bfa);
   font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+/* ── Release toast ("out now") ──────────────────────────────── */
+.releaseToast .toastHeader {
+  background: var(--ad);
+  border-bottom-color: var(--ab);
+}
+
+.releaseIcon {
+  background: var(--ad) !important;
+  border-color: var(--ab) !important;
 }
 
 /* ── Unknown-game toast actions ─────────────────────────────── */
@@ -569,7 +607,9 @@
 
 .progressFill {
   height: 100%;
-  background: var(--a, #a78bfa);
+  /* Accent gradient — the trophy moment's timer bar reads as a charged meter
+     draining, not a plain rule. */
+  background: linear-gradient(90deg, color-mix(in srgb, var(--a) 45%, transparent), var(--a));
   transition: width 0.1s linear;
-  opacity: 0.8;
+  opacity: 0.9;
 }

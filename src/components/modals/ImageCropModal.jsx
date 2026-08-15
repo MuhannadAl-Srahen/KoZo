@@ -30,11 +30,15 @@ export default function ImageCropModal({ src, kind = 'avatar', title, onCancel, 
 
   const baseScaleRef = useRef(1)   // scale that makes the image cover the viewport at zoom 1
   const dragRef      = useRef(null)
+  const viewportRef  = useRef(null)
+  const wheelRef     = useRef(null)
 
   // Load the source image and centre it at cover scale.
   useEffect(() => {
+    let cancelled = false
     const im = new Image()
     im.onload = () => {
+      if (cancelled) return
       const base = Math.max(VP_W / im.naturalWidth, VP_H / im.naturalHeight)
       baseScaleRef.current = base
       const dispW = im.naturalWidth * base
@@ -43,8 +47,9 @@ export default function ImageCropModal({ src, kind = 'avatar', title, onCancel, 
       setZoom(1)
       setOffset({ x: (VP_W - dispW) / 2, y: (VP_H - dispH) / 2 })
     }
-    im.onerror = () => setErr('Could not load that image.')
+    im.onerror = () => { if (!cancelled) setErr('Could not load that image.') }
     im.src = src
+    return () => { cancelled = true }
   }, [src])
 
   // Keep the image covering the viewport (no empty gaps) after any pan/zoom.
@@ -88,6 +93,19 @@ export default function ImageCropModal({ src, kind = 'avatar', title, onCancel, 
     e.preventDefault()
     applyZoom(zoom * (e.deltaY < 0 ? 1.08 : 0.92))
   }
+
+  // React registers delegated wheel listeners passively, so a JSX onWheel can't
+  // preventDefault and the modal body scrolls while zooming. Bind natively with
+  // passive:false, routed through a ref so the listener always sees the current
+  // zoom/offset without re-binding every render.
+  wheelRef.current = onWheel
+  useEffect(() => {
+    const el = viewportRef.current
+    if (!el) return
+    const h = (e) => wheelRef.current(e)
+    el.addEventListener('wheel', h, { passive: false })
+    return () => el.removeEventListener('wheel', h)
+  }, [])
 
   async function save() {
     if (!img) return
@@ -135,13 +153,13 @@ export default function ImageCropModal({ src, kind = 'avatar', title, onCancel, 
     >
       <div className={s.wrap}>
         <div
+          ref={viewportRef}
           className={s.viewport}
           style={{ width: VP_W, height: VP_H, borderRadius: kind === 'avatar' ? '50%' : 'var(--r-card)' }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerLeave={onPointerUp}
-          onWheel={onWheel}
         >
           {img ? (
             <img

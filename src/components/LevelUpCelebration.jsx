@@ -23,11 +23,11 @@ export default function LevelUpCelebration() {
 
   useEffect(() => {
     if (!window.kozo?.events?.onXpLevelUp) return
-    window.kozo.events.onXpLevelUp((payload) => {
+    const off = window.kozo.events.onXpLevelUp((payload) => {
       setLeaving(false)
       setData(payload)
     })
-    return () => window.kozo?.events?.removeAll?.('xp:levelup')
+    return () => off?.()
   }, [])
 
   // Auto-dismiss, but generously — this is the payoff for tens of hours.

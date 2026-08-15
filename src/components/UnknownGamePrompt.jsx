@@ -11,13 +11,13 @@ export default function UnknownGamePrompt() {
 
   useEffect(() => {
     if (!window.kozo?.events?.onUnknownProcessAdd) return
-    window.kozo.events.onUnknownProcessAdd(({ exe_name, install_path }) => {
+    const off = window.kozo.events.onUnknownProcessAdd(({ exe_name, install_path }) => {
       if (!exe_name) return
       sessionStorage.setItem('kozo:prefill-exe', exe_name)
       if (install_path) sessionStorage.setItem('kozo:prefill-install-path', install_path)
       navigate('/?add=1')
     })
-    return () => window.kozo.events.removeAll('unknown-process:add')
+    return () => off?.()
   }, [])
 
   return null

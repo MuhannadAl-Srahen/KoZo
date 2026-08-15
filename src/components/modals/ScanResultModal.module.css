@@ -2,34 +2,24 @@
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-8);
   flex-wrap: wrap;
-  margin-bottom: 14px;
+  margin-bottom: var(--sp-12);
 }
 
 .searchBox {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--surface-3);
-  border: 1px solid var(--border);
-  border-radius: var(--r-input);
-  padding: 6px 10px;
+  composes: inputWrap from '../../styles/controls.module.css';
   flex: 1;
   min-width: 160px;
-  transition: border-color 0.12s;
 }
-.searchBox:focus-within { border-color: var(--ab); }
 
 .searchIcon { color: var(--text-muted); flex-shrink: 0; }
 
 .searchInput {
-  flex: 1;
-  font-size: 13px;
-  color: var(--text-primary);
-  background: transparent;
+  composes: inputBare from '../../styles/controls.module.css';
 }
-.searchInput::placeholder { color: var(--text-muted); }
+
+.searchInput.searchInput { padding: var(--sp-6) 0; }
 
 .searchClear {
   display: flex;
@@ -37,55 +27,61 @@
   color: var(--text-muted);
   cursor: pointer;
   padding: 1px;
-  border-radius: 3px;
+  border-radius: var(--r-xs);
+  transition: var(--t-color);
 }
 .searchClear:hover { color: var(--text-secondary); }
 
 .typePills {
   display: flex;
-  gap: 4px;
+  gap: var(--sp-4);
   flex-wrap: wrap;
 }
 
+/* Segmented filter: the ACTIVE state must outrank its own hover, which is only
+   controllable when both live in this file — so geometry composes but the
+   colours stay local. */
 .typePill {
-  padding: 4px 10px;
-  font-size: 12px;
-  border-radius: var(--r-pill);
-  border: 1px solid var(--border);
+  composes: btn btnSm btnPill from '../../styles/controls.module.css';
+}
+
+.typePill.typePill {
   background: var(--surface-3);
   color: var(--text-secondary);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: border-color 0.1s, color 0.1s, background 0.1s;
+  border-color: var(--border);
 }
-.typePill:hover { border-color: var(--ab); color: var(--text-primary); }
-.typePillActive { background: var(--ad) !important; border-color: var(--ab) !important; color: var(--a) !important; }
+
+.typePill.typePill:hover:not(:disabled) {
+  border-color: var(--ab);
+  color: var(--text-primary);
+}
+
+.typePillActive.typePillActive,
+.typePillActive.typePillActive:hover:not(:disabled) {
+  background: var(--ad);
+  border-color: var(--ab);
+  color: var(--a);
+}
 
 .actionBtn {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 11px;
-  font-size: 12px;
-  border-radius: var(--r-input);
-  border: 1px solid var(--border);
-  background: var(--surface-3);
-  color: var(--text-secondary);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: border-color 0.1s, color 0.1s;
+  composes: btn btnSecondary btnSm from '../../styles/controls.module.css';
 }
-.actionBtn:hover:not(:disabled) { border-color: var(--ab); color: var(--text-primary); }
-.actionBtn:disabled { opacity: 0.4; cursor: default; }
+
+.actionBtn.actionBtn { background: var(--surface-3); }
 
 /* ── Card grid ── */
+/* auto-fill + minmax rather than a fixed column count: the dialog is 900px on a
+   wide window and ~700 on the 960px minimum, and this fills both without a
+   breakpoint. */
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 12px;
+  gap: var(--sp-12);
   max-height: 460px;
   overflow-y: auto;
-  padding-right: 4px;
+  padding-right: var(--sp-4);
+  contain: layout style;
+  transform: translateZ(0);
 }
 
 .card {
@@ -94,10 +90,14 @@
   border: 2px solid transparent;
   cursor: pointer;
   background: var(--surface-2);
-  transition: border-color 0.15s, transform 0.1s;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 260px;
+  transition: border-color var(--dur-slow) var(--ease), transform var(--dur-fast) var(--ease);
 }
-.card:hover:not(.cardDim) { border-color: var(--ab); transform: translateY(-1px); }
-.cardSelected { border-color: var(--a) !important; }
+/* :not(.cardSelected) rather than an !important on .cardSelected — hovering a
+   picked card must not swap its accent border back to the plain hover tint. */
+.card:hover:not(.cardDim):not(.cardSelected) { border-color: var(--ab); transform: translateY(-1px); }
+.cardSelected.cardSelected { border-color: var(--a); }
 .cardDim { opacity: 0.5; cursor: default; }
 
 /* ── Banner ── */
@@ -117,7 +117,7 @@
   width: 100%;
   height: 100%;
   object-fit: contain;
-  z-index: 1;
+  z-index: var(--z-raised);
 }
 
 .bannerBlur {
@@ -126,25 +126,25 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-  z-index: 0;
+  z-index: var(--z-base);
   filter: blur(16px) brightness(0.55) saturate(1.1);
   transform: scale(1.18);
 }
 
 .checkOverlay {
   position: absolute;
-  top: 6px;
-  left: 6px;
+  top: var(--sp-6);
+  left: var(--sp-6);
   width: 22px;
   height: 22px;
-  border-radius: 6px;
-  border: 2px solid rgba(255,255,255,0.4);
-  background: rgba(0,0,0,0.3);
+  border-radius: var(--r-md);
+  border: 2px solid color-mix(in srgb, var(--on-art) 40%, transparent);
+  background: var(--scrim-soft);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 2;
-  transition: background 0.12s, border-color 0.12s;
+  z-index: var(--z-card);
+  transition: var(--t-control);
 }
 .checkOverlayOn {
   background: var(--a);
@@ -153,83 +153,82 @@
 
 .typeBadge {
   position: absolute;
-  bottom: 6px;
-  right: 6px;
+  bottom: var(--sp-6);
+  right: var(--sp-6);
   font-size: 9px;
   font-weight: 500;
   letter-spacing: 0.06em;
-  padding: 2px 6px;
-  border-radius: 4px;
+  padding: var(--sp-2) var(--sp-6);
+  border-radius: var(--r-sm);
   border: 1px solid;
-  z-index: 2;
+  z-index: var(--z-card);
   cursor: pointer;
-  transition: opacity 0.1s;
+  transition: var(--t-opacity);
 }
 .typeBadge:hover { opacity: 0.85; }
 
 .inLibraryOverlay {
   position: absolute;
   inset: 0;
-  background: rgba(0,0,0,0.5);
+  background: var(--scrim);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   font-weight: 500;
   letter-spacing: 0.06em;
-  color: rgba(255,255,255,0.6);
+  color: var(--on-art-muted);
   z-index: 3;
 }
 
 /* ── Info section ── */
 .info {
-  padding: 7px 8px 8px;
+  padding: var(--sp-6) var(--sp-8) var(--sp-8);
 }
 
 .nameInput {
   width: 100%;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 500;
   color: var(--text-primary);
   background: transparent;
   border: none;
-  outline: none;
   font-family: var(--font);
   cursor: pointer;
-  line-height: 1.3;
+  line-height: var(--lh-snug);
 }
 .nameInput:focus {
   background: var(--surface-3);
-  border-radius: 3px;
-  padding: 1px 4px;
+  border-radius: var(--r-xs);
+  padding: 1px var(--sp-4);
   cursor: text;
 }
 .nameInput:disabled { cursor: default; color: var(--text-secondary); }
 
 .appid {
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   color: var(--text-muted);
-  margin-top: 2px;
+  margin-top: var(--sp-2);
 }
 
 .metaLine {
   display: flex;
-  gap: 8px;
-  font-size: 10px;
+  gap: var(--sp-8);
+  font-size: var(--fs-2xs);
   color: var(--text-secondary);
   margin-top: 3px;
 }
 
 .installedTag {
   position: absolute;
-  bottom: 6px;
-  left: 6px;
+  bottom: var(--sp-6);
+  left: var(--sp-6);
   font-size: 9px;
   font-weight: 500;
-  padding: 2px 5px;
-  border-radius: 3px;
-  background: rgba(74,222,128,0.18);
-  color: #4ade80;
-  border: 1px solid rgba(74,222,128,0.35);
-  z-index: 2;
+  padding: var(--sp-2) 5px;
+  border-radius: var(--r-xs);
+  background: var(--success-bg-hover);
+  color: var(--success);
+  border: 1px solid var(--success-border-strong);
+  z-index: var(--z-card);
 }

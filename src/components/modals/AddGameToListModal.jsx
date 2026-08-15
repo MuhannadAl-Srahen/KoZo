@@ -174,7 +174,7 @@ export default function AddGameToListModal({ onClose, onSaved }) {
     >
       {/* Search or selected chip */}
       {!showForm ? (
-        <div className={s.searchRow}>
+        <div className={`${s.searchRow} hasRing`}>
           <IconSearch size={15} stroke={1.6} className={s.searchIcon} />
           <input
             className={s.searchInput}

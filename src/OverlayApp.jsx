@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { IconTrophy, IconPlayerPlay, IconX, IconClock, IconDeviceGamepad2, IconSparkles, IconArrowBigUpLines, IconPlus, IconCheck } from '@tabler/icons-react'
+import { IconTrophy, IconPlayerPlay, IconX, IconClock, IconDeviceGamepad2, IconSparkles, IconArrowBigUpLines, IconPlus, IconCheck, IconCalendarEvent } from '@tabler/icons-react'
 import { applyAccent } from './context/AccentColorContext'
 import { fileUrl } from './lib/utils'
 import { playAchievement, playLevelUp, playSessionStart } from './lib/sounds'
@@ -7,13 +7,14 @@ import s from './OverlayApp.module.css'
 
 // Cover-art thumb for session toasts — local cached banner first, CDN fallback,
 // hidden entirely when neither loads (returns null so the icon shows instead).
-function ToastArt({ artPath, artUrl }) {
+// `className` lets each toast type add its glow (achGlow / liveGlow / levelGlow).
+function ToastArt({ artPath, artUrl, className }) {
   const [stage, setStage] = useState(artPath ? 'local' : (artUrl ? 'remote' : 'none'))
   if (stage === 'none') return null
   const src = stage === 'local' ? fileUrl(artPath) : artUrl
   return (
     <img
-      className={s.toastArt}
+      className={`${s.toastArt} ${className || ''}`}
       src={src}
       alt=""
       onError={() => setStage(stage === 'local' && artUrl ? 'remote' : 'none')}
@@ -103,7 +104,7 @@ function SessionToast({ toast, onDismiss }) {
       </div>
       <div className={s.toastBody}>
         {(toast.artPath || toast.artUrl) ? (
-          <ToastArt artPath={toast.artPath} artUrl={toast.artUrl} />
+          <ToastArt artPath={toast.artPath} artUrl={toast.artUrl} className={s.liveGlow} />
         ) : (
           <div className={`${s.toastIcon} ${s.sessionIcon}`}>
             <IconPlayerPlay size={22} stroke={1.5} style={{ color: 'var(--a, #a78bfa)' }} />
@@ -134,7 +135,7 @@ function StatusToast({ toast, onDismiss }) {
       </div>
       <div className={s.toastBody}>
         {(toast.artPath || toast.artUrl) ? (
-          <ToastArt artPath={toast.artPath} artUrl={toast.artUrl} />
+          <ToastArt artPath={toast.artPath} artUrl={toast.artUrl} className={s.liveGlow} />
         ) : (
           <div className={`${s.toastIcon} ${s.sessionIcon}`}>
             <IconDeviceGamepad2 size={22} stroke={1.5} style={{ color: 'var(--a)' }} />
@@ -223,7 +224,7 @@ function AchListToast({ toast, onDismiss }) {
   // this window can't receive key events itself — it's click-through and never
   // focused, which is the whole reason the list couldn't be scrolled in-game.
   useEffect(() => {
-    window.kozo?.events?.onAchListControl?.(({ action, delta }) => {
+    const off = window.kozo?.events?.onAchListControl?.(({ action, delta }) => {
       if (action === 'close') { close(); return }
       if (action !== 'scroll') return
       const el = rowsRef.current
@@ -231,7 +232,7 @@ function AchListToast({ toast, onDismiss }) {
       el.scrollBy({ top: delta, behavior: 'smooth' })
       bump()                       // reading it counts as still wanting it up
     })
-    return () => window.kozo?.events?.removeAll?.('achList:control')
+    return () => off?.()
   }, [])
 
   const onScroll = () => {
@@ -335,7 +336,7 @@ function LevelUpToast({ toast, onDismiss }) {
       </div>
       <div className={s.toastBody}>
         {(toast.artPath || toast.artUrl) ? (
-          <ToastArt artPath={toast.artPath} artUrl={toast.artUrl} />
+          <ToastArt artPath={toast.artPath} artUrl={toast.artUrl} className={s.levelGlow} />
         ) : (
           <div className={`${s.toastIcon} ${s.levelUpIcon}`}>
             <span className={s.levelUpNumber}>{level}</span>
@@ -424,16 +425,17 @@ function OverlayToast({ toast, onDismiss }) {
       </div>
 
       {/* Body — game cover first (all toasts lead with the cover), the
-          achievement's own icon when no cover is cached, trophy last */}
+          achievement's own icon when no cover is cached, trophy last. The
+          leading visual carries the accent glow — this is the trophy moment. */}
       <div className={s.toastBody}>
         {(toast.artPath || toast.artUrl) ? (
-          <ToastArt artPath={toast.artPath} artUrl={toast.artUrl} />
+          <ToastArt artPath={toast.artPath} artUrl={toast.artUrl} className={s.achGlow} />
         ) : displayAch?.icon_url ? (
-          <div className={s.toastIcon}>
+          <div className={`${s.toastIcon} ${s.achGlow}`}>
             <img src={displayAch.icon_url} alt="" onError={e => { e.target.style.display = 'none' }} />
           </div>
         ) : (
-          <div className={s.toastIcon}>
+          <div className={`${s.toastIcon} ${s.achGlow}`}>
             <IconTrophy size={28} stroke={1.3} style={{ color: 'var(--a)' }} />
           </div>
         )}
@@ -527,7 +529,58 @@ function UnknownGameToast({ toast, onDismiss }) {
   )
 }
 
+// ── Release toast ─────────────────────────────────────────────────────────────
+// A tracked upcoming game's release date has passed. Informational only — the
+// Game List entry has already regrouped itself under "Out now" by the time this
+// shows. This is a toast rather than an OS notification on purpose (§6).
+
+function ReleaseToast({ toast, onDismiss }) {
+  const { leaving, close } = useAutoClose(onDismiss, 10000)
+  const games = toast.games || []
+  const one = games.length === 1 ? games[0] : null
+  return (
+    <div className={`${s.toast} ${s.releaseToast} ${leaving ? s.toastOut : s.toastIn}`}
+      {...toastInteractions(close)}>
+      <CloseButton close={close} />
+      <div className={s.toastHeader}>
+        <IconCalendarEvent size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
+        <span className={s.toastHeaderText}>Out Now</span>
+      </div>
+      <div className={s.toastBody}>
+        <div className={`${s.toastIcon} ${s.releaseIcon}`}>
+          <IconCalendarEvent size={22} stroke={1.5} style={{ color: 'var(--a)' }} />
+        </div>
+        <div className={s.toastInfo}>
+          <div className={s.toastName}>
+            {one ? one.name : `${games.length} games you're waiting for`}
+          </div>
+          <div className={s.toastDesc}>
+            {one
+              ? `Released ${one.release_date} — now under "Out now" in your Game List`
+              : games.map(g => g.name).slice(0, 4).join(', ')}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Overlay app ───────────────────────────────────────────────────────────────
+
+// The queue is capped so a burst of unlocks can't paper the screen — but the
+// Alt+J list is exempt from that cap. Main keeps Alt+Down/Alt+Up registered
+// globally for as long as the list is on screen and only releases them when the
+// toast reports itself closed (dismiss below), so evicting it here would leave
+// two very common combos hijacked system-wide and make the next Alt+J look dead.
+const MAX_TOASTS = 4
+
+function capToasts(list) {
+  const pinned = list.filter(t => t.type === 'achList').length
+  if (!pinned) return list.slice(-MAX_TOASTS)
+  const room = Math.max(0, MAX_TOASTS - pinned)
+  const kept = new Set(room ? list.filter(t => t.type !== 'achList').slice(-room) : [])
+  return list.filter(t => t.type === 'achList' || kept.has(t))
+}
 
 export default function OverlayApp() {
   const [toasts, setToasts] = useState([])
@@ -544,34 +597,42 @@ export default function OverlayApp() {
         .then(res => { if (res?.ok && res.data) applyAccent(res.data) })
         .catch(() => {})
     } catch {}
-    window.kozo?.events?.onAccentChanged?.((hex) => { if (hex) applyAccent(hex) })
-    return () => window.kozo?.events?.removeAll?.('accent:changed')
+    const off = window.kozo?.events?.onAccentChanged?.((hex) => { if (hex) applyAccent(hex) })
+    return () => off?.()
   }, [])
 
   useEffect(() => {
+    const offs = []
+    const on = (fn, cb) => { const off = fn?.(cb); if (off) offs.push(off) }
+
+    // A fresh renderer starts with no toasts, so nothing would ever hand clicks
+    // back to the game — assert click-through once here in case this mount
+    // followed a crash/reload that happened while a toast was hovered.
+    setInteractive(false)
+
     // Spread the FULL payload — main sends artPath/artUrl for the cover thumb.
-    window.kozo?.events?.onSessionOverlay?.((data) => {
+    on(window.kozo?.events?.onSessionOverlay, (data) => {
       playSessionStart()
-      setToasts(q => [...q, { id: ++nextId.current, type: 'session', ...data }].slice(-4))
+      setToasts(q => capToasts([...q, { id: ++nextId.current, type: 'session', ...data }]))
     })
 
     // Global-hotkey status flash. Replace any existing flash card so repeated
     // Alt+K presses don't stack — show a fresh snapshot each time.
-    window.kozo?.events?.onStatusOverlay?.(({ cards }) => {
+    on(window.kozo?.events?.onStatusOverlay, ({ cards }) => {
       const list = (cards && cards.length)
         ? cards.map(c => ({ id: ++nextId.current, type: 'status', ...c }))
         : [{ id: ++nextId.current, type: 'status', idle: true, gameName: 'KoZo' }]
-      setToasts(q => [...q.filter(t => t.type !== 'status'), ...list].slice(-4))
+      setToasts(q => capToasts([...q.filter(t => t.type !== 'status'), ...list]))
     })
 
     // Global-hotkey achievement list (Alt+J), read-only. Replaces any existing
     // list toast so repeated presses refresh in place instead of stacking.
-    window.kozo?.events?.onAchListOverlay?.((data) => {
+    on(window.kozo?.events?.onAchListOverlay, (data) => {
       const toast = { id: ++nextId.current, type: 'achList', ...data }
-      setToasts(q => [...q.filter(t => t.type !== 'achList'), toast].slice(-4))
+      setToasts(q => capToasts([...q.filter(t => t.type !== 'achList'), toast]))
     })
 
-    window.kozo?.events?.onAchievementOverlay?.(({ achievements, gameName, artPath, artUrl }) => {
+    on(window.kozo?.events?.onAchievementOverlay, ({ achievements, gameName, artPath, artUrl }) => {
       const list = achievements || []
       if (!list.length) return
       playAchievement()   // one chime per event, even when batched below
@@ -587,27 +648,33 @@ export default function OverlayApp() {
             gameName, artPath, artUrl,
           }]
         : list.map(ach => ({ id: ++nextId.current, ach, gameName, artPath, artUrl }))
-      setToasts(q => [...q, ...newToasts].slice(-4))
+      setToasts(q => capToasts([...q, ...newToasts]))
     })
 
     // XP: level-up celebration + post-session "+N XP" summary.
-    window.kozo?.events?.onXpOverlay?.((data) => {
+    on(window.kozo?.events?.onXpOverlay, (data) => {
       playLevelUp()
-      setToasts(q => [...q, { id: ++nextId.current, type: 'levelup', ...data }].slice(-4))
+      setToasts(q => capToasts([...q, { id: ++nextId.current, type: 'levelup', ...data }]))
     })
-    window.kozo?.events?.onSessionEndOverlay?.((data) => {
-      setToasts(q => [...q, { id: ++nextId.current, type: 'sessionEnd', ...data }].slice(-4))
+    on(window.kozo?.events?.onSessionEndOverlay, (data) => {
+      setToasts(q => capToasts([...q, { id: ++nextId.current, type: 'sessionEnd', ...data }]))
     })
 
     // "New game detected" notification. Skips exes the user said never to ask
     // about again, and never stacks a duplicate for the same exe.
-    window.kozo?.events?.onUnknownGameOverlay?.((data) => {
+    on(window.kozo?.events?.onUnknownGameOverlay, (data) => {
       if (!data?.exe_name) return
       const key = data.exe_name.toLowerCase()
       if (loadDismissed().has(key)) return
       setToasts(q => q.some(t => t.type === 'unknown' && t.exe_name?.toLowerCase() === key)
         ? q
-        : [...q, { id: ++nextId.current, type: 'unknown', ...data }].slice(-4))
+        : capToasts([...q, { id: ++nextId.current, type: 'unknown', ...data }]))
+    })
+
+    // A tracked upcoming game reached its release date.
+    on(window.kozo?.events?.onReleaseOverlay, (data) => {
+      if (!data?.games?.length) return
+      setToasts(q => capToasts([...q, { id: ++nextId.current, type: 'release', ...data }]))
     })
 
     // Tell main both listeners are attached — it flushes any queued messages
@@ -615,16 +682,10 @@ export default function OverlayApp() {
     window.kozo?.api?.overlay?.ready?.()
 
     // Cleanup is essential: without it, React StrictMode's double-mount in dev
-    // registers the IPC listener twice → every event renders TWO toasts.
-    return () => {
-      window.kozo?.events?.removeAll?.('session:overlay')
-      window.kozo?.events?.removeAll?.('achievement:overlay')
-      window.kozo?.events?.removeAll?.('status:overlay')
-      window.kozo?.events?.removeAll?.('achList:overlay')
-      window.kozo?.events?.removeAll?.('xp:overlay')
-      window.kozo?.events?.removeAll?.('sessionEnd:overlay')
-      window.kozo?.events?.removeAll?.('unknownGame:overlay')
-    }
+    // registers the IPC listener twice → every event renders TWO toasts. Each
+    // on* returns an unsubscribe for THAT listener — never removeAll, which is
+    // process-wide and would tear down other components' listeners too.
+    return () => { for (const off of offs) { try { off() } catch {} } }
   }, [])
 
   function dismiss(id) {
@@ -659,6 +720,8 @@ export default function OverlayApp() {
           ? <SessionEndToast key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
           : t.type === 'unknown'
           ? <UnknownGameToast key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
+          : t.type === 'release'
+          ? <ReleaseToast    key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
           : <OverlayToast    key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
       )}
     </div>

@@ -14,8 +14,8 @@
 .logoArea {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 18px 16px 15px;
+  gap: var(--sp-10);
+  padding: var(--sp-16);
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
 }
@@ -24,18 +24,25 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
+  min-width: 0;
 }
 
 .appName {
-  font-size: 17px;
+  font-size: var(--fs-lg);
   font-weight: 500;
   color: var(--text-primary);
-  line-height: 1.2;
+  line-height: var(--lh-tight);
   letter-spacing: -0.02em;
+  /* Whisper of accent on the tail of the wordmark — clip order matters: the
+     `background` shorthand would reset a clip declared before it. No glow. */
+  background: linear-gradient(120deg, var(--text-primary) 45%, var(--text-accent-bright));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .appSub {
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   font-weight: 400;
   color: var(--a);
   text-transform: uppercase;
@@ -46,55 +53,58 @@
 /* ── Nav ────────────────────────────────────────────────────── */
 .nav {
   flex: 1;
-  padding: 10px 8px;
+  padding: var(--sp-10) var(--sp-8);
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: var(--sp-4);
   overflow-y: auto;
-}
-
-.sectionLabel {
-  font-size: 10px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-muted);
-  padding: 8px 8px 4px;
+  transform: translateZ(0);
 }
 
 .navItem {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px 10px;
+  gap: var(--sp-10);
+  padding: var(--sp-8) var(--sp-10);
   border-radius: var(--r-input);
   cursor: pointer;
   color: var(--text-secondary);
-  font-size: 13.5px;
+  font-size: var(--fs-md);
   text-decoration: none;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: var(--t-control);
   position: relative;
+  min-width: 0;
 }
 
 .navItem:hover {
-  background: var(--border-subtle);
+  background: var(--neutral-bg);
   color: var(--text-primary);
 }
 
-.navItemActive {
+/* The :hover leg is load-bearing: .navItem:hover out-specifies .navItemActive,
+   so without it hovering the active item would swap the accent pill for the
+   neutral hover pill. */
+.navItemActive,
+.navItemActive:hover {
   background: var(--ad);
   color: var(--a);
+  /* The one glowing thing per surface: the place you ARE. */
+  box-shadow: var(--glow-1);
 }
 
+/* Accent rail on the active item — the Settings link composes this class so it
+   can never drift back into being a look-alike without the rail. Full item
+   height, flush with the sidebar edge: both .nav and .bottomArea pad sp-8, so
+   -sp-8 lands the rail exactly on the window edge instead of floating 8px in. */
 .navItemActive::before {
   content: '';
   position: absolute;
-  left: 0;
-  top: 4px;
-  bottom: 4px;
+  left: calc(-1 * var(--sp-8));
+  top: 0;
+  bottom: 0;
   width: 2px;
   background: var(--a);
-  border-radius: 0 2px 2px 0;
+  border-radius: 0 var(--r-xs) var(--r-xs) 0;
 }
 
 .navIcon {
@@ -110,28 +120,32 @@
 
 /* ── Bottom area ────────────────────────────────────────────── */
 .bottomArea {
-  padding: 8px 8px 12px;
+  padding: var(--sp-8) var(--sp-8) var(--sp-12);
   border-top: 1px solid var(--border-subtle);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--sp-8);
 }
 
 /* ── Profile chip ───────────────────────────────────────────── */
 .profileChip {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 7px 8px;
+  gap: var(--sp-10);
+  padding: 7px var(--sp-8);
   border-radius: var(--r-input);
   text-decoration: none;
   border: 1px solid var(--border);
   background: var(--surface-2);
-  transition: background 0.12s, border-color 0.12s;
+  transition: var(--t-bg), var(--t-border), box-shadow var(--dur-base) var(--ease);
+  min-width: 0;
 }
-.profileChip:hover { border-color: var(--ab); }
-.profileChipActive { border-color: var(--a); background: var(--ad); }
+/* Crisp edge on hover: border toward the accent, one elevation step. */
+.profileChip:hover { border-color: var(--border-accent-soft); box-shadow: var(--elev-1); }
+/* :hover leg guards against the hover rule out-specifying the active state. */
+.profileChipActive,
+.profileChipActive:hover { border-color: var(--a); background: var(--ad); box-shadow: none; }
 
 .profileAvatar {
   width: 32px;
@@ -145,18 +159,29 @@
   background: linear-gradient(135deg, var(--a), var(--ab));
 }
 .profileAvatar img { width: 100%; height: 100%; object-fit: cover; }
-.profileInitials { font-size: 13px; font-weight: 600; color: #0a0a12; }
+.profileInitials { font-size: var(--fs-md); font-weight: 600; color: var(--accent-ink); }
 
-.profileMeta { min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+/* min-height reserves the three-line (name · level · bar) layout. XP arrives a
+   tick after mount, and without the reservation the chip visibly grew a line —
+   and shoved the Settings link down — on every single mount. */
+.profileMeta {
+  flex: 1;
+  min-width: 0;
+  min-height: 38px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  line-height: var(--lh-snug);
+}
 .profileName {
-  font-size: 13px;
+  font-size: var(--fs-md);
   font-weight: 500;
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.profileLink { font-size: 11px; color: var(--text-muted); }
+.profileLink { font-size: var(--fs-xs); color: var(--text-muted); }
 
 /* Live level + progress on the chip — the XP system's only always-visible
    surface. Levels take tens of hours near the top of the curve, so without
@@ -165,11 +190,18 @@
   display: flex;
   align-items: baseline;
   gap: 5px;
-  font-size: 11px;
-  line-height: 1.2;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-tight);
+  min-width: 0;
 }
 
-.profileLevel { color: var(--a); font-weight: 500; }
+.profileLevel {
+  color: var(--a);
+  font-weight: 500;
+  flex-shrink: 0;
+  /* HUD number: never jitters as the level climbs. */
+  font-variant-numeric: tabular-nums;
+}
 
 .profileTier {
   color: var(--text-muted);
@@ -181,63 +213,51 @@
 .profileXpBar {
   display: block;
   height: 3px;
-  margin-top: 4px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.1);
+  margin-top: var(--sp-4);
+  border-radius: var(--r-xs);
+  background: var(--neutral-bg-hover);
   overflow: hidden;
 }
 
 .profileXpFill {
   display: block;
   height: 100%;
-  border-radius: 2px;
-  background: var(--a);
-  transition: width 0.45s ease;
+  border-radius: var(--r-xs);
+  /* Accent-to-bright gradient so it reads as an XP bar, not a loading bar.
+     Both stops derive from var(--a) — a custom accent re-tints the whole bar. */
+  background: linear-gradient(90deg, var(--a), var(--text-accent-bright));
+  box-shadow: 0 0 8px -2px var(--a);
+  transition: width var(--dur-slower) var(--ease-out);
 }
 .profileChipActive .profileLink { color: var(--a); }
 
-.settingsLink {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: var(--r-input);
-  font-size: 13.5px;
-  color: var(--text-secondary);
-  text-decoration: none;
-  transition: background 0.12s, color 0.12s;
-}
-
-.settingsLink:hover {
-  background: var(--border-subtle);
-  color: var(--text-primary);
-}
-
-.settingsLinkActive {
-  background: var(--ad);
-  color: var(--a);
-}
-
-.settingsLinkActive .navIcon {
-  opacity: 1;
-}
+/* Settings is a nav item that happens to live at the bottom — same padding,
+   same icon size, same active rail. It used to be a near-copy with neither. */
+.settingsLink { composes: navItem; }
+.settingsLinkActive { composes: navItemActive; }
 
 /* ── Now playing card ───────────────────────────────────────── */
+/* The powered-on element of the whole app: a live session gets the accent
+   surface tint plus the (green) live glow. Both are state, not decoration —
+   the AFK variant below strips them, so light literally means life. */
 .nowPlaying {
-  background: var(--surface-2);
+  background: var(--surface-accent);
   border: 1px solid var(--ab);
   border-radius: var(--r-card);
-  padding: 10px 12px;
+  padding: var(--sp-10) var(--sp-12);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--sp-4);
+  min-width: 0;
+  box-shadow: var(--glow-live);
+  transition: var(--t-bg), var(--t-border), box-shadow var(--dur-slow) var(--ease);
 }
 
 .nowPlayingHeader {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 10px;
+  gap: var(--sp-6);
+  font-size: var(--fs-2xs);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -250,16 +270,16 @@
   border-radius: 50%;
   background: var(--status-playing);
   flex-shrink: 0;
-  animation: livePulse 1.4s ease-in-out infinite;
-}
-
-@keyframes livePulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.25; }
+  /* livePulse lives in global.css (four identical copies used to be inlined).
+     The var() indirection is load-bearing: this bundler hashes every bare
+     identifier in an `animation` value, so a plain `livePulse` here compiles to
+     a scoped name with no matching @keyframes — a dot that never pulses. */
+  --pulse-name: livePulse;
+  animation: var(--pulse-name) 1.4s var(--ease) infinite;
 }
 
 .nowPlayingName {
-  font-size: 13px;
+  font-size: var(--fs-md);
   font-weight: 500;
   color: var(--text-primary);
   overflow: hidden;
@@ -268,18 +288,36 @@
 }
 
 .nowPlayingTime {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
   display: flex;
   align-items: center;
-  gap: 8px;
+  /* Wraps rather than overflows: the card's usable width is ~163px, which the
+     elapsed time plus the AFK pill can exceed on their own. */
+  flex-wrap: wrap;
+  gap: var(--sp-4) var(--sp-8);
+  min-width: 0;
+}
+
+/* The number that matters — HUD treatment: bright, tabular, unjittering. */
+.nowPlayingElapsed {
+  flex-shrink: 0;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-accent-bright);
 }
 
 /* ── AFK / Away state ───────────────────────────────────────── */
+/* Powered down, not alarmed: no glow, no tint, muted counter. */
 .nowPlayingIdle {
+  background: var(--surface-2);
   border-color: var(--border);
+  box-shadow: none;
 }
 .nowPlayingIdle .nowPlayingHeader {
+  color: var(--text-muted);
+}
+.nowPlayingIdle .nowPlayingElapsed {
   color: var(--text-muted);
 }
 .liveDotIdle {
@@ -287,86 +325,21 @@
   animation: none;
 }
 .nowPlayingAfk {
-  font-size: 9.5px;
+  flex-shrink: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-2xs);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #fb923c;
-  background: rgba(251,146,60,0.12);
-  border: 1px solid rgba(251,146,60,0.25);
+  /* Neutral, not orange: AFK is "paused", not a warning — variables.css keeps
+     the on-hold hue reserved so two unrelated meanings can't look identical on
+     the same card. */
+  color: var(--neutral);
+  background: var(--neutral-bg);
+  border: 1px solid var(--neutral-border);
   border-radius: var(--r-pill);
   padding: 1px 7px;
-}
-
-/* ── Accent color picker ────────────────────────────────────── */
-.accentSection {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.accentLabel {
-  font-size: 10px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-muted);
-  padding: 0 2px;
-}
-
-.accentDots {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 2px;
-  flex-wrap: wrap;
-}
-
-.dot {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  cursor: pointer;
-  border: 2px solid transparent;
-  transition: transform 0.12s ease, border-color 0.12s ease;
-  flex-shrink: 0;
-}
-
-.dot:hover {
-  transform: scale(1.15);
-}
-
-.dotActive {
-  border-color: rgba(255, 255, 255, 0.6);
-  transform: scale(1.1);
-}
-
-.customColorWrapper {
-  position: relative;
-  width: 18px;
-  height: 18px;
-  flex-shrink: 0;
-}
-
-.customColorSwatch {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  border: 2px solid var(--border);
-  cursor: pointer;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.colorInput {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
-  width: 100%;
-  height: 100%;
-  border: none;
-  padding: 0;
 }

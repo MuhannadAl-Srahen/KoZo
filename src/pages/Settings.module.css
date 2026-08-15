@@ -1,30 +1,17 @@
-.page {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  overflow: hidden;
-}
-
-.header {
-  padding: 14px 24px 12px;
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.title {
-  font-size: 18px;
-  font-weight: 500;
-  color: var(--text-primary);
-  letter-spacing: -0.01em;
-}
+/* Settings is the only page that had its own page chrome: an 18px title where
+   every other page uses 16px/500, and 24px gutters against the app-wide 20px.
+   It now composes the same skeleton as everything else. */
+.page     { composes: page      from '../styles/page.module.css'; }
+.toolbar  { composes: toolbar   from '../styles/page.module.css'; }
+.pageTitle { composes: pageTitle from '../styles/page.module.css'; }
 
 /* ── Layout ── */
 .layout {
   display: flex;
   flex: 1;
   overflow: hidden;
-  padding: 16px 24px 24px;
-  gap: 20px;
+  padding: var(--sp-16) var(--gutter) var(--content-pb);
+  gap: var(--sp-20);
 }
 
 /* ── Sidebar nav ── */
@@ -33,26 +20,42 @@
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding-top: 2px;
+  gap: var(--sp-2);
+  padding-top: var(--sp-2);
 }
 
 .navItem {
-  padding: 8px 12px;
+  position: relative;   /* anchors the active tab's accent rail */
+  padding: var(--sp-8) var(--sp-12);
   border-radius: var(--r-input);
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: var(--text-secondary);
   cursor: pointer;
   text-align: left;
-  transition: background 0.1s, color 0.1s;
+  transition: var(--t-control);
   background: transparent;
 }
 
-.navItem:hover { background: var(--surface-3); color: var(--text-primary); }
+/* :not(.navActive) instead of an !important on the active state — hovering the
+   tab you are already on must not repaint it as a plain hover. */
+.navItem:hover:not(.navActive) { background: var(--surface-3); color: var(--text-primary); }
 
 .navActive {
-  background: var(--ad) !important;
-  color: var(--a) !important;
+  background: var(--ad);
+  color: var(--a);
+}
+
+/* Same accent rail as the sidebar's active nav item (Sidebar.module.css
+   .navItemActive::before) — the two navs read as one system. */
+.navActive::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: var(--sp-4);
+  bottom: var(--sp-4);
+  width: 2px;
+  background: var(--a);
+  border-radius: 0 var(--r-xs) var(--r-xs) 0;
 }
 
 /* ── Panel ── */
@@ -60,133 +63,148 @@
   flex: 1;
   min-width: 0;
   overflow-y: auto;
+  transform: translateZ(0);
 }
 
+/* ONE width for every tab. It used to be 520px — about 30% of a maximised
+   window — and then jumped to 820px on Features alone, so the content edge
+   visibly moved when you switched tabs. */
 .tabContent {
   display: flex;
   flex-direction: column;
-  gap: 24px;
-  max-width: 520px;
+  gap: var(--sp-24);
+  max-width: 1040px;
 }
 
 /* ── Section ── */
 .section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--sp-10);
 }
 
 .sectionHeader {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13.5px;
+  gap: var(--sp-8);
+  font-size: var(--fs-md);
   font-weight: 500;
   color: var(--text-primary);
 }
 
+/* Section icons carry the accent — a quiet wayfinding tint, not a glow. */
+.sectionHeader > svg { color: var(--a); }
+
+.subSection {
+  border-top: 1px solid var(--border-subtle);
+  margin-top: var(--sp-12);
+  padding-top: var(--sp-12);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-10);
+}
+
 .sectionDesc {
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
-  line-height: 1.5;
+  line-height: var(--lh-base);
+  max-width: 76ch;   /* long-form copy stops being readable past ~80 characters */
 }
 
-.link {
+.sectionDescQuiet {
+  composes: sectionDesc;
+  color: var(--text-muted);
+}
+
+.sectionDescItalic {
+  composes: sectionDesc;
+  font-style: italic;
+}
+
+.strong { color: var(--text-primary); font-weight: 500; }
+
+/* A real <button> that reads as a link — the old version was a <span> with an
+   onClick, so it was unreachable by keyboard and invisible to AT. */
+.linkBtn {
+  display: inline;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
   color: var(--a);
+  cursor: pointer;
+  text-align: left;
 }
+.linkBtn:hover { text-decoration: underline; }
 
-/* ── API key input ── */
+/* ── Rows of controls ── */
 .keyRow {
   display: flex;
-  gap: 8px;
+  gap: var(--sp-8);
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .keyInputWrap {
+  composes: inputWrap from '../styles/controls.module.css';
   flex: 1;
-  position: relative;
+  min-width: 220px;
 }
 
 .keyInput {
-  width: 100%;
-  padding: 9px 36px 9px 12px;
-  background: var(--surface-3);
-  border: 1px solid var(--border);
-  border-radius: var(--r-input);
-  color: var(--text-primary);
-  font-size: 13px;
-  font-family: var(--font-mono, monospace);
-  letter-spacing: 0.02em;
-  outline: none;
-  transition: border-color 0.12s;
-  box-sizing: border-box;
+  composes: inputBare inputMono from '../styles/controls.module.css';
 }
 
-.keyInput:focus {
-  border-color: var(--ab);
-}
-
+/* The key itself is monospace so its 32 characters stay countable; the
+   placeholder is not, or it reads as a value rather than a hint. */
 .keyInput::placeholder {
-  color: var(--text-muted);
   font-family: var(--font);
   letter-spacing: 0;
 }
 
 .keyToggle {
-  position: absolute;
-  right: 8px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--text-muted);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  padding: 2px;
-  transition: color 0.1s;
+  composes: btn btnGhost btnIcon btnSm from '../styles/controls.module.css';
+  flex-shrink: 0;
 }
-
-.keyToggle:hover { color: var(--text-secondary); }
 
 .testBtn {
-  padding: 9px 18px;
-  border-radius: var(--r-input);
-  border: 1px solid var(--border);
-  background: var(--surface-3);
-  color: var(--text-secondary);
-  font-size: 13px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: border-color 0.12s, color 0.12s;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  composes: btn btnSecondary btnMd from '../styles/controls.module.css';
 }
 
-.testBtn:hover:not(:disabled) { border-color: var(--ab); color: var(--text-primary); }
-.testBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+.testBtn.testBtn { background: var(--surface-3); }
 
-/* ── Test result ── */
-.testResult {
+/* ── Status line ─────────────────────────────────────────────────────────── */
+/* One strip for every "did it work" message on the page. The variant used to be
+   inferred from an emoji prefix on the message string (bannerMsg.startsWith('❌'))
+   or from its opening word (detectMsg.startsWith('Detected')); it is now a
+   plain {type, text} state object. */
+.statusLine {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 12.5px;
-  padding: 7px 12px;
+  font-size: var(--fs-sm);
+  padding: 7px var(--sp-12);
   border-radius: var(--r-input);
   border: 1px solid transparent;
+  line-height: var(--lh-snug);
 }
 
-.testValid {
-  background: rgba(74,222,128,0.08);
-  border-color: rgba(74,222,128,0.2);
-  color: #4ade80;
+.statusIcon { flex-shrink: 0; }
+
+.statusSuccess { background: var(--success-bg); border-color: var(--success-border); color: var(--success); }
+.statusError   { background: var(--error-bg);   border-color: var(--error-border);   color: var(--error); }
+.statusWarning { background: var(--warning-bg); border-color: var(--warning-border); color: var(--warning); }
+.statusInfo    { background: var(--info-bg);    border-color: var(--info-border);    color: var(--info); }
+.statusNeutral { background: var(--surface-2);  border-color: var(--border);         color: var(--text-secondary); }
+
+.statusStack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
 }
 
-.testInvalid {
-  background: rgba(248,113,113,0.08);
-  border-color: rgba(248,113,113,0.2);
-  color: #f87171;
-}
+.statusDetail { opacity: 0.7; }
+.statusSummary { font-weight: 600; }
 
 /* Steam refuses to serve unlocks (private profile / unreadable ID). Warning
    amber, not error red — achievements still work via the local Steam stats
@@ -195,218 +213,90 @@
   display: flex;
   align-items: flex-start;
   gap: 9px;
-  margin-bottom: 10px;
-  padding: 10px 12px;
+  padding: var(--sp-10) var(--sp-12);
   border-radius: var(--r-input);
-  border: 1px solid rgba(251, 146, 60, 0.35);
-  background: rgba(251, 146, 60, 0.08);
-  color: #fb923c;
-  font-size: 12.5px;
-  line-height: 1.5;
+  border: 1px solid color-mix(in srgb, var(--orange) 35%, transparent);
+  background: color-mix(in srgb, var(--orange) 8%, transparent);
+  color: var(--orange);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-base);
 }
-.privacyBanner strong { color: #fdba74; }
+/* A lighter tint of the same orange so emphasis inside the banner reads without
+   introducing a second hue. */
+.privacyBanner strong { color: color-mix(in srgb, var(--orange) 65%, #fff); }
 
-/* ── Sensitivity ── */
+.privacyIcon { flex-shrink: 0; }
+
+.privacyBanner .keyRow { margin-top: var(--sp-8); }
+
+/* ── Idle / AFK picker ── */
 .sensitivityRow {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-8);
+  flex-wrap: wrap;
 }
 
+/* Segmented control: its ACTIVE state has to outrank its own hover, so the
+   colours stay in this file where the ordering is controllable. */
 .sensitivityBtn {
-  padding: 7px 14px;
-  border-radius: var(--r-input);
-  border: 1px solid var(--border);
+  composes: btn btnMd from '../styles/controls.module.css';
+}
+
+.sensitivityBtn.sensitivityBtn {
+  padding: 7px var(--sp-16);
   background: var(--surface-3);
   color: var(--text-secondary);
-  font-size: 13px;
-  cursor: pointer;
-  transition: border-color 0.12s, color 0.12s, background 0.12s;
+  border-color: var(--border);
 }
 
-.sensitivityBtn:hover { border-color: var(--ab); color: var(--text-primary); }
-
-.sensitivityActive {
-  background: var(--ad) !important;
-  border-color: var(--ab) !important;
-  color: var(--a) !important;
-}
-
-.sensitivityCustom {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: 4px;
-}
-
-.sensitivityInput {
-  width: 56px;
-  padding: 7px 10px;
-  background: var(--surface-3);
-  border: 1px solid var(--border);
-  border-radius: var(--r-input);
+.sensitivityBtn.sensitivityBtn:hover:not(:disabled) {
+  border-color: var(--ab);
   color: var(--text-primary);
-  font-size: 13px;
-  text-align: center;
-  outline: none;
-  transition: border-color 0.12s;
 }
 
-.sensitivityInput:focus { border-color: var(--ab); }
-
-.sensitivityUnit {
-  font-size: 12px;
-  color: var(--text-muted);
+.sensitivityActive.sensitivityActive,
+.sensitivityActive.sensitivityActive:hover:not(:disabled) {
+  background: var(--ad);
+  border-color: var(--border-accent-soft);   /* hairline matches .btnActive */
+  color: var(--a);
 }
 
 /* ── Save row ── */
 .saveRow {
   display: flex;
   justify-content: flex-end;
-  padding-top: 8px;
+  padding-top: var(--sp-8);
   border-top: 1px solid var(--border-subtle);
+}
+
+.saveRowBare {
+  composes: saveRow;
+  border-top: none;
+  padding-top: 0;
 }
 
 .saveBtn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 9px 22px;
-  border-radius: var(--r-input);
-  border: none;
-  background: var(--a);
-  color: #09090f;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: opacity 0.12s, background 0.2s;
+  composes: btn btnPrimary btnMd from '../styles/controls.module.css';
 }
 
-.saveBtn:hover { opacity: 0.88; }
+.saveBtn.saveBtn { padding: 9px var(--sp-24); }
 
-.saveBtnSaved {
-  background: #4ade80 !important;
-  opacity: 1 !important;
+.saveBtnSaved.saveBtnSaved {
+  background: var(--success);
+  color: var(--accent-ink);
 }
 
-/* ── Spinner ── */
-@keyframes spin {
-  to { transform: rotate(360deg); }
+.saveBtnSaved.saveBtnSaved:hover:not(:disabled):not([aria-disabled='true']) {
+  opacity: 1;
 }
 
-.spin {
-  animation: spin 0.7s linear infinite;
-}
-
-/* ── Sync section cards ──────────────────────────────────────── */
-.syncOptions {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 4px 0 6px;
-  padding: 12px 14px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-card);
-}
-
-.syncOption {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-  color: var(--text-primary);
-  cursor: pointer;
-  user-select: none;
-}
-
-.syncOption input[type="checkbox"] {
-  accent-color: var(--a);
-  width: 14px;
-  height: 14px;
-  cursor: pointer;
-}
-
-.syncProgress {
-  margin-top: 4px;
-  padding: 10px 14px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-card);
-}
-
-.syncProgressRow {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  color: var(--text-secondary);
-  margin-bottom: 6px;
-}
-
-.syncProgressBar {
-  height: 4px;
-  background: var(--surface-3);
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.syncProgressFill {
-  height: 100%;
-  background: var(--a);
-  transition: width 0.2s;
-  border-radius: 2px;
-}
-
-.rescanCard {
-  margin-top: 14px;
-  padding: 12px 14px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-card);
-}
-
-.rescanRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.rescanTitle {
-  font-size: 13px;
-  color: var(--text-primary);
-  font-weight: 500;
-}
-
-.rescanDesc {
-  font-size: 11.5px;
-  color: var(--text-secondary);
-  margin-top: 2px;
-  line-height: 1.4;
-}
-
-.rescanInfo {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border-subtle);
-  font-size: 12px;
-  color: var(--text-secondary);
-  line-height: 1.5;
-}
-
-.rescanInfoMuted {
-  color: var(--text-muted);
-  margin-top: 4px;
-  font-size: 11px;
-  word-break: break-all;
-}
-
+/* ── Steam profile card ── */
 .profileCard {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 10px;
-  padding: 10px 12px;
+  gap: var(--sp-12);
+  padding: var(--sp-10) var(--sp-12);
   border-radius: var(--r-card);
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -415,7 +305,7 @@
 .profileAvatar {
   width: 40px;
   height: 40px;
-  border-radius: 6px;
+  border-radius: var(--r-md);
   border: 1px solid var(--border);
   flex-shrink: 0;
 }
@@ -427,70 +317,37 @@
 
 .profileName {
   color: var(--text-primary);
-  font-size: 13.5px;
+  font-size: var(--fs-md);
   font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .profileId {
   color: var(--text-secondary);
-  font-size: 11.5px;
-  margin-top: 2px;
+  font-size: var(--fs-xs);
+  margin-top: var(--sp-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .profileLinkBtn {
-  padding: 6px 8px;
-  border-radius: var(--r-input);
-  border: 1px solid var(--border);
-  background: var(--surface-3);
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: border-color 0.12s, color 0.12s;
-  display: flex;
-  align-items: center;
+  composes: btn btnSecondary btnSm from '../styles/controls.module.css';
 }
 
-.profileLinkBtn:hover {
+.profileLinkBtn.profileLinkBtn { background: var(--surface-3); }
+
+.profileLinkBtn.profileLinkBtn:hover:not(:disabled):not([aria-disabled='true']) {
   border-color: var(--ab);
   color: var(--a);
-}
-
-/* ── Startup feedback ── */
-.startupMsg {
-  font-size: 12px;
-  color: #4ade80;
-  padding: 6px 10px;
-  background: rgba(74,222,128,0.07);
-  border: 1px solid rgba(74,222,128,0.18);
-  border-radius: var(--r-input);
-}
-
-.startupErr {
-  font-size: 12px;
-  color: #f87171;
-  padding: 6px 10px;
-  background: rgba(248,113,113,0.07);
-  border: 1px solid rgba(248,113,113,0.18);
-  border-radius: var(--r-input);
-}
-
-.importWarning {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  font-size: 12px;
-  color: #fbbf24;
-  background: rgba(251,191,36,0.07);
-  border: 1px solid rgba(251,191,36,0.22);
-  border-radius: var(--r-input);
-  padding: 8px 12px;
-  line-height: 1.5;
 }
 
 /* ── Toggle switch ── */
 .toggleList {
   display: flex;
   flex-direction: column;
-  gap: 0;
   border: 1px solid var(--border);
   border-radius: var(--r-card);
   overflow: hidden;
@@ -500,11 +357,11 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 12px 14px;
+  gap: var(--sp-16);
+  padding: var(--sp-12) var(--sp-16);
   background: var(--surface-2);
   cursor: pointer;
-  transition: background 0.1s;
+  transition: var(--t-bg);
 }
 
 .toggleRow + .toggleRow {
@@ -516,32 +373,37 @@
 .toggleInfo { flex: 1; min-width: 0; }
 
 .toggleLabel {
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: var(--text-primary);
   font-weight: 500;
 }
 
 .toggleDesc {
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
-  margin-top: 2px;
+  margin-top: var(--sp-2);
+  line-height: var(--lh-snug);
 }
 
 .toggle {
   flex-shrink: 0;
   width: 38px;
   height: 22px;
-  border-radius: 11px;
+  border-radius: var(--r-pill);
   background: var(--surface-3);
   border: 1px solid var(--border);
   position: relative;
   cursor: pointer;
-  transition: background 0.18s, border-color 0.18s;
+  transition: background var(--dur-slow) var(--ease), border-color var(--dur-slow) var(--ease),
+              box-shadow var(--dur-slow) var(--ease);
 }
 
+/* ON = lit. The soft glow is the "this is live" cue — the one glowing thing in
+   its row, per the light-means-life rule. */
 .toggleOn {
-  background: var(--a) !important;
-  border-color: var(--a) !important;
+  background: var(--a);
+  border-color: var(--a);
+  box-shadow: var(--glow-1);
 }
 
 .toggleThumb {
@@ -552,41 +414,45 @@
   height: 14px;
   border-radius: 50%;
   background: var(--text-secondary);
-  transition: transform 0.18s, background 0.18s;
+  transition: transform var(--dur-slow) var(--ease), background var(--dur-slow) var(--ease);
 }
 
 .toggleOn .toggleThumb {
   transform: translateX(16px);
-  background: #09090f;
+  background: var(--accent-ink);
 }
+
+.toggleBusy { color: var(--text-muted); flex-shrink: 0; }
 
 /* ── Color swatches ── */
 .swatchGrid {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--sp-8);
 }
 
 .swatch {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 10px 14px;
+  gap: var(--sp-6);
+  padding: var(--sp-10) var(--sp-16);
   border-radius: var(--r-card);
   border: 1px solid var(--border);
   background: var(--surface-2);
   cursor: pointer;
-  transition: border-color 0.12s, background 0.12s;
+  transition: var(--t-control);
   position: relative;
   min-width: 72px;
 }
 
-.swatch:hover { border-color: var(--ab); background: var(--surface-3); }
+.swatch:hover:not(.swatchActive) { border-color: var(--ab); background: var(--surface-3); }
 
 .swatchActive {
-  border-color: var(--sw) !important;
-  background: color-mix(in srgb, var(--sw) 10%, var(--surface-2)) !important;
+  border-color: var(--sw);
+  background: color-mix(in srgb, var(--sw) 10%, var(--surface-2));
+  /* The chosen accent is the live one — it glows faintly in its own colour. */
+  box-shadow: 0 0 16px -8px color-mix(in srgb, var(--sw) 55%, transparent);
 }
 
 .swatchDot {
@@ -599,13 +465,13 @@
 
 .swatchCheck {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: var(--sp-8);
+  right: var(--sp-8);
   color: var(--sw);
 }
 
 .swatchLabel {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
   white-space: nowrap;
 }
@@ -613,8 +479,8 @@
 .customColorRow {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 12px;
+  gap: var(--sp-8);
+  margin-top: var(--sp-12);
 }
 
 .customColorPreview {
@@ -626,26 +492,21 @@
 }
 
 .customColorInput {
-  flex: 1;
-  padding: 8px 12px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-input);
-  color: var(--text-primary);
-  font-size: 13px;
-  font-family: var(--font-mono, monospace);
-  outline: none;
-  transition: border-color 0.12s;
+  composes: input inputMono from '../styles/controls.module.css';
 }
 
-.customColorInput:focus { border-color: var(--ab); }
+.customColorInput.customColorInput {
+  flex: 1;
+  max-width: 200px;
+  background: var(--surface-2);
+}
 
 /* ── About tab ── */
 .aboutCard {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 16px;
+  gap: var(--sp-16);
+  padding: var(--sp-16);
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--r-card);
@@ -659,29 +520,29 @@
 .aboutInfo { flex: 1; min-width: 0; }
 
 .aboutName {
-  font-size: 18px;
+  font-size: var(--fs-xl);
   font-weight: 500;
   color: var(--text-primary);
   letter-spacing: -0.01em;
 }
 
 .aboutVersion {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
-  margin-top: 2px;
+  margin-top: var(--sp-2);
 }
 
 .aboutDesc {
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
-  margin-top: 8px;
-  line-height: 1.5;
+  margin-top: var(--sp-8);
+  line-height: var(--lh-base);
+  max-width: 76ch;
 }
 
 .aboutDetails {
   display: flex;
   flex-direction: column;
-  gap: 0;
   border: 1px solid var(--border);
   border-radius: var(--r-card);
   overflow: hidden;
@@ -689,11 +550,11 @@
 
 .aboutDetailRow {
   display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 10px 14px;
+  align-items: baseline;
+  gap: var(--sp-16);
+  padding: var(--sp-10) var(--sp-16);
   background: var(--surface-2);
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
 }
 
 .aboutDetailRow + .aboutDetailRow { border-top: 1px solid var(--border); }
@@ -706,13 +567,13 @@
 
 .aboutDetailVal {
   color: var(--text-primary);
+  min-width: 0;
 }
 
 /* ── Scan PC tab ── */
 .pathList {
   display: flex;
   flex-direction: column;
-  gap: 4px;
   border: 1px solid var(--border);
   border-radius: var(--r-card);
   overflow: hidden;
@@ -722,324 +583,56 @@
 .pathRow {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: var(--sp-8);
+  padding: var(--sp-8) var(--sp-12);
   border-bottom: 1px solid var(--border-subtle);
 }
 
+/* Scan roots are absolute Windows paths and routinely overflow. They truncate
+   here and carry the full path in a title attribute. */
 .pathText {
   flex: 1;
-  font-size: 12px;
+  min-width: 0;
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
 }
 
 .pathRemoveBtn {
-  display: flex;
-  align-items: center;
-  padding: 3px;
-  border-radius: 4px;
-  color: var(--text-muted);
-  cursor: pointer;
+  composes: btn btnGhost btnIcon btnSm from '../styles/controls.module.css';
   flex-shrink: 0;
-  transition: color 0.1s, background 0.1s;
 }
-.pathRemoveBtn:hover { color: #f87171; background: rgba(248,113,113,0.1); }
+
+.pathRemoveBtn.pathRemoveBtn:hover:not(:disabled):not([aria-disabled='true']) {
+  color: var(--error);
+  background: var(--error-bg);
+}
 
 .pathAddBtn {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  font-size: 12.5px;
+  gap: var(--sp-6);
+  padding: var(--sp-8) var(--sp-12);
+  font-size: var(--fs-sm);
   color: var(--a);
   cursor: pointer;
-  transition: background 0.1s;
+  transition: var(--t-bg);
 }
 .pathAddBtn:hover { background: var(--ad); }
 
-.scanToolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.typePills {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-.typePill {
-  padding: 3px 9px;
-  font-size: 11.5px;
-  border-radius: var(--r-pill);
-  border: 1px solid var(--border);
-  background: var(--surface-3);
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: border-color 0.1s, color 0.1s, background 0.1s;
-}
-.typePill:hover { border-color: var(--ab); color: var(--text-primary); }
-.typePillActive { background: var(--ad) !important; border-color: var(--ab) !important; color: var(--a) !important; }
-
-.scanResultList {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--r-card);
-  overflow: hidden;
-  max-height: 400px;
-  overflow-y: auto;
-}
-
-.scanRow {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 9px 12px;
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border-subtle);
-  transition: background 0.1s;
-}
-.scanRow:hover:not(.scanRowDim) { background: var(--surface-3); }
-.scanRowDim { opacity: 0.45; }
-
-.scanInfo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-
-.scanNameInput {
-  font-size: 13px;
-  color: var(--text-primary);
-  background: transparent;
-  border: none;
-  outline: none;
-  width: 100%;
-  font-family: var(--font);
-}
-.scanNameInput:focus { background: var(--surface-3); border-radius: 3px; padding: 0 4px; }
-.scanNameInput:disabled { cursor: default; }
-
-.scanMeta {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.scanPath {
-  font-size: 10.5px;
-  color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 260px;
-}
-
-.scanFooter {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 8px;
-  flex-wrap: wrap;
-}
-
-/* ── Rescan result ── */
-.rescanResult {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 4px;
-  padding: 12px 14px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-card);
-}
-
-.rescanSummary {
-  font-size: 13px;
-  color: var(--text-primary);
-}
-
-.rescanRoots {
-  font-size: 11.5px;
-  color: var(--text-secondary);
-}
-
-.rescanChangeGroup {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.rescanChangeHeader {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.rescanGameRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  padding-left: 4px;
-}
-
-.rescanDot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.rescanDetails {
-  border-top: 1px solid var(--border-subtle);
-  padding-top: 8px;
-}
-
-.rescanDetailsSummary {
-  font-size: 12px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  user-select: none;
-  list-style: none;
-}
-.rescanDetailsSummary:hover { color: var(--text-primary); }
-.rescanDetailsSummary::marker { display: none; }
-
-.rescanGrid {
-  margin-top: 8px;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 4px 12px;
-}
-
-.rescanGridItem {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 11.5px;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* ── Crack tab ── */
-.crackGameList {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--r-card);
-  overflow: hidden;
-}
-
-.crackGameRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 14px;
-  background: var(--surface-2);
-}
-
-.crackGameRow + .crackGameRow { border-top: 1px solid var(--border); }
-
-.crackGameName {
-  flex: 1;
-  font-size: 13px;
-  color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.crackGameNoId {
-  font-size: 11.5px;
-  color: var(--text-muted);
-}
-
-.crackFileList {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--r-card);
-  overflow: hidden;
-}
-
-.crackFileRow {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  background: var(--surface-2);
-}
-
-.crackFileRow + .crackFileRow { border-top: 1px solid var(--border); }
-
-.crackFileSource {
-  flex-shrink: 0;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--a);
-  background: var(--ad);
-  border: 1px solid var(--ab);
-  border-radius: 4px;
-  padding: 2px 7px;
-  white-space: nowrap;
-}
-
-.crackFilePath {
-  font-size: 11px;
-  color: var(--text-secondary);
-  word-break: break-all;
-  line-height: 1.4;
-}
-
-/* ── Game saves (Data tab) ─────────────────────────────────── */
-.savePathRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.savePathCode {
-  flex: 1;
-  min-width: 0;
-  font-size: 11.5px;
-  color: var(--text-secondary);
-  background: var(--surface-3);
-  border: 1px solid var(--border);
-  border-radius: var(--r-input);
-  padding: 7px 10px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: ui-monospace, monospace;
-}
-
+/* ── Game saves (Backups tab) ─────────────────────────────── */
 .saveGameList {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--sp-4);
   max-height: 280px;
   overflow-y: auto;
   /* Contained scroll box — without the margin/border, scrolled rows clipped
      flush against the "Back up all" button and looked shoved underneath it. */
-  margin-top: 10px;
-  padding: 6px;
+  padding: var(--sp-6);
   border: 1px solid var(--border);
   border-radius: var(--r-card);
   background: var(--surface-2);
@@ -1050,15 +643,15 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: var(--sp-10);
   background: var(--surface-3);
   border: 1px solid var(--border);
   border-radius: var(--r-input);
-  padding: 8px 12px;
+  padding: var(--sp-8) var(--sp-12);
 }
 
 .saveGameName {
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1071,63 +664,60 @@
 .saveBackupInfo {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-4);
   flex-shrink: 0;
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   font-weight: 500;
   color: var(--text-secondary);
 }
 .saveBackupDate { color: var(--text-muted); font-weight: 400; }
-.saveBackupNone { color: var(--status-upcoming); opacity: 0.85; }
+.saveBackupNone { color: var(--warning); opacity: 0.85; }
+.saveBackupTick { color: var(--success); }
 
 .saveManageBtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
+  composes: btn btnSecondary btnSm from '../styles/controls.module.css';
   flex-shrink: 0;
-  padding: 5px 10px;
-  border-radius: var(--r-input);
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 11.5px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: border-color 0.12s, color 0.12s, background 0.12s;
 }
 
-.saveManageBtn:hover {
+.saveManageBtn.saveManageBtn:hover:not(:disabled):not([aria-disabled='true']) {
   border-color: var(--ab);
   color: var(--a);
   background: var(--ad);
 }
 
-/* ── Features tab (categorized list) ─────────────────────────────── */
-.featuresTab {
-  max-width: 820px;
+.savePath {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
 }
 
-/* One titled block per category. */
+/* ── Features tab (categorized list) ─────────────────────────────── */
+/* One titled block per category; spacing comes from .tabContent's gap rather
+   than a margin-bottom that used to stack on top of it. */
 .featureGroup {
-  margin-bottom: 22px;
+  display: flex;
+  flex-direction: column;
 }
 
 .featureGroupTitle {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--a);
-  padding-bottom: 8px;
-  margin-bottom: 10px;
+  padding-bottom: var(--sp-8);
+  margin-bottom: var(--sp-10);
   border-bottom: 1px solid var(--border);
 }
 
-/* Two readable columns of feature rows; collapses to one when narrow. */
+/* auto-fit rather than a fixed 2 columns plus a sub-960px breakpoint that could
+   never fire — the window minimum is 960x600. This gives 3 columns at the
+   1040px cap and 2 on a narrow window, with no media query. */
 .featureList {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 9px;
+  contain: layout style;
 }
 
 .featureRow {
@@ -1137,10 +727,10 @@
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--r-card);
-  padding: 12px 13px;
-  transition: border-color 0.15s, background 0.15s;
+  padding: var(--sp-12);
+  transition: var(--t-control);
 }
-.featureRow:hover { border-color: var(--ab); background: var(--surface-3); }
+.featureRow:hover { border-color: var(--border-accent-soft); background: var(--surface-3); }
 
 .featureRowBody {
   display: flex;
@@ -1153,8 +743,11 @@
   flex-shrink: 0;
   width: 36px;
   height: 36px;
-  border-radius: 9px;
-  background: var(--ad);
+  border-radius: var(--r-card);
+  /* --surface-accent, not --ad: with ~23 of these tiles on one screen, the
+     louder translucent tint made everything glow at once. The accent lives in
+     the glyph; the plate stays a quiet tinted surface. */
+  background: var(--surface-accent);
   border: 1px solid var(--ab);
   color: var(--a);
   display: flex;
@@ -1163,17 +756,13 @@
 }
 
 .featureName {
-  font-size: 14px;
+  font-size: var(--fs-base);
   font-weight: 500;
   color: var(--text-primary);
 }
 
 .featureDesc {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
-  line-height: 1.5;
-}
-
-@media (max-width: 720px) {
-  .featureList { grid-template-columns: 1fr; }
+  line-height: var(--lh-base);
 }
