@@ -114,13 +114,18 @@ function flush() {
 }
 
 // Show + force the overlay above whatever currently owns the top of the
-// z-order (borderless-fullscreen games). Set once at creation is not enough —
-// games re-claim topmost, so this is re-asserted on every toast.
+// z-order (borderless-fullscreen games). The full show + topmost re-assert
+// runs ONLY when the window isn't visible yet: each setAlwaysOnTop/showInactive
+// is a SetWindowPos that forces DWM to re-evaluate composition over the game —
+// doing all three on every toast was a visible frame hitch. An already-visible
+// window just needs moveTop to re-win the z-order race within the topmost band.
 function raise() {
   if (!_win || _win.isDestroyed()) return
   try {
-    _win.setAlwaysOnTop(true, 'screen-saver')
-    _win.showInactive()
+    if (!_win.isVisible()) {
+      _win.setAlwaysOnTop(true, 'screen-saver')
+      _win.showInactive()
+    }
     _win.moveTop()
   } catch {}
 }
@@ -147,10 +152,24 @@ let _idleTimer = null
 function scheduleIdleDestroy() {
   clearTimeout(_idleTimer)
   _idleTimer = setTimeout(() => {
-    try {
-      const active = require('./db/queries/sessions').getActiveSessions()
-      if (active.length > 0) { scheduleIdleDestroy(); return }   // in-game: stay warm
-    } catch {}
+    // isSessionActive() also counts games mid-DETECTION (exe seen, no DB row
+    // yet) — the plain DB read destroyed a just-pre-warmed overlay while the
+    // next game sat in its sensitivity window, recreating the toast-time
+    // renderer-spawn hitch the pre-warm exists to prevent.
+    let active = false
+    try { active = require('./services/processWatcher').isSessionActive() } catch {
+      try { active = require('./db/queries/sessions').getActiveSessions().length > 0 } catch {}
+    }
+    if (active) { scheduleIdleDestroy(); return }   // in-game or launching: stay warm
+    if (_win && !_win.isDestroyed() && _win.isVisible()) {
+      // No session and 3 idle minutes since the last toast — this is an empty
+      // overlay the in-session no-hide rule left composited (e.g. the session
+      // ended without its end-toast being dismissed). Every _send resets this
+      // timer, so nothing can still be on screen: hide now, destroy next cycle.
+      _win.hide()
+      scheduleIdleDestroy()
+      return
+    }
     if (_win && !_win.isDestroyed() && !_win.isVisible()) {
       logger.info('overlayWindow: tearing down idle overlay to free memory')
       _win.destroy()   // the closed handler resets state; next toast recreates
@@ -208,8 +227,37 @@ function releaseAchListKeys() {
   try { require('./services/achievementListFlash').markClosed() } catch {}
 }
 
+// Pre-warm entry point for game-launch paths (processWatcher detection,
+// games:launch). Distinct from bare getOrCreate() because a pre-warm must ALSO
+// arm the idle teardown: a launch that never becomes a session (launcher stub
+// dies, Steam dialog dismissed, stale path) sends no toast and therefore never
+// reaches hideOverlay — without the timer the renderer would leak until quit.
+// If a session does start, the timer's isSessionActive() check re-arms instead
+// of destroying, and every _send still cancels it while toasts are live.
+function warm() {
+  getOrCreate()
+  scheduleIdleDestroy()
+}
+
 function hideOverlay() {
-  if (_win && !_win.isDestroyed()) _win.hide()
+  // ALWAYS restore click-through first: the last toast can be dismissed while
+  // re-hovered during its 300ms slide-out (its mouseenter re-asserts
+  // interactive after close() cleared it), and the in-session no-hide below
+  // would then leave an invisible click-swallowing rectangle over the game.
+  // hideOverlay only runs when no toast remains, so click-through is always
+  // the correct state here — a genuine hover re-asserts on the next enter.
+  try { if (_win && !_win.isDestroyed()) _win.setIgnoreMouseEvents(true, { forward: true }) } catch {}
+  // While a game session is running, DON'T actually hide the window: an empty
+  // overlay is fully transparent and click-through (invisible in practice),
+  // but every hide()/show() pair flips DWM's composition mode over the
+  // fullscreen game — the user saw that as a lag spike on every toast. Keeping
+  // it composited for the session means one transition at session start and
+  // one at the end, none per toast. The real hide happens on the first
+  // hideOverlay after the last session ends (the session-end toast's own
+  // dismissal), and the idle teardown then reclaims the renderer as before.
+  let inSession = false
+  try { inSession = require('./services/processWatcher').isSessionActive() } catch {}
+  if (!inSession && _win && !_win.isDestroyed()) _win.hide()
   releaseAchListKeys()
   scheduleIdleDestroy()
 }
@@ -226,4 +274,4 @@ function applyAccent(hex) {
 
 // getWindow lets ipc.js tell the overlay apart from the main window (e.g. to
 // focus the main window when an overlay notification is clicked).
-module.exports = { getOrCreate, getWindow: () => _win, sendAchievements, sendSessionStarted, sendStatusFlash, sendAchievementListFlash, sendAchListControl, sendLevelUp, sendSessionEnded, sendUnknownGame, sendReleaseFlash, hideOverlay, markReady, setInteractive, applyAccent }
+module.exports = { getOrCreate, warm, getWindow: () => _win, sendAchievements, sendSessionStarted, sendStatusFlash, sendAchievementListFlash, sendAchListControl, sendLevelUp, sendSessionEnded, sendUnknownGame, sendReleaseFlash, hideOverlay, markReady, setInteractive, applyAccent }

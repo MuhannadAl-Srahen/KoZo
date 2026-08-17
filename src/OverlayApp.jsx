@@ -73,9 +73,13 @@ function useAutoClose(onDismiss, ms) {
 
 // Props shared by every toast so hovering captures the mouse and the card is
 // fully click-to-dismiss, with a hover-revealed X for an explicit close.
-function toastInteractions(close) {
+// `leaving` gates the capture: a toast re-hovered DURING its 300ms slide-out
+// must not re-take the mouse — close() has already handed clicks back to the
+// game, and with the window staying visible between in-session toasts a stale
+// capture would be an invisible click-swallowing rectangle over the game.
+function toastInteractions(close, leaving = false) {
   return {
-    onMouseEnter: () => setInteractive(true),
+    onMouseEnter: () => { if (!leaving) setInteractive(true) },
     onMouseLeave: () => setInteractive(false),
     onClick: close,
   }
@@ -96,7 +100,7 @@ function SessionToast({ toast, onDismiss }) {
   const { leaving, close } = useAutoClose(onDismiss, 4000)
   return (
     <div className={`${s.toast} ${s.sessionToast} ${leaving ? s.toastOut : s.toastIn}`}
-      {...toastInteractions(close)}>
+      {...toastInteractions(close, leaving)}>
       <CloseButton close={close} />
       <div className={s.toastHeader}>
         <span className={s.liveDot} />
@@ -127,7 +131,7 @@ function StatusToast({ toast, onDismiss }) {
   const pct = total > 0 ? Math.round((unlocked / total) * 100) : 0
   return (
     <div className={`${s.toast} ${s.statusToast} ${leaving ? s.toastOut : s.toastIn}`}
-      {...toastInteractions(close)}>
+      {...toastInteractions(close, leaving)}>
       <CloseButton close={close} />
       <div className={s.toastHeader}>
         <IconClock size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
@@ -248,7 +252,7 @@ function AchListToast({ toast, onDismiss }) {
   }, [remaining.length])
   return (
     <div className={`${s.toast} ${s.achListToast} ${leaving ? s.toastOut : s.toastIn}`}
-      {...toastInteractions(close)}>
+      {...toastInteractions(close, leaving)}>
       <CloseButton close={close} />
       <div className={s.toastHeader}>
         <IconTrophy size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
@@ -328,7 +332,7 @@ function LevelUpToast({ toast, onDismiss }) {
   const { level, tier, totalXp } = toast
   return (
     <div className={`${s.toast} ${s.levelUpToast} ${leaving ? s.toastOut : s.toastIn}`}
-      {...toastInteractions(close)}>
+      {...toastInteractions(close, leaving)}>
       <CloseButton close={close} />
       <div className={s.toastHeader}>
         <IconArrowBigUpLines size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
@@ -358,7 +362,7 @@ function SessionEndToast({ toast, onDismiss }) {
   const { gameName, durationSeconds, gainedXp, toNextLevel } = toast
   return (
     <div className={`${s.toast} ${s.sessionToast} ${leaving ? s.toastOut : s.toastIn}`}
-      {...toastInteractions(close)}>
+      {...toastInteractions(close, leaving)}>
       <CloseButton close={close} />
       <div className={s.toastHeader}>
         <IconSparkles size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
@@ -415,7 +419,7 @@ function OverlayToast({ toast, onDismiss }) {
 
   return (
     <div className={`${s.toast} ${leaving ? s.toastOut : s.toastIn}`}
-      {...toastInteractions(close)}>
+      {...toastInteractions(close, leaving)}>
       <CloseButton close={close} />
       {/* Header bar */}
       <div className={s.toastHeader}>
@@ -503,7 +507,7 @@ function UnknownGameToast({ toast, onDismiss }) {
 
   return (
     <div className={`${s.toast} ${leaving ? s.toastOut : s.toastIn}`}
-      {...toastInteractions(close)}>
+      {...toastInteractions(close, leaving)}>
       <CloseButton close={close} />
       <div className={s.toastHeader}>
         <IconDeviceGamepad2 size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
@@ -540,7 +544,7 @@ function ReleaseToast({ toast, onDismiss }) {
   const one = games.length === 1 ? games[0] : null
   return (
     <div className={`${s.toast} ${s.releaseToast} ${leaving ? s.toastOut : s.toastIn}`}
-      {...toastInteractions(close)}>
+      {...toastInteractions(close, leaving)}>
       <CloseButton close={close} />
       <div className={s.toastHeader}>
         <IconCalendarEvent size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />

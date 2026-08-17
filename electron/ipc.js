@@ -258,6 +258,11 @@ handle('games:launch', async (id) => {
     // Pull the next process scan forward so "Now Playing" lights up in a couple
     // of seconds instead of waiting out the idle poll.
     try { require('./services/processWatcher').nudge() } catch {}
+    // Pre-warm the overlay window while the game is still starting up — its
+    // renderer-process creation at toast time was a frame hitch in-game.
+    // warm() also arms the idle teardown, so a Play that never becomes a
+    // session (stale path, dismissed Steam dialog) can't leak the renderer.
+    try { require('./overlayWindow').warm() } catch {}
     return r
   } finally { launchInFlight.delete(id) }
 })

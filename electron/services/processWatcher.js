@@ -517,6 +517,14 @@ async function tick() {
       if (!detectingGames.has(game.id)) {
         detectingGames.set(game.id, { game_name: game.name, started_at: new Date(now).toISOString() })
         sendToRenderer('session:detected', { gameId: game.id })
+        // Pre-warm the overlay window NOW — one poll after the exe appears,
+        // i.e. while the game is still on its loading screens. Creating the
+        // overlay's renderer process at toast time (session start) was a
+        // visible frame hitch in the running game: a process spawn + bundle
+        // load + GPU surface init on the hot path (§perf invariant).
+        // warm(), not getOrCreate(): it also arms the idle teardown so a
+        // launch that never becomes a session can't leak the renderer.
+        try { require('../overlayWindow').warm() } catch {}
         // Cracked game → attach the live achievement file watcher NOW (~one poll
         // after the exe appears) instead of after the sensitivity window, so an
         // unlock in the opening seconds still surfaces instantly. Idempotent —
