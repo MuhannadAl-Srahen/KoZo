@@ -27,6 +27,10 @@ const logger = require('../logger')
 const SCAN_INTERVAL_MS = 60_000
 let scanTimer = null
 
+// Schema-bootstrap attempts this run: gameId → Set<appid> already tried, so a
+// crack config declaring multiple dead appids can't loop manual_appid writes.
+const bootstrapTried = new Map()
+
 // ── Tiny helpers ─────────────────────────────────────────────────────────────
 
 function safeRead(p) {
@@ -111,18 +115,28 @@ function parseCodexIni(text) {
     if (lower === 'steamachievements' || lower === 'achievements' ||
         lower === 'settings' || lower === 'gamesettings') continue
 
-    // All the different "achieved" field names across emulators
-    const achieved =
-      /^Achieved\s*=\s*1/im.test(body)        ||   // CODEX
-      /^achieved\s*=\s*1/im.test(body)        ||
-      /^achieved\s*=\s*true/im.test(body)     ||   // online-fix
-      /^HaveAchieved\s*=\s*1/im.test(body)    ||   // SSE INI
-      /^Unlocked\s*=\s*1/im.test(body)        ||   // Skidrow alt
-      /^State\s*=\s*0101/im.test(body)        ||   // ALI213 hex state
-      /^State\s*=\s*1/im.test(body)           ||   // Generic
-      /^earned\s*=\s*1/im.test(body)          ||   // EMPRESS alt
-      /^CurProgress\s*=\s*1/im.test(body)     ||   // RUNE
-      /^AchievementState\s*=\s*1/im.test(body)     // RUNE alt
+    // An EXPLICIT boolean key decides alone when present — the fallback
+    // heuristics below must never override "Achieved=0". Without this, a
+    // section like [ACH_KILL_100] Achieved=0 / CurProgress=12 fabricated a
+    // permanent unlock (with a toast and XP) the moment a progress counter's
+    // value merely STARTED with a 1 — the old patterns were unanchored, so
+    // CurProgress=1, 12, 150, 1000 all "matched".
+    // Trailing content after the value (a hand-added ` ; comment`) is allowed,
+    // but only across a whitespace boundary — `Achieved=10` still reads as the
+    // value "10" (locked), never as "1" plus junk.
+    const explicit = body.match(/^(Achieved|HaveAchieved|Unlocked|earned)\s*=\s*(\S+)(?:\s.*)?$/im)
+    let achieved
+    if (explicit) {
+      achieved = /^(1|true)$/i.test(explicit[2])
+    } else {
+      // No explicit flag — heuristics for emulators that only write a state
+      // value, every pattern anchored to the EXACT value.
+      achieved =
+        /^State\s*=\s*0101(?:\s.*)?$/im.test(body)            ||   // ALI213 hex state
+        /^State\s*=\s*1(?:\s.*)?$/im.test(body)               ||   // Generic
+        /^CurProgress\s*=\s*1(?:\s.*)?$/im.test(body)         ||   // RUNE (boolean progress)
+        /^AchievementState\s*=\s*1(?:\s.*)?$/im.test(body)         // RUNE alt
+    }
 
     if (!achieved) continue
 
@@ -191,7 +205,10 @@ function myDocsDir() {
     const { execSync } = require('child_process')
     const reg = execSync(
       'reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\User Shell Folders" /v Personal',
-      { encoding: 'utf8', stdio: 'pipe' }
+      // timeout: this now also runs on the startup path (main.js cache warm) —
+      // a reg.exe hung by an AV interlock must fall through to the Documents
+      // default, never freeze boot.
+      { encoding: 'utf8', stdio: 'pipe', timeout: 3000 }
     )
     const m = reg.match(/Personal\s+REG_EXPAND_SZ\s+(.+)/i)
     if (m) _myDocs = m[1].trim().replace(/%USERPROFILE%/i, home)
@@ -824,10 +841,36 @@ async function scanGameForCrackAchievements(gameId, opts = {}) {
   }
 
   // Map api_name → local achievement row
-  const localAchs = achievementsQ.listAchievementsForGame(gameId)
+  let localAchs = achievementsQ.listAchievementsForGame(gameId)
   if (localAchs.length === 0) {
-    // Unlocks parsed but no schema to match them against — without this the
-    // unlocks vanish silently (the #1 confusing failure for cracked games).
+    // Unlocks parsed but no schema to match them against. Before giving up,
+    // try to BOOTSTRAP the schema from an appid the crack itself declares
+    // (a config-appid candidate hit, or the emu config on disk). The old flow
+    // only persisted a working appid after added > 0 — which needs the schema,
+    // which needs the appid: a cycle no number of scans could ever break, so
+    // a game whose stored appid was null stayed at "0 unlocks" forever while
+    // its unlock file parsed fine on every pass.
+    const bootAppid = hits.find(h => h.appid)?.appid
+      || (readEmuConfigAppIds(game.install_path)[0] ?? null)
+    // One attempt per appid per app run: an emu config declaring TWO appids
+    // where neither yields a schema would otherwise ping-pong manual_appid
+    // between them on every scan (a pointless DB write per poll, forever).
+    const tried = bootstrapTried.get(gameId) || new Set()
+    if (bootAppid && !game.steam_app_id && Number(game.manual_appid || 0) !== Number(bootAppid)
+        && !tried.has(Number(bootAppid))) {
+      try {
+        tried.add(Number(bootAppid))
+        bootstrapTried.set(gameId, tried)
+        gamesQ.updateGame(gameId, { manual_appid: Number(bootAppid) })
+        logger.info(`crackWatcher: bootstrapping schema for "${game.name}" from crack-declared appid ${bootAppid}`)
+        await require('./achievementSync').ensureSchema(gameId).catch(() => {})
+        localAchs = achievementsQ.listAchievementsForGame(gameId)
+      } catch {}
+    }
+  }
+  if (localAchs.length === 0) {
+    // Still nothing — without this warning the unlocks vanish silently (the
+    // #1 confusing failure for cracked games).
     logger.warn(`crackWatcher: ${allUnlocks.length} unlocks parsed for "${game.name}" but no achievement schema — check the appid, add a Steam API key, or make your Steam profile public`)
     return { added: 0, hits, scannedPaths, candidatesTried: unique.length, schemaMissing: true }
   }
@@ -846,9 +889,15 @@ async function scanGameForCrackAchievements(gameId, opts = {}) {
     if (!u.name) continue
     const ach = nameToAch[u.name.toUpperCase()]
     if (!ach || alreadyUnlocked.has(ach.id)) continue
+    // Timestamp honesty: "now" is only true on LIVE passes (the chokidar watch
+    // and the in-session safety poll — the file was just written). Catch-up
+    // passes (on add, startup sweep, manual scan) can be importing months-old
+    // unlocks from formats that carry no time key; stamping those "now" made
+    // a long-played game's whole history read as unlocked Today. Store NULL
+    // instead, exactly like the Steam path does for unlocktime 0.
     const ts = u.unlocktime > 0
       ? new Date(u.unlocktime * 1000).toISOString()
-      : new Date().toISOString()
+      : (opts.catchUp ? null : new Date().toISOString())
     try {
       // addUnlock is INSERT OR IGNORE — a row that already existed reports 0
       // inserted, and must not produce a toast or an XP award.
@@ -1005,7 +1054,7 @@ async function scanAllCrackedGames() {
   let totalAdded = 0
   const perGame  = []
   for (const g of games) {
-    const r = await scanGameForCrackAchievements(g.id)
+    const r = await scanGameForCrackAchievements(g.id, { catchUp: true })
     perGame.push({ gameId: g.id, name: g.name, added: r.added, sources: r.hits.map(h => h.source) })
     totalAdded += r.added
   }
@@ -1287,7 +1336,7 @@ module.exports = {
   startWatching, stopWatching,
   scanGameForCrackAchievements, scanAllCrackedGames, scanActiveSessions,
   watchGame, unwatchGame,
-  buildCandidates, readEmuConfigAppIds, detectEmulator, diagnoseGame,
+  buildCandidates, readEmuConfigAppIds, detectEmulator, diagnoseGame, myDocsDir,
   inspectGoldberg, enableGoldbergAchievements, deepScanForAppIds, collectCandidates,
   // Pure parsers — exported for the standalone test script (scripts/test-parsers.js)
   parseGoldbergJson, parseCodexIni, parseSseBinary,

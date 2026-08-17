@@ -94,11 +94,19 @@ handle('games:add', async (data) => {
         broadcast('game:updated', game.id)
       } catch {}
     })
-  } else if (!game?.is_cracked) {
-    // No Steam appid (Xbox/Epic/manual) → auto-resolve by name and import the
-    // achievement LIST so it appears automatically, no App ID typing needed.
-    const { autoImportSchemaByName } = require('./services/achievementSync')
-    setImmediate(() => autoImportSchemaByName(game.id).catch(() => {}))
+  } else {
+    // No Steam appid → auto-resolve by name and import the achievement LIST so
+    // it appears automatically, no App ID typing needed. This includes CRACKED
+    // adds: a cracked game added without picking a Steam match used to fall
+    // through both branches — no schema, no manual_appid — so its emulator's
+    // unlock file parsed on every scan and every unlock was dropped as
+    // schemaMissing, forever. After the name-match lands, run the same crack
+    // unlock import the appid path gets.
+    const { autoImportSchemaByName, fetchAndStoreAchievements: fetchAndStore } = require('./services/achievementSync')
+    setImmediate(async () => {
+      await autoImportSchemaByName(game.id).catch(() => {})
+      if (game?.is_cracked) await fetchAndStore(game.id).catch(() => {})
+    })
   }
 
   bk()
@@ -859,7 +867,11 @@ handle('steam:refresh', async (gameId) => {
     playerSync = await syncPlayerUnlocks(gameId).catch(() => ({ added: 0 }))
   }
 
-  const crackScan = await scanGameForCrackAchievements(gameId, { fresh: true })
+  // Same mid-session gate as crack:scanGame below: GameDetail auto-fires this
+  // on page open, and `fresh` alone would force the install-tree walk while the
+  // game streams off the same disk.
+  const walkOk = (() => { try { return !require('./services/processWatcher').isSessionActive() } catch { return true } })()
+  const crackScan = await scanGameForCrackAchievements(gameId, { fresh: true, allowWalk: walkOk, catchUp: true })
     .catch(() => ({ added: 0, hits: [], scannedPaths: [] }))
 
   return {
@@ -876,8 +888,14 @@ handle('steam:refresh', async (gameId) => {
 handle('crack:scanGame', async (gameId) => {
   const { scanGameForCrackAchievements } = require('./services/crackWatcher')
   // Manual check from the UI — bypass the failed-schema-fetch backoff AND the
-  // poll's cached directory walk.
-  return scanGameForCrackAchievements(gameId, { forceSchema: true, fresh: true })
+  // poll's cached directory walk. BUT: GameDetail auto-fires this on page open,
+  // and `fresh` alone forced a synchronous install-tree readdirSync walk even
+  // mid-session (blocking the main process while the game streams off the same
+  // disk). allowWalk gates the walk on no-session; fixed candidate paths + the
+  // live watcher fully cover in-session unlocks. catchUp: found unlocks may be
+  // old — timestamp-less ones store NULL, not a fake "today".
+  const inSession = (() => { try { return require('./services/processWatcher').isSessionActive() } catch { return false } })()
+  return scanGameForCrackAchievements(gameId, { forceSchema: true, fresh: true, allowWalk: !inSession, catchUp: true })
 })
 handle('crack:scanAll', async () => {
   const { scanAllCrackedGames } = require('./services/crackWatcher')

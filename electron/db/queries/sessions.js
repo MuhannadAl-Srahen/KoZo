@@ -107,7 +107,14 @@ function resumeOrStartSession(gameId) {
     // duration from the raw timestamps, so the caller has to carry the exclusion
     // forward — otherwise a merge silently re-credits time spent away.
     const rawSpanSec = Math.max(0, Math.floor((new Date(recent.ended_at) - new Date(recent.started_at)) / 1000))
-    const prevExcluded = Math.max(0, rawSpanSec - (recent.duration_seconds || 0))
+    // The gap between the previous leg's end and this reopen is NOT playtime
+    // either: the session only ended because KoZo confirmed the exe was gone
+    // (scan miss or real quit), so the gap is by definition time the game
+    // wasn't running. Same accounting resolveOrphanSessions applies to the
+    // KoZo-was-off gap. Without this, every quick quit-and-relaunch silently
+    // re-credited up to 3 minutes of confirmed-closed time.
+    const gapSec = Math.max(0, Math.floor((Date.now() - new Date(recent.ended_at).getTime()) / 1000))
+    const prevExcluded = Math.max(0, rawSpanSec - (recent.duration_seconds || 0)) + gapSec
     // Reverse the playtime credit then reopen the row so duration accumulates naturally.
     db.prepare(`UPDATE games SET total_playtime_seconds = MAX(0, total_playtime_seconds - ?) WHERE id = ?`)
       .run(recent.duration_seconds || 0, gameId)

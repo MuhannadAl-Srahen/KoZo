@@ -13,6 +13,27 @@ function broadcastToRenderers(channel, payload) {
   } catch {}
 }
 
+// Per-game notification silencing for bulk imports (add / scan). This used to
+// be a single global boolean saved-and-restored around each import — with
+// scanner:addGames scheduling N concurrent imports, the interleaved restores
+// left the flag stuck ON (~(N-1)/N odds) and every future unlock toast in the
+// process was silently dropped until restart. A Map<gameId, refcount> can't
+// get stuck (finally always balances its own increment) and no longer silences
+// live unlocks for an UNRELATED game you're playing while an add imports.
+const _silencedGames = new Map()
+function silenceGame(gameId) {
+  _silencedGames.set(gameId, (_silencedGames.get(gameId) || 0) + 1)
+}
+function unsilenceGame(gameId) {
+  const n = (_silencedGames.get(gameId) || 0) - 1
+  if (n > 0) _silencedGames.set(gameId, n)
+  else _silencedGames.delete(gameId)
+}
+function isSilenced(gameId) {
+  // Legacy escape hatch: a few external bulk paths still set the global.
+  return _silencedGames.has(gameId) || !!global.__kozoSilenceAchNotify
+}
+
 // One shared "new unlocks landed" pipeline: backup flag, renderer broadcasts,
 // overlay toast, OS notification (no-op), XP check. Every unlock source (Steam
 // Web API, crack files, local Steam stats) funnels through this so behavior
@@ -21,7 +42,7 @@ function emitNewUnlocks(game, newUnlocks) {
   if (!game || !newUnlocks?.length) return
   try { require('./autoBackup').markDirty() } catch {}
   broadcastToRenderers('game:updated', game.id)
-  if (global.__kozoSilenceAchNotify) return
+  if (isSilenced(game.id)) return
   // Game cover for the overlay toasts. Some callers pass a partial game object —
   // look the art up from the DB when the fields aren't present.
   let artPath = game.banner_local_path ?? null
@@ -437,19 +458,21 @@ async function fetchAndStoreAchievements(gameId) {
     // dozens of unlocks and we don't want a toast storm just for adding it.
     const { getDb } = require('../db/database')
     const game = getDb().prepare('SELECT * FROM games WHERE id = ?').get(gameId)
-    const prevSilent = global.__kozoSilenceAchNotify
-    global.__kozoSilenceAchNotify = true
+    // Silence THIS game's import only (per-game refcount — see _silencedGames):
+    // concurrent adds can't corrupt each other, and a live unlock for a game
+    // currently being played still toasts.
+    silenceGame(gameId)
     try {
       if (game?.is_cracked) {
         const { scanGameForCrackAchievements } = require('./crackWatcher')
-        const r = await scanGameForCrackAchievements(gameId).catch(() => ({ added: 0 }))
+        const r = await scanGameForCrackAchievements(gameId, { catchUp: true }).catch(() => ({ added: 0 }))
         if (r?.added) logger.info(`achievementSync: imported ${r.added} crack unlock(s) on add for game ${gameId}`)
       } else {
         const r = await syncPlayerUnlocks(gameId).catch(() => ({ added: 0 }))
         if (r?.added) logger.info(`achievementSync: imported ${r.added} Steam unlock(s) on add for game ${gameId}`)
       }
     } finally {
-      global.__kozoSilenceAchNotify = prevSilent
+      unsilenceGame(gameId)
     }
 
     broadcastToRenderers('game:updated', gameId)

@@ -138,6 +138,10 @@ const activeSessions  = new Map()
 // poll after launch instead of waiting the full sensitivity delay.
 const detectingGames  = new Map()
 
+// exe_name collisions (two library rows sharing "game.exe") are warned once
+// per exe per app run, not once per 5s tick.
+const exeConflictWarned = new Set()
+
 // ── Unknown process detection (game not in library) ──────────────────────────
 // exe_name → { count, firstSeen }
 const unknownExeBuffer = new Map()
@@ -258,7 +262,13 @@ async function getProcessPathsBatch(exeNames) {
         pathCache.set(key, item.Path)
       }
     }
-  } catch {}
+  } catch {
+    // Distinguish "lookup FAILED" (timeout, AV interference, truncated output)
+    // from "these processes have no path": the caller must not treat a failed
+    // batch as an authoritative no-path answer, or a transient hiccup
+    // permanently blacklists a real game from unknown-exe detection.
+    return null
+  }
   return results
 }
 
@@ -499,6 +509,23 @@ async function tick() {
   const sensitivityMs   = sensitivitySecs * 1000
 
   // ── Track registered games ─────────────────────────────────────────────────
+  // exe_name has no UNIQUE constraint, and repacks love generic names
+  // ("game.exe", "start.exe") — two library rows sharing an exe would BOTH
+  // match one running process and each log a full parallel session (double
+  // playtime, two Now Playing cards). First game to claim an exe this tick —
+  // or the one already mid-session/mid-detection with it — owns it.
+  const exeClaimedBy = new Map()   // exeLower → gameId
+  for (const [gid, sess] of activeSessions) {
+    const e = (sess.exe_name || '').toLowerCase()
+    if (e && !exeClaimedBy.has(e)) exeClaimedBy.set(e, gid)
+  }
+  for (const game of games) {
+    if (detectingGames.has(game.id)) {
+      const e = (game.exe_name || '').toLowerCase()
+      if (e && !exeClaimedBy.has(e)) exeClaimedBy.set(e, game.id)
+    }
+  }
+
   for (const game of games) {
     const exeLower   = (game.exe_name || '').toLowerCase()
     if (!exeLower) continue   // defensive — empty exe must not match every empty process name
@@ -506,6 +533,15 @@ async function tick() {
     const hasSession = activeSessions.has(game.id)
 
     if (isRunning && !hasSession) {
+      const owner = exeClaimedBy.get(exeLower)
+      if (owner != null && owner !== game.id) {
+        if (!exeConflictWarned.has(exeLower)) {
+          exeConflictWarned.add(exeLower)
+          logger.warn(`Two library games share exe "${exeLower}" — sessions are credited to game ${owner} only`)
+        }
+        continue
+      }
+      exeClaimedBy.set(exeLower, game.id)
       const buf = detectionBuffer.get(game.id) || { ticks: 0, firstSeen: now }
       buf.ticks++
       detectionBuffer.set(game.id, buf)
@@ -649,30 +685,39 @@ async function tick() {
 
   // Check candidate paths via ONE batched PowerShell call (never one spawn per
   // exe — see getProcessPathsBatch). Deferred entirely while a session is
-  // active: this is background bookkeeping, not detection of the game already
-  // playing, so it can wait for the next idle full scan rather than spawn a
-  // process on top of a running game (perf invariant — nothing on the hot
-  // in-session cadence may spawn a process). Left-alone candidates simply stay
-  // in unknownExeBuffer and get re-evaluated once the session ends.
-  if (candidates.length && activeSessions.size === 0) {
+  // active OR a launch is mid-detection: this is background bookkeeping, not
+  // detection of the game already playing, so it can wait for the next idle
+  // full scan rather than spawn a process on top of a launching/running game
+  // (perf invariant — nothing on the hot in-session cadence may spawn a
+  // process; isSessionActive() counts detectingGames too, because a launch is
+  // exactly when the machine is busiest). Left-alone candidates simply stay in
+  // unknownExeBuffer and get re-evaluated once the session ends.
+  if (candidates.length && !isSessionActive()) {
     const pathsByName = await getProcessPathsBatch(candidates.map(p => p.name || ''))
-    for (const proc of candidates) {
-      const name = (proc.name || '').toLowerCase()
-      evaluatedExes.add(name)
-      unknownExeBuffer.delete(name)
+    // null = the batch lookup itself FAILED (PowerShell timeout, AV block,
+    // truncated JSON) — not "these processes have no path". Marking the exes
+    // evaluated on that would permanently blacklist a real game from
+    // unknown-game detection (persisted across restarts). Leave everything
+    // buffered and try again on the next idle scan instead.
+    if (pathsByName !== null) {
+      for (const proc of candidates) {
+        const name = (proc.name || '').toLowerCase()
+        evaluatedExes.add(name)
+        unknownExeBuffer.delete(name)
 
-      const exePath = pathsByName.get(name) || null
-      if (looksLikeGamePath(exePath)) {
-        logger.info(`Unknown game detected: ${proc.name} @ ${exePath}`)
-        emitter.emit('unknownProcess', {
-          exe_name: proc.name || name,
-          install_path: exePath ? exePath.replace(/\\[^\\]+$/, '') : null,
-        })
-      } else {
-        logger.debug(`Rejected as non-game: ${proc.name} @ ${exePath || '(no path)'}`)
+        const exePath = pathsByName.get(name) || null
+        if (looksLikeGamePath(exePath)) {
+          logger.info(`Unknown game detected: ${proc.name} @ ${exePath}`)
+          emitter.emit('unknownProcess', {
+            exe_name: proc.name || name,
+            install_path: exePath ? exePath.replace(/\\[^\\]+$/, '') : null,
+          })
+        } else {
+          logger.debug(`Rejected as non-game: ${proc.name} @ ${exePath || '(no path)'}`)
+        }
       }
+      scheduleSaveEvaluatedExes()
     }
-    scheduleSaveEvaluatedExes()
   }
 
   // Clean up buffer for processes that stopped running
@@ -838,12 +883,25 @@ const POLL_IDLE_MS = 20000
 const FULL_SCAN_EVERY_TICKS = 12
 let ticksSinceFullScan = 0
 
+// Generation token for the poll chain. nudge() can land while a tick callback
+// is IN FLIGHT (its timer has already fired, so clearTimeout is a no-op on the
+// stale handle) — without the token, the in-flight callback's trailing
+// reschedule and the nudge's timer would each spawn a self-perpetuating chain,
+// permanently doubling every poll (and its fastlist.exe spawns). Whoever bumps
+// the token owns the chain; a superseded callback neither ticks nor
+// reschedules, and a superseded in-flight callback's trailing reschedule is
+// skipped so it can't clobber the nudge's pending bring-forward timer.
+let tickGen = 0
+
 function scheduleNextTick() {
   // Fast cadence while a session is live OR a launch is mid-confirmation
   // (detectingGames non-empty) — a just-launched game still gets checked at
   // 5s so its session starts on time even though full idle scans back off.
   const delay = (activeSessions.size > 0 || detectingGames.size > 0) ? POLL_MS : POLL_IDLE_MS
+  const gen = ++tickGen
+  clearTimeout(pollTimer)
   pollTimer = setTimeout(async () => {
+    if (gen !== tickGen) return   // superseded by a nudge or a newer schedule
     try {
       const useLight = activeSessions.size > 0 && ticksSinceFullScan < FULL_SCAN_EVERY_TICKS - 1
       if (useLight) {
@@ -861,7 +919,7 @@ function scheduleNextTick() {
     // those paths used to leave idle jobs queued forever. A Map size check, so
     // it costs nothing on the in-session cadence.
     if (deferredJobs.size && !isSessionActive()) emitter.emit('idle')
-    scheduleNextTick()
+    if (gen === tickGen) scheduleNextTick()
   }, delay)
 }
 
@@ -870,14 +928,16 @@ function scheduleNextTick() {
 // before "Now Playing" lights up, which reads as the app not noticing.
 function nudge() {
   if (!pollTimer || paused) return
+  const gen = ++tickGen   // supersede whatever is pending OR in flight
   clearTimeout(pollTimer)
   pollTimer = setTimeout(async () => {
+    if (gen !== tickGen) return
     // This IS the full scan, so the counter restarts here — leaving it high made
     // the next scheduled tick spawn fastlist.exe again seconds later, right while
     // the freshly-launched game is loading.
     ticksSinceFullScan = 0
     try { await tick() } catch (err) { logger.error('processWatcher nudge error', { message: err.message }) }
-    scheduleNextTick()
+    if (gen === tickGen) scheduleNextTick()
   }, 2000)
 }
 

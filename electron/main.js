@@ -200,6 +200,15 @@ app.whenReady().then(() => {
   createWindow()
 
   const watcher = require('./services/processWatcher')
+
+  // Warm the two memoized exec-based lookups (Steam path via reg query, the
+  // Documents dir) BEFORE the watcher can need them: when KoZo starts while a
+  // game is already running, resolveOrphanSessions/first tick would otherwise
+  // pay their cold execSync reg-query spawns mid-gameplay — the one window the
+  // perf invariant exists to protect. One spawn each at app boot is fine.
+  try { require('./services/steamStatsWatcher').getSteamPath?.() } catch {}
+  try { require('./services/crackWatcher').myDocsDir?.() } catch {}
+
   watcher.start()
 
   // The overlay window is created lazily on the first session-start / achievement
@@ -241,9 +250,13 @@ app.whenReady().then(() => {
   require('./services/autoBackup').startPeriodic()
 
   // Silently fill in any missing game genres in the background — no button,
-  // no progress UI. Delayed so it doesn't compete with startup work.
+  // no progress UI. Delayed AND idle-gated like every other background job:
+  // its per-row store fetches + synchronous DB writes must not run while a
+  // game is playing (KoZo is often autostarted alongside one).
   setTimeout(() => {
-    require('./services/steamApi').runGenreBackfill().catch(() => {})
+    watcher.runWhenIdle('genreBackfill', () => {
+      require('./services/steamApi').runGenreBackfill().catch(() => {})
+    })
   }, 8000)
 
   // Automatic achievement catch-up on startup, so unlocks earned while KoZo was

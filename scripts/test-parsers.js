@@ -99,6 +99,22 @@ console.log('\nparseCodexIni')
   check('online-fix achieved=true + timestamp=', r5.length === 1 && r5[0].name === 'TROPHY_10' && r5[0].unlocktime === 1782324898)
   check('online-fix achieved=false excluded', !r5.some(u => u.name === 'TROPHY_1'))
 
+  // Explicit boolean key must decide ALONE — a progress counter whose value
+  // merely starts with "1" (CurProgress=12) must never fabricate an unlock.
+  const progress = '[ACH_KILL_100]\nAchieved=0\nCurProgress=12\n\n[ACH_BIG]\nCurProgress=150\n'
+  const r6 = cw.parseCodexIni(progress)
+  check('Achieved=0 + CurProgress=12 excluded', !r6.some(u => u.name === 'ACH_KILL_100'))
+  check('bare CurProgress=150 excluded', !r6.some(u => u.name === 'ACH_BIG'))
+
+  // Trailing content after the value across a whitespace boundary is tolerated
+  // (hand-edited "; comment"); a longer VALUE is never split ("Achieved=10" ≠ "1").
+  const trail = '[ACH_T1]\nAchieved=1 ; comment\n\n[ACH_T2]\nAchieved=10\n\n[ACH_T3]\nState=0101 (done)\n\n[ACH_T4]\nState=01011\n'
+  const r7 = cw.parseCodexIni(trail)
+  check('trailing comment after Achieved=1 accepted', r7.some(u => u.name === 'ACH_T1'))
+  check('Achieved=10 excluded (value is "10", not "1")', !r7.some(u => u.name === 'ACH_T2'))
+  check('State=0101 with trailing note accepted', r7.some(u => u.name === 'ACH_T3'))
+  check('State=01011 excluded', !r7.some(u => u.name === 'ACH_T4'))
+
   check('empty text → []', cw.parseCodexIni('').length === 0)
 }
 
@@ -145,7 +161,10 @@ console.log('\nbuildCandidates')
   const paths = cands.map(c => c.path.toLowerCase())
   const has = frag => paths.some(p => p.includes(frag.toLowerCase()))
   check('Goldberg AppData path', has(path.join('Goldberg SteamEmu Saves', '480', 'achievements.json')))
-  check('install-relative steam_settings (unzipped games)', has(path.join('C:\\FakeGame', 'steam_settings', 'achievements.json')))
+  // steam_settings\achievements.json is deliberately NOT a candidate: it is the
+  // achievement DEFINITIONS file (the one "Enable achievement tracking" writes),
+  // never a save file — treating it as one imported the whole list as unlocked.
+  check('install-relative steam_settings excluded (definitions, not saves)', !has(path.join('C:\\FakeGame', 'steam_settings', 'achievements.json')))
   check('install-relative CODEX ini', has(path.join('C:\\FakeGame', 'achievements.ini')))
   check('CODEX/EMPRESS keyed by appid somewhere', has(path.join('480', 'achievements.ini')))
   check('SSE stats.bin candidate', has('stats.bin'))

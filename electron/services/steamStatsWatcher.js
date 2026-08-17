@@ -31,7 +31,9 @@ function getSteamPath() {
   const { execSync } = require('child_process')
   const tryReg = (cmd, valueName) => {
     try {
-      const out = execSync(cmd, { encoding: 'utf8', stdio: 'pipe' })
+      // timeout: this also runs on the startup path (main.js cache warm) — a
+      // hung reg.exe must fail this probe, never freeze boot.
+      const out = execSync(cmd, { encoding: 'utf8', stdio: 'pipe', timeout: 3000 })
       const m = out.match(new RegExp(`${valueName}\\s+REG_SZ\\s+(.+)`, 'i'))
       if (m) {
         const p = m[1].trim().replace(/\//g, '\\')

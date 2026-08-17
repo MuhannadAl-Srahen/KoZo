@@ -38,6 +38,14 @@ function flashTime(sec) {
 // game underneath stays clickable everywhere except over a toast.
 const setInteractive = (v) => { try { window.kozo?.api?.overlay?.setInteractive?.(v) } catch {} }
 
+// Window-level click capture is ONE flag shared by every toast, so releases
+// must be ownership-aware: which toast (by a private per-mount id) the cursor
+// is currently over. Without this, a background toast's auto-close dropped the
+// capture while the cursor sat on ANOTHER live toast — the next click fell
+// straight through into the game.
+let hoverSeq = 0
+let hoveredToastId = null
+
 // Shared dismiss-with-animation: plays the slide-out, then removes the toast.
 // `auto` runs it on a timer; the returned `close` lets the user trigger it early
 // (click anywhere on the toast or the X). Clears the auto timer so it fires once.
@@ -45,13 +53,20 @@ function useAutoClose(onDismiss, ms) {
   const [leaving, setLeaving] = useState(false)
   const timerRef = useRef(null)
   const goneRef  = useRef(false)
+  const idRef    = useRef(0)
+  if (!idRef.current) idRef.current = ++hoverSeq
 
   const close = () => {
     if (goneRef.current) return
     goneRef.current = true
     clearTimeout(timerRef.current)
     setLeaving(true)
-    setInteractive(false)          // hand clicks back to the game
+    // Hand clicks back to the game — unless a DIFFERENT toast is hovered
+    // right now, in which case the capture is that toast's to release.
+    if (hoveredToastId == null || hoveredToastId === idRef.current) {
+      hoveredToastId = null
+      setInteractive(false)
+    }
     setTimeout(onDismiss, 300)
   }
 
@@ -65,10 +80,19 @@ function useAutoClose(onDismiss, ms) {
 
   useEffect(() => {
     timerRef.current = setTimeout(close, ms)
-    return () => clearTimeout(timerRef.current)
+    return () => {
+      clearTimeout(timerRef.current)
+      // Unmounted while hovered (capToasts can evict a hovered toast with no
+      // mouseleave ever firing) — release the capture ourselves or the window
+      // stays click-swallowing until some later toast closes.
+      if (hoveredToastId === idRef.current) {
+        hoveredToastId = null
+        setInteractive(false)
+      }
+    }
   }, [])
 
-  return { leaving, close, bump }
+  return { leaving, close, bump, hoverId: idRef.current }
 }
 
 // Props shared by every toast so hovering captures the mouse and the card is
@@ -77,10 +101,13 @@ function useAutoClose(onDismiss, ms) {
 // must not re-take the mouse — close() has already handed clicks back to the
 // game, and with the window staying visible between in-session toasts a stale
 // capture would be an invisible click-swallowing rectangle over the game.
-function toastInteractions(close, leaving = false) {
+function toastInteractions(close, leaving = false, hoverId = null) {
   return {
-    onMouseEnter: () => { if (!leaving) setInteractive(true) },
-    onMouseLeave: () => setInteractive(false),
+    onMouseEnter: () => { if (!leaving) { hoveredToastId = hoverId; setInteractive(true) } },
+    onMouseLeave: () => {
+      if (hoveredToastId === hoverId) hoveredToastId = null
+      setInteractive(false)
+    },
     onClick: close,
   }
 }
@@ -97,10 +124,10 @@ function CloseButton({ close }) {
 // ── Session-start toast ───────────────────────────────────────────────────────
 
 function SessionToast({ toast, onDismiss }) {
-  const { leaving, close } = useAutoClose(onDismiss, 4000)
+  const { leaving, close, hoverId } = useAutoClose(onDismiss, 4000)
   return (
     <div className={`${s.toast} ${s.sessionToast} ${leaving ? s.toastOut : s.toastIn}`}
-      {...toastInteractions(close, leaving)}>
+      {...toastInteractions(close, leaving, hoverId)}>
       <CloseButton close={close} />
       <div className={s.toastHeader}>
         <span className={s.liveDot} />
@@ -126,12 +153,12 @@ function SessionToast({ toast, onDismiss }) {
 // ── Status flash toast (global hotkey) ────────────────────────────────────────
 
 function StatusToast({ toast, onDismiss }) {
-  const { leaving, close } = useAutoClose(onDismiss, 5000)
+  const { leaving, close, hoverId } = useAutoClose(onDismiss, 5000)
   const { gameName, elapsedSec, unlocked, total, idle } = toast
   const pct = total > 0 ? Math.round((unlocked / total) * 100) : 0
   return (
     <div className={`${s.toast} ${s.statusToast} ${leaving ? s.toastOut : s.toastIn}`}
-      {...toastInteractions(close, leaving)}>
+      {...toastInteractions(close, leaving, hoverId)}>
       <CloseButton close={close} />
       <div className={s.toastHeader}>
         <IconClock size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
@@ -218,7 +245,7 @@ function AchRow({ a, done, showHint }) {
 const ACH_LIST_MS = 60_000
 
 function AchListToast({ toast, onDismiss }) {
-  const { leaving, close, bump } = useAutoClose(onDismiss, ACH_LIST_MS)
+  const { leaving, close, bump, hoverId } = useAutoClose(onDismiss, ACH_LIST_MS)
   const { gameName, unlocked, total, percent, remaining = [], recent = [], idle } = toast
   const rowsRef = useRef(null)
   const [atEnd, setAtEnd] = useState(false)
@@ -252,7 +279,7 @@ function AchListToast({ toast, onDismiss }) {
   }, [remaining.length])
   return (
     <div className={`${s.toast} ${s.achListToast} ${leaving ? s.toastOut : s.toastIn}`}
-      {...toastInteractions(close, leaving)}>
+      {...toastInteractions(close, leaving, hoverId)}>
       <CloseButton close={close} />
       <div className={s.toastHeader}>
         <IconTrophy size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
@@ -328,11 +355,11 @@ function AchListToast({ toast, onDismiss }) {
 // ── Level-up toast ────────────────────────────────────────────────────────────
 
 function LevelUpToast({ toast, onDismiss }) {
-  const { leaving, close } = useAutoClose(onDismiss, 7000)
+  const { leaving, close, hoverId } = useAutoClose(onDismiss, 7000)
   const { level, tier, totalXp } = toast
   return (
     <div className={`${s.toast} ${s.levelUpToast} ${leaving ? s.toastOut : s.toastIn}`}
-      {...toastInteractions(close, leaving)}>
+      {...toastInteractions(close, leaving, hoverId)}>
       <CloseButton close={close} />
       <div className={s.toastHeader}>
         <IconArrowBigUpLines size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
@@ -358,11 +385,11 @@ function LevelUpToast({ toast, onDismiss }) {
 // ── Session-end XP summary toast ──────────────────────────────────────────────
 
 function SessionEndToast({ toast, onDismiss }) {
-  const { leaving, close } = useAutoClose(onDismiss, 6000)
+  const { leaving, close, hoverId } = useAutoClose(onDismiss, 6000)
   const { gameName, durationSeconds, gainedXp, toNextLevel } = toast
   return (
     <div className={`${s.toast} ${s.sessionToast} ${leaving ? s.toastOut : s.toastIn}`}
-      {...toastInteractions(close, leaving)}>
+      {...toastInteractions(close, leaving, hoverId)}>
       <CloseButton close={close} />
       <div className={s.toastHeader}>
         <IconSparkles size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
@@ -393,7 +420,7 @@ function SessionEndToast({ toast, onDismiss }) {
 // ── Individual achievement toast ──────────────────────────────────────────────
 
 function OverlayToast({ toast, onDismiss }) {
-  const { leaving, close } = useAutoClose(onDismiss, DISPLAY_MS)
+  const { leaving, close, hoverId } = useAutoClose(onDismiss, DISPLAY_MS)
   const [progress, setProgress] = useState(100)
 
   useEffect(() => {
@@ -419,7 +446,7 @@ function OverlayToast({ toast, onDismiss }) {
 
   return (
     <div className={`${s.toast} ${leaving ? s.toastOut : s.toastIn}`}
-      {...toastInteractions(close, leaving)}>
+      {...toastInteractions(close, leaving, hoverId)}>
       <CloseButton close={close} />
       {/* Header bar */}
       <div className={s.toastHeader}>
@@ -488,7 +515,7 @@ function dismissForever(exeName) {
 }
 
 function UnknownGameToast({ toast, onDismiss }) {
-  const { leaving, close } = useAutoClose(onDismiss, 12000)
+  const { leaving, close, hoverId } = useAutoClose(onDismiss, 12000)
   const folderHint = toast.install_path
     ? toast.install_path.split(/[\\/]/).slice(-2).join('\\')
     : null
@@ -507,7 +534,7 @@ function UnknownGameToast({ toast, onDismiss }) {
 
   return (
     <div className={`${s.toast} ${leaving ? s.toastOut : s.toastIn}`}
-      {...toastInteractions(close, leaving)}>
+      {...toastInteractions(close, leaving, hoverId)}>
       <CloseButton close={close} />
       <div className={s.toastHeader}>
         <IconDeviceGamepad2 size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
@@ -539,12 +566,12 @@ function UnknownGameToast({ toast, onDismiss }) {
 // shows. This is a toast rather than an OS notification on purpose (§6).
 
 function ReleaseToast({ toast, onDismiss }) {
-  const { leaving, close } = useAutoClose(onDismiss, 10000)
+  const { leaving, close, hoverId } = useAutoClose(onDismiss, 10000)
   const games = toast.games || []
   const one = games.length === 1 ? games[0] : null
   return (
     <div className={`${s.toast} ${s.releaseToast} ${leaving ? s.toastOut : s.toastIn}`}
-      {...toastInteractions(close, leaving)}>
+      {...toastInteractions(close, leaving, hoverId)}>
       <CloseButton close={close} />
       <div className={s.toastHeader}>
         <IconCalendarEvent size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
