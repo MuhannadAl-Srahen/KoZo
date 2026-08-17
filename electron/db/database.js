@@ -75,29 +75,87 @@ function initDatabase() {
     // the first time a non-elevated launch fails/silently no-ops (see games:launch).
     try { db.exec('ALTER TABLE games ADD COLUMN run_as_admin INTEGER DEFAULT 0') } catch (_) {}
 
+    relaxUnlockedAtNotNull()
     migrateCategoriesToCustomLists()
     dedupeGameList()
     seedDefaults()
-    fixOrphanedSessions()
-    // After fixOrphanedSessions — it re-baselines XP, which counts still-open
-    // sessions as live playtime, so crash leftovers must be closed first.
+    // Open sessions are NOT closed here — processWatcher.resolveOrphanSessions
+    // owns that, and it can tell "game still running, resume as one session"
+    // from "game closed while KoZo was off, cap at the last heartbeat".
     purgeOcrUnlocks()
+    purgeForeignStatsUnlocks()
 
     return db
   } catch (err) {
-    // Corrupted DB: backup and start fresh
+    // Corrupted DB: backup and start fresh. Close the handle first — on Windows
+    // renaming a file SQLite still holds open fails silently, and the retry then
+    // reopens the same corrupt file.
+    try { if (db) db.close() } catch (_) {}
+    db = null
     if (fs.existsSync(dbPath)) {
-      try { fs.renameSync(dbPath, backupPath) } catch (_) {}
+      for (const [from, to] of [[dbPath, backupPath], [`${dbPath}-wal`, `${backupPath}-wal`], [`${dbPath}-shm`, `${backupPath}-shm`]]) {
+        try { if (fs.existsSync(from)) fs.renameSync(from, to) } catch (_) {}
+      }
     }
-    db = new Database(dbPath)
-    db.pragma('journal_mode = WAL')
-    db.pragma('foreign_keys = ON')
+    try {
+      db = new Database(dbPath)
+      db.pragma('journal_mode = WAL')
+      db.pragma('foreign_keys = ON')
 
-    const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8')
-    db.exec(schema)
-    seedDefaults()
+      const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8')
+      db.exec(schema)
+      seedDefaults()
+    } catch (fatal) {
+      db = null
+      try { require('../logger').error('initDatabase: recovery failed', { message: fatal.message, original: err.message }) } catch (_) {}
+      throw new Error(`KoZo could not open its database (${fatal.message}). The previous file was moved to ${backupPath}.`)
+    }
+    try { require('../logger').warn('initDatabase: recovered from an unreadable database', { message: err.message }) } catch (_) {}
 
     return db
+  }
+}
+
+// achievement_unlocks.unlocked_at was created NOT NULL, but Steam reports
+// unlocktime 0 for unlocks it has no date for — and INSERT OR IGNORE turns that
+// constraint violation into a silent no-op, so those unlocks were dropped and
+// re-detected (re-toasted) on every session-end retry. SQLite can't drop a
+// NOT NULL in place, so rebuild the table once.
+function relaxUnlockedAtNotNull() {
+  const done = db.prepare("SELECT value FROM settings WHERE key = 'unlocked_at_nullable_v1'").get()
+  if (done) return
+
+  const nullable = db.prepare("SELECT [notnull] FROM pragma_table_info('achievement_unlocks') WHERE name = 'unlocked_at'").get()
+  if (!nullable || nullable.notnull === 0) {
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('unlocked_at_nullable_v1', '1')").run()
+    return
+  }
+
+  try {
+    db.pragma('foreign_keys = OFF')
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE achievement_unlocks_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          achievement_id INTEGER NOT NULL,
+          session_id INTEGER,
+          unlocked_at TIMESTAMP,
+          source TEXT NOT NULL,
+          FOREIGN KEY (achievement_id) REFERENCES achievements(id) ON DELETE CASCADE,
+          FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE SET NULL,
+          UNIQUE(achievement_id)
+        );
+        INSERT INTO achievement_unlocks_new (id, achievement_id, session_id, unlocked_at, source)
+          SELECT id, achievement_id, session_id, unlocked_at, source FROM achievement_unlocks;
+        DROP TABLE achievement_unlocks;
+        ALTER TABLE achievement_unlocks_new RENAME TO achievement_unlocks;
+      `)
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('unlocked_at_nullable_v1', '1')").run()
+    })()
+  } catch (e) {
+    console.error('relaxUnlockedAtNotNull failed:', e.message)
+  } finally {
+    try { db.pragma('foreign_keys = ON') } catch (_) {}
   }
 }
 
@@ -194,7 +252,9 @@ function migrateCategoriesToCustomLists() {
 
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('categories_migrated_v1', 'true')").run()
   })
-  migrate()
+  // A failure here must not reach initDatabase's catch — that path treats any
+  // throw as "the database file is corrupt" and moves it aside.
+  try { migrate() } catch (e) { console.error('migrateCategoriesToCustomLists failed:', e.message) }
 }
 
 // One-time migration: delete every unlock the removed screen-OCR watcher wrote.
@@ -251,50 +311,84 @@ function purgeOcrUnlocks() {
   } catch (_) {}
 }
 
-// Close sessions left open from a previous crash. We don't know exactly when
-// the game stopped, so we estimate: use the game's last_played_at (the watcher
-// heartbeat keeps this fresh while a session is active) if available, then cap
-// at started_at + 4h to keep crash-day inflation bounded.
-function fixOrphanedSessions() {
-  const orphans = db.prepare(`
-    SELECT s.id, s.started_at, g.last_played_at, s.game_id
-    FROM sessions s
-    LEFT JOIN games g ON g.id = s.game_id
-    WHERE s.ended_at IS NULL
-  `).all()
+// One-time cleanup for a short-lived bug: steamStatsWatcher
+// briefly fell back to ANY account's UserGameStats_*_<appid>.bin when the
+// user's own was missing — and imported other accounts' achievements for
+// family-shared games (47 Ghost of Tsushima unlocks the user never earned).
+// Achievements are per-account even for shared games, so a 'steam_stats'
+// unlock on a game with no OWN-account stats file can only be foreign —
+// delete exactly those. Legit games keep their file, so they're untouched;
+// so are all other sources (steam_api, crack, manual).
+function purgeForeignStatsUnlocks() {
+  const done = db.prepare("SELECT value FROM settings WHERE key = 'foreign_stats_purged_v1'").get()
+  if (done) return
 
-  const closeOrphan = db.prepare(`
-    UPDATE sessions
-    SET ended_at = ?,
-        duration_seconds = MAX(0, CAST((julianday(?) - julianday(started_at)) * 86400 AS INTEGER))
-    WHERE id = ?
-  `)
-  const addPlaytime = db.prepare(`
-    UPDATE games
-    SET total_playtime_seconds = total_playtime_seconds +
-        MAX(0, CAST((julianday(?) - julianday(?)) * 86400 AS INTEGER))
-    WHERE id = ?
-  `)
-  // last_played_at on the game gets touched on every heartbeat; if the watcher
-  // updated it after the session started but never wrote `ended_at`, that
-  // timestamp is a much better end-of-play estimate than "now".
-  const CAP_MS = 4 * 60 * 60 * 1000
-  const fix = db.transaction(() => {
-    for (const s of orphans) {
-      const startedMs   = new Date(s.started_at).getTime()
-      const heartbeatMs = s.last_played_at ? new Date(s.last_played_at).getTime() : null
-      let estimatedEndMs = Date.now()
-      if (heartbeatMs && heartbeatMs > startedMs) estimatedEndMs = heartbeatMs
-      const cappedMs = Math.min(estimatedEndMs, startedMs + CAP_MS)
-      const cappedEnd = new Date(cappedMs).toISOString()
-      closeOrphan.run(cappedEnd, cappedEnd, s.id)
-      // The forced end recovers playtime that processWatcher.endSession would
-      // have added if the watcher had run to completion.
-      addPlaytime.run(cappedEnd, s.started_at, s.game_id)
+  // Steam install dir — same resolution steamStatsWatcher uses, inlined so the
+  // migration cannot pull service requires into DB init.
+  let steamPath = null
+  try {
+    const { execSync } = require('child_process')
+    const out = execSync('reg query "HKCU\\Software\\Valve\\Steam" /v SteamPath', { encoding: 'utf8', stdio: 'pipe' })
+    const m = out.match(/SteamPath\s+REG_SZ\s+(.+)/i)
+    if (m) {
+      const p = m[1].trim().replace(/\//g, '\\')
+      if (fs.existsSync(p)) steamPath = p
     }
-  })
+  } catch {}
+  if (!steamPath && fs.existsSync('C:\\Program Files (x86)\\Steam')) steamPath = 'C:\\Program Files (x86)\\Steam'
 
-  fix()
+  let acct = null
+  try {
+    const raw = db.prepare("SELECT value FROM settings WHERE key = 'steam_user_id'").get()?.value
+    if (raw && /^\d+$/.test(String(raw).trim())) {
+      const id64 = BigInt(String(raw).trim())
+      const base = 76561197960265728n
+      if (id64 > base) acct = (id64 - base).toString()
+    }
+  } catch {}
+
+  // Can't verify ownership without both — leave the flag unset so the purge
+  // retries on a later boot instead of guessing.
+  if (!steamPath || !acct) return
+
+  const statsDir = path.join(steamPath, 'appcache', 'stats')
+  let removed = 0
+  try {
+    const games = db.prepare('SELECT id, steam_app_id FROM games WHERE steam_app_id IS NOT NULL').all()
+    const del = db.prepare(
+      "DELETE FROM achievement_unlocks WHERE source = 'steam_stats' AND achievement_id IN (SELECT id FROM achievements WHERE game_id = ?)"
+    )
+    const run = db.transaction(() => {
+      let n = 0
+      for (const g of games) {
+        let ownExists = false
+        try { ownExists = fs.existsSync(path.join(statsDir, `UserGameStats_${acct}_${g.steam_app_id}.bin`)) } catch {}
+        if (!ownExists) n += del.run(g.id).changes
+      }
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('foreign_stats_purged_v1', '1')").run()
+      return n
+    })
+    removed = run()
+  } catch (e) {
+    console.error('purgeForeignStatsUnlocks failed:', e.message)
+    return
+  }
+  if (!removed) return
+
+  // Re-baseline XP so the next xpTracker.check() diffs against reality (same
+  // reason as purgeOcrUnlocks above).
+  try {
+    const xp = require('../services/xp').computeXp()
+    const set = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+    set.run('xp_last_total', String(xp.totalXp))
+    set.run('xp_last_level', String(xp.level))
+  } catch (e) {
+    console.error('purgeForeignStatsUnlocks: XP re-baseline failed:', e.message)
+  }
+
+  try {
+    require('../logger').info(`purgeForeignStatsUnlocks: removed ${removed} foreign-account achievement unlock(s)`)
+  } catch (_) {}
 }
 
 module.exports = { initDatabase, getDb }

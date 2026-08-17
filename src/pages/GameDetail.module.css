@@ -1,491 +1,628 @@
+/* GameDetail — hero, notes, tabs, achievements, sessions.
+
+   OVERRIDE PATTERN: `composes:` pulls rules in from controls.module.css, and the
+   bundler emits that file AFTER this one — so a same-specificity declaration
+   here loses to the composed one. Anything that must differ from the shared
+   control (an on-artwork plate, a left-aligned menu row, a tab's bottom rule) is
+   therefore written in a scoped `.hero .x` / `.tabs .x` rule: one extra level of
+   specificity, no !important anywhere. */
+
 .page {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  overflow: hidden;
+  composes: page from '../styles/page.module.css';
 }
 
-/* ── Banner ─────────────────────────────────────────────────── */
-.banner {
-  position: relative;
-  height: 440px;
+/* ── Hero ────────────────────────────────────────────────────────────── */
+/* Height is responsive, not the old fixed 440px — that was 73% of the 600px
+   minimum window height, so the page opened with almost no content visible.
+   overflow stays VISIBLE and the hero gets no z-index or isolation of its own:
+   the ⋮ and status dropdowns open downward out of this box, and either property
+   would trap them behind the tabs. .heroArt does the clipping instead. */
+/* The hero fills the full width, edge to edge. Steam's library_hero art is
+   already wide, so `cover` is the right fit here — the blurred-fill pattern is
+   for PORTRAIT cards, where landscape art would otherwise be cropped to a
+   sliver. Height scales with the window instead of the old fixed 440px, which
+   ate 73% of a minimum-height window. */
+/* The scroller that hosts the collapsing header. Everything (hero, tabs,
+   panels) scrolls in ONE surface so the hero can pin with position: sticky. */
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  transform: translateZ(0);
+  /* Height of the hero's pinned (collapsed) strip. Declared here — not on
+     .hero — because BOTH .hero (its negative sticky top) and .tabs (which
+     pins directly beneath the strip) read it, and siblings don't inherit
+     custom properties from each other. */
+  --hero-min: 172px;   /* fits the roomier title block (gap 16 + pb 20) */
+}
+
+/* Collapsing header: opens tall (the bigger cover the user asked for), then
+   pins once scrolled so only its bottom strip — title block + scrim — stays
+   at the top while achievements scroll beneath. Pure sticky with a negative
+   top: no per-frame height animation, no JS, no layout cost. */
+.hero {
+  position: sticky;
+  --hero-h: clamp(340px, 50vh, 600px);
+  top: calc(var(--hero-min) - var(--hero-h));
+  height: var(--hero-h);
+  z-index: var(--z-sticky);
   flex-shrink: 0;
-  /* overflow must be visible so the options dropdown can extend below the banner */
+  display: flex;
+  flex-direction: column;
+}
+
+.heroArt {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-base);
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.bannerImg {
+.heroIcon {
+  position: relative;
+  z-index: var(--z-base);
+  color: color-mix(in srgb, var(--on-art) 9%, transparent);
+}
+
+/* Blurred-fill pair (CLAUDE.md section 3): a cover-fit blurred plate underneath,
+   the real art contain-fit on top. Hero art is 16:6-ish landscape and the old
+   object-fit: cover cropped every one of them. */
+.heroBlur,
+.heroImg {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  object-position: center top;
-  /* clip image within the banner even though .banner has overflow: visible */
-  clip-path: inset(0);
-  animation: bannerFadeIn 0.2s ease;
+  animation: heroFade var(--dur-slow) var(--ease);
 }
 
-@keyframes bannerFadeIn {
+/* Kept only as the backdrop for art that is NARROWER than the hero box (a
+   portrait cover used as a fallback); for normal wide hero art the foreground
+   covers it completely. */
+.heroBlur {
+  object-fit: cover;
+  filter: blur(16px) brightness(0.55) saturate(1.1);
+  transform: scale(1.18);
+  z-index: var(--z-base);
+}
+
+.heroImg {
+  object-fit: cover;
+  object-position: center 22%;
+  z-index: var(--z-raised);
+}
+
+@keyframes heroFade {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
 
-.bannerPlaceholderIcon {
-  color: rgba(255, 255, 255, 0.09);
-  position: relative;
-  z-index: 1;
-}
-
-.bannerOverlay {
+/* Two gradients: one down the bottom so the title block stays legible, one
+   across the top-left so the back button and action row read over bright art. */
+.heroScrim {
   position: absolute;
   inset: 0;
-  /* Taller banner — keep top clear to show artwork, darken bottom for text readability */
-  background: linear-gradient(to bottom,
-    rgba(0,0,0,0.05) 0%,
-    rgba(0,0,0,0.10) 40%,
-    rgba(0,0,0,0.65) 75%,
-    rgba(0,0,0,0.88) 100%
-  );
-  z-index: 2;
+  z-index: var(--z-card);
+  pointer-events: none;
+  background:
+    linear-gradient(to bottom,
+      color-mix(in srgb, var(--scrim) 55%, transparent) 0%,
+      transparent 26%,
+      var(--scrim-soft) 62%,
+      var(--scrim-strong) 100%
+    );
 }
 
-.bannerBack {
-  position: absolute;
-  top: 14px;
-  left: 16px;
-  z-index: 4;
+/* ── Hero top bar ────────────────────────────────────────────────────── */
+/* A real flex row, replacing the two magic numbers that used to hold this
+   together (`left: 110px` to clear the back button, `right: 56px` to clear the
+   menu). It wraps at narrow widths instead of overlapping. z-index is raised
+   above .heroBottom AND above the tabs/content that follow, because both
+   dropdowns open downward out of this row. */
+.heroTop {
+  position: relative;
+  z-index: var(--z-dropdown);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  background: rgba(0,0,0,0.55);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  border: 1px solid rgba(255,255,255,0.12);
-  border-radius: var(--r-pill);
-  padding: 6px 14px 6px 10px;
-  font-size: 12.5px;
-  font-weight: 500;
-  color: #fff;
-  cursor: pointer;
-  transition: color 0.15s, background 0.15s, border-color 0.15s, transform 0.1s;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+  justify-content: flex-end;   /* only bites on a wrapped line — .heroTopSpacer
+                                  eats the free space on the first one */
+  gap: var(--sp-8);
+  padding: var(--sp-12) var(--gutter) 0;
 }
 
-.bannerBack:hover {
+.heroActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-8);
+  min-width: 0;
+}
+
+.heroTopSpacer {
+  flex: 1 1 auto;
+  min-width: var(--sp-8);
+}
+
+.backBtn {
+  composes: btn btnSm btnPill from '../styles/controls.module.css';
+}
+
+.playBtn {
+  composes: btn btnPrimary btnSm btnPill from '../styles/controls.module.css';
+}
+
+.statusBtn {
+  composes: btn btnSm btnPill from '../styles/controls.module.css';
+}
+
+.menuTrigger {
+  composes: btn btnIcon from '../styles/controls.module.css';
+}
+
+/* On-artwork controls need their own opaque plate — whatever sits behind them
+   is the game's own cover art. */
+.hero .backBtn,
+.hero .statusBtn,
+.hero .menuTrigger {
+  background: var(--scrim-chip);
+  color: var(--on-art);
+  border-color: color-mix(in srgb, var(--on-art) 14%, transparent);
+  box-shadow: var(--elev-1);
+}
+
+.hero .backBtn:hover,
+.hero .statusBtn:hover:not(:disabled),
+.hero .menuTrigger:hover {
   background: var(--a);
-  color: #09090f;
+  color: var(--accent-ink);
   border-color: var(--a);
 }
 
-.bannerBack:active { transform: scale(0.97); }
-
-/* ── Game options menu ─────────────────────────────────────── */
-.gameMenu {
-  position: absolute;
-  top: 14px;
-  right: 16px;
-  z-index: 4;
+.hero .menuTrigger {
+  border-radius: 50%;
 }
 
-.gameMenuTrigger {
-  display: flex;
+.hero .playBtn {
+  box-shadow: var(--elev-1);
+}
+
+/* The one live-able control on this surface: hover earns the full accent glow. */
+.hero .playBtn:hover {
+  box-shadow: var(--elev-1), var(--glow-2);
+}
+
+/* Status set but not finished: tinted with that status' own colour, handed in
+   as --st so the border can be mixed from it. */
+.hero .statusBtnSet {
+  color: var(--st);
+  border-color: color-mix(in srgb, var(--st) 45%, transparent);
+}
+
+/* Finished — solid accent, so it reads as an achieved milestone. */
+.hero .statusBtnFinished {
+  background: var(--a);
+  color: var(--accent-ink);
+  border-color: var(--a);
+}
+
+.hero .statusBtnFinished:hover:not(:disabled) {
+  background: var(--a);
+  color: var(--accent-ink);
+  filter: brightness(1.08);
+}
+
+/* Subtle spinner while a background achievement sync runs */
+.heroSyncing {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
-  background: rgba(0,0,0,0.55);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  border: 1px solid rgba(255,255,255,0.12);
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
-  color: #fff;
-  cursor: pointer;
-  transition: color 0.15s, background 0.15s, border-color 0.15s, transform 0.1s;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+  background: var(--scrim-chip);
+  color: var(--on-art-dim);
+  flex-shrink: 0;
 }
 
-.gameMenuTrigger:hover {
-  background: var(--a);
-  color: #09090f;
-  border-color: var(--a);
+.liveBadge {
+  composes: chip from '../styles/controls.module.css';
 }
 
-.gameMenuTrigger:active { transform: scale(0.95); }
+.hero .liveBadge {
+  padding: var(--sp-4) var(--sp-10);
+  background: var(--scrim-chip);
+  color: var(--success);
+  border-color: var(--success-border-strong);
+  box-shadow: var(--glow-live);   /* light means life — the running session glows */
+}
 
-.gameMenuDropdown {
+.liveDot {
+  composes: chipDot from '../styles/controls.module.css';
+  /* The indirection is load-bearing. This bundler hashes every bare identifier
+     it finds in an `animation` value, so writing `livePulse` here would compile
+     to a scoped name with no matching @keyframes — a dot that never pulses.
+     PostCSS rejects `:global(...)` inside a value, but it leaves var() alone,
+     so the shared keyframe in global.css survives the round trip. */
+  --pulse-name: livePulse;
+  animation: var(--pulse-name) 1.4s var(--ease) infinite;
+}
+
+/* ── Game options menu ───────────────────────────────────────────────── */
+.gameMenu,
+.statusWrap {
+  position: relative;
+}
+
+.menuDropdown,
+.statusDropdown {
   position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  min-width: 200px;
+  top: calc(100% + var(--sp-6));
+  z-index: var(--z-dropdown);
   background: var(--surface-2);
   border: 1px solid var(--ab);
   border-radius: var(--r-card);
-  box-shadow: var(--shadow-modal);
+  box-shadow: var(--elev-2);
   overflow: hidden;
-  animation: menuIn 0.1s ease;
+  animation: menuIn var(--dur-fast) var(--ease);
 }
+
+.menuDropdown   { right: 0; min-width: 210px; }
+.statusDropdown { left: 0;  min-width: 180px; }
 
 @keyframes menuIn {
-  from { opacity: 0; transform: translateY(-4px) }
-  to   { opacity: 1; transform: translateY(0) }
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: none; }
 }
 
-.gameMenuItem {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.menuItem {
+  composes: btn from '../styles/controls.module.css';
+}
+
+.hero .menuItem {
+  justify-content: flex-start;
+  gap: var(--sp-10);
   width: 100%;
-  padding: 10px 14px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  background: transparent;
-  border: none;
-  cursor: pointer;
+  padding: var(--sp-10) var(--sp-12);
+  border-radius: 0;
   text-align: left;
-  transition: background 0.08s, color 0.08s;
+  color: var(--text-secondary);
 }
 
-.gameMenuItem:hover {
+.hero .menuItem:hover:not(:disabled) {
   background: var(--ad);
   color: var(--a);
 }
 
-.gameMenuItem:disabled {
-  opacity: 0.5;
-  cursor: default;
+.hero .menuItemDanger {
+  color: var(--error);
 }
 
-.gameMenuItemDanger {
-  color: var(--status-dropped);
+.hero .menuItemDanger:hover:not(:disabled) {
+  background: var(--error-bg);
+  color: var(--error);
 }
 
-.gameMenuItemDanger:hover {
-  background: rgba(248, 113, 113, 0.08);
-  color: var(--status-dropped);
+/* Busy, not disabled — the row keeps its label and stays readable to AT while
+   the sync it kicked off is running. */
+.menuItemBusy {
+  composes: btnLoading from '../styles/controls.module.css';
 }
 
-.gameMenuConfirm {
-  padding: 12px 14px;
+.menuConfirm {
+  padding: var(--sp-12);
   border-top: 1px solid var(--border-subtle);
 }
 
-.gameMenuConfirmText {
-  font-size: 12px;
+.menuConfirmText {
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
-  line-height: 1.5;
-  margin-bottom: 10px;
+  line-height: var(--lh-base);
+  margin-bottom: var(--sp-10);
 }
 
-.gameMenuConfirmBtns {
+.menuConfirmBtns {
   display: flex;
-  gap: 8px;
+  gap: var(--sp-8);
   justify-content: flex-end;
 }
 
-.gameMenuCancelBtn {
-  padding: 5px 12px;
-  border-radius: var(--r-input);
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 12px;
-  cursor: pointer;
-  transition: color 0.1s;
+.menuCancelBtn {
+  composes: btn btnSm btnSecondary from '../styles/controls.module.css';
 }
 
-.gameMenuCancelBtn:hover { color: var(--text-primary); }
-
-.gameMenuDeleteBtn {
-  padding: 5px 12px;
-  border-radius: var(--r-input);
-  border: 1px solid rgba(248,113,113,0.4);
-  background: rgba(248,113,113,0.12);
-  color: var(--status-dropped);
-  font-size: 12px;
-  cursor: pointer;
-  transition: background 0.1s;
+.menuDeleteBtn {
+  composes: btn btnSm btnDanger from '../styles/controls.module.css';
 }
 
-.gameMenuDeleteBtn:hover { background: rgba(248,113,113,0.22); }
-.gameMenuDeleteBtn:disabled { opacity: 0.5; cursor: default; }
-
-/* ── Live badge (moved to not overlap menu) ──────────────────── */
-.liveBadge {
-  position: absolute;
-  top: 14px;
-  right: 56px;
-  z-index: 4;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(0,0,0,0.6);
-  backdrop-filter: blur(4px);
-  border: 1px solid rgba(74,222,128,0.3);
-  border-radius: var(--r-pill);
-  padding: 5px 12px 5px 8px;
-  font-size: 11.5px;
-  font-weight: 500;
-  color: var(--status-playing);
-}
-
-.liveDot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--status-playing);
-  animation: livePulse 1.4s ease-in-out infinite;
-}
-
-@keyframes livePulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.2; }
-}
-
-.bannerBottom {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  padding: 0 20px 14px;
-  z-index: 3;
+/* ── Hero bottom (title + meta) ──────────────────────────────────────── */
+/* Breathing room scaled to the bigger type (user: rows read glued together
+   after the font bump) — wider row gap, taller bottom padding. */
+.heroBottom {
+  position: relative;
+  z-index: var(--z-card);
+  margin-top: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--sp-16);
+  min-width: 0;
+  padding: var(--sp-16) var(--gutter) var(--sp-20);
 }
 
 .gameNameRow {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: var(--sp-10);
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .gameName {
-  font-size: 22px;
+  min-width: 0;
+  max-width: 100%;
+  font-size: var(--fs-2xl);
   font-weight: 500;
-  color: #fff;
+  color: var(--on-art);
+  letter-spacing: -0.01em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  letter-spacing: -0.01em;
-}
-
-/* Steam store genre chips under the game title */
-.genreChips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 6px;
-}
-
-.genreChip {
-  font-size: 10.5px;
-  font-weight: 500;
-  color: rgba(255,255,255,0.75);
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.14);
-  border-radius: 999px;
-  padding: 2px 9px;
-  white-space: nowrap;
+  /* Legibility shadow over bright art — plain dark scrim, deliberately not an
+     accent glow. */
+  text-shadow: 0 1px 2px var(--scrim-strong), 0 2px 10px var(--scrim-soft);
 }
 
 .crackBadge {
-  flex-shrink: 0;
-  font-size: 10px;
-  font-weight: 500;
+  composes: chip chipSm from '../styles/controls.module.css';
+}
+
+.hero .crackBadge {
+  background: var(--scrim-chip);
+  color: var(--warning);
+  border-color: var(--warning-border-strong);
   letter-spacing: 0.08em;
-  color: #fbbf24;
-  background: rgba(251,191,36,0.12);
-  border: 1px solid rgba(251,191,36,0.28);
-  border-radius: 4px;
-  padding: 2px 7px;
-  white-space: nowrap;
 }
-
-.completionBadge {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11.5px;
-  font-weight: 600;
-  border: 1px solid;
-  border-radius: var(--r-pill);
-  padding: 2px 9px;
-  white-space: nowrap;
-}
-
-/* Completion status picker inside the game menu */
-.menuStatusLabel {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--text-muted);
-  padding: 10px 14px 6px;
-}
-.menuStatusRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  padding: 0 12px 10px;
-}
-.statusPill {
-  font-size: 11.5px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  background: var(--surface-3);
-  border: 1px solid var(--border);
-  border-radius: var(--r-pill);
-  padding: 4px 10px;
-  cursor: pointer;
-  transition: border-color 0.12s, color 0.12s, background 0.12s;
-}
-.statusPill:hover { border-color: var(--ab); color: var(--text-primary); }
-.statusPillOn { font-weight: 600; }
-.menuDivider { height: 1px; background: var(--border); margin: 0; }
-
-.importBtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--a);
-  background: var(--ad);
-  border: 1px solid var(--ab);
-  border-radius: var(--r-input);
-  padding: 9px 16px;
-  cursor: pointer;
-  transition: background 0.12s;
-}
-.importBtn:hover { background: var(--ab); }
 
 .crackBadgeSource {
   font-weight: 400;
-  opacity: 0.8;
   letter-spacing: 0;
-  text-transform: none;
+  opacity: 0.8;
 }
 
-.bannerMeta {
+.genreChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-6);
+}
+
+.genreChip {
+  composes: chip chipSm chipOnArt from '../styles/controls.module.css';
+}
+
+.heroMeta {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: var(--sp-24);
   flex-wrap: wrap;
 }
 
 .metaItem {
   display: flex;
   align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  color: rgba(255,255,255,0.7);
+  gap: var(--sp-4);
+  font-size: var(--fs-sm);
+  color: var(--on-art-dim);
 }
 
+/* HUD values: the numbers that matter read brighter than their labels, and
+   tabular so they don't wobble as a live session ticks them up. */
 .metaValue {
-  color: var(--a);
+  color: var(--text-accent-bright);
   font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.metaPct {
+  color: var(--on-art-muted);
+  font-size: var(--fs-xs);
 }
 
 .achProgress {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-8);
 }
 
 .progressBar {
-  width: 80px;
+  width: clamp(64px, 14vw, 160px);
   height: 3px;
-  background: rgba(255,255,255,0.15);
-  border-radius: 2px;
+  background: color-mix(in srgb, var(--on-art) 15%, transparent);
+  border-radius: var(--r-xs);
   overflow: hidden;
 }
 
 .progressFill {
   height: 100%;
-  background: var(--a);
-  border-radius: 2px;
-  transition: width 0.3s ease;
+  /* Brightest at the leading edge — progress reads as a charge meter. */
+  background: linear-gradient(90deg, var(--a), var(--text-accent-bright));
+  box-shadow: 0 0 8px -2px var(--a);
+  border-radius: var(--r-xs);
+  transition: width var(--dur-slower) var(--ease);
 }
 
-/* ── Tabs ───────────────────────────────────────────────────── */
+/* ── Tabs ────────────────────────────────────────────────────────────── */
+/* Segmented PILLS, not underlined text (third round of "they look
+   stuck together"): each tab now has its own visible bounds — a bordered pill
+   with real space around it — matching the Library's segmented toggles. Gap
+   tweaks could never fix this because flush text runs have no edges. */
 .tabs {
   display: flex;
-  border-bottom: 1px solid var(--border);
-  padding: 0 20px;
+  align-items: center;
+  gap: var(--sp-24);
   flex-shrink: 0;
+  padding: var(--sp-12) var(--gutter);
+  border-bottom: 1px solid var(--border);
   background: var(--bg);
+  /* Pins right beneath the collapsed hero; panels scroll under it. One step
+     below the hero's z so the hero's dropdowns still paint over the tabs. */
+  position: sticky;
+  top: var(--hero-min);
+  z-index: calc(var(--z-sticky) - 1);
 }
 
 .tab {
-  padding: 12px 16px 11px;
-  font-size: 13.5px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  transition: color 0.12s;
-  display: flex;
-  align-items: center;
-  gap: 7px;
+  composes: btn from '../styles/controls.module.css';
 }
 
-.tab:hover { color: var(--text-primary); }
-
-.tabActive {
-  color: var(--a);
-  border-bottom-color: var(--a);
-}
-
-.tabCount {
-  font-size: 11px;
-  background: var(--ad);
-  color: var(--a);
-  padding: 1px 6px;
+.tabs .tab {
+  position: relative;
+  gap: var(--sp-6);
+  padding: var(--sp-8) var(--sp-16);
+  border: 1px solid transparent;
   border-radius: var(--r-pill);
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
 }
 
-/* ── Content area ───────────────────────────────────────────── */
+.tabs .tab:hover {
+  color: var(--text-primary);
+  background: var(--neutral-bg);
+}
+
+/* Active = the app-wide selected-segment recipe (--ad fill, accent text,
+   accent hairline) with a faint glow so it reads as the lit control. */
+.tabs .tabActive {
+  color: var(--a);
+  background: var(--ad);
+  border-color: var(--ab);
+  box-shadow: var(--glow-1);
+}
+
+.tabs .tabActive:hover {
+  color: var(--a);
+  background: var(--ad);
+}
+
+/* Muted on purpose — the count is context, the glow bar marks the selection. */
+.tabCount {
+  composes: chip chipSm chipNeutral from '../styles/controls.module.css';
+}
+
+.tabs .tabCount {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Content ─────────────────────────────────────────────────────────── */
+/* NOT composed from page.module.css here: .scroll owns the scrolling now, so
+   this is a plain padded block (the shared .content is itself a scroller and
+   two nested scrollers would break the sticky hero). */
 .content {
   flex: 1;
-  overflow-y: auto;
-  padding: 16px 20px 20px;
+  min-height: 0;
+  /* A taller top gap than the shared 10px — the first section sits directly
+     under the pinned tabs and needs the extra air at the new type size. */
+  padding: var(--sp-16) var(--gutter) var(--content-pb);
 }
 
-/* ── Achievement grid ───────────────────────────────────────── */
-.achGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+.contentInner {
+  composes: contentInner from '../styles/page.module.css';
 }
 
-.achCard {
-  height: 88px;
+.privacyBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-12);
+  padding: var(--sp-10) var(--sp-12);
+  border-radius: var(--r-input);
+  border: 1px solid var(--warning-border-strong);
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-size: var(--fs-md);
+  line-height: var(--lh-snug);
+}
+
+.privacyIcon {
+  flex-shrink: 0;
+  margin-top: var(--sp-2);
+}
+
+/* ── Achievement grid ────────────────────────────────────────────────── */
+/* auto-fill, not a hard 2 columns: an 88px-tall card stretched to ~1200px wide
+   on a wide window, with the icon at one end and nothing after the text. */
+/* Unlocked / Locked sections. */
+.achSection { margin-bottom: var(--sp-24); }
+
+.achSectionHead {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 10px 0 10px;
-  background: var(--surface-2);
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-12);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-secondary);
+}
+
+.achSectionCount {
+  padding: 1px var(--sp-6);
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  color: var(--text-muted);
+  font-weight: 500;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Capped width: auto-fill against the full content width put five columns on a
+   wide monitor, which reads as a wall. Two at the minimum window, three on
+   anything wide — never more. */
+.achGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(460px, 1fr));
+  gap: var(--sp-10);
+  max-width: 1400px;
+  contain: layout style;
+}
+
+/* Unlocked rows (the base class — locked overrides below) carry a whisper of
+   accent tint: earned items read as part of the player's colour, the backlog
+   stays flat. */
+/* The richer card the user asked back for: icon, name, VISIBLE
+   description, date. The one-line rows read as a bare list; grouping into
+   Unlocked/Locked sections stays — that part worked. */
+.achCard {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+  padding: var(--sp-12) var(--sp-16);
+  background: var(--surface-accent);
   border: 1px solid var(--border);
   border-radius: var(--r-card);
   overflow: hidden;
   cursor: pointer;
-  transition: border-color 0.12s, background 0.12s;
-  flex-shrink: 0;
+  transition: var(--t-control);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 92px;
 }
 
+/* Locked rows recede — they are the backlog, not the achievement. */
+.achCardLocked { background: transparent; border-color: var(--border-subtle); }
+.achCardLocked .achName { color: var(--text-muted); }
+
 .achCard:hover {
-  border-color: var(--ab);
+  border-color: var(--border-accent-soft);
   background: var(--surface-3);
 }
 
 .achIcon {
   width: 48px;
   height: 48px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   flex-shrink: 0;
   overflow: hidden;
   display: flex;
@@ -501,10 +638,17 @@
 
 .achIconLocked {
   background: var(--surface-3);
+  color: var(--text-muted);
 }
 
+/* The ring is a real border, not an inset shadow — the icon <img> fills the
+   tile and would paint over an inset shadow. --rar arrives per-row from JSX
+   (fixed --rarity-* hue when Steam's global % is known) and falls back to the
+   accent when it isn't. */
 .achIconUnlocked {
   background: var(--ad);
+  color: var(--a);
+  border: 1px solid color-mix(in srgb, var(--rar, var(--a)) 40%, transparent);
 }
 
 .achBody {
@@ -512,81 +656,76 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 
 .achName {
-  font-size: 12.5px;
-  font-weight: 500;
+  min-width: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* Visible, but capped at two lines so a paragraph-length description can't
+   turn the grid back into a wall. */
 .achDesc {
-  font-size: 11px;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-snug);
   color: var(--text-secondary);
+  overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
-  overflow: hidden;
-  line-height: 1.45;
-}
-
-.achHidden {
-  font-size: 10.5px;
-  color: var(--text-secondary);
-  font-style: italic;
-  opacity: 0.55;
 }
 
 .achDate {
-  font-size: 10.5px;
+  font-size: var(--fs-sm);
   color: var(--a);
-  margin-top: 1px;
+  font-variant-numeric: tabular-nums;
 }
 
-/* Also a click target: quick manual unlock/lock toggle (routes through toggleManual) */
+/* Also a click target: quick manual unlock/lock toggle (routes through
+   toggleManual, exactly like the modal's button). Colour is set here rather than
+   composed from btnGhost, whose :hover rule carries four classes of specificity
+   and would repaint the unlocked checkmark on hover. */
 .achStatus {
+  composes: btn btnIcon from '../styles/controls.module.css';
   flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--r-input);
-  cursor: pointer;
-  transition: border-color 0.12s, background 0.12s;
+  color: var(--text-muted);
 }
 
 .achStatus:hover {
-  border-color: var(--ab);
-  background: var(--surface-3);
+  background: var(--neutral-bg);
+  color: var(--text-primary);
 }
 
-/* ── Sessions tab ───────────────────────────────────────────── */
+.achStatusOn,
+.achStatusOn:hover {
+  color: var(--a);
+}
+
+/* ── Sessions tab ────────────────────────────────────────────────────── */
 .chartSection {
-  margin-bottom: 16px;
+  margin-bottom: var(--sp-16);
 }
 
 .chartTitle {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--text-muted);
-  margin-bottom: 10px;
+  margin-bottom: var(--sp-10);
   font-weight: 500;
 }
 
 .chart {
   display: flex;
   align-items: flex-end;
-  gap: 4px;
+  gap: var(--sp-4);
   height: 64px;
-  padding-bottom: 0;
 }
 
 .chartBar {
@@ -594,25 +733,37 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  height: 100%;
   justify-content: flex-end;
+  gap: var(--sp-4);
+  height: 100%;
 }
 
 .chartBarFill {
   width: 100%;
-  background: var(--border);
-  border-radius: 3px 3px 0 0;
+  max-width: 48px;   /* seven bars across an ultrawide would be slabs otherwise */
+  /* Mixed into surface-3 (not transparent) so the bars stay opaque; the ramp
+     brightens toward the top like a filling meter. */
+  background: linear-gradient(to top,
+    color-mix(in srgb, var(--a) 26%, var(--surface-3)),
+    color-mix(in srgb, var(--a) 58%, var(--surface-3)));
+  border-radius: var(--r-xs) var(--r-xs) 0 0;
   min-height: 2px;
-  transition: height 0.3s ease;
+  transition: height var(--dur-slower) var(--ease);
 }
 
+/* Today burns brightest — full accent into the bright HUD tint. */
 .chartBarToday .chartBarFill {
-  background: var(--a);
+  background: linear-gradient(to top, var(--a), var(--text-accent-bright));
+}
+
+/* Empty days stay faint neutral stubs — an accent sliver would read as data.
+   After .chartBarToday so an unplayed today is also just a stub. */
+.chartBarZero .chartBarFill {
+  background: var(--border);
 }
 
 .chartBarLabel {
-  font-size: 9.5px;
+  font-size: var(--fs-2xs);
   color: var(--text-muted);
   text-align: center;
   white-space: nowrap;
@@ -622,25 +773,26 @@
   color: var(--a);
 }
 
-/* ── Session list ───────────────────────────────────────────── */
 .sessionList {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--sp-4);
 }
 
 .sessionRow {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--sp-12);
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--r-card);
-  padding: 10px 14px;
+  padding: var(--sp-10) var(--sp-12);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 44px;
 }
 
 .sessionDate {
-  font-size: 12.5px;
+  font-size: var(--fs-md);
   color: var(--text-primary);
   min-width: 80px;
   font-weight: 500;
@@ -648,231 +800,47 @@
 }
 
 .sessionTime {
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
   min-width: 48px;
   flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .sessionDurBar {
   flex: 1;
+  min-width: var(--sp-24);
   height: 3px;
   background: var(--border);
-  border-radius: 2px;
+  border-radius: var(--r-xs);
   overflow: hidden;
 }
 
 .sessionDurFill {
   height: 100%;
-  background: var(--a);
-  border-radius: 2px;
+  /* Fades in from the left, brightest at the leading edge — same charge-meter
+     read as the hero progress bar. */
+  background: linear-gradient(90deg, color-mix(in srgb, var(--a) 55%, transparent), var(--a));
+  border-radius: var(--r-xs);
 }
 
+/* HUD number: brighter than the labels around it, tabular so the column
+   stays aligned. */
 .sessionDuration {
-  font-size: 12.5px;
-  color: var(--a);
+  font-size: var(--fs-md);
+  color: var(--text-accent-bright);
   font-weight: 500;
   min-width: 55px;
   text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .sessionAchs {
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-4);
   min-width: 40px;
   justify-content: flex-end;
-}
-
-/* Subtle spinner shown while a background achievement sync runs */
-.bannerSyncing {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.55);
-  color: var(--text-secondary);
-}
-
-/* Notes card — freeform per-game text between the hero and the tabs */
-.notesCard {
-  margin: 12px 24px 0;
-  padding: 10px 14px 12px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-card);
-}
-.notesHeader {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 0;
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
-  transition: color 0.12s;
-}
-.notesHeader:hover { color: var(--text-secondary); }
-.notesCard:has(.notesTextarea) .notesHeader { margin-bottom: 6px; }
-.notesPreview {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: left;
-  text-transform: none;
-  letter-spacing: 0;
-  font-weight: 400;
-  font-size: 12px;
-  color: var(--text-muted);
-  opacity: 0.8;
-}
-.notesSaved {
-  margin-left: auto;
-  font-size: 10.5px;
-  font-weight: 500;
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--status-finished);
-}
-.notesTextarea {
-  width: 100%;
-  resize: vertical;
-  min-height: 40px;
-  max-height: 260px;     /* resize is capped — notes can never bury the page */
-  overflow-y: auto;
-  padding: 6px 8px;
-  background: var(--surface-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--r-input);
-  color: var(--text-primary);
-  font-family: inherit;
-  font-size: 12.5px;
-  line-height: 1.5;
-  outline: none;
-  transition: border-color 0.12s;
-}
-.notesTextarea:focus { border-color: var(--ab); }
-.notesTextarea::placeholder { color: var(--text-muted); }
-
-/* Inline privacy warning above the achievements grid */
-.privacyBanner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-  padding: 9px 12px;
-  border-radius: var(--r-input);
-  border: 1px solid rgba(251, 146, 60, 0.35);
-  background: rgba(251, 146, 60, 0.08);
-  color: #fb923c;
-  font-size: 12.5px;
-  line-height: 1.4;
-}
-
-.emptyState {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 48px 0;
-  color: var(--text-muted);
-  font-size: 13px;
-}
-
-/* ── Banner action bar (Play + Sync next to back button) ───────── */
-.bannerActions {
-  position: absolute;
-  top: 14px;
-  left: 110px;
-  z-index: 5;
-  display: flex;
-  gap: 8px;
-}
-
-.bannerPlayBtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  border-radius: var(--r-pill);
-  border: none;
-  background: var(--a);
-  color: #09090f;
-  font-family: inherit;
-  font-size: 12.5px;
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-  transition: transform 0.1s, opacity 0.15s, box-shadow 0.15s;
-}
-.bannerPlayBtn:hover { opacity: 0.95; box-shadow: 0 4px 14px var(--ab); }
-.bannerPlayBtn:active { transform: scale(0.97); }
-
-.bannerSyncBtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  border-radius: var(--r-pill);
-  background: rgba(0,0,0,0.55);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  border: 1px solid rgba(255,255,255,0.12);
-  color: #fff;
-  font-family: inherit;
-  font-size: 12.5px;
-  font-weight: 500;
-  cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.35);
-  transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.1s;
-}
-.bannerSyncBtn:hover:not(:disabled) {
-  background: var(--a);
-  color: #09090f;
-  border-color: var(--a);
-}
-.bannerSyncBtn:disabled { opacity: 0.65; cursor: progress; }
-.bannerSyncBtn:active { transform: scale(0.97); }
-
-/* Status picker — wraps the pill button + its dropdown */
-.statusWrap { position: relative; }
-
-.statusDropdown {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 6;
-  min-width: 170px;
-  background: var(--surface-2);
-  border: 1px solid var(--ab);
-  border-radius: var(--r-card);
-  box-shadow: var(--shadow-modal);
-  overflow: hidden;
-  animation: menuIn 0.1s ease;
-}
-
-/* Finished state — solid accent so it reads as an achieved milestone */
-.bannerFinishedBtn {
-  background: var(--a);
-  color: #09090f;
-  border-color: var(--a);
-}
-.bannerFinishedBtn:hover:not(:disabled) {
-  background: var(--a);
-  color: #09090f;
-  filter: brightness(1.08);
 }

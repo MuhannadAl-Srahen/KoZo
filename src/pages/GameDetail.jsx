@@ -3,19 +3,26 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   IconChevronLeft, IconTrophy, IconLock, IconCheck, IconHistory,
   IconDotsVertical, IconTrash, IconRefresh, IconEdit, IconPlayerPlayFilled,
-  IconStethoscope, IconFolderOpen, IconDeviceFloppy, IconDownload, IconLoader2,
+  IconStethoscope, IconFolderOpen, IconDeviceFloppy, IconDownload,
   IconCircleCheck, IconCircleOff, IconEye, IconEyeOff, IconChevronDown,
-  IconChevronRight, IconAlertTriangle,
+  IconChevronRight, IconAlertTriangle, IconDeviceGamepad2,
 } from '@tabler/icons-react'
-import { getBannerBg, getBannerIcon, formatPlaytime, formatDate, formatDateTime, fileUrl, isSteamTracked, launcherLabel } from '../lib/utils'
+import { getBannerBg, getBannerIcon, formatPlaytime, formatDate, formatDateTime, fileUrl, isSteamTracked, launcherLabel, localDayKey } from '../lib/utils'
 import { STATUS_META } from '../components/GameCard'
 import AchievementModal from '../components/modals/AchievementModal'
 import EditGameModal from '../components/modals/EditGameModal'
 import SaveManagerModal from '../components/modals/SaveManagerModal'
 import InfoModal, { PrivacyHelp } from '../components/ui/InfoModal'
+import EmptyState from '../components/ui/EmptyState'
+import { HeroSkeleton, PanelSkeleton } from '../components/ui/Skeleton'
 import s from './GameDetail.module.css'
 
 const STEAM_PRIVACY_URL = 'https://steamcommunity.com/my/edit/settings'
+
+// toggleManual doesn't return the new unlock row's id, and only its presence
+// decides "unlocked" — the real id arrives with the reload its game:updated
+// broadcast triggers. Mirrors the sentinel AchievementModal patches with.
+const OPTIMISTIC_UNLOCK_ID = -1
 
 // ── 7-day chart helpers ────────────────────────────────────────────────────
 function buildWeekData(sessions) {
@@ -24,9 +31,12 @@ function buildWeekData(sessions) {
   for (let i = 6; i >= 0; i--) {
     const d = new Date(today)
     d.setDate(d.getDate() - i)
-    const dayStr = d.toISOString().slice(0, 10)
+    // Local day buckets — the labels below say "Today"/"Yest" in local terms and
+    // started_at is UTC, so a prefix match would credit late-night play to the
+    // previous bar.
+    const dayStr = localDayKey(d)
     const secs = sessions
-      .filter(s => s.started_at?.startsWith(dayStr))
+      .filter(s => localDayKey(s.started_at) === dayStr)
       .reduce((a, s) => a + (s.duration_seconds || 0), 0)
     const label = i === 0 ? 'Today'
       : i === 1 ? 'Yest'
@@ -45,11 +55,14 @@ function WeekChart({ sessions }) {
       <div className={s.chartTitle}>Last 7 days</div>
       <div className={s.chart}>
         {data.map((d, i) => (
-          <div key={i} className={`${s.chartBar} ${d.isToday ? s.chartBarToday : ''}`}>
+          <div
+            key={i}
+            className={`${s.chartBar} ${d.isToday ? s.chartBarToday : ''} ${d.seconds === 0 ? s.chartBarZero : ''}`}
+          >
             <div
               className={s.chartBarFill}
               style={{ height: `${Math.max((d.seconds / maxSec) * 52, d.seconds > 0 ? 4 : 2)}px` }}
-              title={formatPlaytime(d.seconds)}
+              title={`${d.label} — ${formatPlaytime(d.seconds)}`}
             />
             <div className={s.chartBarLabel}>{d.label}</div>
           </div>
@@ -59,42 +72,67 @@ function WeekChart({ sessions }) {
   )
 }
 
-// ── Achievement card (88px fixed) ──────────────────────────────────────────
-function AchCard({ ach, maxUnlockSec, onClick, onQuickToggle }) {
-  const unlocked = !!ach.unlocked_at
+function isUnlocked(ach) {
+  return ach?.unlock_id != null || ach?.unlocked_at != null
+}
+
+// ── Achievement card ───────────────────────────────────────────────────────
+// One compact line per achievement. The description used to render on every
+// tile, which turned a 50-achievement game into a wall of text — it now lives
+// in the row's tooltip, where it is there when you want it and silent when you
+// don't.
+function AchCard({ ach, onClick, onQuickToggle }) {
+  // unlock_id is the row's existence; unlocked_at can legitimately be NULL when
+  // Steam reported no date (unlocktime 0). The unlocked_at half stays as a
+  // safety net for any patch that forgets the id.
+  const unlocked = isUnlocked(ach)
+  const hint = ach.description || (unlocked ? '' : 'Hidden achievement')
+
+  // Rarity tint for the unlocked icon's ring — same tier cuts as rarityLabel()
+  // (lib/utils.js) and the modal's badge, on the fixed --rarity-* tokens that
+  // never follow the accent. No global % → the CSS falls back to the accent
+  // via var(--rar, var(--a)).
+  const gp = ach.global_unlock_percent
+  const rarityColor = gp == null ? null
+    : gp < 5  ? 'var(--rarity-ultra)'
+    : gp < 15 ? 'var(--rarity-very)'
+    : gp < 30 ? 'var(--rarity-rare)'
+    : gp < 50 ? 'var(--rarity-uncommon)'
+    :           'var(--rarity-common)'
 
   return (
-    <div className={s.achCard} onClick={() => onClick(ach)}>
-      <div className={`${s.achIcon} ${unlocked ? s.achIconUnlocked : s.achIconLocked}`}>
+    <div
+      className={`${s.achCard} ${unlocked ? '' : s.achCardLocked}`}
+      onClick={() => onClick(ach)}
+    >
+      <div
+        className={`${s.achIcon} ${unlocked ? s.achIconUnlocked : s.achIconLocked}`}
+        style={unlocked && rarityColor ? { '--rar': rarityColor } : undefined}
+      >
         {ach.icon_url
-          ? <img src={ach.icon_url} alt="" />
-          : <IconTrophy
-              size={22}
-              stroke={1.4}
-              style={{ color: unlocked ? 'var(--a)' : 'var(--text-muted)' }}
-            />
+          ? <img src={ach.icon_url} alt="" loading="lazy" decoding="async" />
+          : <IconTrophy size={20} stroke={1.4} />
         }
       </div>
 
       <div className={s.achBody}>
         <div className={s.achName}>{ach.display_name}</div>
-        {ach.description
-          ? <div className={s.achDesc}>{ach.description}</div>
-          : !unlocked && <div className={s.achHidden}>Hidden achievement</div>
-        }
+        {hint && <div className={s.achDesc}>{hint}</div>}
         {unlocked && (
-          <div className={s.achDate}>{formatDate(ach.unlocked_at)}</div>
+          <div className={s.achDate}>
+            {ach.unlocked_at ? formatDate(ach.unlocked_at) : 'No date'}
+          </div>
         )}
       </div>
 
       <button
-        className={s.achStatus}
+        className={`${s.achStatus} ${unlocked ? s.achStatusOn : ''}`}
         title={unlocked ? 'Mark as locked' : 'Mark as unlocked (manual)'}
         onClick={(e) => { e.stopPropagation(); onQuickToggle?.(ach) }}
       >
         {unlocked
-          ? <IconCheck size={16} stroke={2.5} style={{ color: 'var(--a)' }} />
-          : <IconLock  size={15} stroke={1.6} style={{ color: 'var(--text-muted)' }} />
+          ? <IconCheck size={14} stroke={2.5} />
+          : <IconLock  size={13} stroke={1.6} />
         }
       </button>
     </div>
@@ -109,16 +147,18 @@ function SessionRow({ session, maxDuration }) {
 
   return (
     <div className={s.sessionRow}>
-      <div className={s.sessionDate}>{formatDate(session.started_at)}</div>
+      <div className={s.sessionDate} title={formatDateTime(session.started_at)}>
+        {formatDate(session.started_at)}
+      </div>
       <div className={s.sessionTime}>
         {new Date(session.started_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
       </div>
-      <div className={s.sessionDurBar}>
+      <div className={s.sessionDurBar} title={formatPlaytime(session.duration_seconds)}>
         <div className={s.sessionDurFill} style={{ width: `${widthPct}%` }} />
       </div>
       <div className={s.sessionDuration}>{formatPlaytime(session.duration_seconds)}</div>
       {session.achievements_unlocked > 0 && (
-        <div className={s.sessionAchs}>
+        <div className={s.sessionAchs} title={`${session.achievements_unlocked} achievements unlocked this session`}>
           <IconTrophy size={11} stroke={1.5} />
           {session.achievements_unlocked}
         </div>
@@ -154,34 +194,15 @@ export default function GameDetail() {
   const statusMenuRef               = useRef(null)
   const [syncPrivacyError, setSyncPrivacyError] = useState(null)
 
-  // Notes — debounced autosave, flushed on unmount so nothing is lost.
-  const [notes, setNotes]           = useState('')
-  const [notesOpen, setNotesOpen]   = useState(false)   // opened on load when notes exist
-  const [notesSaved, setNotesSaved] = useState(false)
-  const notesTimer   = useRef(null)
-  const notesDirty   = useRef(null)   // pending unsaved text (null = clean)
-  const notesLoaded  = useRef(false)
+  // Notes were removed from this page at the user's request. The
+  // DB column and games:update path still accept `notes`, so nothing is lost
+  // if the surface ever comes back.
 
-  function persistNotes(text) {
-    notesDirty.current = null
-    window.kozo?.api?.games?.update(Number(id), { notes: text })
-    setNotesSaved(true)
-    setTimeout(() => setNotesSaved(false), 1500)
-  }
-
-  function handleNotesChange(text) {
-    setNotes(text)
-    notesDirty.current = text
-    clearTimeout(notesTimer.current)
-    notesTimer.current = setTimeout(() => persistNotes(text), 800)
-  }
-
-  useEffect(() => () => {
-    // Flush pending notes when leaving the page.
-    clearTimeout(notesTimer.current)
-    if (notesDirty.current != null) {
-      window.kozo?.api?.games?.update(Number(id), { notes: notesDirty.current })
-    }
+  // Per-game reset. The route has no key, so /game/A → /game/B (the tray's
+  // now-playing item does exactly that) reuses this instance with only `id`
+  // changing — reset per-game state so game A never renders under game B's URL.
+  useEffect(() => {
+    setLoading(true)
   }, [id])
 
   // Automatic achievement sync — fires silently once per page visit so nobody
@@ -213,15 +234,7 @@ export default function GameDetail() {
       window.kozo.api.sessions.active(),
       window.kozo.api.steam?.lastSyncError?.(Number(id)),
     ])
-    if (gRes?.ok) {
-      setGame(gRes.data)
-      // Seed notes once per game — don't clobber live typing on background reloads.
-      if (!notesLoaded.current) {
-        setNotes(gRes.data?.notes || '')
-        setNotesOpen(!!gRes.data?.notes)   // expanded only when there's something to read
-        notesLoaded.current = true
-      }
-    }
+    if (gRes?.ok) setGame(gRes.data)
     if (aRes?.ok) setAch(aRes.data ?? [])
     if (sRes?.ok) setSessions(sRes.data ?? [])
     if (activeRes?.ok) {
@@ -234,18 +247,17 @@ export default function GameDetail() {
   useEffect(() => {
     load()
     if (!window.kozo?.events) return
-    window.kozo.events.onSessionStarted(() => load())
-    window.kozo.events.onSessionEnded(()   => load())
-    // Reload when an achievement syncs in (live, during a session) so the page
-    // catches new unlocks without a manual refresh.
-    window.kozo.events.onGameUpdated(() => load())
-    window.kozo.events.onAchievementUnlocked(() => load())
-    return () => {
-      window.kozo.events.removeAll('session:started')
-      window.kozo.events.removeAll('session:ended')
-      window.kozo.events.removeAll('game:updated')
-      window.kozo.events.removeAll('achievement:unlocked')
-    }
+    // Unsubscribe THIS page's own listeners only — removeAll() is window-wide
+    // and would tear down the always-mounted Sidebar's listeners too.
+    const offs = [
+      window.kozo.events.onSessionStarted(() => load()),
+      window.kozo.events.onSessionEnded(()   => load()),
+      // Reload when an achievement syncs in (live, during a session) so the page
+      // catches new unlocks without a manual refresh.
+      window.kozo.events.onGameUpdated(() => load()),
+      window.kozo.events.onAchievementUnlocked(() => load()),
+    ]
+    return () => { for (const off of offs) off?.() }
   }, [load])
 
   // Auto-scan crack files when a cracked game page opens
@@ -281,6 +293,23 @@ export default function GameDetail() {
     document.addEventListener('mousedown', onClickOutside)
     return () => document.removeEventListener('mousedown', onClickOutside)
   }, [])
+
+  // Hero art source ladder: cached local hero → Steam's CDN hero → the generated
+  // placeholder icon. Held in state rather than by mutating the <img> element,
+  // because the blurred-fill pair means TWO elements share one source.
+  const bust = imgBust || undefined
+  const heroCdnUrl = game?.steam_app_id
+    ? `https://cdn.akamai.steamstatic.com/steam/apps/${game.steam_app_id}/library_hero.jpg`
+    : null
+  const heroPrimary = !game ? null
+    : game.hero_local_path ? fileUrl(game.hero_local_path, bust)
+    : (heroCdnUrl ?? fileUrl(game.banner_local_path, bust))
+  const [heroStage, setHeroStage] = useState(0)
+  useEffect(() => { setHeroStage(0) }, [heroPrimary])
+  const heroUrl = heroStage === 0 ? heroPrimary : heroStage === 1 ? heroCdnUrl : null
+  function handleHeroError() {
+    setHeroStage(st => (st === 0 && heroCdnUrl && heroPrimary !== heroCdnUrl) ? 1 : 2)
+  }
 
   async function handleDelete() {
     if (!confirmDelete) { setConfirmDelete(true); return }
@@ -439,7 +468,7 @@ export default function GameDetail() {
     if (diag.emulator)      lines.push(`Emulator detected: ${diag.emulator}`)
     if (diag.storedAppId)   lines.push(`AppID KoZo uses: ${diag.storedAppId}`)
     if (diag.configAppIds?.length && diag.mismatch) {
-      lines.push(`⚠ AppID in the game's own config: ${diag.configAppIds.join(', ')}`)
+      lines.push(`AppID in the game's own config: ${diag.configAppIds.join(', ')}`)
     }
     if (diag.crackDir)      lines.push(`Save folder KoZo watches: ${diag.crackDir}`)
     for (const c of (diag.candidates || [])) {
@@ -564,7 +593,7 @@ export default function GameDetail() {
         setInfo({
           variant: 'warning',
           title: 'This is the Games for Windows LIVE version',
-          message: 'KoZo found xlive.dll in the install folder — this build predates Steam achievements entirely (its achievements lived in the long-dead GFWL service), so NO tool can read unlocks from it. To get automatic tracking you\'d need the Complete Edition build with a Steam emulator. The achievement list is loaded. While you play, KoZo also watches the screen for the game\'s own unlock popups (OCR) and marks a match automatically — anything it misses you can click below.',
+          message: 'KoZo found xlive.dll in the install folder — this build predates Steam achievements entirely (its achievements lived in the long-dead GFWL service), so NO tool can read unlocks from it. To get automatic tracking you\'d need the Complete Edition build with a Steam emulator. The achievement list is loaded, but there is no automatic unlock source for this build — mark achievements manually by clicking one below.',
           lines,
         })
         break
@@ -573,7 +602,7 @@ export default function GameDetail() {
         setInfo({
           variant: 'warning',
           title: 'No Steam emulator found in this crack',
-          message: 'KoZo checked the install folder (configs AND dlls) and found no Steam emulator at all — so this crack doesn\'t produce unlock files anywhere (some, like this one, use their own launcher\'s stats system instead of Steam). The achievement list is loaded. While you play, KoZo watches the screen for the game\'s own unlock popups (OCR) and marks a match automatically — anything it misses you can click below. If the game DOES show achievement popups in-game, play a bit and run this check again — the deep scan will catch any file the crack writes under this game\'s AppID.',
+          message: 'KoZo checked the install folder (configs AND dlls) and found no Steam emulator at all — so this crack doesn\'t produce unlock files anywhere (some, like this one, use their own launcher\'s stats system instead of Steam). The achievement list is loaded, but there is no automatic unlock source for this build — mark achievements manually by clicking one below. If the game DOES show achievement popups in-game, play a bit and run this check again — the deep scan will catch any file the crack writes under this game\'s AppID.',
           lines,
         })
         break
@@ -597,6 +626,7 @@ export default function GameDetail() {
     if (!res?.ok) return
     setAch(prev => prev.map(a => a.id === ach.id
       ? { ...a,
+          unlock_id: res.data.unlocked ? (a.unlock_id ?? OPTIMISTIC_UNLOCK_ID) : null,
           unlocked_at: res.data.unlocked ? res.data.unlocked_at : null,
           unlock_source: res.data.unlocked ? 'manual' : null }
       : a))
@@ -613,8 +643,37 @@ export default function GameDetail() {
     }
   }
 
-  if (loading) return <div className={s.emptyState}>Loading…</div>
-  if (!game)   return <div className={s.emptyState}>Game not found.</div>
+  // A ghost hero + panel, not a bare "Loading…": the real layout lands without a
+  // reflow, and the page never reads as empty while the four queries resolve.
+  if (loading) {
+    return (
+      <div className={s.page}>
+        <HeroSkeleton height={240} />
+        <div className={s.content}>
+          <div className={s.contentInner}>
+            <PanelSkeleton lines={6} />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (!game) {
+    return (
+      <div className={s.page}>
+        <div className={s.content}>
+          <div className={s.contentInner}>
+            <EmptyState
+              Icon={IconDeviceGamepad2}
+              title="Game not found"
+              desc="This game is no longer in your library — it may have been removed."
+              action={{ label: 'Back to Library', Icon: IconChevronLeft, onClick: () => navigate('/') }}
+            />
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   const Icon         = getBannerIcon(game.name)
   const bannerBg     = getBannerBg(game.id)
@@ -622,210 +681,207 @@ export default function GameDetail() {
   // foreign-launcher game (Xbox/Epic/GOG…) never shows Steam sync, even if it
   // happens to carry a stray steam_app_id.
   const steamTracked = isSteamTracked(game)
-  const unlocked     = achievements.filter(a => a.unlocked_at).length
+  const unlocked     = achievements.filter(isUnlocked).length
   const total        = achievements.length
   const pct          = total > 0 ? Math.round((unlocked / total) * 100) : 0
   const maxDuration  = Math.max(...sessions.map(s => s.duration_seconds || 0), 1)
-
-  // Priority: local hero (cached, wide landscape) → CDN hero → local portrait (last resort)
-  const heroCdnUrl = game.steam_app_id
-    ? `https://cdn.akamai.steamstatic.com/steam/apps/${game.steam_app_id}/library_hero.jpg`
-    : null
-  const bust = imgBust || undefined
-  const heroUrl = game.hero_local_path
-    ? fileUrl(game.hero_local_path, bust)
-    : (heroCdnUrl ?? fileUrl(game.banner_local_path, bust))
+  const status       = STATUS_META[game.completion_status]
 
   return (
     <div className={s.page}>
-      {/* Banner */}
-      <div className={s.banner} style={{ background: bannerBg }}>
-        {heroUrl ? (
-          <img
-            key={heroUrl}
-            src={heroUrl}
-            className={s.bannerImg}
-            alt=""
-            onError={e => {
-              // CDN fallback chain: hero CDN → hide
-              if (heroCdnUrl && e.target.src !== heroCdnUrl) {
-                e.target.src = heroCdnUrl
-                e.target.onerror = () => { e.target.style.display = 'none' }
-              } else {
-                e.target.style.display = 'none'
-              }
-            }}
-          />
-        ) : (
-          <Icon size={80} className={s.bannerPlaceholderIcon} stroke={1.0} />
-        )}
-        <div className={s.bannerOverlay} />
+      {/* One scroller wraps hero + tabs + panels: the hero is a sticky
+          collapsing header (big at rest, pins to a compact strip on scroll)
+          and the tabs pin right beneath it. */}
+      <div className={s.scroll}>
+      {/* ── Hero ── */}
+      <div className={s.hero}>
+        {/* Only the ART layer clips; the hero itself stays overflow: visible so
+            the dropdowns below can extend past it. */}
+        <div className={s.heroArt} style={{ background: bannerBg }}>
+          <Icon size={72} stroke={1} className={s.heroIcon} />
+          {heroUrl && (
+            <React.Fragment key={heroUrl}>
+              <img
+                src={heroUrl} className={s.heroBlur} alt="" aria-hidden="true"
+                decoding="async" onError={handleHeroError}
+              />
+              <img
+                src={heroUrl} className={s.heroImg} alt=""
+                decoding="async" onError={handleHeroError}
+              />
+            </React.Fragment>
+          )}
+          <div className={s.heroScrim} />
+        </div>
 
-        <button className={s.bannerBack} onClick={() => navigate('/')}>
-          <IconChevronLeft size={15} stroke={2} />
-          Library
-        </button>
+        <div className={s.heroTop}>
+          <button className={s.backBtn} onClick={() => navigate('/')} title="Back to Library">
+            <IconChevronLeft size={15} stroke={2} />
+            Library
+          </button>
 
-        <div className={s.bannerActions}>
-          {!!game.is_installed && !isLive && (
-            <button
-              onClick={handleLaunch}
-              title={`Launch ${game.name}`}
-              className={s.bannerPlayBtn}
-            >
-              <IconPlayerPlayFilled size={13} />
-              Play
-            </button>
+          <div className={s.heroActions}>
+            {!!game.is_installed && !isLive && (
+              <button onClick={handleLaunch} title={`Launch ${game.name}`} className={s.playBtn}>
+                <IconPlayerPlayFilled size={13} />
+                Play
+              </button>
+            )}
+
+            {/* Status picker — Playing / Finished / Dropped / On hold, synced with the Game List */}
+            <div className={s.statusWrap} ref={statusMenuRef}>
+              <button
+                onClick={() => setStatusMenuOpen(v => !v)}
+                title={status ? `Status: ${status.label} — click to change` : 'Set a status for this game (finishing earns XP)'}
+                className={`${s.statusBtn} ${
+                  game.completion_status === 'finished' ? s.statusBtnFinished : status ? s.statusBtnSet : ''
+                }`}
+                style={status ? { '--st': status.color } : undefined}
+              >
+                {status ? <status.Icon size={14} /> : <IconCircleCheck size={14} />}
+                {status ? status.label : 'Set status'}
+                <IconChevronDown size={12} stroke={2} />
+              </button>
+
+              {statusMenuOpen && (
+                <div className={s.statusDropdown}>
+                  {Object.entries(STATUS_META).map(([key, st]) => (
+                    <button
+                      key={key}
+                      className={s.menuItem}
+                      onClick={() => setStatus(game.completion_status === key ? null : key)}
+                    >
+                      <st.Icon size={14} style={{ color: st.color }} />
+                      {st.label}
+                      {game.completion_status === key && <IconCheck size={13} stroke={2} style={{ marginLeft: 'auto' }} />}
+                    </button>
+                  ))}
+                  {game.completion_status && (
+                    <button className={s.menuItem} onClick={() => setStatus(null)}>
+                      <IconCircleOff size={14} />
+                      Clear status
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Achievements sync automatically (on open + live during sessions);
+                a subtle spinner appears while a background sync is running.
+                Manual sync/diagnose now live in the ⋯ menu for the rare case. */}
+            {(refreshing || crackScanning || importing) && (
+              <span className={s.heroSyncing} title="Syncing achievements…">
+                <IconRefresh size={13} className="spin" />
+              </span>
+            )}
+          </div>
+
+          <div className={s.heroTopSpacer} />
+
+          {isLive && (
+            <div className={s.liveBadge} title="A session is running right now">
+              <span className={s.liveDot} />
+              LIVE
+            </div>
           )}
 
-          {/* Status picker — Playing / Finished / Dropped / On hold, synced with the Game List */}
-          <div className={s.statusWrap} ref={statusMenuRef}>
-            {(() => {
-              const st = STATUS_META[game.completion_status]
-              return (
+          {/* Game options menu */}
+          <div className={s.gameMenu} ref={menuRef}>
+            <button
+              className={s.menuTrigger}
+              onClick={() => { setMenuOpen(v => !v); setConfirmDelete(false) }}
+              title="Game options"
+            >
+              <IconDotsVertical size={16} stroke={1.8} />
+            </button>
+
+            {menuOpen && (
+              <div className={s.menuDropdown}>
                 <button
-                  onClick={() => setStatusMenuOpen(v => !v)}
-                  title={st ? `Status: ${st.label} — click to change` : 'Set a status for this game (finishing earns XP)'}
-                  className={`${s.bannerSyncBtn} ${game.completion_status === 'finished' ? s.bannerFinishedBtn : ''}`}
-                  style={st && game.completion_status !== 'finished' ? { color: st.color, borderColor: st.color + '55' } : undefined}
+                  className={s.menuItem}
+                  onClick={() => { setShowEdit(true); setMenuOpen(false) }}
                 >
-                  {st ? <st.Icon size={14} /> : <IconCircleCheck size={14} />}
-                  {st ? st.label : 'Set status'}
-                  <IconChevronDown size={12} stroke={2} />
+                  <IconEdit size={14} stroke={1.6} />
+                  Edit game
                 </button>
-              )
-            })()}
-            {statusMenuOpen && (
-              <div className={s.statusDropdown}>
-                {Object.entries(STATUS_META).map(([key, st]) => (
+
+                {/* Auto-import achievement list — for launchers KoZo can't auto-track */}
+                {!steamTracked && !game.is_cracked && (
                   <button
-                    key={key}
-                    className={s.gameMenuItem}
-                    onClick={() => setStatus(game.completion_status === key ? null : key)}
+                    className={`${s.menuItem} ${importing ? s.menuItemBusy : ''}`}
+                    onClick={handleAutoImport}
+                    aria-busy={importing || undefined}
                   >
-                    <st.Icon size={14} style={{ color: st.color }} />
-                    {st.label}
-                    {game.completion_status === key && <IconCheck size={13} stroke={2} style={{ marginLeft: 'auto' }} />}
+                    <IconDownload size={14} stroke={1.6} />
+                    {importing ? 'Importing…' : (total > 0 ? 'Re-import achievements' : 'Import achievements from Steam')}
                   </button>
-                ))}
-                {game.completion_status && (
-                  <button className={s.gameMenuItem} onClick={() => setStatus(null)}>
-                    <IconCircleOff size={14} />
-                    Clear status
+                )}
+
+                {/* ONE combined check — syncs for new unlocks AND shows the
+                    diagnostic report, via the right pipeline for the game type
+                    (crack files vs Steam). */}
+                {(steamTracked || !!game.is_cracked) && (
+                  <button
+                    className={`${s.menuItem} ${(crackScanning || refreshing) ? s.menuItemBusy : ''}`}
+                    onClick={() => { setMenuOpen(false); (game.is_cracked ? handleCrackFiles : handleSteamCheck)() }}
+                    aria-busy={(crackScanning || refreshing) || undefined}
+                  >
+                    <IconStethoscope size={14} stroke={1.6} />
+                    {(crackScanning || refreshing) ? 'Checking…' : 'Check achievements'}
                   </button>
+                )}
+
+                <button className={s.menuItem} onClick={() => { setMenuOpen(false); setShowSaveManager(true) }}>
+                  <IconDeviceFloppy size={14} stroke={1.6} />
+                  Save files &amp; backup
+                </button>
+
+                {!!game.install_path && (
+                  <button className={s.menuItem} onClick={handleOpenFolder}>
+                    <IconFolderOpen size={14} stroke={1.6} />
+                    Open game folder
+                  </button>
+                )}
+
+                <button className={s.menuItem} onClick={toggleHidden}
+                  title="Hidden games leave the Library grid but keep tracking time, achievements and XP">
+                  {game.is_hidden ? <IconEye size={14} stroke={1.6} /> : <IconEyeOff size={14} stroke={1.6} />}
+                  {game.is_hidden ? 'Unhide from library' : 'Hide from library'}
+                </button>
+
+                {!confirmDelete ? (
+                  <button
+                    className={`${s.menuItem} ${s.menuItemDanger}`}
+                    onClick={() => setConfirmDelete(true)}
+                  >
+                    <IconTrash size={14} stroke={1.6} />
+                    Remove from Library
+                  </button>
+                ) : (
+                  <div className={s.menuConfirm}>
+                    <div className={s.menuConfirmText}>
+                      Remove "{game.name}"? All sessions and achievements will be deleted.
+                    </div>
+                    <div className={s.menuConfirmBtns}>
+                      <button className={s.menuCancelBtn} onClick={() => setConfirmDelete(false)}>Cancel</button>
+                      <button
+                        className={`${s.menuDeleteBtn} ${deleting ? s.menuItemBusy : ''}`}
+                        onClick={handleDelete}
+                        aria-busy={deleting || undefined}
+                      >
+                        {deleting ? 'Removing…' : 'Remove'}
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             )}
           </div>
-          {/* Achievements sync automatically (on open + live during sessions);
-              a subtle spinner appears while a background sync is running.
-              Manual sync/diagnose now live in the ⋯ menu for the rare case. */}
-          {(refreshing || crackScanning || importing) && (
-            <span className={s.bannerSyncing} title="Syncing achievements…">
-              <IconRefresh size={13} style={{ animation: 'spin 1s linear infinite' }} />
-            </span>
-          )}
         </div>
 
-        {isLive && (
-          <div className={s.liveBadge}>
-            <span className={s.liveDot} />
-            LIVE
-          </div>
-        )}
-
-        {/* Game options menu */}
-        <div className={s.gameMenu} ref={menuRef}>
-          <button
-            className={s.gameMenuTrigger}
-            onClick={() => { setMenuOpen(v => !v); setConfirmDelete(false) }}
-            title="Game options"
-          >
-            <IconDotsVertical size={16} stroke={1.8} />
-          </button>
-
-          {menuOpen && (
-            <div className={s.gameMenuDropdown}>
-              <button
-                className={s.gameMenuItem}
-                onClick={() => { setShowEdit(true); setMenuOpen(false) }}
-              >
-                <IconEdit size={14} stroke={1.6} />
-                Edit game
-              </button>
-
-              {/* Auto-import achievement list — for launchers KoZo can't auto-track */}
-              {!steamTracked && !game.is_cracked && (
-                <button
-                  className={s.gameMenuItem}
-                  onClick={handleAutoImport}
-                  disabled={importing}
-                >
-                  <IconDownload size={14} stroke={1.6} />
-                  {importing ? 'Importing…' : (total > 0 ? 'Re-import achievements' : 'Import achievements from Steam')}
-                </button>
-              )}
-
-              {/* ONE combined check — syncs for new unlocks AND shows the
-                  diagnostic report, via the right pipeline for the game type
-                  (crack files vs Steam). */}
-              {(steamTracked || !!game.is_cracked) && (
-                <button
-                  className={s.gameMenuItem}
-                  onClick={() => { setMenuOpen(false); (game.is_cracked ? handleCrackFiles : handleSteamCheck)() }}
-                  disabled={crackScanning || refreshing}
-                >
-                  <IconStethoscope size={14} stroke={1.6} />
-                  {(crackScanning || refreshing) ? 'Checking…' : 'Check achievements'}
-                </button>
-              )}
-
-              <button className={s.gameMenuItem} onClick={() => { setMenuOpen(false); setShowSaveManager(true) }}>
-                <IconDeviceFloppy size={14} stroke={1.6} />
-                Save files &amp; backup
-              </button>
-
-              {!!game.install_path && (
-                <button className={s.gameMenuItem} onClick={handleOpenFolder}>
-                  <IconFolderOpen size={14} stroke={1.6} />
-                  Open game folder
-                </button>
-              )}
-
-              <button className={s.gameMenuItem} onClick={toggleHidden}
-                title="Hidden games leave the Library grid but keep tracking time, achievements and XP">
-                {game.is_hidden ? <IconEye size={14} stroke={1.6} /> : <IconEyeOff size={14} stroke={1.6} />}
-                {game.is_hidden ? 'Unhide from library' : 'Hide from library'}
-              </button>
-
-              {!confirmDelete ? (
-                <button
-                  className={`${s.gameMenuItem} ${s.gameMenuItemDanger}`}
-                  onClick={() => setConfirmDelete(true)}
-                >
-                  <IconTrash size={14} stroke={1.6} />
-                  Remove from Library
-                </button>
-              ) : (
-                <div className={s.gameMenuConfirm}>
-                  <div className={s.gameMenuConfirmText}>
-                    Remove "{game.name}"? All sessions and achievements will be deleted.
-                  </div>
-                  <div className={s.gameMenuConfirmBtns}>
-                    <button className={s.gameMenuCancelBtn} onClick={() => setConfirmDelete(false)}>Cancel</button>
-                    <button className={s.gameMenuDeleteBtn} onClick={handleDelete} disabled={deleting}>
-                      {deleting ? 'Removing…' : 'Remove'}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className={s.bannerBottom}>
+        <div className={s.heroBottom}>
           <div className={s.gameNameRow}>
-            <div className={s.gameName}>{game.name}</div>
+            <div className={s.gameName} title={game.name}>{game.name}</div>
             {!!game.is_cracked && (
               <div className={s.crackBadge}>
                 CRACKED
@@ -835,6 +891,7 @@ export default function GameDetail() {
               </div>
             )}
           </div>
+
           {(() => {
             let genres = []
             try { genres = JSON.parse(game.genres || '[]') } catch {}
@@ -842,12 +899,13 @@ export default function GameDetail() {
             return (
               <div className={s.genreChips}>
                 {genres.slice(0, 5).map(g => (
-                  <span key={g} className={s.genreChip}>{g}</span>
+                  <span key={g} className={s.genreChip} title={g}>{g}</span>
                 ))}
               </div>
             )
           })()}
-          <div className={s.bannerMeta}>
+
+          <div className={s.heroMeta}>
             <div className={s.metaItem}>
               <span>Playtime</span>
               <span className={s.metaValue}>{formatPlaytime(game.total_playtime_seconds)}</span>
@@ -857,9 +915,17 @@ export default function GameDetail() {
                 <span className={s.metaItem}>
                   <IconTrophy size={12} stroke={1.5} />
                   <span className={s.metaValue}>{unlocked}/{total}</span>
-                  <span style={{ color: 'rgba(255,255,255,0.45)', fontSize: 11 }}>({pct}%)</span>
+                  <span className={s.metaPct}>({pct}%)</span>
                 </span>
-                <div className={s.progressBar}>
+                <div
+                  className={s.progressBar}
+                  role="progressbar"
+                  aria-valuenow={pct}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label="Achievements unlocked"
+                  title={`${unlocked} of ${total} achievements unlocked`}
+                >
                   <div className={s.progressFill} style={{ width: `${pct}%` }} />
                 </div>
               </div>
@@ -872,32 +938,6 @@ export default function GameDetail() {
             )}
           </div>
         </div>
-      </div>
-
-      {/* Notes — mods installed, save locations, where you left off.
-          Collapsible + height-capped so it can never bury the achievements. */}
-      <div className={s.notesCard}>
-        <button className={s.notesHeader} onClick={() => setNotesOpen(v => !v)}>
-          {notesOpen ? <IconChevronDown size={13} stroke={1.8} /> : <IconChevronRight size={13} stroke={1.8} />}
-          <IconEdit size={13} stroke={1.6} />
-          Notes
-          {!notesOpen && (
-            <span className={s.notesPreview}>
-              {notes ? notes.split('\n')[0] : 'Add notes…'}
-            </span>
-          )}
-          {notesSaved && <span className={s.notesSaved}>Saved</span>}
-        </button>
-        {notesOpen && (
-          <textarea
-            className={s.notesTextarea}
-            value={notes}
-            onChange={e => handleNotesChange(e.target.value)}
-            placeholder="Mods installed, save locations, where you left off…"
-            rows={3}
-            spellCheck={false}
-          />
-        )}
       </div>
 
       {/* Tabs */}
@@ -922,53 +962,87 @@ export default function GameDetail() {
 
       {/* Tab content */}
       <div className={s.content}>
-        {tab === 'achievements' && (
-          <>
-            {syncPrivacyError && (
-              <div className={s.privacyBanner}>
-                <IconAlertTriangle size={14} stroke={1.8} />
-                {syncPrivacyError === 'profile_not_found'
-                  ? 'Your Steam profile could not be read — check the Steam ID in Settings → Steam.'
-                  : 'Steam won\'t return unlocks for this game over the web — usually because it isn\'t owned on your Steam account (Steam reports that as "profile is not public" either way), or because your profile\'s Game details are private. KoZo still reads unlocks from the Steam app on this PC, so this only costs you Steam\'s unlock dates.'}
-              </div>
-            )}
-            {total === 0 ? (
-              <div className={s.emptyState}>
-                {game.is_cracked
-                  ? 'No achievements found yet — they appear here once you unlock them in-game.'
-                  : steamTracked
-                    ? 'No achievements found. Try "Check achievements" in the ⋮ menu.'
-                    : <>
-                        <div style={{ marginBottom: 12 }}>
-                          {launcherLabel(game.source)} unlocks can't be read automatically — but KoZo can
-                          pull the achievement list from Steam so you can tick off the ones you've earned.
-                        </div>
-                        <button className={s.importBtn} onClick={handleAutoImport} disabled={importing}>
-                          {importing
-                            ? <><IconLoader2 size={14} stroke={1.8} style={{ animation: 'spin 1s linear infinite' }} /> Importing…</>
-                            : <><IconDownload size={14} stroke={1.8} /> Import achievements from Steam</>}
-                        </button>
-                      </>}
-              </div>
-            ) : (
-              <div className={s.achGrid}>
-                {achievements.map(a => (
-                  <AchCard
-                    key={a.id}
-                    ach={a}
-                    onClick={setSelectedAch}
-                    onQuickToggle={quickToggleAch}
-                  />
-                ))}
-              </div>
-            )}
-          </>
-        )}
+        <div className={s.contentInner}>
+          {tab === 'achievements' && (
+            <>
+              {syncPrivacyError && (
+                <div className={s.privacyBanner}>
+                  <IconAlertTriangle size={15} stroke={1.8} className={s.privacyIcon} />
+                  <div>
+                    {syncPrivacyError === 'profile_not_found'
+                      ? 'Your Steam profile could not be read — check the Steam ID in Settings → Steam.'
+                      : 'Steam won\'t return unlocks for this game over the web — usually because it isn\'t owned on your Steam account (Steam reports that as "profile is not public" either way), or because your profile\'s Game details are private. KoZo still reads unlocks from the Steam app on this PC, so this only costs you Steam\'s unlock dates.'}
+                  </div>
+                </div>
+              )}
 
-        {tab === 'sessions' && (
-          <>
-            {sessions.length === 0 ? (
-              <div className={s.emptyState}>No sessions recorded yet.</div>
+              {total === 0 ? (
+                game.is_cracked ? (
+                  <EmptyState
+                    Icon={IconTrophy}
+                    title="No achievements yet"
+                    desc="They appear here as soon as the crack writes your first unlock to disk."
+                  />
+                ) : steamTracked ? (
+                  <EmptyState
+                    Icon={IconTrophy}
+                    title="No achievements found"
+                    desc={'Run "Check achievements" from the ⋮ menu to pull this game\'s list from Steam.'}
+                  />
+                ) : (
+                  <EmptyState
+                    Icon={IconTrophy}
+                    title="No achievements imported"
+                    desc={`${launcherLabel(game.source)} unlocks can't be read automatically — but KoZo can pull the achievement list from Steam so you can tick off the ones you've earned.`}
+                    action={{
+                      label: importing ? 'Importing…' : 'Import achievements from Steam',
+                      Icon: IconDownload,
+                      onClick: handleAutoImport,
+                    }}
+                  />
+                )
+              ) : (
+                // Split rather than one long mixed list: what you have earned and
+                // what is left are two different questions, and answering both in
+                // one 50-row grid is what made this page unreadable.
+                (() => {
+                  const unlockedAchs = achievements.filter(isUnlocked)
+                  const lockedAchs   = achievements.filter(a => !isUnlocked(a))
+                  const section = (label, list) => list.length > 0 && (
+                    <div className={s.achSection}>
+                      <div className={s.achSectionHead}>
+                        {label}<span className={s.achSectionCount}>{list.length}</span>
+                      </div>
+                      <div className={s.achGrid}>
+                        {list.map(a => (
+                          <AchCard
+                            key={a.id}
+                            ach={a}
+                            onClick={setSelectedAch}
+                            onQuickToggle={quickToggleAch}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )
+                  return (
+                    <>
+                      {section('Unlocked', unlockedAchs)}
+                      {section('Locked', lockedAchs)}
+                    </>
+                  )
+                })()
+              )}
+            </>
+          )}
+
+          {tab === 'sessions' && (
+            sessions.length === 0 ? (
+              <EmptyState
+                Icon={IconHistory}
+                title="No sessions recorded"
+                desc="KoZo logs one automatically the next time you play this game."
+              />
             ) : (
               <>
                 <WeekChart sessions={sessions} />
@@ -978,9 +1052,10 @@ export default function GameDetail() {
                   ))}
                 </div>
               </>
-            )}
-          </>
-        )}
+            )
+          )}
+        </div>
+      </div>
       </div>
 
       {selectedAch && (
@@ -989,6 +1064,9 @@ export default function GameDetail() {
           game={game}
           onClose={() => setSelectedAch(null)}
           onToggle={(updated) => {
+            // The modal already patches unlock_id (the truth) and unlocked_at
+            // (display-only, legitimately null) — take its row as-is so the two
+            // surfaces can't disagree about what's unlocked.
             setAch(prev => prev.map(a => a.id === updated.id ? updated : a))
             setSelectedAch(updated)
           }}

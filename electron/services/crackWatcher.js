@@ -474,6 +474,23 @@ async function enableGoldbergAchievements(gameId) {
       }
     }
   }
+  if (!target) {
+    // No dll and no existing steam_settings — but GSE-family repacks
+    // increasingly embed the emulator inside a hooked GAME dll (Khazan ships
+    // it as voices38.dll), so no steam_api*.dll ever appears on disk. If the
+    // emulator's save folder for THIS appid already exists in AppData, the emu
+    // is provably running for this game — create steam_settings beside the
+    // exe, which is the directory the hook dll loads its config from.
+    const id = String(game.steam_app_id || game.manual_appid || '')
+    const appdata = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming')
+    const emuRuns = id && (
+      exists(path.join(appdata, 'GSE Saves', id)) ||
+      exists(path.join(appdata, 'Goldberg SteamEmu Saves', id))
+    )
+    if (emuRuns && game.install_path && exists(game.install_path)) {
+      target = path.join(game.install_path, 'steam_settings')
+    }
+  }
   if (!target) return { ok: false, reason: 'no_goldberg' }
 
   const list = schema.map(a => ({
@@ -519,9 +536,10 @@ const SKIP_DIRS = new Set([
 // fresh=true to bypass the cache.
 const RECURSIVE_SCAN_TTL_MS = 3 * 60 * 1000
 const recursiveScanCache = new Map()   // `${root}|${appid}` -> { at, hits }
+const scanCacheKey = (rootPath, appid) => `${String(rootPath || '').toLowerCase()}|${appid || ''}`
 
 function recursiveScan(rootPath, appid, fresh = false) {
-  const cacheKey = `${String(rootPath || '').toLowerCase()}|${appid || ''}`
+  const cacheKey = scanCacheKey(rootPath, appid)
   const cached = recursiveScanCache.get(cacheKey)
   if (!fresh && cached && Date.now() - cached.at < RECURSIVE_SCAN_TTL_MS) return cached.hits
 
@@ -652,7 +670,18 @@ const BINARY_SUBDIRS = new Set([
   'shipping', 'retail', 'game', 'app',
 ])
 
-function collectCandidates(game, fresh = false) {
+// Parser for a file the live watcher reported, keyed off its name alone. MUST
+// cover every entry in WATCH_NAMES — a watched name with no parser here is a
+// file that wakes a scan which then can't read it.
+function parserForFile(p) {
+  const n = path.basename(p).toLowerCase()
+  if (n === 'achievements.json') return parseGoldbergJson
+  if (n === 'stats.bin')         return 'sse'
+  if (n.endsWith('.ini') || n.endsWith('.cfg')) return parseCodexIni
+  return null
+}
+
+function collectCandidates(game, fresh = false, allowWalk = true, extraPaths = []) {
   const gameAppid = game.steam_app_id || game.manual_appid
   const fixed     = buildCandidates(game)
 
@@ -663,9 +692,20 @@ function collectCandidates(game, fresh = false) {
   // neither of which needs this. Skipping it keeps the in-session safety poll
   // down to a handful of stat() calls instead of a recursive readdir over a
   // game install, on the exact disk the game is streaming from.
-  // `fresh` (manual "Check achievements" / diagnostics) always walks.
-  const walkOk = fresh || !sessionActive()
-  const scan = (p) => (walkOk && p ? recursiveScan(p, gameAppid, fresh) : [])
+  // `fresh` (manual "Check achievements" / diagnostics) always walks. The live
+  // file watcher passes allowWalk:false: it reports the exact path that changed
+  // (extraPaths below), so it needs the CACHE bypass, not the tree.
+  const walkOk = (fresh && allowWalk) || !sessionActive()
+  // With the walk off, serve whatever an earlier (idle) walk already found
+  // instead of nothing — a pure Map lookup, no disk I/O, so install-tree
+  // layouts discovered while idle stay visible for the whole session. The TTL
+  // is deliberately ignored here: a stale entry only lists paths, and every
+  // candidate is exists()-checked before it's read.
+  const cachedHits = (p) => {
+    const c = recursiveScanCache.get(scanCacheKey(p, gameAppid))
+    return c ? c.hits : []
+  }
+  const scan = (p) => (!p ? [] : walkOk ? recursiveScan(p, gameAppid, fresh) : cachedHits(p))
 
   const recursive = scan(game.install_path)
 
@@ -702,7 +742,17 @@ function collectCandidates(game, fresh = false) {
   // most likely place a live unlock lands.
   const crackDirHits = game.crack_dir ? recursiveScan(game.crack_dir, gameAppid, fresh) : []
 
-  const all = [...fixed, ...configCandidates, ...recursive, ...extraRecursive, ...crackDirHits]
+  // Files the live watcher actually saw change. chokidar watches whole dirs
+  // (depth 3), not just the fixed candidate files, so it fires for unlock files
+  // no candidate list knows — per-profile ALI213/Hoodlum nesting, nested
+  // SteamEmu\UserStats subfolders, in-game OnlineFix Stats\. Reading the exact
+  // path it reported is what keeps those layouts instant mid-session; it costs
+  // one exists() + one read of a file the OS just wrote, no readdir.
+  const extra = extraPaths
+    .map(p => ({ path: p, parse: parserForFile(p), source: 'live-watch' }))
+    .filter(c => c.parse)
+
+  const all = [...fixed, ...configCandidates, ...recursive, ...extraRecursive, ...crackDirHits, ...extra]
   const seen = new Set()
   const unique = all.filter(c => {
     const k = c.path.toLowerCase()
@@ -735,7 +785,7 @@ async function scanGameForCrackAchievements(gameId, opts = {}) {
   try { await require('./achievementSync').ensureSchema(gameId, { force: !!opts.forceSchema }) }
   catch (e) { logger.warn(`crackWatcher: ensureSchema failed for game ${gameId}`, { message: e.message }) }
 
-  const { unique } = collectCandidates(game, !!opts.fresh)
+  const { unique } = collectCandidates(game, !!opts.fresh, opts.allowWalk !== false, opts.extraPaths || [])
 
   // Load schema names for SSE CRC matching
   let schemaNames = null
@@ -785,7 +835,9 @@ async function scanGameForCrackAchievements(gameId, opts = {}) {
   const alreadyUnlocked = new Set()
   for (const a of localAchs) {
     if (a.steam_api_name) nameToAch[a.steam_api_name.toUpperCase()] = a
-    if (a.unlocked_at) alreadyUnlocked.add(a.id)
+    // unlock_id, not unlocked_at — an unlock Steam reported with unlocktime 0 is
+    // stored with a NULL date and is still very much unlocked.
+    if (a.unlock_id != null) alreadyUnlocked.add(a.id)
   }
 
   let added = 0
@@ -798,15 +850,19 @@ async function scanGameForCrackAchievements(gameId, opts = {}) {
       ? new Date(u.unlocktime * 1000).toISOString()
       : new Date().toISOString()
     try {
-      achievementsQ.addUnlock({
+      // addUnlock is INSERT OR IGNORE — a row that already existed reports 0
+      // inserted, and must not produce a toast or an XP award.
+      const inserted = achievementsQ.addUnlock({
         achievement_id: ach.id,
         session_id: null,
         unlocked_at: ts,
         source: 'crack',
       })
-      newUnlocks.push({ ...ach, unlocked_at: ts })
       alreadyUnlocked.add(ach.id)
-      added++
+      if (inserted > 0) {
+        newUnlocks.push({ ...ach, unlocked_at: ts })
+        added++
+      }
     } catch {}
   }
 
@@ -986,6 +1042,7 @@ async function scanActiveSessions() {
 
 const fileWatchers    = new Map()   // gameId → chokidar watcher
 const scanDebounce    = new Map()   // gameId → timeout
+const pendingPaths    = new Map()   // gameId → Set of paths the watcher saw change
 const pendingPollers  = new Map()   // gameId → interval polling not-yet-existing dirs
 const PENDING_POLL_MS = 5_000
 const deepScanned     = new Set()   // gameIds deep-scanned this app run
@@ -1058,13 +1115,28 @@ function dirsToWatch(game) {
   return { existing: [...existing.values()], pending: [...pending.values()] }
 }
 
-function scheduleScan(gameId) {
+// changedPath: the file the watcher reported. Collected across the whole
+// debounce window, not just the last event — an emulator commonly writes
+// achievements.ini AND stats.bin within those 500ms, and dropping either loses
+// the unlock for any layout the fixed candidate list doesn't cover.
+function scheduleScan(gameId, changedPath) {
+  if (changedPath) {
+    let paths = pendingPaths.get(gameId)
+    if (!paths) { paths = new Set(); pendingPaths.set(gameId, paths) }
+    paths.add(changedPath)
+  }
   clearTimeout(scanDebounce.get(gameId))
   scanDebounce.set(gameId, setTimeout(() => {
     scanDebounce.delete(gameId)
+    const extraPaths = [...(pendingPaths.get(gameId) || [])]
+    pendingPaths.delete(gameId)
     // fresh: a file just changed on disk — this pass exists to pick it up, so
-    // it must never be served the cached directory walk.
-    scanGameForCrackAchievements(gameId, { fresh: true }).catch(e =>
+    // it must never be served the cached hit list. allowWalk:false keeps that
+    // cache bypass off the install tree: this runs mid-session (and at watch
+    // attach, while the game is loading), where a synchronous recursive readdir
+    // is exactly the stutter the deferred deep scan was added to remove. The
+    // changed paths above replace what that walk would have found.
+    scanGameForCrackAchievements(gameId, { fresh: true, allowWalk: false, extraPaths }).catch(e =>
       logger.warn(`crackWatcher: live re-scan failed for game ${gameId}`, { message: e.message }))
   }, 500))
 }
@@ -1113,9 +1185,13 @@ function watchGame(gameId) {
   }
 
   const onHit = (fp) => {
-    if (WATCH_NAMES.has(path.basename(fp).toLowerCase())) scheduleScan(gameId)
+    if (WATCH_NAMES.has(path.basename(fp).toLowerCase())) scheduleScan(gameId, fp)
   }
   watcher.on('add', onHit).on('change', onHit)
+  // An 'error' emit with no listener is an uncaught main-process exception —
+  // Windows raises EPERM/EBUSY routinely when an emulator (or AV) locks a file
+  // mid-write, which is precisely when this watcher is doing its job.
+  watcher.on('error', (e) => logger.debug(`crackWatcher: watch error for game ${gameId}`, { message: e?.message }))
   fileWatchers.set(gameId, watcher)
 
   // Dirs that don't exist yet (game never unlocked anything): poll for their
@@ -1191,6 +1267,7 @@ function unwatchGame(gameId) {
   if (w) { try { w.close() } catch {} ; fileWatchers.delete(gameId) }
   clearInterval(pendingPollers.get(gameId)); pendingPollers.delete(gameId)
   clearTimeout(scanDebounce.get(gameId)); scanDebounce.delete(gameId)
+  pendingPaths.delete(gameId)
 }
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
