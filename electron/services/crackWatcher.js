@@ -27,6 +27,10 @@ const logger = require('../logger')
 const SCAN_INTERVAL_MS = 60_000
 let scanTimer = null
 
+// Schema-bootstrap attempts this run: gameId → Set<appid> already tried, so a
+// crack config declaring multiple dead appids can't loop manual_appid writes.
+const bootstrapTried = new Map()
+
 // ── Tiny helpers ─────────────────────────────────────────────────────────────
 
 function safeRead(p) {
@@ -111,18 +115,28 @@ function parseCodexIni(text) {
     if (lower === 'steamachievements' || lower === 'achievements' ||
         lower === 'settings' || lower === 'gamesettings') continue
 
-    // All the different "achieved" field names across emulators
-    const achieved =
-      /^Achieved\s*=\s*1/im.test(body)        ||   // CODEX
-      /^achieved\s*=\s*1/im.test(body)        ||
-      /^achieved\s*=\s*true/im.test(body)     ||   // online-fix
-      /^HaveAchieved\s*=\s*1/im.test(body)    ||   // SSE INI
-      /^Unlocked\s*=\s*1/im.test(body)        ||   // Skidrow alt
-      /^State\s*=\s*0101/im.test(body)        ||   // ALI213 hex state
-      /^State\s*=\s*1/im.test(body)           ||   // Generic
-      /^earned\s*=\s*1/im.test(body)          ||   // EMPRESS alt
-      /^CurProgress\s*=\s*1/im.test(body)     ||   // RUNE
-      /^AchievementState\s*=\s*1/im.test(body)     // RUNE alt
+    // An EXPLICIT boolean key decides alone when present — the fallback
+    // heuristics below must never override "Achieved=0". Without this, a
+    // section like [ACH_KILL_100] Achieved=0 / CurProgress=12 fabricated a
+    // permanent unlock (with a toast and XP) the moment a progress counter's
+    // value merely STARTED with a 1 — the old patterns were unanchored, so
+    // CurProgress=1, 12, 150, 1000 all "matched".
+    // Trailing content after the value (a hand-added ` ; comment`) is allowed,
+    // but only across a whitespace boundary — `Achieved=10` still reads as the
+    // value "10" (locked), never as "1" plus junk.
+    const explicit = body.match(/^(Achieved|HaveAchieved|Unlocked|earned)\s*=\s*(\S+)(?:\s.*)?$/im)
+    let achieved
+    if (explicit) {
+      achieved = /^(1|true)$/i.test(explicit[2])
+    } else {
+      // No explicit flag — heuristics for emulators that only write a state
+      // value, every pattern anchored to the EXACT value.
+      achieved =
+        /^State\s*=\s*0101(?:\s.*)?$/im.test(body)            ||   // ALI213 hex state
+        /^State\s*=\s*1(?:\s.*)?$/im.test(body)               ||   // Generic
+        /^CurProgress\s*=\s*1(?:\s.*)?$/im.test(body)         ||   // RUNE (boolean progress)
+        /^AchievementState\s*=\s*1(?:\s.*)?$/im.test(body)         // RUNE alt
+    }
 
     if (!achieved) continue
 
@@ -191,7 +205,10 @@ function myDocsDir() {
     const { execSync } = require('child_process')
     const reg = execSync(
       'reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\User Shell Folders" /v Personal',
-      { encoding: 'utf8', stdio: 'pipe' }
+      // timeout: this now also runs on the startup path (main.js cache warm) —
+      // a reg.exe hung by an AV interlock must fall through to the Documents
+      // default, never freeze boot.
+      { encoding: 'utf8', stdio: 'pipe', timeout: 3000 }
     )
     const m = reg.match(/Personal\s+REG_EXPAND_SZ\s+(.+)/i)
     if (m) _myDocs = m[1].trim().replace(/%USERPROFILE%/i, home)
@@ -474,6 +491,23 @@ async function enableGoldbergAchievements(gameId) {
       }
     }
   }
+  if (!target) {
+    // No dll and no existing steam_settings — but GSE-family repacks
+    // increasingly embed the emulator inside a hooked GAME dll (Khazan ships
+    // it as voices38.dll), so no steam_api*.dll ever appears on disk. If the
+    // emulator's save folder for THIS appid already exists in AppData, the emu
+    // is provably running for this game — create steam_settings beside the
+    // exe, which is the directory the hook dll loads its config from.
+    const id = String(game.steam_app_id || game.manual_appid || '')
+    const appdata = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming')
+    const emuRuns = id && (
+      exists(path.join(appdata, 'GSE Saves', id)) ||
+      exists(path.join(appdata, 'Goldberg SteamEmu Saves', id))
+    )
+    if (emuRuns && game.install_path && exists(game.install_path)) {
+      target = path.join(game.install_path, 'steam_settings')
+    }
+  }
   if (!target) return { ok: false, reason: 'no_goldberg' }
 
   const list = schema.map(a => ({
@@ -519,9 +553,10 @@ const SKIP_DIRS = new Set([
 // fresh=true to bypass the cache.
 const RECURSIVE_SCAN_TTL_MS = 3 * 60 * 1000
 const recursiveScanCache = new Map()   // `${root}|${appid}` -> { at, hits }
+const scanCacheKey = (rootPath, appid) => `${String(rootPath || '').toLowerCase()}|${appid || ''}`
 
 function recursiveScan(rootPath, appid, fresh = false) {
-  const cacheKey = `${String(rootPath || '').toLowerCase()}|${appid || ''}`
+  const cacheKey = scanCacheKey(rootPath, appid)
   const cached = recursiveScanCache.get(cacheKey)
   if (!fresh && cached && Date.now() - cached.at < RECURSIVE_SCAN_TTL_MS) return cached.hits
 
@@ -652,7 +687,18 @@ const BINARY_SUBDIRS = new Set([
   'shipping', 'retail', 'game', 'app',
 ])
 
-function collectCandidates(game, fresh = false) {
+// Parser for a file the live watcher reported, keyed off its name alone. MUST
+// cover every entry in WATCH_NAMES — a watched name with no parser here is a
+// file that wakes a scan which then can't read it.
+function parserForFile(p) {
+  const n = path.basename(p).toLowerCase()
+  if (n === 'achievements.json') return parseGoldbergJson
+  if (n === 'stats.bin')         return 'sse'
+  if (n.endsWith('.ini') || n.endsWith('.cfg')) return parseCodexIni
+  return null
+}
+
+function collectCandidates(game, fresh = false, allowWalk = true, extraPaths = []) {
   const gameAppid = game.steam_app_id || game.manual_appid
   const fixed     = buildCandidates(game)
 
@@ -663,9 +709,20 @@ function collectCandidates(game, fresh = false) {
   // neither of which needs this. Skipping it keeps the in-session safety poll
   // down to a handful of stat() calls instead of a recursive readdir over a
   // game install, on the exact disk the game is streaming from.
-  // `fresh` (manual "Check achievements" / diagnostics) always walks.
-  const walkOk = fresh || !sessionActive()
-  const scan = (p) => (walkOk && p ? recursiveScan(p, gameAppid, fresh) : [])
+  // `fresh` (manual "Check achievements" / diagnostics) always walks. The live
+  // file watcher passes allowWalk:false: it reports the exact path that changed
+  // (extraPaths below), so it needs the CACHE bypass, not the tree.
+  const walkOk = (fresh && allowWalk) || !sessionActive()
+  // With the walk off, serve whatever an earlier (idle) walk already found
+  // instead of nothing — a pure Map lookup, no disk I/O, so install-tree
+  // layouts discovered while idle stay visible for the whole session. The TTL
+  // is deliberately ignored here: a stale entry only lists paths, and every
+  // candidate is exists()-checked before it's read.
+  const cachedHits = (p) => {
+    const c = recursiveScanCache.get(scanCacheKey(p, gameAppid))
+    return c ? c.hits : []
+  }
+  const scan = (p) => (!p ? [] : walkOk ? recursiveScan(p, gameAppid, fresh) : cachedHits(p))
 
   const recursive = scan(game.install_path)
 
@@ -702,7 +759,17 @@ function collectCandidates(game, fresh = false) {
   // most likely place a live unlock lands.
   const crackDirHits = game.crack_dir ? recursiveScan(game.crack_dir, gameAppid, fresh) : []
 
-  const all = [...fixed, ...configCandidates, ...recursive, ...extraRecursive, ...crackDirHits]
+  // Files the live watcher actually saw change. chokidar watches whole dirs
+  // (depth 3), not just the fixed candidate files, so it fires for unlock files
+  // no candidate list knows — per-profile ALI213/Hoodlum nesting, nested
+  // SteamEmu\UserStats subfolders, in-game OnlineFix Stats\. Reading the exact
+  // path it reported is what keeps those layouts instant mid-session; it costs
+  // one exists() + one read of a file the OS just wrote, no readdir.
+  const extra = extraPaths
+    .map(p => ({ path: p, parse: parserForFile(p), source: 'live-watch' }))
+    .filter(c => c.parse)
+
+  const all = [...fixed, ...configCandidates, ...recursive, ...extraRecursive, ...crackDirHits, ...extra]
   const seen = new Set()
   const unique = all.filter(c => {
     const k = c.path.toLowerCase()
@@ -735,7 +802,7 @@ async function scanGameForCrackAchievements(gameId, opts = {}) {
   try { await require('./achievementSync').ensureSchema(gameId, { force: !!opts.forceSchema }) }
   catch (e) { logger.warn(`crackWatcher: ensureSchema failed for game ${gameId}`, { message: e.message }) }
 
-  const { unique } = collectCandidates(game, !!opts.fresh)
+  const { unique } = collectCandidates(game, !!opts.fresh, opts.allowWalk !== false, opts.extraPaths || [])
 
   // Load schema names for SSE CRC matching
   let schemaNames = null
@@ -774,10 +841,36 @@ async function scanGameForCrackAchievements(gameId, opts = {}) {
   }
 
   // Map api_name → local achievement row
-  const localAchs = achievementsQ.listAchievementsForGame(gameId)
+  let localAchs = achievementsQ.listAchievementsForGame(gameId)
   if (localAchs.length === 0) {
-    // Unlocks parsed but no schema to match them against — without this the
-    // unlocks vanish silently (the #1 confusing failure for cracked games).
+    // Unlocks parsed but no schema to match them against. Before giving up,
+    // try to BOOTSTRAP the schema from an appid the crack itself declares
+    // (a config-appid candidate hit, or the emu config on disk). The old flow
+    // only persisted a working appid after added > 0 — which needs the schema,
+    // which needs the appid: a cycle no number of scans could ever break, so
+    // a game whose stored appid was null stayed at "0 unlocks" forever while
+    // its unlock file parsed fine on every pass.
+    const bootAppid = hits.find(h => h.appid)?.appid
+      || (readEmuConfigAppIds(game.install_path)[0] ?? null)
+    // One attempt per appid per app run: an emu config declaring TWO appids
+    // where neither yields a schema would otherwise ping-pong manual_appid
+    // between them on every scan (a pointless DB write per poll, forever).
+    const tried = bootstrapTried.get(gameId) || new Set()
+    if (bootAppid && !game.steam_app_id && Number(game.manual_appid || 0) !== Number(bootAppid)
+        && !tried.has(Number(bootAppid))) {
+      try {
+        tried.add(Number(bootAppid))
+        bootstrapTried.set(gameId, tried)
+        gamesQ.updateGame(gameId, { manual_appid: Number(bootAppid) })
+        logger.info(`crackWatcher: bootstrapping schema for "${game.name}" from crack-declared appid ${bootAppid}`)
+        await require('./achievementSync').ensureSchema(gameId).catch(() => {})
+        localAchs = achievementsQ.listAchievementsForGame(gameId)
+      } catch {}
+    }
+  }
+  if (localAchs.length === 0) {
+    // Still nothing — without this warning the unlocks vanish silently (the
+    // #1 confusing failure for cracked games).
     logger.warn(`crackWatcher: ${allUnlocks.length} unlocks parsed for "${game.name}" but no achievement schema — check the appid, add a Steam API key, or make your Steam profile public`)
     return { added: 0, hits, scannedPaths, candidatesTried: unique.length, schemaMissing: true }
   }
@@ -785,7 +878,9 @@ async function scanGameForCrackAchievements(gameId, opts = {}) {
   const alreadyUnlocked = new Set()
   for (const a of localAchs) {
     if (a.steam_api_name) nameToAch[a.steam_api_name.toUpperCase()] = a
-    if (a.unlocked_at) alreadyUnlocked.add(a.id)
+    // unlock_id, not unlocked_at — an unlock Steam reported with unlocktime 0 is
+    // stored with a NULL date and is still very much unlocked.
+    if (a.unlock_id != null) alreadyUnlocked.add(a.id)
   }
 
   let added = 0
@@ -794,19 +889,29 @@ async function scanGameForCrackAchievements(gameId, opts = {}) {
     if (!u.name) continue
     const ach = nameToAch[u.name.toUpperCase()]
     if (!ach || alreadyUnlocked.has(ach.id)) continue
+    // Timestamp honesty: "now" is only true on LIVE passes (the chokidar watch
+    // and the in-session safety poll — the file was just written). Catch-up
+    // passes (on add, startup sweep, manual scan) can be importing months-old
+    // unlocks from formats that carry no time key; stamping those "now" made
+    // a long-played game's whole history read as unlocked Today. Store NULL
+    // instead, exactly like the Steam path does for unlocktime 0.
     const ts = u.unlocktime > 0
       ? new Date(u.unlocktime * 1000).toISOString()
-      : new Date().toISOString()
+      : (opts.catchUp ? null : new Date().toISOString())
     try {
-      achievementsQ.addUnlock({
+      // addUnlock is INSERT OR IGNORE — a row that already existed reports 0
+      // inserted, and must not produce a toast or an XP award.
+      const inserted = achievementsQ.addUnlock({
         achievement_id: ach.id,
         session_id: null,
         unlocked_at: ts,
         source: 'crack',
       })
-      newUnlocks.push({ ...ach, unlocked_at: ts })
       alreadyUnlocked.add(ach.id)
-      added++
+      if (inserted > 0) {
+        newUnlocks.push({ ...ach, unlocked_at: ts })
+        added++
+      }
     } catch {}
   }
 
@@ -949,7 +1054,7 @@ async function scanAllCrackedGames() {
   let totalAdded = 0
   const perGame  = []
   for (const g of games) {
-    const r = await scanGameForCrackAchievements(g.id)
+    const r = await scanGameForCrackAchievements(g.id, { catchUp: true })
     perGame.push({ gameId: g.id, name: g.name, added: r.added, sources: r.hits.map(h => h.source) })
     totalAdded += r.added
   }
@@ -986,6 +1091,7 @@ async function scanActiveSessions() {
 
 const fileWatchers    = new Map()   // gameId → chokidar watcher
 const scanDebounce    = new Map()   // gameId → timeout
+const pendingPaths    = new Map()   // gameId → Set of paths the watcher saw change
 const pendingPollers  = new Map()   // gameId → interval polling not-yet-existing dirs
 const PENDING_POLL_MS = 5_000
 const deepScanned     = new Set()   // gameIds deep-scanned this app run
@@ -1058,13 +1164,28 @@ function dirsToWatch(game) {
   return { existing: [...existing.values()], pending: [...pending.values()] }
 }
 
-function scheduleScan(gameId) {
+// changedPath: the file the watcher reported. Collected across the whole
+// debounce window, not just the last event — an emulator commonly writes
+// achievements.ini AND stats.bin within those 500ms, and dropping either loses
+// the unlock for any layout the fixed candidate list doesn't cover.
+function scheduleScan(gameId, changedPath) {
+  if (changedPath) {
+    let paths = pendingPaths.get(gameId)
+    if (!paths) { paths = new Set(); pendingPaths.set(gameId, paths) }
+    paths.add(changedPath)
+  }
   clearTimeout(scanDebounce.get(gameId))
   scanDebounce.set(gameId, setTimeout(() => {
     scanDebounce.delete(gameId)
+    const extraPaths = [...(pendingPaths.get(gameId) || [])]
+    pendingPaths.delete(gameId)
     // fresh: a file just changed on disk — this pass exists to pick it up, so
-    // it must never be served the cached directory walk.
-    scanGameForCrackAchievements(gameId, { fresh: true }).catch(e =>
+    // it must never be served the cached hit list. allowWalk:false keeps that
+    // cache bypass off the install tree: this runs mid-session (and at watch
+    // attach, while the game is loading), where a synchronous recursive readdir
+    // is exactly the stutter the deferred deep scan was added to remove. The
+    // changed paths above replace what that walk would have found.
+    scanGameForCrackAchievements(gameId, { fresh: true, allowWalk: false, extraPaths }).catch(e =>
       logger.warn(`crackWatcher: live re-scan failed for game ${gameId}`, { message: e.message }))
   }, 500))
 }
@@ -1113,9 +1234,13 @@ function watchGame(gameId) {
   }
 
   const onHit = (fp) => {
-    if (WATCH_NAMES.has(path.basename(fp).toLowerCase())) scheduleScan(gameId)
+    if (WATCH_NAMES.has(path.basename(fp).toLowerCase())) scheduleScan(gameId, fp)
   }
   watcher.on('add', onHit).on('change', onHit)
+  // An 'error' emit with no listener is an uncaught main-process exception —
+  // Windows raises EPERM/EBUSY routinely when an emulator (or AV) locks a file
+  // mid-write, which is precisely when this watcher is doing its job.
+  watcher.on('error', (e) => logger.debug(`crackWatcher: watch error for game ${gameId}`, { message: e?.message }))
   fileWatchers.set(gameId, watcher)
 
   // Dirs that don't exist yet (game never unlocked anything): poll for their
@@ -1191,6 +1316,7 @@ function unwatchGame(gameId) {
   if (w) { try { w.close() } catch {} ; fileWatchers.delete(gameId) }
   clearInterval(pendingPollers.get(gameId)); pendingPollers.delete(gameId)
   clearTimeout(scanDebounce.get(gameId)); scanDebounce.delete(gameId)
+  pendingPaths.delete(gameId)
 }
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
@@ -1210,7 +1336,7 @@ module.exports = {
   startWatching, stopWatching,
   scanGameForCrackAchievements, scanAllCrackedGames, scanActiveSessions,
   watchGame, unwatchGame,
-  buildCandidates, readEmuConfigAppIds, detectEmulator, diagnoseGame,
+  buildCandidates, readEmuConfigAppIds, detectEmulator, diagnoseGame, myDocsDir,
   inspectGoldberg, enableGoldbergAchievements, deepScanForAppIds, collectCandidates,
   // Pure parsers — exported for the standalone test script (scripts/test-parsers.js)
   parseGoldbergJson, parseCodexIni, parseSseBinary,

@@ -49,6 +49,19 @@ export function formatDate(ts) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: diff > 365 ? 'numeric' : undefined })
 }
 
+// Local calendar day key, "YYYY-MM-DD". started_at is stored as a UTC ISO
+// string, so slicing it (toISOString().slice(0,10)) files a session played after
+// local midnight under the previous day while the row still shows a local clock
+// time. Every day-grouping surface (Statistics chart, Sessions timeline,
+// GameDetail's 7-day chart) must key off THIS, and the stats IPCs group by
+// DATE(...,'localtime') so the keys match on both sides.
+export function localDayKey(d = new Date()) {
+  const dt = d instanceof Date ? d : new Date(d)
+  if (Number.isNaN(dt.getTime())) return null
+  const p = n => String(n).padStart(2, '0')
+  return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`
+}
+
 export function formatDateTime(ts) {
   if (!ts) return '—'
   const d = new Date(ts)

@@ -59,14 +59,16 @@ export default function SearchableSelect({
   }
 
   return (
-    <div ref={wrapRef} style={{ width, position: 'relative', flexShrink: 0 }}>
+    <div ref={wrapRef} className={s.wrap} style={{ width }}>
       <button
         ref={triggerRef}
         className={`${s.trigger} ${open ? s.triggerOpen : ''}`}
         onClick={handleTrigger}
         type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
       >
-        <span className={s.triggerLabel}>
+        <span className={s.triggerLabel} title={selected ? selected.label : placeholder}>
           {selected ? selected.label : <span className={s.triggerPlaceholder}>{placeholder}</span>}
         </span>
         {value && value !== '' ? (
@@ -86,16 +88,23 @@ export default function SearchableSelect({
       {open && pos && createPortal(
         <div
           ref={dropdownRef}
+          role="listbox"
           className={s.dropdown}
+          // Only what the measurement pass computes lives inline. The stacking
+          // level is CSS (var(--z-popover)) — an inline zIndex here used to
+          // shadow it and made the stylesheet's value unreadable/untunable.
           style={{
             position: 'fixed',
             left: pos.left,
             width: pos.width,
             top: pos.top,
             bottom: pos.bottom,
-            zIndex: 99999,
           }}
         >
+          {/* No hasRing here: the input is auto-focused the moment the dropdown
+              opens, so a focus rectangle around this row always renders — its
+              offset edges read as a stray line across the dropdown. The open
+              dropdown itself is the focus signal. */}
           {searchable && (
             <div className={s.searchRow}>
               <IconSearch size={13} stroke={1.6} className={s.searchIcon} />
@@ -109,15 +118,24 @@ export default function SearchableSelect({
             </div>
           )}
           <div className={s.list}>
-            <div className={`${s.option} ${!value || value === '' ? s.optionActive : ''}`} onClick={() => select('')}>
+            <div
+              role="option"
+              aria-selected={!value || value === ''}
+              className={`${s.option} ${!value || value === '' ? s.optionActive : ''}`}
+              onClick={() => select('')}
+              title={placeholder}
+            >
               {placeholder}
             </div>
             {filtered.length === 0 && <div className={s.noResults}>No results</div>}
             {filtered.map(o => (
               <div
                 key={o.value}
+                role="option"
+                aria-selected={String(o.value) === String(value)}
                 className={`${s.option} ${String(o.value) === String(value) ? s.optionActive : ''}`}
                 onClick={() => select(o.value)}
+                title={o.label}
               >
                 {o.label}
               </div>

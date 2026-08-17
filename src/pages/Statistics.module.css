@@ -1,87 +1,66 @@
-.page {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  overflow: hidden;
-}
+/* Statistics — page skeleton and control vocabulary come from the shared
+   modules; only the chart and the panels are local. */
 
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 20px 12px;
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
-}
+.page      { composes: page from '../styles/page.module.css'; }
+.toolbar   { composes: toolbar from '../styles/page.module.css'; }
+.pageTitle { composes: pageTitle from '../styles/page.module.css'; }
+.spacer    { composes: toolbarSpacer from '../styles/page.module.css'; }
+.content   { composes: content from '../styles/page.module.css'; }
+.inner     { composes: contentInner from '../styles/page.module.css'; }
 
-.pageTitle {
-  font-size: 16px;
-  font-weight: 500;
-  color: var(--text-primary);
-  flex: 1;
-}
-
+/* ── Period picker ─────────────────────────────────────────── */
 .periodBtns {
   display: flex;
-  gap: 4px;
+  gap: var(--sp-4);
+  flex-shrink: 0;
 }
 
-.periodBtn {
-  padding: 5px 14px;
-  font-size: 12.5px;
-  color: var(--text-muted);
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--r-pill);
-  cursor: pointer;
-  transition: background 0.1s, color 0.1s, border-color 0.1s;
-}
+.periodBtn { composes: btn btnSm btnPill from '../styles/controls.module.css'; }
 
-.periodBtn:hover { color: var(--text-secondary); border-color: var(--ab); }
-.periodBtnActive { background: var(--ad); color: var(--a); border-color: var(--ab); }
-
-/* ── First-load placeholder ────────────────────────────────── */
-.firstLoad {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* ── Content ───────────────────────────────────────────────── */
-.content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px 20px 24px;
-  transform: translateZ(0);
-}
+/* Idle and active are mutually exclusive so `.btnSecondary:hover` can never
+   repaint the selected pill on mouseover — that is why the idle look is a
+   separate class rather than a base both states share. */
+.periodBtnIdle   { composes: btnSecondary from '../styles/controls.module.css'; }
+.periodBtnActive { composes: btnActive from '../styles/controls.module.css'; }
+.periodBtnActive:hover { background: var(--ab); }
 
 /* ── Highlight cards ───────────────────────────────────────── */
+/* auto-fit, not a hard 5 columns: at the 960px window minimum five cards leave
+   ~130px each and the labels spill out of their own card. */
 .highlights {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: var(--sp-10);
+  margin-bottom: var(--sp-12);
+  contain: layout style;
 }
 
 .hlCard {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+  min-width: 0;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--r-card);
-  padding: 14px 16px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  transition: border-color 0.12s;
+  padding: var(--sp-12) var(--sp-16);
+  transition: var(--t-border);
 }
 
-.hlCard:hover { border-color: var(--ab); }
+/* Hover sharpens toward the card's OWN hue — every tint below derives from the
+   one --hl-color set inline on the card. */
+.hlCard:hover { border-color: color-mix(in srgb, var(--hl-color, var(--a)) 32%, transparent); }
 
+/* --hl-color is set inline per card (accent / info / warning / success /
+   on-hold), so the tint and the border derive from one value instead of three
+   hand-mixed hex strings. */
 .hlIcon {
   width: 40px;
   height: 40px;
-  border-radius: 10px;
-  border: 1px solid;
+  border-radius: var(--r-card);
+  color: var(--hl-color, var(--a));
+  background: color-mix(in srgb, var(--hl-color, var(--a)) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--hl-color, var(--a)) 24%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -89,24 +68,30 @@
 }
 
 .hlBody {
+  flex: 1;
   min-width: 0;
 }
 
+/* The VALUE carries the card's hue at full strength — the number is the HUD
+   readout, the label underneath stays quiet. */
 .hlValue {
-  font-size: 20px;
+  font-size: clamp(var(--fs-lg), 1.5vw, var(--fs-2xl));
   font-weight: 500;
-  color: var(--text-primary);
-  line-height: 1.2;
+  color: var(--hl-color, var(--text-primary));
+  font-variant-numeric: tabular-nums;
+  line-height: var(--lh-tight);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .hlLabel {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   margin-top: 1px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ── Sections ──────────────────────────────────────────────── */
@@ -114,17 +99,17 @@
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--r-card);
-  padding: 16px 18px;
-  margin-bottom: 12px;
+  padding: var(--sp-16);
+  margin-bottom: var(--sp-12);
 }
 
 .sectionTitle {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--text-secondary);
-  margin-bottom: 14px;
+  margin-bottom: var(--sp-12);
 }
 
 /* Header row for the chart section (title + day pill / hint) */
@@ -132,51 +117,39 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 14px;
+  gap: var(--sp-10);
+  margin-bottom: var(--sp-12);
 }
-.sectionHead .sectionTitle { margin-bottom: 0; }
-.sectionHint {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-.dayPill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11.5px;
-  font-weight: 500;
-  color: var(--a);
-  background: var(--ad);
-  border: 1px solid var(--ab);
-  border-radius: var(--r-pill);
-  padding: 3px 8px 3px 10px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.dayPill:hover { background: var(--ab); }
 
-.empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 56px;
+.sectionHead .sectionTitle { margin-bottom: 0; }
+
+.sectionHint {
+  font-size: var(--fs-xs);
   color: var(--text-muted);
-  font-size: 13px;
 }
+
+/* btnActive already IS the accent-filled pill look, so composing it keeps every
+   declaration inside controls.module.css — a local `border-color` here would be
+   a coin-flip against .btn's `border` shorthand depending on sheet order. */
+.dayPill { composes: btn btnSm btnPill btnActive from '../styles/controls.module.css'; }
+
+.dayPill:hover { background: var(--ab); }
 
 /* ── Activity chart ────────────────────────────────────────── */
 .chartWrap {
   overflow: hidden;
-  padding-top: 4px;
+  padding-top: var(--sp-4);
 }
 
+/* The gap has to give at the narrow end: 30 columns plus a fixed 4px gutter is
+   what squashed the month view into hairlines at the window minimum. */
 .chart {
   display: flex;
   align-items: stretch;
-  gap: 4px;
+  gap: clamp(2px, 0.4vw, 6px);
   height: 140px;
   width: 100%;
+  contain: layout style;
 }
 
 /* Each bar is a clickable button — reset native chrome. The column itself stays
@@ -187,13 +160,14 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 7px;
+  gap: var(--sp-6);
   height: 100%;
   border: none;
   background: transparent;
-  padding: 4px 0 0;
+  padding: var(--sp-4) 0 0;
   cursor: pointer;
 }
+
 .chartColStatic { cursor: default; }
 
 /* The plotting area each bar grows inside — keeps bars slim + centred regardless
@@ -209,15 +183,24 @@
 
 .chartBar {
   width: 100%;
-  max-width: 26px;
+  max-width: clamp(9px, 1.7vw, 26px);
   min-height: 4px;
   background: linear-gradient(180deg, var(--a) 0%, var(--ab) 100%);
-  border-radius: 4px 4px 2px 2px;
-  transition: height 0.25s, filter 0.15s, transform 0.12s, box-shadow 0.15s;
+  border-radius: var(--r-sm) var(--r-sm) var(--r-xs) var(--r-xs);
+  transition: height var(--dur-slow) var(--ease),
+              filter var(--dur-base) var(--ease),
+              transform var(--dur-fast) var(--ease),
+              box-shadow var(--dur-base) var(--ease);
   transform-origin: bottom center;
 }
-/* Hover lifts + brightens the bar itself (not a surrounding box) */
-.chartCol:not(.chartColStatic):hover .chartBar { filter: brightness(1.22); transform: scaleX(1.12); }
+
+/* Hover lifts + brightens the bar itself (not a surrounding box); the glow marks
+   the one bar under the cursor — light means life. */
+.chartCol:not(.chartColStatic):hover .chartBar {
+  filter: brightness(1.22);
+  transform: scaleX(1.12);
+  box-shadow: var(--glow-1);
+}
 
 /* Empty days: a faint stub so the column still reads on the timeline */
 .chartBarEmpty {
@@ -229,15 +212,17 @@
   box-shadow: 0 0 0 1.5px var(--a), 0 0 8px -2px var(--a);
 }
 
-/* Selected day → solid, brighter bar with a ring; clearly the bar, not a box */
+/* Selected day → solid, brighter bar with a ring + glow; clearly the bar, not a box */
 .chartBarSel {
   background: var(--a);
   filter: brightness(1.12);
-  box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--a);
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--a), var(--glow-1);
 }
 
+/* Fixed height, so the 30-day view can blank four labels out of five without
+   any column changing size. */
 .chartLabel {
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   color: var(--text-muted);
   text-align: center;
   white-space: nowrap;
@@ -246,174 +231,91 @@
   height: 11px;
   flex-shrink: 0;
 }
+
 .chartLabelToday { color: var(--a); font-weight: 500; }
 .chartLabelSel   { color: var(--text-secondary); font-weight: 500; }
 
-/* ── Day drill-down panel ──────────────────────────────────── */
-.dayDetail {
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
-}
-.dayDetailHead {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 6px;
-}
-.dayDetailTitle {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-primary);
-}
-.dayDetailTotal {
-  font-size: 12px;
-  color: var(--a);
-  font-weight: 500;
-  white-space: nowrap;
-}
-.dayDetailSub {
-  color: var(--text-secondary);
-  font-weight: 400;
-  margin-left: 6px;
-}
-.dayDetailEmpty {
-  font-size: 12px;
-  color: var(--text-muted);
-  padding: 10px 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-/* Scrolls when a day has many games / unlocks — never blows out the card height */
-.dayDetailScroll {
-  max-height: 240px;
-  overflow-y: auto;
-  transform: translateZ(0);
-}
-.dayDetailSubhead {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
-  margin: 10px 0 2px;
-}
-.daySession, .dayAch {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--border);
-}
-.daySession:last-child, .dayAch:last-child { border-bottom: none; }
-.daySessionName {
-  font-size: 13px;
-  color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-.daySessionMeta {
-  font-size: 11px;
-  color: var(--text-secondary);
-  margin-left: auto;
-  white-space: nowrap;
-  flex-shrink: 0;
-  padding-left: 8px;
-}
-.daySessionTime {
-  font-size: 12px;
-  color: var(--text-primary);
-  font-weight: 500;
-  flex-shrink: 0;
-  min-width: 48px;
-  text-align: right;
-}
-.dayAchThumb {
-  width: 20px;
-  height: 20px;
-  border-radius: 4px;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--surface-3);
-  flex-shrink: 0;
-}
-.dayAchThumb img { width: 100%; height: 100%; object-fit: cover; }
-
-/* ── Mid grid ──────────────────────────────────────────────── */
-/* ── Horizontal bars ───────────────────────────────────────── */
+/* ── Horizontal bars (playtime by game) ────────────────────── */
 .hbars {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--sp-10);
 }
 
 .hbar {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: var(--sp-4);
 }
 
 .hbarMeta {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: var(--sp-8);
 }
 
+/* Rank digits read as muted HUD counters — tabular so 1 and 10 line up. */
 .hbarRank {
-  font-size: 11px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
   color: var(--text-muted);
   width: 16px;
   flex-shrink: 0;
 }
 
 .hbarName {
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
+  min-width: 0;
 }
 
 .hbarTime {
-  font-size: 12px;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
   flex-shrink: 0;
+}
+
+/* Only the #1 row earns the bright readout — one highlight per surface. */
+.hbarTimeTop {
+  color: var(--text-accent-bright);
+  font-weight: 600;
 }
 
 .hbarTrack {
   height: 5px;
   background: var(--surface-3);
-  border-radius: 3px;
+  border-radius: var(--r-pill);
   overflow: hidden;
 }
 
+/* Dim tail brightening into full accent at the leading edge — the same meter
+   language as the activity chart, fully accent-derived. */
 .hbarFill {
   height: 100%;
-  background: var(--a);
-  border-radius: 3px;
+  background: linear-gradient(90deg, var(--ab), var(--a));
+  border-radius: var(--r-pill);
   min-width: 3px;
-  opacity: 0.75;
-  transition: width 0.3s;
+  transition: width var(--dur-slower) var(--ease);
 }
 
 /* ── Achievement list ──────────────────────────────────────── */
 .achList {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--sp-2);
 }
 
 .achRow {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 7px 0;
+  gap: var(--sp-10);
+  padding: var(--sp-6) 0;
   border-bottom: 1px solid var(--border-subtle);
 }
 
@@ -422,7 +324,7 @@
 .achThumb {
   width: 32px;
   height: 32px;
-  border-radius: 6px;
+  border-radius: var(--r-md);
   background: var(--ad);
   border: 1px solid var(--ab);
   display: flex;
@@ -437,7 +339,7 @@
 .achBody { flex: 1; min-width: 0; }
 
 .achName {
-  font-size: 13px;
+  font-size: var(--fs-md);
   font-weight: 500;
   color: var(--text-primary);
   overflow: hidden;
@@ -446,7 +348,7 @@
 }
 
 .achGame {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -454,11 +356,14 @@
 }
 
 /* ── Bottom grid ───────────────────────────────────────────── */
+/* auto-fit rather than two hard columns — at the window minimum a 340px floor
+   still yields two columns, and an ultrawide never gets two 900px panels. */
 .bottomGrid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
-  margin-top: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: var(--sp-12);
+  margin-top: var(--sp-12);
+  contain: layout style;
 }
 
 .bottomGrid .section { margin-bottom: 0; min-width: 0; overflow: hidden; }
@@ -467,33 +372,41 @@
 .rankRow {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 0;
+  gap: var(--sp-10);
+  padding: var(--sp-8) 0;
   border-bottom: 1px solid var(--border-subtle);
 }
 
 .rankRow:last-child { border-bottom: none; }
 
-.rankNum {
-  font-size: 12px;
-  color: var(--text-muted);
-  width: 18px;
-  text-align: right;
-  flex-shrink: 0;
-}
-
 .rankName {
   flex: 1;
-  font-size: 13px;
+  min-width: 0;
+  font-size: var(--fs-md);
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* Durations are the point of this panel — they read as HUD values. */
 .rankVal {
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   font-weight: 500;
-  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  color: var(--a);
   flex-shrink: 0;
+}
+
+/* ── First-load ghost ──────────────────────────────────────── */
+/* A full ghost of the real layout, not a lone spinner: the page has a fixed
+   shape, so nothing moves when the data lands. */
+.ghostHead { margin-bottom: var(--sp-12); }
+
+.ghostBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  flex: 1;
+  min-width: 0;
 }

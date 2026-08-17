@@ -94,11 +94,19 @@ handle('games:add', async (data) => {
         broadcast('game:updated', game.id)
       } catch {}
     })
-  } else if (!game?.is_cracked) {
-    // No Steam appid (Xbox/Epic/manual) → auto-resolve by name and import the
-    // achievement LIST so it appears automatically, no App ID typing needed.
-    const { autoImportSchemaByName } = require('./services/achievementSync')
-    setImmediate(() => autoImportSchemaByName(game.id).catch(() => {}))
+  } else {
+    // No Steam appid → auto-resolve by name and import the achievement LIST so
+    // it appears automatically, no App ID typing needed. This includes CRACKED
+    // adds: a cracked game added without picking a Steam match used to fall
+    // through both branches — no schema, no manual_appid — so its emulator's
+    // unlock file parsed on every scan and every unlock was dropped as
+    // schemaMissing, forever. After the name-match lands, run the same crack
+    // unlock import the appid path gets.
+    const { autoImportSchemaByName, fetchAndStoreAchievements: fetchAndStore } = require('./services/achievementSync')
+    setImmediate(async () => {
+      await autoImportSchemaByName(game.id).catch(() => {})
+      if (game?.is_cracked) await fetchAndStore(game.id).catch(() => {})
+    })
   }
 
   bk()
@@ -258,6 +266,11 @@ handle('games:launch', async (id) => {
     // Pull the next process scan forward so "Now Playing" lights up in a couple
     // of seconds instead of waiting out the idle poll.
     try { require('./services/processWatcher').nudge() } catch {}
+    // Pre-warm the overlay window while the game is still starting up — its
+    // renderer-process creation at toast time was a frame hitch in-game.
+    // warm() also arms the idle teardown, so a Play that never becomes a
+    // session (stale path, dismissed Steam dialog) can't leak the renderer.
+    try { require('./overlayWindow').warm() } catch {}
     return r
   } finally { launchInFlight.delete(id) }
 })
@@ -577,9 +590,14 @@ handle('gameList:add', async (data) => {
   const r = gameListQ.addGameListItem(data); bk(); return r
 })
 handle('gameList:update', (id, data) => {
+  const prev = data?.status ? gameListQ.getGameListItem(id) : null
   const r = gameListQ.updateGameListItem(id, data)
   // Mirror a status change onto the linked library game (and vice versa elsewhere).
-  if (data?.status) { try { require('./services/statusSync').syncFromGameList(id, data.status) } catch (e) { logger.warn('statusSync from game list failed', { message: e.message }) } }
+  // Only on a real CHANGE: re-asserting the same status would clear a linked
+  // game's Finished flag on any unrelated edit (rename, rating, list membership).
+  if (data?.status && data.status !== prev?.status) {
+    try { require('./services/statusSync').syncFromGameList(id, data.status) } catch (e) { logger.warn('statusSync from game list failed', { message: e.message }) }
+  }
   // Newly marked "upcoming" with no stored release date → fetch it right away so
   // the Upcoming tab shows the countdown immediately (not on the next backfill).
   if (data?.status === 'upcoming' && r?.steam_app_id && !r?.release_date) {
@@ -849,7 +867,11 @@ handle('steam:refresh', async (gameId) => {
     playerSync = await syncPlayerUnlocks(gameId).catch(() => ({ added: 0 }))
   }
 
-  const crackScan = await scanGameForCrackAchievements(gameId, { fresh: true })
+  // Same mid-session gate as crack:scanGame below: GameDetail auto-fires this
+  // on page open, and `fresh` alone would force the install-tree walk while the
+  // game streams off the same disk.
+  const walkOk = (() => { try { return !require('./services/processWatcher').isSessionActive() } catch { return true } })()
+  const crackScan = await scanGameForCrackAchievements(gameId, { fresh: true, allowWalk: walkOk, catchUp: true })
     .catch(() => ({ added: 0, hits: [], scannedPaths: [] }))
 
   return {
@@ -866,8 +888,14 @@ handle('steam:refresh', async (gameId) => {
 handle('crack:scanGame', async (gameId) => {
   const { scanGameForCrackAchievements } = require('./services/crackWatcher')
   // Manual check from the UI — bypass the failed-schema-fetch backoff AND the
-  // poll's cached directory walk.
-  return scanGameForCrackAchievements(gameId, { forceSchema: true, fresh: true })
+  // poll's cached directory walk. BUT: GameDetail auto-fires this on page open,
+  // and `fresh` alone forced a synchronous install-tree readdirSync walk even
+  // mid-session (blocking the main process while the game streams off the same
+  // disk). allowWalk gates the walk on no-session; fixed candidate paths + the
+  // live watcher fully cover in-session unlocks. catchUp: found unlocks may be
+  // old — timestamp-less ones store NULL, not a fake "today".
+  const inSession = (() => { try { return require('./services/processWatcher').isSessionActive() } catch { return false } })()
+  return scanGameForCrackAchievements(gameId, { forceSchema: true, fresh: true, allowWalk: !inSession, catchUp: true })
 })
 handle('crack:scanAll', async () => {
   const { scanAllCrackedGames } = require('./services/crackWatcher')
@@ -1592,8 +1620,11 @@ handle('stats:get', (period) => {
     GROUP BY g.id ORDER BY seconds DESC LIMIT 5
   `).all(since)
 
+  // Local days, like every other day-based surface (hourly chart, streaks, the
+  // Sessions timeline). Grouping by UTC put an after-midnight session on the
+  // previous bar for anyone east of Greenwich.
   const dailyActivity = db.prepare(`
-    SELECT DATE(started_at) AS day, SUM(duration_seconds) AS seconds
+    SELECT DATE(started_at, 'localtime') AS day, SUM(duration_seconds) AS seconds
     FROM sessions WHERE ended_at IS NOT NULL AND started_at >= ?
     GROUP BY day ORDER BY day ASC
   `).all(since)
@@ -1651,7 +1682,7 @@ handle('stats:get', (period) => {
 })
 
 // Drill-down for one calendar day (clicked in the Daily Activity chart).
-// `day` is a UTC YYYY-MM-DD key (same basis as dailyActivity's DATE(started_at)).
+// `day` is a LOCAL YYYY-MM-DD key (same basis as dailyActivity above).
 handle('stats:dayActivity', (day) => {
   const db = require('./db/database').getDb()
 
@@ -1660,7 +1691,7 @@ handle('stats:dayActivity', (day) => {
     SELECT g.id, g.name, g.banner_local_path, g.source, g.is_cracked,
            SUM(s.duration_seconds) AS seconds, COUNT(*) AS sessions
     FROM sessions s JOIN games g ON g.id = s.game_id
-    WHERE s.ended_at IS NOT NULL AND DATE(s.started_at) = ?
+    WHERE s.ended_at IS NOT NULL AND DATE(s.started_at, 'localtime') = ?
     GROUP BY g.id ORDER BY seconds DESC
   `).all(day)
 
@@ -1672,7 +1703,7 @@ handle('stats:dayActivity', (day) => {
     FROM achievement_unlocks au
     JOIN achievements a ON a.id = au.achievement_id
     JOIN games g ON g.id = a.game_id
-    WHERE au.unlocked_at IS NOT NULL AND DATE(au.unlocked_at) = ?
+    WHERE au.unlocked_at IS NOT NULL AND DATE(au.unlocked_at, 'localtime') = ?
     ORDER BY au.unlocked_at DESC
   `).all(day)
 
@@ -1680,7 +1711,7 @@ handle('stats:dayActivity', (day) => {
   const sessions = db.prepare(`
     SELECT s.id, s.duration_seconds, g.name AS game_name, s.started_at
     FROM sessions s JOIN games g ON g.id = s.game_id
-    WHERE s.ended_at IS NOT NULL AND DATE(s.started_at) = ?
+    WHERE s.ended_at IS NOT NULL AND DATE(s.started_at, 'localtime') = ?
     ORDER BY s.duration_seconds DESC LIMIT 8
   `).all(day)
 

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { IconStar, IconEye, IconEyeOff, IconCircleOff, IconPencil, IconTrash, IconBrandSteam } from '@tabler/icons-react'
 import { STATUS_META } from '../GameCard'
 import s from './CardContextMenu.module.css'
@@ -52,7 +53,10 @@ export default function CardContextMenu({
   if (!game) return null
   const current = game[statusField]
 
-  return (
+  // Portal to <body> like Modal/SearchableSelect — this is a fixed-position
+  // overlay, and any transformed ancestor (cards use `transform` on hover) would
+  // become its containing block and clip it to that ancestor's box.
+  return createPortal(
     <div className={s.backdrop} onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose() }}>
       <div ref={ref} className={s.menu} style={{ left: pos.left, top: pos.top }} onClick={e => e.stopPropagation()}>
         <div className={s.header}>{game.name}</div>
@@ -136,6 +140,7 @@ export default function CardContextMenu({
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

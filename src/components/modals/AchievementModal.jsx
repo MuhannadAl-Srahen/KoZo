@@ -7,10 +7,17 @@ import Modal from '../ui/Modal'
 import { rarityLabel, formatDateTime } from '../../lib/utils'
 import s from './AchievementModal.module.css'
 
+// toggleManual doesn't return the new unlock row's id, and only its presence
+// decides "unlocked" — the real id arrives with the reload its game:updated
+// broadcast triggers.
+const OPTIMISTIC_UNLOCK_ID = -1
+
 export default function AchievementModal({ achievement: initialAch, game, onClose, onToggle }) {
   const [ach, setAch] = useState(initialAch)
   const [busy, setBusy] = useState(false)
-  const unlocked = !!ach.unlocked_at
+  // Unlocked is the presence of an unlock row — unlocked_at is display-only and
+  // is legitimately NULL when Steam never reported a date.
+  const unlocked = ach.unlock_id != null
   const hidden = ach.is_hidden === 1
   const rarity = rarityLabel(ach.global_unlock_percent)
 
@@ -32,17 +39,17 @@ export default function AchievementModal({ achievement: initialAch, game, onClos
       : Promise.resolve(null))
     if (res?.ok) {
       updated = res.data.unlocked
-        ? { ...ach, unlocked_at: res.data.unlocked_at, unlock_source: 'manual' }
-        : { ...ach, unlocked_at: null, unlock_source: null }
+        ? { ...ach, unlock_id: ach.unlock_id ?? OPTIMISTIC_UNLOCK_ID, unlocked_at: res.data.unlocked_at, unlock_source: 'manual' }
+        : { ...ach, unlock_id: null, unlocked_at: null, unlock_source: null }
     } else if (unlocked) {
       await window.kozo.api.achievements.removeUnlock(ach.id)
-      updated = { ...ach, unlocked_at: null, unlock_source: null }
+      updated = { ...ach, unlock_id: null, unlocked_at: null, unlock_source: null }
     } else {
       const now = new Date().toISOString()
       await window.kozo.api.achievements.addUnlock({
         achievement_id: ach.id, session_id: null, unlocked_at: now, source: 'manual',
       })
-      updated = { ...ach, unlocked_at: now, unlock_source: 'manual' }
+      updated = { ...ach, unlock_id: OPTIMISTIC_UNLOCK_ID, unlocked_at: now, unlock_source: 'manual' }
     }
     setAch(updated)
     onToggle?.(updated)
@@ -122,10 +129,10 @@ export default function AchievementModal({ achievement: initialAch, game, onClos
           )}
         </div>
 
-        {unlocked && ach.unlocked_at && (
+        {unlocked && (
           <div className={s.unlockedAt}>
             <IconCheck size={12} stroke={2.5} style={{ color: 'var(--a)' }} />
-            Unlocked {formatDateTime(ach.unlocked_at)}
+            {ach.unlocked_at ? `Unlocked ${formatDateTime(ach.unlocked_at)}` : 'Unlocked · no date'}
             {ach.unlock_source === 'manual' && (
               <span className={s.sourceTag}>manual</span>
             )}

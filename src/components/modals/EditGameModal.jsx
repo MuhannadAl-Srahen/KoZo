@@ -6,6 +6,7 @@ import {
 import Modal, { modalStyles as ms } from '../ui/Modal'
 import RunningProcessPicker from '../ui/RunningProcessPicker'
 import { FOREIGN_LAUNCHERS } from '../../lib/utils'
+import cs from '../../styles/controls.module.css'
 import s from './AddGameModal.module.css'
 
 const KNOWN_SYSTEM_EXES = new Set([
@@ -34,6 +35,13 @@ export default function EditGameModal({ game, onClose, onSaved }) {
     setExeWarn(KNOWN_SYSTEM_EXES.has(val.toLowerCase().trim()))
   }
 
+  // One predicate drives BOTH the field's visibility and whether save keeps the
+  // value, so an App ID can never be held while hidden nor destroyed while
+  // invisible. Kept for anything that is or was a cracked Steam copy (the
+  // scanner stores those as source='cracked'); force-nulled for foreign
+  // launchers and plain manual entries.
+  const appIdRelevant = source === 'steam' || source === 'cracked' || isCracked === 1
+
   async function handleSave() {
     const newErrors = {}
     if (!name.trim())    newErrors.name = 'Game name is required'
@@ -41,10 +49,6 @@ export default function EditGameModal({ game, onClose, onSaved }) {
     if (exeName.trim() && !exeName.toLowerCase().trim().endsWith('.exe')) {
       newErrors.exeName = 'Must end in .exe'
     }
-    // App ID only applies to Steam / cracked games; a foreign launcher must never
-    // keep one (it would wrongly re-enable Steam sync). Force-null it here so even a
-    // value left over in hidden state is dropped on save.
-    const appIdRelevant = source === 'steam' || !!isCracked
     const sid = appIdRelevant ? steamAppId.trim() : ''
     if (sid && !/^\d+$/.test(sid)) newErrors.steamAppId = 'Steam App ID must be numeric'
     if (Object.keys(newErrors).length) { setErrors(newErrors); return }
@@ -83,14 +87,19 @@ export default function EditGameModal({ game, onClose, onSaved }) {
       width={540}
       footer={
         <>
-          <button className={ms.btnCancel} onClick={onClose}>Cancel</button>
+          <button type="button" className={ms.btnCancel} onClick={onClose}>Cancel</button>
+          {/* Busy is `btnLoading`, not `disabled`: a disabled button drops out of
+              the focus order and stops announcing itself mid-save. `saved` is a
+              real terminal state, so that one still disables. */}
           <button
-            className={ms.btnPrimary}
+            type="button"
+            className={`${ms.btnPrimary} ${saving ? cs.btnLoading : ''}`}
             onClick={handleSave}
-            disabled={saving || saved}
+            disabled={saved}
+            aria-busy={saving || undefined}
           >
             {saved
-              ? <><IconCheck size={14} stroke={2.5} style={{ marginRight: 4 }} /> Saved</>
+              ? <><IconCheck size={14} stroke={2.5} /> Saved</>
               : (saving ? 'Saving…' : 'Save changes')}
           </button>
         </>
@@ -166,7 +175,7 @@ export default function EditGameModal({ game, onClose, onSaved }) {
         }
         {exeWarn && (
           <div className={s.warning}>
-            <IconAlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+            <IconAlertTriangle size={14} stroke={1.8} className={s.warningIcon} />
             This looks like a Windows system process. Are you sure?
           </div>
         )}
@@ -175,7 +184,7 @@ export default function EditGameModal({ game, onClose, onSaved }) {
       {/* Install path */}
       <div className={s.field}>
         <label className={s.label}>
-          Install path <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional)</span>
+          Install path <span className={s.labelNote}>(optional)</span>
         </label>
         <input
           className={s.input}
@@ -190,14 +199,9 @@ export default function EditGameModal({ game, onClose, onSaved }) {
           time) — collapsed so the modal stays a quick name/exe/path editor. */}
       <button
         type="button"
+        className={s.advancedToggle}
         onClick={() => setShowAdvanced(v => !v)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 6, width: '100%',
-          padding: '8px 0', marginTop: 2, background: 'none', border: 'none',
-          borderTop: '1px solid var(--border-subtle)', cursor: 'pointer',
-          color: 'var(--text-muted)', fontFamily: 'inherit', fontSize: 11,
-          fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em',
-        }}
+        aria-expanded={showAdvanced}
       >
         {showAdvanced ? <IconChevronDown size={13} stroke={1.8} /> : <IconChevronRight size={13} stroke={1.8} />}
         Advanced — status, launcher, copy type
@@ -233,6 +237,10 @@ export default function EditGameModal({ game, onClose, onSaved }) {
         <label className={s.label}>Launcher</label>
         <div className={s.pills} style={{ flexWrap: 'wrap' }}>
           {[
+            // A scanner/discovery-added cracked copy is stored as source='cracked',
+            // which isn't a launcher — but without a pill for it no option would
+            // render active and a stray click would silently drop it.
+            ...(game.source === 'cracked' ? [['cracked', 'Cracked']] : []),
             ['steam', 'Steam'], ['epic', 'Epic'], ['gog', 'GOG'],
             ['xbox', 'Xbox'], ['ea', 'EA'], ['ubisoft', 'Ubisoft'], ['manual', 'Other'],
           ].map(([val, lbl]) => (
@@ -260,10 +268,10 @@ export default function EditGameModal({ game, onClose, onSaved }) {
 
       {/* Steam App ID — only relevant for Steam (and cracked games that use the
           Steam schema for achievement names/icons). Hidden for foreign launchers. */}
-      {(source === 'steam' || isCracked === 1) && (
+      {appIdRelevant && (
         <div className={s.field}>
           <label className={s.label}>
-            Steam App ID <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional)</span>
+            Steam App ID <span className={s.labelNote}>(optional)</span>
           </label>
           <input
             className={`${s.input} ${errors.steamAppId ? s.inputError : ''}`}
@@ -329,7 +337,7 @@ export default function EditGameModal({ game, onClose, onSaved }) {
       </div>
       </>}
 
-      {errors.save && <div className={s.errorText} style={{ marginTop: 6 }}>{errors.save}</div>}
+      {errors.save && <div className={s.errorText} role="alert">{errors.save}</div>}
     </Modal>
   )
 }

@@ -1,8 +1,11 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import {
   IconTrophy, IconClock, IconHistory, IconDeviceGamepad2, IconFlame, IconLoader2, IconX,
+  IconChartBar,
 } from '@tabler/icons-react'
-import { formatPlaytime } from '../lib/utils'
+import { formatPlaytime, localDayKey } from '../lib/utils'
+import EmptyState from '../components/ui/EmptyState'
+import { Skeleton, PanelSkeleton } from '../components/ui/Skeleton'
 import s from './Statistics.module.css'
 
 const PERIODS = [
@@ -32,8 +35,15 @@ function buildDays(period, data) {
 
   const result = []
   for (let i = count - 1; i >= 0; i--) {
-    const d = new Date(todayMs - i * 86400000)
-    const key = d.toISOString().slice(0, 10)
+    // Local day keys — the backend groups by DATE(started_at,'localtime').
+    // Step the local calendar field, NOT the epoch: fixed 86400000 jumps only
+    // guarantee distinct UTC days, so a DST transition would repeat one local
+    // day (duplicate React key, doubled bar) and drop another. Noon anchoring
+    // keeps every bucket inside its own day across a 23h and a 25h day.
+    const d = new Date(todayMs)
+    d.setHours(12, 0, 0, 0)
+    d.setDate(d.getDate() - i)
+    const key = localDayKey(d)
     result.push({ day: key, seconds: byDay[key] || 0 })
   }
   return result
@@ -62,6 +72,10 @@ const WEEKDAY_1 = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
 const MONTHS    = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const DOW       = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
+// 30 one-letter labels at 10px is mush. Label every Nth column instead, anchored
+// on the LAST column so today always carries a label.
+const LABEL_EVERY = { '30d': 5 }
+
 function prettyDay(key) {
   const d = new Date(key + 'T12:00:00')
   return `${DOW[d.getDay()]}, ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
@@ -74,8 +88,7 @@ function prettyShort(key) {
 // Daily bars (7d / 30d / all). Clicking a bar selects that day so the sections
 // below re-scope to it. Hover/selection highlight the BAR itself, not a box.
 // Label mode is by PERIOD so it's predictable: 7d → 2-letter weekday on every bar,
-// 30d → 1-letter weekday on every bar (fits 30 cols, same "every day shows" feel),
-// all → month abbrev at each month boundary.
+// 30d → 1-letter weekday every 5th bar, all → month abbrev per month bar.
 function DailyChart({ data, period, selectedDay, onSelectDay }) {
   // All-time → monthly bars (display-only) so the axis shows month names.
   if (period === 'all') {
@@ -90,7 +103,7 @@ function DailyChart({ data, period, selectedDay, onSelectDay }) {
             const hasData = m.seconds > 0
             const isNow   = m.key === curKey
             return (
-              <div key={m.key} className={s.chartCol}
+              <div key={m.key} className={`${s.chartCol} ${s.chartColStatic}`}
                 title={`${MONTHS[m.monthIdx]} ${m.year} — ${formatPlaytime(m.seconds) || 'No activity'}`}>
                 <div className={s.chartBarArea}>
                   <div className={[s.chartBar, hasData ? '' : s.chartBarEmpty, isNow ? s.chartBarToday : ''].join(' ')}
@@ -105,10 +118,11 @@ function DailyChart({ data, period, selectedDay, onSelectDay }) {
     )
   }
 
-  const days     = buildDays(period, data)
-  const maxSec   = Math.max(...days.map(d => d.seconds), 1)
-  const today    = new Date().toISOString().slice(0, 10)
+  const days      = buildDays(period, data)
+  const maxSec    = Math.max(...days.map(d => d.seconds), 1)
+  const today     = localDayKey()
   const labelMode = period === '30d' ? 'wd1' : 'wd2'
+  const every     = LABEL_EVERY[period] || 1
 
   return (
     <div className={s.chartWrap}>
@@ -119,22 +133,20 @@ function DailyChart({ data, period, selectedDay, onSelectDay }) {
           const isToday = d.day === today
           const isSel   = d.day === selectedDay
           const hasData = d.seconds > 0
+          // Count back from the end so the anchors land on today, then every
+          // 5th day before it — a readable axis instead of 30 crushed glyphs.
+          const isAnchor = (days.length - 1 - idx) % every === 0
 
-          let label = ''
-          if (labelMode === 'wd2') {
-            label = WEEKDAY_2[dt.getDay()]
-          } else if (labelMode === 'wd1') {
-            label = WEEKDAY_1[dt.getDay()]
-          } else {
-            const prev = idx > 0 ? new Date(days[idx - 1].day + 'T12:00:00') : null
-            if (!prev || prev.getMonth() !== dt.getMonth()) label = MONTHS[dt.getMonth()]
-          }
+          const label = !isAnchor
+            ? ''
+            : labelMode === 'wd1' ? WEEKDAY_1[dt.getDay()] : WEEKDAY_2[dt.getDay()]
 
           return (
             <button
               type="button"
               key={d.day}
               className={s.chartCol}
+              aria-pressed={isSel}
               title={`${prettyDay(d.day)} — ${formatPlaytime(d.seconds) || 'No activity'}`}
               onClick={() => onSelectDay(isSel ? null : d.day)}
             >
@@ -192,6 +204,7 @@ function HourlyChart({ data, selectedHour, onSelectHour }) {
               type="button"
               key={h.hour}
               className={s.chartCol}
+              aria-pressed={isSel}
               title={`${fmtHour(h.hour)} — ${formatPlaytime(h.seconds) || 'No activity'}`}
               onClick={() => onSelectHour(isSel ? null : h.hour)}
             >
@@ -212,7 +225,51 @@ function HourlyChart({ data, selectedHour, onSelectHour }) {
   )
 }
 
+// ── Loading ghost ─────────────────────────────────────────────────────────────
+// Mirrors the real layout so the first paint has the page's final shape and
+// nothing jumps when the data arrives.
+function StatsGhost() {
+  return (
+    <div className={s.content}>
+      <div className={s.inner}>
+        <div className={s.highlights}>
+          {Array.from({ length: 5 }, (_, i) => (
+            <div key={i} className={s.hlCard}>
+              <Skeleton w={40} h={40} r="var(--r-card)" />
+              <div className={s.ghostBody}>
+                <Skeleton w="62%" h={18} />
+                <Skeleton w="44%" h={10} />
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className={s.section}>
+          <div className={s.ghostHead}><Skeleton w={110} h={10} /></div>
+          <Skeleton h={140} r="var(--r-input)" />
+        </div>
+
+        <div className={s.section}>
+          <div className={s.ghostHead}><Skeleton w={140} h={10} /></div>
+          <PanelSkeleton lines={5} />
+        </div>
+
+        <div className={s.bottomGrid}>
+          {[0, 1].map(i => (
+            <div key={i} className={s.section}>
+              <div className={s.ghostHead}><Skeleton w={130} h={10} /></div>
+              <PanelSkeleton lines={4} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
+
+const EMPTY_DETAIL = { games: [], achievements: [], sessions: [] }
 
 export default function Statistics() {
   const [period, setPeriod]   = useState('7d')
@@ -241,16 +298,20 @@ export default function Statistics() {
 
   useEffect(() => { load('7d') }, [])
 
-  // Fetch the per-day breakdown whenever a bar is selected.
+  // Fetch the per-day breakdown whenever a bar is selected. A failed read must
+  // still resolve to an EMPTY detail, not null — the panels treat a null detail
+  // as "still loading" and would spin forever.
   useEffect(() => {
     if (!selectedDay) { setDayDetail(null); return }
     let cancelled = false
     setDayLoading(true)
-    window.kozo?.api?.stats?.dayActivity(selectedDay).then(res => {
-      if (cancelled) return
-      setDayDetail(res?.ok ? res.data : null)
-      setDayLoading(false)
-    })
+    Promise.resolve(window.kozo?.api?.stats?.dayActivity?.(selectedDay))
+      .then(res => {
+        if (cancelled) return
+        setDayDetail(res?.ok ? res.data : EMPTY_DETAIL)
+        setDayLoading(false)
+      })
+      .catch(() => { if (!cancelled) { setDayDetail(EMPTY_DETAIL); setDayLoading(false) } })
     return () => { cancelled = true }
   }, [selectedDay])
 
@@ -259,11 +320,13 @@ export default function Statistics() {
     if (selectedHour == null) { setHourDetail(null); return }
     let cancelled = false
     setHourLoading(true)
-    window.kozo?.api?.stats?.hourActivity(selectedHour).then(res => {
-      if (cancelled) return
-      setHourDetail(res?.ok ? res.data : null)
-      setHourLoading(false)
-    })
+    Promise.resolve(window.kozo?.api?.stats?.hourActivity?.(selectedHour))
+      .then(res => {
+        if (cancelled) return
+        setHourDetail(res?.ok ? res.data : EMPTY_DETAIL)
+        setHourLoading(false)
+      })
+      .catch(() => { if (!cancelled) { setHourDetail(EMPTY_DETAIL); setHourLoading(false) } })
     return () => { cancelled = true }
   }, [selectedHour])
 
@@ -276,11 +339,11 @@ export default function Statistics() {
   const gamesCount  = stats?.gamesPlayedCount?.count ?? 0
 
   const HIGHLIGHTS = [
-    { Icon: IconClock,          label: 'Playtime',     value: formatPlaytime(playtime) || '—',             color: 'var(--a)' },
-    { Icon: IconHistory,        label: 'Sessions',     value: sessions,                                     color: '#60a5fa' },
-    { Icon: IconTrophy,         label: 'Unlocked',     value: achUnlocked,                                  color: '#fbbf24' },
-    { Icon: IconDeviceGamepad2, label: 'Games played', value: gamesCount,                                   color: '#4ade80' },
-    { Icon: IconFlame,          label: 'Avg session',  value: avgSession ? formatPlaytime(avgSession) : '—', color: '#fb923c' },
+    { Icon: IconClock,          label: 'Playtime',     value: formatPlaytime(playtime) || '—',              color: 'var(--a)' },
+    { Icon: IconHistory,        label: 'Sessions',     value: sessions,                                     color: 'var(--info)' },
+    { Icon: IconTrophy,         label: 'Unlocked',     value: achUnlocked,                                  color: 'var(--warning)' },
+    { Icon: IconDeviceGamepad2, label: 'Games played', value: gamesCount,                                   color: 'var(--success)' },
+    { Icon: IconFlame,          label: 'Avg session',  value: avgSession ? formatPlaytime(avgSession) : '—', color: 'var(--status-onhold)' },
   ]
 
   // When a day is selected (daily views only) the three lower panels re-scope to
@@ -302,14 +365,17 @@ export default function Statistics() {
     <div className={s.page}>
       <div className={s.toolbar}>
         <h1 className={s.pageTitle}>Statistics</h1>
+        <div className={s.spacer} />
         {fetching && (
-          <IconLoader2 size={15} stroke={1.8} style={{ color: 'var(--text-muted)', animation: 'spin 0.8s linear infinite' }} />
+          <IconLoader2 size={15} stroke={1.8} className="spin" style={{ color: 'var(--text-muted)' }} />
         )}
         <div className={s.periodBtns}>
           {PERIODS.map(p => (
             <button
+              type="button"
               key={p.key}
-              className={`${s.periodBtn} ${period === p.key ? s.periodBtnActive : ''}`}
+              className={`${s.periodBtn} ${period === p.key ? s.periodBtnActive : s.periodBtnIdle}`}
+              aria-pressed={period === p.key}
               onClick={() => handlePeriod(p.key)}
             >
               {p.label}
@@ -318,133 +384,146 @@ export default function Statistics() {
         </div>
       </div>
 
-      {loading && (
-        <div className={s.firstLoad}>
-          <IconLoader2 size={22} stroke={1.8} style={{ color: 'var(--text-muted)', animation: 'spin 0.8s linear infinite' }} />
-        </div>
-      )}
+      {loading && <StatsGhost />}
 
       {!loading && (
         <div className={s.content}>
-          {/* Highlight row */}
-          <div className={s.highlights}>
-            {HIGHLIGHTS.map(({ Icon, label, value, color }) => (
-              <div key={label} className={s.hlCard}>
-                <div className={s.hlIcon} style={{ color, background: color + '18', borderColor: color + '33' }}>
-                  <Icon size={18} stroke={1.6} />
+          <div className={s.inner}>
+            {/* Highlight row */}
+            <div className={s.highlights}>
+              {HIGHLIGHTS.map(({ Icon, label, value, color }) => (
+                // --hl-color lives on the CARD so the icon tile, the value and
+                // the hover border all derive from the same hue.
+                <div key={label} className={s.hlCard} style={{ '--hl-color': color }}>
+                  <div className={s.hlIcon}>
+                    <Icon size={18} stroke={1.6} />
+                  </div>
+                  <div className={s.hlBody}>
+                    <div className={s.hlValue} title={`${label}: ${value}`}>{value}</div>
+                    <div className={s.hlLabel} title={label}>{label}</div>
+                  </div>
                 </div>
-                <div className={s.hlBody}>
-                  <div className={s.hlValue}>{value}</div>
-                  <div className={s.hlLabel}>{label}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Activity chart — hourly for 24h, daily otherwise */}
-          <div className={s.section}>
-            <div className={s.sectionHead}>
-              <div className={s.sectionTitle}>{period === '1d' ? "Today's Activity" : 'Daily Activity'}</div>
-              {dayScoped && (
-                <button className={s.dayPill} onClick={() => setSelectedDay(null)}>
-                  {prettyDay(selectedDay)}
-                  <IconX size={12} stroke={2.2} />
-                </button>
-              )}
-              {period === '1d' && selectedHour != null && (
-                <button className={s.dayPill} onClick={() => setSelectedHour(null)}>
-                  {fmtHour(selectedHour)}–{fmtHour((selectedHour + 1) % 24)} · {formatPlaytime(hourSeconds(stats?.hourlyActivity, selectedHour)) || 'No activity'}
-                  <IconX size={12} stroke={2.2} />
-                </button>
-              )}
-              {period === '1d' && selectedHour == null && (
-                <span className={s.sectionHint}>Click an hour</span>
-              )}
-              {period !== '1d' && period !== 'all' && !dayScoped && (
-                <span className={s.sectionHint}>Click a day to focus it</span>
-              )}
+              ))}
             </div>
-            {period === '1d'
-              ? <HourlyChart data={stats?.hourlyActivity} selectedHour={selectedHour} onSelectHour={setSelectedHour} />
-              : <DailyChart
-                  data={stats?.dailyActivity}
-                  period={period}
-                  selectedDay={selectedDay}
-                  onSelectDay={setSelectedDay}
-                />}
-          </div>
 
-          {/* Playtime by Game — full width with rank + bar combined */}
-          <div className={s.section}>
-            <div className={s.sectionTitle}>Playtime by Game{scopeSuffix}</div>
-            {scopeLoadingNow
-              ? <div className={s.empty}><IconLoader2 size={16} style={{ animation: 'spin 0.8s linear infinite' }} /></div>
-              : !(topGames.length)
-                ? <div className={s.empty}>{scoped ? 'No playtime in this window' : 'No data this period'}</div>
-                : (() => {
-                    const max = Math.max(...topGames.map(g => g.seconds), 1)
-                    return (
-                      <div className={s.hbars}>
-                        {topGames.map((g, i) => (
-                          <div key={g.id} className={s.hbar}>
-                            <div className={s.hbarMeta}>
-                              <span className={s.hbarRank}>{i + 1}</span>
-                              <span className={s.hbarName}>{g.name}</span>
-                              <span className={s.hbarTime}>{formatPlaytime(g.seconds)}</span>
+            {/* Activity chart — hourly for 24h, daily otherwise */}
+            <div className={s.section}>
+              <div className={s.sectionHead}>
+                <div className={s.sectionTitle}>{period === '1d' ? "Today's Activity" : 'Daily Activity'}</div>
+                {dayScoped && (
+                  <button type="button" className={s.dayPill} onClick={() => setSelectedDay(null)}>
+                    {prettyDay(selectedDay)}
+                    <IconX size={12} stroke={2.2} />
+                  </button>
+                )}
+                {period === '1d' && selectedHour != null && (
+                  <button type="button" className={s.dayPill} onClick={() => setSelectedHour(null)}>
+                    {fmtHour(selectedHour)}–{fmtHour((selectedHour + 1) % 24)} · {formatPlaytime(hourSeconds(stats?.hourlyActivity, selectedHour)) || 'No activity'}
+                    <IconX size={12} stroke={2.2} />
+                  </button>
+                )}
+                {period === '1d' && selectedHour == null && (
+                  <span className={s.sectionHint}>Click an hour</span>
+                )}
+                {period !== '1d' && period !== 'all' && !dayScoped && (
+                  <span className={s.sectionHint}>Click a day to focus it</span>
+                )}
+              </div>
+              {period === '1d'
+                ? <HourlyChart data={stats?.hourlyActivity} selectedHour={selectedHour} onSelectHour={setSelectedHour} />
+                : <DailyChart
+                    data={stats?.dailyActivity}
+                    period={period}
+                    selectedDay={selectedDay}
+                    onSelectDay={setSelectedDay}
+                  />}
+            </div>
+
+            {/* Playtime by Game — full width with rank + bar combined */}
+            <div className={s.section}>
+              <div className={s.sectionTitle}>Playtime by Game{scopeSuffix}</div>
+              {scopeLoadingNow
+                ? <PanelSkeleton lines={5} />
+                : !(topGames.length)
+                  ? <EmptyState
+                      size="sm"
+                      Icon={IconChartBar}
+                      title={scoped ? 'No playtime in this window' : 'No playtime this period'}
+                      desc={scoped ? 'Pick another bar, or clear the selection to see the whole period.' : 'Play a game and it will show up here.'}
+                    />
+                  : (() => {
+                      const max = Math.max(...topGames.map(g => g.seconds), 1)
+                      return (
+                        <div className={s.hbars}>
+                          {topGames.map((g, i) => (
+                            <div key={g.id} className={s.hbar}>
+                              <div className={s.hbarMeta}>
+                                <span className={s.hbarRank}>{i + 1}</span>
+                                <span className={s.hbarName} title={g.name}>{g.name}</span>
+                                <span className={`${s.hbarTime} ${i === 0 ? s.hbarTimeTop : ''}`}>{formatPlaytime(g.seconds)}</span>
+                              </div>
+                              <div className={s.hbarTrack}>
+                                <div className={s.hbarFill} style={{ width: `${(g.seconds / max) * 100}%` }} />
+                              </div>
                             </div>
-                            <div className={s.hbarTrack}>
-                              <div className={s.hbarFill} style={{ width: `${(g.seconds / max) * 100}%` }} />
+                          ))}
+                        </div>
+                      )
+                    })()
+              }
+            </div>
+
+            {/* Achievements + Sessions — scoped to the selected day, else the period */}
+            <div className={s.bottomGrid}>
+              <div className={s.section}>
+                <div className={s.sectionTitle}>{scoped ? 'Achievements Unlocked' : 'Recent Achievements'}{scopeSuffix}</div>
+                {scopeLoadingNow
+                  ? <PanelSkeleton lines={4} />
+                  : !(recentAch.length)
+                    ? <EmptyState
+                        size="sm"
+                        Icon={IconTrophy}
+                        title={scoped ? 'No unlocks in this window' : 'No unlocks this period'}
+                      />
+                    : (
+                      <div className={s.achList}>
+                        {recentAch.map(a => (
+                          <div key={`${a.game_name}-${a.display_name}-${a.unlocked_at}`} className={s.achRow}>
+                            <div className={s.achThumb}>
+                              {a.icon_url
+                                ? <img src={a.icon_url} alt="" loading="lazy" decoding="async" onError={e => { e.target.style.display = 'none' }} />
+                                : <IconTrophy size={14} stroke={1.5} style={{ color: 'var(--a)' }} />
+                              }
+                            </div>
+                            <div className={s.achBody}>
+                              <div className={s.achName} title={a.display_name}>{a.display_name}</div>
+                              <div className={s.achGame} title={a.game_name}>{a.game_name}</div>
                             </div>
                           </div>
                         ))}
                       </div>
                     )
-                  })()
-            }
-          </div>
+                }
+              </div>
 
-          {/* Achievements + Sessions — scoped to the selected day, else the period */}
-          <div className={s.bottomGrid}>
-            <div className={s.section}>
-              <div className={s.sectionTitle}>{scoped ? 'Achievements Unlocked' : 'Recent Achievements'}{scopeSuffix}</div>
-              {scopeLoadingNow
-                ? <div className={s.empty}><IconLoader2 size={16} style={{ animation: 'spin 0.8s linear infinite' }} /></div>
-                : !(recentAch.length)
-                  ? <div className={s.empty}>{scoped ? 'No unlocks in this window' : 'No unlocks this period'}</div>
-                  : (
-                    <div className={s.achList}>
-                      {recentAch.map((a, i) => (
-                        <div key={i} className={s.achRow}>
-                          <div className={s.achThumb}>
-                            {a.icon_url
-                              ? <img src={a.icon_url} alt="" onError={e => { e.target.style.display = 'none' }} />
-                              : <IconTrophy size={14} stroke={1.5} style={{ color: 'var(--a)' }} />
-                            }
-                          </div>
-                          <div className={s.achBody}>
-                            <div className={s.achName}>{a.display_name}</div>
-                            <div className={s.achGame}>{a.game_name}</div>
-                          </div>
+              <div className={s.section}>
+                <div className={s.sectionTitle}>Longest Sessions{scopeSuffix}</div>
+                {scopeLoadingNow
+                  ? <PanelSkeleton lines={4} />
+                  : !(longest.length)
+                    ? <EmptyState
+                        size="sm"
+                        Icon={IconHistory}
+                        title={scoped ? 'No sessions in this window' : 'No sessions this period'}
+                      />
+                    : longest.map(sess => (
+                        <div key={sess.id} className={s.rankRow}>
+                          <span className={s.rankName} title={sess.game_name}>{sess.game_name}</span>
+                          <span className={s.rankVal}>{formatPlaytime(sess.duration_seconds)}</span>
                         </div>
-                      ))}
-                    </div>
-                  )
-              }
-            </div>
-
-            <div className={s.section}>
-              <div className={s.sectionTitle}>Longest Sessions{scopeSuffix}</div>
-              {scopeLoadingNow
-                ? <div className={s.empty}><IconLoader2 size={16} style={{ animation: 'spin 0.8s linear infinite' }} /></div>
-                : !(longest.length)
-                  ? <div className={s.empty}>{scoped ? 'No sessions in this window' : 'No sessions this period'}</div>
-                  : longest.map(sess => (
-                      <div key={sess.id} className={s.rankRow}>
-                        <span className={s.rankName}>{sess.game_name}</span>
-                        <span className={s.rankVal}>{formatPlaytime(sess.duration_seconds)}</span>
-                      </div>
-                    ))
-              }
+                      ))
+                }
+              </div>
             </div>
           </div>
         </div>

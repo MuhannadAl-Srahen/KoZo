@@ -4,14 +4,14 @@ import {
   IconPlus, IconLayoutGrid, IconList, IconLayoutColumns,
   IconDeviceGamepad2, IconScan, IconLoader2, IconCheckbox, IconSquare,
   IconTrash, IconX, IconCheck, IconSearch, IconEyeOff, IconChevronRight, IconChevronDown,
-  IconSparkles,
 } from '@tabler/icons-react'
 import GameCard, { formatPlaytime, STATUS_META } from '../components/GameCard'
 import AddGameModal from '../components/modals/AddGameModal'
 import ScanResultModal from '../components/modals/ScanResultModal'
-import DiscoveredGamesModal from '../components/modals/DiscoveredGamesModal'
 import SearchableSelect from '../components/ui/SearchableSelect'
 import CardContextMenu from '../components/ui/CardContextMenu'
+import EmptyState from '../components/ui/EmptyState'
+import { CardSkeletonGrid } from '../components/ui/Skeleton'
 import s from './Library.module.css'
 
 const VIEW_OPTIONS = [
@@ -67,23 +67,21 @@ function computeStats(games) {
   const totalPlaytime = games.reduce((a, g) => a + (g.total_playtime_seconds || 0), 0)
   const totalUnlocked = games.reduce((a, g) => a + (Number(g._unlocked) || 0), 0)
   const totalAchs     = games.reduce((a, g) => a + (Number(g._total)    || 0), 0)
-  const weekAgo       = Date.now() - 7 * 86400000
-  const weekPlaytime  = games
-    .filter(g => g.last_played_at && new Date(g.last_played_at) > weekAgo)
-    .reduce((a, g) => a + (g.total_playtime_seconds || 0), 0)
-  return { totalPlaytime, totalUnlocked, totalAchs, weekPlaytime }
+  return { totalPlaytime, totalUnlocked, totalAchs }
 }
 
 // Module-level cache so navigating back to the Library renders the grid + stat
 // numbers instantly from memory and refreshes silently — instead of flashing
 // empty/zero values on every visit.
 let libraryCache = null
+let weekCache = null
 
 export default function Library() {
   const location = useLocation()
   const navigate = useNavigate()
 
   const [games, setGames]           = useState(libraryCache ?? [])
+  const [weekSeconds, setWeekSeconds] = useState(weekCache ?? 0)
   const [liveIds, setLiveIds]       = useState(new Set())
   const [view, setView]             = useState(() => localStorage.getItem(VIEW_KEY) || 'big')
   const [loading, setLoading]       = useState(!libraryCache)
@@ -92,20 +90,7 @@ export default function Library() {
   const [prefillInstallPath, setPrefillInstallPath] = useState('')
   const [scanning, setScanning]     = useState(false)
   const [scanModal, setScanModal]   = useState(null)  // null | scan results[]
-  // Emulator achievement data on disk for games not in the library.
-  const [discovered, setDiscovered]     = useState([])
-  const [discoverModal, setDiscoverModal] = useState(false)
 
-  // One look on mount. The scan itself is ~20 shallow directory reads in the
-  // main process, and it skips anything already in the library or dismissed —
-  // so it stays quiet once you've answered it.
-  useEffect(() => {
-    let cancelled = false
-    window.kozo?.api?.crack?.discover?.().then(res => {
-      if (!cancelled && res?.ok && Array.isArray(res.data)) setDiscovered(res.data)
-    }).catch(() => {})
-    return () => { cancelled = true }
-  }, [])
   const [search, setSearch]         = useState('')
   const [sortBy, setSortBy]         = useState(() => {
     const saved = localStorage.getItem('kozo:sort:library')
@@ -195,15 +180,18 @@ export default function Library() {
     })
   }
 
+  // Only ever select what is actually on screen. Hidden games and games filtered
+  // out by the search/status filter have no card to untick in selection mode, so
+  // including them meant "Select all" → "Remove" could delete games the user
+  // never saw. (Safe despite gamesWithLive being declared below — this runs on
+  // click, long after render.)
   function selectAll() {
-    setSelectedIds(new Set(games.map(g => g.id)))
+    setSelectedIds(new Set(gamesWithLive.map(g => g.id)))
   }
 
   function deselectAll() {
     setSelectedIds(new Set())
   }
-
-  const allSelected = games.length > 0 && selectedIds.size === games.length
 
   async function handleBulkDelete() {
     if (!confirmDelete) { setConfirmDelete(true); return }
@@ -212,6 +200,7 @@ export default function Library() {
       await window.kozo?.api?.games?.delete(id)
     }
     await loadGames()
+    loadWeekPlaytime({ invalidate: true })
     setBulkDeleting(false)
     exitSelection()
   }
@@ -245,6 +234,21 @@ export default function Library() {
     if (res?.ok) setLiveIds(new Set((res.data ?? []).map(s => s.gameId)))
   }, [])
 
+  // "This Week" must be time played IN the last 7 days — summing the lifetime
+  // playtime of games merely touched this week inflated it by hundreds of hours.
+  // stats:get always returns weeklyPlaytime for the trailing 7 days; refreshed
+  // on session end and on delete only (it runs ~10 queries, so not on every
+  // game:updated — that fires on favorite/status/hidden toggles too).
+  // `invalidate` drops the module cache up front: deleting a game cascades its
+  // sessions away, so the cached figure is provably wrong from that moment and
+  // must not be re-seeded as the first paint if the page remounts mid-refetch.
+  const loadWeekPlaytime = useCallback(async ({ invalidate = false } = {}) => {
+    if (!window.kozo?.api?.stats?.get) return
+    if (invalidate) weekCache = null
+    const res = await window.kozo.api.stats.get('7d')
+    if (res?.ok) { weekCache = res.data?.weeklyPlaytime?.seconds || 0; setWeekSeconds(weekCache) }
+  }, [])
+
   // Scan the PC for installed games right from the Library (the folder list is
   // still configured in Settings → Scan PC). Uses the saved scan paths, or the
   // platform defaults on first run, then opens the shared scan-result picker.
@@ -272,21 +276,20 @@ export default function Library() {
     // Warm cache → refresh silently (no loading flash); cold → show the spinner.
     loadGames({ silent: !!libraryCache })
     loadActiveSessions()
+    loadWeekPlaytime()
     if (!window.kozo?.events) return
-    window.kozo.events.onSessionStarted(() => { loadGames({ silent: true }); loadActiveSessions() })
-    window.kozo.events.onSessionEnded(()   => { loadGames({ silent: true }); loadActiveSessions() })
-    window.kozo.events.onGameUpdated(() => loadGames({ silent: true }))
-    // Optimistic LIVE badge — light up the cover ~one poll after launch.
-    window.kozo.events.onSessionDetected?.(()   => loadActiveSessions())
-    window.kozo.events.onSessionUndetected?.(() => loadActiveSessions())
-    return () => {
-      window.kozo.events.removeAll('session:started')
-      window.kozo.events.removeAll('session:ended')
-      window.kozo.events.removeAll('game:updated')
-      window.kozo.events.removeAll('session:detected')
-      window.kozo.events.removeAll('session:undetected')
-    }
-  }, [loadGames, loadActiveSessions])
+    // Unsubscribe THIS page's own listeners only — removeAll() is window-wide
+    // and would tear down the always-mounted Sidebar's listeners too.
+    const offs = [
+      window.kozo.events.onSessionStarted(() => { loadGames({ silent: true }); loadActiveSessions() }),
+      window.kozo.events.onSessionEnded(()   => { loadGames({ silent: true }); loadActiveSessions(); loadWeekPlaytime() }),
+      window.kozo.events.onGameUpdated(() => loadGames({ silent: true })),
+      // Optimistic LIVE badge — light up the cover ~one poll after launch.
+      window.kozo.events.onSessionDetected?.(()   => loadActiveSessions()),
+      window.kozo.events.onSessionUndetected?.(() => loadActiveSessions()),
+    ]
+    return () => { for (const off of offs) off?.() }
+  }, [loadGames, loadActiveSessions, loadWeekPlaytime])
 
   const allGamesWithLive = games.map(g => ({ ...g, _isLive: liveIds.has(g.id) }))
   // Shared search/status predicate for both the main grid and the hidden section.
@@ -300,6 +303,7 @@ export default function Library() {
   }
   const filtered = allGamesWithLive.filter(g => !g.is_hidden && matchesFilters(g))
   const gamesWithLive = sortGames(filtered, sortBy)
+  const allSelected = gamesWithLive.length > 0 && selectedIds.size === gamesWithLive.length
   // Hidden games live in their own collapsed section at the bottom of the grid.
   const hiddenGames = sortGames(allGamesWithLive.filter(g => g.is_hidden && matchesFilters(g)), sortBy)
   // Header stats include hidden games — hiding only affects grid visibility,
@@ -325,7 +329,7 @@ export default function Library() {
         </div>
         <div className={s.statCard}>
           <span className={s.statLabel}>This Week</span>
-          <span className={s.statValue}>{formatPlaytime(stats.weekPlaytime)}</span>
+          <span className={s.statValue}>{formatPlaytime(weekSeconds)}</span>
         </div>
       </div>
 
@@ -335,7 +339,7 @@ export default function Library() {
           <h1 className={s.pageTitle}>My Library</h1>
 
           {/* Search */}
-          <div className={s.searchBox}>
+          <div className={`${s.searchBox} hasRing`}>
             <IconSearch size={13} stroke={1.6} className={s.searchIcon} />
             <input
               className={s.searchInput}
@@ -430,7 +434,7 @@ export default function Library() {
           >
             {allSelected
               ? <><IconCheckbox size={14} stroke={1.8} /> Deselect all</>
-              : <><IconSquare size={14} stroke={1.8} /> Select all ({games.length})</>
+              : <><IconSquare size={14} stroke={1.8} /> Select all ({gamesWithLive.length})</>
             }
           </button>
 
@@ -465,54 +469,39 @@ export default function Library() {
         </div>
       )}
 
-      {/* Cracked games with achievement data on disk that aren't in the library.
-          Surfaced, never auto-added — see crackDiscovery.js. */}
-      {discovered.length > 0 && (
-        <div className={s.discoverBanner}>
-          <IconSparkles size={15} stroke={1.7} style={{ flexShrink: 0, color: 'var(--a)' }} />
-          <span className={s.discoverText}>
-            Found achievements for <strong>{discovered.length}</strong> game
-            {discovered.length === 1 ? '' : 's'} you haven't added
-            {discovered.some(g => g.unlocked > 0) && (
-              <> — including <strong>{discovered.find(g => g.unlocked > 0).name}</strong> with{' '}
-                {discovered.find(g => g.unlocked > 0).unlocked} already unlocked</>
-            )}
-          </span>
-          <button className={s.discoverBtn} onClick={() => setDiscoverModal(true)}>Review</button>
-          <button className={s.discoverDismiss} title="Not now"
-            onClick={async () => {
-              for (const g of discovered) {
-                try { await window.kozo?.api?.crack?.dismissDiscovered?.(g.appId) } catch {}
-              }
-              setDiscovered([])
-            }}>
-            <IconX size={14} stroke={2} />
-          </button>
-        </div>
-      )}
-
       {/* Game grid */}
       <div className={s.content}>
+        {/* Three distinct states. The old version could show two messages at
+            once (empty search AND empty library), and showed NOTHING at all
+            when a status filter matched nothing — a blank page with no
+            explanation and no way back out. */}
         {loading && (
-          <div className={s.emptyState}>
-            <div className={s.emptyDesc} style={{ color: 'var(--text-muted)' }}>Loading…</div>
-          </div>
-        )}
-
-        {!loading && search && gamesWithLive.length === 0 && (
-          <div className={s.emptyState}>
-            <div className={s.emptyDesc}>No games match "{search}"</div>
-          </div>
+          <CardSkeletonGrid gridClassName={gridClass} count={view === 'list' ? 6 : 12} />
         )}
 
         {!loading && games.length === 0 && (
-          <div className={s.emptyState}>
-            <IconDeviceGamepad2 size={48} stroke={1.2} style={{ color: 'var(--text-muted)' }} />
-            <div className={s.emptyTitle}>No games yet</div>
-            <div className={s.emptyDesc}>
-              Click "Add Game" to add your first game to the library.
-            </div>
-          </div>
+          <EmptyState
+            Icon={IconDeviceGamepad2}
+            title="No games yet"
+            desc="Add a game manually, or scan your PC to find what you already have installed."
+          />
+        )}
+
+        {!loading && games.length > 0 && gamesWithLive.length === 0 && (
+          <EmptyState
+            Icon={IconDeviceGamepad2}
+            title={search ? `No games match "${search}"` : 'Nothing matches these filters'}
+            desc="Try a different search, or clear the filters to see your whole library."
+            action={{
+              label: 'Clear filters',
+              Icon: IconX,
+              onClick: () => {
+                setSearch('')
+                setStatusFilter('')
+                localStorage.setItem('kozo:status:library', '')
+              },
+            }}
+          />
         )}
 
         {!loading && games.length > 0 && (
@@ -601,14 +590,6 @@ export default function Library() {
         />
       )}
 
-      {discoverModal && (
-        <DiscoveredGamesModal
-          games={discovered}
-          onClose={() => setDiscoverModal(false)}
-          onAdded={() => { setDiscovered([]); loadGames() }}
-        />
-      )}
-
       {ctxMenu && (
         <CardContextMenu
           x={ctxMenu.x}
@@ -631,6 +612,7 @@ export default function Library() {
             await window.kozo?.api?.games?.delete(game.id)
             setGames(prev => { const u = prev.filter(g => g.id !== game.id); libraryCache = u; return u })
             loadGames()
+            loadWeekPlaytime({ invalidate: true })
           }}
           deleteLabel="Remove from library"
           deleteHint="Sessions and achievements for this game will be deleted."

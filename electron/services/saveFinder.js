@@ -78,10 +78,15 @@ function buildMatcher(game) {
       const leftover = n.split(gameNorm).join('')
       return leftoverIsEdition(leftover) ? 90 : 0
     }
-    // Game name contains the folder name (folder is a shorter form) — require the
-    // folder to be a substantial prefix so "witcher3" matches "thewitcher3wildhunt"
-    // but a tiny fragment doesn't match everything.
-    if (n.length >= 6 && gameNorm.includes(n)) return 76
+    // Game name contains the folder name (folder is a shorter form) — same
+    // leftover rule as above in reverse: the swallowed text must be edition
+    // words, or the folder keeps its sequel number ("witcher3" →
+    // "thewitcher3wildhunt"). Never a base game inside a successor's title
+    // (reject "hollowknight" for "Hollow Knight Silksong").
+    if (n.length >= 6 && gameNorm.includes(n)) {
+      const leftover = gameNorm.split(n).join('')
+      return (leftoverIsEdition(leftover) || /\d$/.test(n)) ? 76 : 0
+    }
     if (acronym && acronym.length >= 2 && n === acronym) return 64   // "CD" → Crimson Desert
     return 0
   }

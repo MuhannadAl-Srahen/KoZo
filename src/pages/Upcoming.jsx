@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react'
 import {
-  IconCalendar, IconLoader2, IconHourglassLow, IconConfetti, IconHelpCircle,
-  IconExternalLink, IconPlayerPlayFilled, IconBookmark, IconBrandSteam,
+  IconCalendar, IconHourglassLow, IconConfetti, IconHelpCircle,
+  IconPlayerPlayFilled, IconBookmark, IconBrandSteam,
 } from '@tabler/icons-react'
 import { parseGenres } from '../lib/utils'
 import Modal, { modalStyles as ms } from '../components/ui/Modal'
+import EmptyState from '../components/ui/EmptyState'
+import { Skeleton, CardSkeletonGrid, PanelSkeleton } from '../components/ui/Skeleton'
 import s from './Upcoming.module.css'
 
 // Persist the last working art source per game across tab switches so cards don't
@@ -16,39 +18,81 @@ let upcomingCache = null
 
 // Steam's release_date strings vary in precision: "13 Nov, 2025" (exact),
 // "November 2025" (month), "2026" (year only), "TBA"/"Coming soon" (nothing).
-// Year-only must NOT be treated as Jan 1st — that faked "Out now!" for games
-// that are a year away.
+// Anything short of a full date is `vague` and carries TWO instants: `ts` (the
+// start of the named window — a month's 1st, or a mid-year point for year-only)
+// for ordering, and `until` (the first instant past the window's end) as the
+// ONLY thing that may read as released. Reading a vague `ts` as "out" faked
+// "Out now" up to a month — or half a year — early.
+const MONTH_NAMES = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+// Steam writes both "November 2025" and "Winter 2026"/"Holiday 2026" in this
+// shape. Date.parse quietly resolves the seasonal ones to January 1st, so they
+// must be matched here and downgraded rather than trusted as a real month.
+const WORD_YEAR = /^([A-Za-z]{3,9}),?\s+(\d{4})$/
+
+function yearRelease(y, label) {
+  return { ts: Date.UTC(y, 5, 30), until: Date.UTC(y + 1, 0, 1), vague: true, precision: 'year', label }
+}
+
 function parseRelease(str) {
   if (!str) return { ts: null }
   const trimmed = str.trim()
   const yearOnly = trimmed.match(/^(\d{4})$/)
-  if (yearOnly) {
-    const y = parseInt(yearOnly[1], 10)
-    return { ts: Date.UTC(y, 5, 30), vague: true, label: trimmed }
+  if (yearOnly) return yearRelease(parseInt(yearOnly[1], 10), trimmed)
+  const wordYear = trimmed.match(WORD_YEAR)
+  if (wordYear) {
+    const y  = parseInt(wordYear[2], 10)
+    const mi = MONTH_NAMES.indexOf(wordYear[1].slice(0, 3).toLowerCase())
+    // A season names no month Steam ever defines — it's no more precise than its year.
+    if (mi < 0) return yearRelease(y, trimmed)
+    return {
+      ts: new Date(y, mi, 1).getTime(),
+      until: new Date(y, mi + 1, 1).getTime(),
+      vague: true, precision: 'month', label: trimmed,
+    }
   }
   const t = Date.parse(trimmed)
-  return Number.isFinite(t) ? { ts: t, vague: false } : { ts: null }
+  if (!Number.isFinite(t)) return { ts: null }
+  return { ts: t, until: t, vague: false, precision: 'day' }
 }
 
-function countdown(rel) {
-  if (!rel || rel.ts == null) return 'No date'
-  if (rel.vague) return rel.label
-  const days = Math.ceil((rel.ts - Date.now()) / 86400000)
-  if (days <= 0) return 'Out now'
-  if (days === 1) return 'Tomorrow'
-  if (days < 31) return `in ${days} days`
+// "How far away" wording. `approx` marks a vague date whose exact day is a guess,
+// so it never reads as a confident "Tomorrow".
+function relativeLabel(ms, approx) {
+  const days = Math.ceil(ms / 86400000)
+  if (days < 31) {
+    if (!approx && days === 1) return 'Tomorrow'
+    return `in ${approx ? '~' : ''}${days} day${days === 1 ? '' : 's'}`
+  }
   const months = Math.round(days / 30.4)
   if (months < 13) return `in ~${months} month${months === 1 ? '' : 's'}`
   return `in ~${(days / 365).toFixed(1)} years`
 }
 
-// The stored banner_url is a PORTRAIT cover — wide cards want Steam's wide art:
-// library_hero (3840×1240) → header (460×215) → portrait as a last resort.
+function countdown(rel) {
+  if (!rel || rel.ts == null) return 'No date'
+  const now = Date.now()
+  if (rel.until <= now) return 'Out now'
+  if (!rel.vague) return relativeLabel(rel.ts - now, false)
+  // Inside the named window: not provably out, and echoing "November 2026" here
+  // would just repeat the subtitle underneath the badge.
+  if (rel.ts <= now) return rel.precision === 'month' ? 'This month' : 'This year'
+  // A year-only ts is a synthetic mid-year point — ±6 months of error makes a
+  // countdown noise, so the raw label stays.
+  if (rel.precision === 'year') return rel.label
+  return relativeLabel(rel.ts - now, true)
+}
+
+// The stored banner_url is a PORTRAIT cover — wide cards want Steam's wide art.
+// capsule_616x353 first: it matches the rendered card size and exists for
+// virtually every store page, unreleased ones included. The old order started
+// at library_hero (3840×1240) — every card decoded a wallpaper-sized bitmap,
+// and unreleased games usually 404 on it, so first paint burned a failed
+// request per card before the real art even started. That was the page's lag.
 function wideArtSources(item) {
   const id = item.steam_app_id
   const srcs = []
   if (id) {
-    srcs.push(`https://cdn.akamai.steamstatic.com/steam/apps/${id}/library_hero.jpg`)
+    srcs.push(`https://cdn.akamai.steamstatic.com/steam/apps/${id}/capsule_616x353.jpg`)
     srcs.push(`https://cdn.akamai.steamstatic.com/steam/apps/${id}/header.jpg`)
   }
   if (item.banner_url) srcs.push(item.banner_url)
@@ -68,6 +112,8 @@ function WideArt({ item, className }) {
       className={className}
       src={srcs[idx]}
       alt=""
+      loading="lazy"
+      decoding="async"
       onLoad={() => wideArtIndexCache.set(cacheKey, idx)}
       onError={() => setIdx((i) => {
         const next = i + 1
@@ -80,8 +126,13 @@ function WideArt({ item, className }) {
 
 function badgeClassFor(rel) {
   if (!rel || rel.ts == null) return s.badgeTba
-  if (rel.ts <= Date.now()) return s.badgeOut
-  if (!rel.vague && rel.ts - Date.now() < 31 * 86400000) return s.badgeSoon
+  const now = Date.now()
+  // Green only once the whole named window has closed (`until`), never off a
+  // month's 1st or a year's midpoint.
+  if (rel.until <= now) return s.badgeOut
+  // Month precision is tight enough to flag as imminent; year-only isn't.
+  if (rel.vague && rel.precision !== 'month') return ''
+  if (rel.ts > now && rel.ts - now < 31 * 86400000) return s.badgeSoon
   return ''
 }
 
@@ -108,7 +159,7 @@ function DetailModal({ item, rel, onClose, onStatus }) {
       <div className={s.detailHero}>
         <WideArt item={item} className={s.detailArt} />
         <span className={s.detailGrad} />
-        <span className={`${s.badge} ${badgeClassFor(rel)}`} style={{ position: 'absolute', top: 10, right: 10 }}>
+        <span className={`${s.badge} ${s.detailBadge} ${badgeClassFor(rel)}`}>
           {countdown(rel)}
         </span>
       </div>
@@ -118,9 +169,7 @@ function DetailModal({ item, rel, onClose, onStatus }) {
         {genres.length > 0 && <span className={s.detailGenres}>{genres.slice(0, 4).join(' · ')}</span>}
       </div>
 
-      {details === undefined && (
-        <div className={s.detailLoading}><IconLoader2 size={15} className="spin" /> Loading store info…</div>
-      )}
+      {details === undefined && <PanelSkeleton lines={3} />}
       {details?.description && <p className={s.detailDesc}>{details.description}</p>}
       {details?.developers?.length > 0 && (
         <div className={s.detailDevs}>
@@ -131,7 +180,7 @@ function DetailModal({ item, rel, onClose, onStatus }) {
         </div>
       )}
       {details === null && !item.steam_app_id && (
-        <p className={s.detailDesc} style={{ color: 'var(--text-muted)' }}>No Steam page linked for this game.</p>
+        <p className={`${s.detailDesc} ${s.detailDescMuted}`}>No Steam page linked for this game.</p>
       )}
 
       <div className={s.detailActions}>
@@ -157,16 +206,15 @@ function DetailModal({ item, rel, onClose, onStatus }) {
 // ── Card ──────────────────────────────────────────────────────────────────────
 function UpcomingCard({ item, rel, onOpen }) {
   const genres = parseGenres(item)
+  const sub = item.release_date || (genres.length ? genres.slice(0, 2).join(' · ') : 'To be announced')
   return (
-    <button className={s.card} onClick={() => onOpen({ item, rel })}>
+    <button className={s.card} data-gpnav="" onClick={() => onOpen({ item, rel })}>
       <WideArt item={item} className={s.cardArt} />
       <span className={s.cardGrad} />
       <span className={`${s.badge} ${badgeClassFor(rel)}`}>{countdown(rel)}</span>
       <div className={s.cardBody}>
-        <div className={s.cardName}>{item.name}</div>
-        <div className={s.cardSub}>
-          {item.release_date || (genres.length ? genres.slice(0, 2).join(' · ') : 'To be announced')}
-        </div>
+        <div className={s.cardName} title={item.name}>{item.name}</div>
+        <div className={s.cardSub} title={sub}>{sub}</div>
       </div>
     </button>
   )
@@ -182,6 +230,9 @@ export default function Upcoming() {
       const nextItems = res.data?.items ?? []
       setItems(nextItems)
       upcomingCache = nextItems
+    } else {
+      // Never leave the first load stuck on the spinner when the read fails.
+      setItems(prev => prev ?? [])
     }
   }
 
@@ -190,8 +241,10 @@ export default function Upcoming() {
     // Warm the store-details cache (instant popups) and backfill any missing
     // release dates so long-released games can't linger in "No date yet".
     window.kozo?.api?.gameList?.refreshUpcomingInfo?.()
-    window.kozo?.events?.onGameUpdated?.(load)
-    return () => window.kozo?.events?.removeAll?.('game:updated')
+    // Unsubscribe THIS page's own listener only — removeAll() is window-wide
+    // and would tear down the always-mounted Sidebar's listeners too.
+    const off = window.kozo?.events?.onGameUpdated?.(load)
+    return () => off?.()
   }, [])
 
   async function setStatus(item, status) {
@@ -200,13 +253,34 @@ export default function Upcoming() {
     load()
   }
 
+  // First load: a ghost of the real layout, so the cards swap in without the
+  // page jumping from a centred spinner to a full grid.
   if (items === null) {
-    return <div className={s.page}><div className={s.loading}><IconLoader2 size={20} className="spin" /></div></div>
+    return (
+      <div className={s.page}>
+        <div className={s.toolbar}>
+          <h1 className={s.pageTitle}><IconCalendar size={16} stroke={1.7} /> Upcoming</h1>
+        </div>
+        <div className={s.content}>
+          <div className={s.inner}>
+            <Skeleton w={130} h={11} className={s.ghostTitle} />
+            <CardSkeletonGrid gridClassName={s.grid} count={6} portrait={false} />
+          </div>
+        </div>
+      </div>
+    )
   }
 
   const withRel = items.map(item => ({ item, rel: parseRelease(item.release_date) }))
-  const soon = withRel.filter(x => x.rel.ts != null && x.rel.ts > Date.now()).sort((a, b) => a.rel.ts - b.rel.ts)
-  const released = withRel.filter(x => x.rel.ts != null && x.rel.ts <= Date.now()).sort((a, b) => b.rel.ts - a.rel.ts)
+  const now = Date.now()
+  // Split on `until`, so a vague date only counts as out once its whole window
+  // has passed ("June 2026" read in August is genuinely behind us), while one
+  // we're still inside stays in Coming soon. Sorting an in-window entry by its
+  // already-past start would pin it above games releasing in days, so those sort
+  // by when the window CLOSES instead.
+  const soonKey = x => (x.rel.ts > now ? x.rel.ts : x.rel.until)
+  const soon = withRel.filter(x => x.rel.ts != null && x.rel.until > now).sort((a, b) => soonKey(a) - soonKey(b))
+  const released = withRel.filter(x => x.rel.ts != null && x.rel.until <= now).sort((a, b) => b.rel.ts - a.rel.ts)
   const tba = withRel.filter(x => x.rel.ts == null).sort((a, b) => a.item.name.localeCompare(b.item.name))
 
   const sections = [
@@ -217,32 +291,36 @@ export default function Upcoming() {
 
   return (
     <div className={s.page}>
-      <div className={s.scroll}>
-        <h1 className={s.title}>
-          <IconCalendar size={20} stroke={1.7} /> Upcoming
-          {items.length > 0 && <span className={s.count}>{items.length}</span>}
+      <div className={s.toolbar}>
+        <h1 className={s.pageTitle}>
+          <IconCalendar size={16} stroke={1.7} /> Upcoming
         </h1>
+        {items.length > 0 && <span className={s.count}>{items.length}</span>}
+      </div>
 
-        {items.length === 0 && (
-          <div className={s.empty}>
-            <IconHourglassLow size={40} stroke={1.2} />
-            <div>No upcoming games yet.</div>
-            <div className={s.emptySub}>Add games to your Game List with the "Upcoming" status and they'll line up here with release countdowns.</div>
-          </div>
-        )}
+      <div className={s.content}>
+        <div className={s.inner}>
+          {items.length === 0 && (
+            <EmptyState
+              Icon={IconHourglassLow}
+              title="No upcoming games yet"
+              desc={'Add games to your Game List with the "Upcoming" status and they\'ll line up here with release countdowns.'}
+            />
+          )}
 
-        {sections.map(sec => (
-          <section key={sec.key} className={s.section}>
-            <div className={`${s.sectionTitle} ${sec.out ? s.sectionTitleOut : ''}`}>
-              <sec.Icon size={14} stroke={1.7} /> {sec.label}
-            </div>
-            <div className={s.grid}>
-              {sec.entries.map(({ item, rel }) => (
-                <UpcomingCard key={item.id} item={item} rel={rel} onOpen={setDetail} />
-              ))}
-            </div>
-          </section>
-        ))}
+          {sections.map(sec => (
+            <section key={sec.key} className={s.section}>
+              <div className={`${s.sectionTitle} ${sec.out ? s.sectionTitleOut : ''}`}>
+                <sec.Icon size={14} stroke={1.7} /> {sec.label}
+              </div>
+              <div className={s.grid}>
+                {sec.entries.map(({ item, rel }) => (
+                  <UpcomingCard key={item.id} item={item} rel={rel} onOpen={setDetail} />
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
 
         {detail && (
           <DetailModal

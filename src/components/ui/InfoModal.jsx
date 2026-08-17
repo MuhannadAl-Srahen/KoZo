@@ -56,7 +56,7 @@ export default function InfoModal({
               b.variant === 'secondary' ? ms.btnCancel :
                                           ms.btnPrimary
             return (
-              <button key={i} className={cls} onClick={b.onClick}>
+              <button key={i} type="button" className={cls} onClick={b.onClick}>
                 {b.icon} {b.label}
               </button>
             )
@@ -95,11 +95,11 @@ export function PrivacyHelp({ openSteamPrivacy }) {
         <li>Click <strong>Edit Profile</strong> → <strong>Privacy Settings</strong></li>
         <li>Set <strong>Game details</strong> to <strong>Public</strong> and save</li>
       </ol>
-      <p className={s.helpText} style={{ marginTop: 6 }}>
+      <p className={s.helpTextSpaced}>
         After changing, wait ~1 minute then click <strong>Refresh achievements</strong> again.
       </p>
       {openSteamPrivacy && (
-        <button className={s.helpBtn} onClick={openSteamPrivacy}>
+        <button type="button" className={s.helpBtn} onClick={openSteamPrivacy}>
           <IconExternalLink size={13} stroke={1.7} />
           Open Steam privacy settings
         </button>

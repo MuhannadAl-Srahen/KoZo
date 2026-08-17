@@ -1,8 +1,5 @@
 .page {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  overflow: hidden;
+  composes: page from '../styles/page.module.css';
 }
 
 /* ── Stats bar ──────────────────────────────────────────────── */
@@ -15,8 +12,11 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* Headline strip — the one row of cards that carries the faint accent tint
+   (--surface-accent), so the page opens with atmosphere while the grid below
+   stays flat. Values are HUD numbers: accent, tabular, muted labels. */
 .statCard {
-  background: var(--surface-2);
+  background: var(--surface-accent);
   border: 1px solid var(--border);
   border-radius: var(--r-card);
   padding: 12px 14px;
@@ -26,7 +26,7 @@
 }
 
 .statLabel {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--text-muted);
@@ -38,26 +38,23 @@
   font-weight: 500;
   color: var(--a);
   line-height: 1.2;
+  font-variant-numeric: tabular-nums;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 /* ── Toolbar ────────────────────────────────────────────────── */
+/* Composed so every page's toolbar shares one padding — there used to be four
+   different values across the app. */
 .toolbar {
-  display: flex;
-  align-items: center;
+  composes: toolbar from '../styles/page.module.css';
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 10px 20px;
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
+  gap: var(--sp-8);
 }
 
 .pageTitle {
-  font-size: 16px;
-  font-weight: 500;
-  color: var(--text-primary);
+  composes: pageTitle from '../styles/page.module.css';
   flex-shrink: 0;
 }
 
@@ -88,7 +85,7 @@
 .searchInput {
   flex: 1;
   padding: 6px 0;
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: var(--text-primary);
   background: transparent;
   border: none;
@@ -131,7 +128,7 @@
   border-top: 1px solid var(--border-subtle);
   color: var(--text-muted);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 500;
   cursor: pointer;
   transition: color 0.12s;
@@ -180,12 +177,13 @@
   font-weight: 600;
   cursor: pointer;
   transition: opacity 0.12s, transform 0.1s, box-shadow 0.15s;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+  box-shadow: var(--elev-1);
 }
 
+/* Primary action hover earns the soft accent glow (light means life). */
 .btnPrimary:hover {
   opacity: 0.95;
-  box-shadow: 0 4px 12px var(--ab);
+  box-shadow: var(--elev-1), var(--glow-1);
 }
 
 .btnPrimary:active { transform: scale(0.98); }
@@ -193,7 +191,7 @@
 /* ── Selection mode toolbar elements ────────────────────────── */
 .selectionCount {
   flex: 1;
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: var(--text-muted);
   padding: 0 4px;
 }
@@ -236,7 +234,7 @@
 }
 
 .confirmText {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--status-dropped);
   flex: 1;
   line-height: 1.4;
@@ -263,70 +261,25 @@
 }
 
 .viewBtn:hover {
+  background: var(--surface-3);
+  color: var(--text-secondary);
+}
+
+/* Active segment — accent tint + accent text (the app-wide btnActive recipe),
+   with an inset ring so the selected segment reads inside the joined group. */
+.viewBtnActive {
+  background: var(--ad);
+  color: var(--a);
+  box-shadow: inset 0 0 0 1px var(--ab);
+}
+.viewBtnActive:hover {
   background: var(--ad);
   color: var(--a);
 }
 
-.viewBtnActive {
-  background: var(--a);
-  color: #09090f;
-}
-.viewBtnActive:hover {
-  background: var(--a);
-  color: #09090f;
-  opacity: 0.92;
-}
-
 /* ── Game grid ──────────────────────────────────────────────── */
-/* "We found achievements for games you haven't added." Sits between the toolbar
-   and the grid so it's noticed once and then gone — dismissing remembers the
-   app ids, so it never nags about the same games twice. */
-.discoverBanner {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 10px 20px 0;
-  padding: 9px 12px;
-  border-radius: var(--r-input);
-  border: 1px solid var(--ab);
-  background: var(--ad);
-  font-size: 12.5px;
-  color: var(--text-secondary);
-}
-
-.discoverText { flex: 1; min-width: 0; line-height: 1.45; }
-.discoverText strong { color: var(--text-primary); font-weight: 500; }
-
-.discoverBtn {
-  flex-shrink: 0;
-  padding: 5px 12px;
-  border-radius: var(--r-input);
-  border: 1px solid var(--a);
-  background: var(--a);
-  color: #09090f;
-  font-size: 12px;
-  font-weight: 500;
-  font-family: inherit;
-  cursor: pointer;
-}
-
-.discoverDismiss {
-  flex-shrink: 0;
-  display: flex;
-  padding: 4px;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-.discoverDismiss:hover { background: var(--surface-3); color: var(--text-primary); }
-
 .content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 10px 20px 20px;
-  transform: translateZ(0);
+  composes: content from '../styles/page.module.css';
 }
 
 .emptyState {
@@ -340,36 +293,46 @@
 }
 
 .emptyTitle {
-  font-size: 15px;
+  font-size: var(--fs-base);
   font-weight: 500;
   color: var(--text-secondary);
 }
 
 .emptyDesc {
-  font-size: 13px;
+  font-size: var(--fs-md);
   text-align: center;
   max-width: 260px;
   line-height: 1.6;
 }
 
-/* Main grid — 4 portrait columns */
+/* Intrinsic column counts, not fixed ones. The grid was locked to 4 (big) and
+   6 (small) at every width, so it squashed at the 960px window minimum and
+   stayed sparse on a wide monitor. auto-fill + minmax gives ~3 big columns at
+   960px and up to 8 on an ultrawide, with no media queries — which matters
+   because the window minimum makes any breakpoint under 960px dead code. */
 .bigGrid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  /* 220px floor (was 200): on the user's 2K monitor 200px packed 7 slim columns
+     and long names truncated hard — fewer, larger cards read better and give
+     the (now 16px, 2-line-capable) name real room. */
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--sp-12);
   contain: layout style;
 }
 
-/* Small grid — 6 compact portrait columns */
 .smallGrid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 8px;
+  /* 168px floor (was 132) — at 132 the covers were postage stamps on a 2K
+     monitor; "small" should mean denser, not unreadable. */
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: var(--sp-10);
   contain: layout style;
 }
 
 .listGrid {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--sp-6);
+  contain: layout style;
+  max-width: var(--content-max);
 }

@@ -31,7 +31,9 @@ function getSteamPath() {
   const { execSync } = require('child_process')
   const tryReg = (cmd, valueName) => {
     try {
-      const out = execSync(cmd, { encoding: 'utf8', stdio: 'pipe' })
+      // timeout: this also runs on the startup path (main.js cache warm) — a
+      // hung reg.exe must fail this probe, never freeze boot.
+      const out = execSync(cmd, { encoding: 'utf8', stdio: 'pipe', timeout: 3000 })
       const m = out.match(new RegExp(`${valueName}\\s+REG_SZ\\s+(.+)`, 'i'))
       if (m) {
         const p = m[1].trim().replace(/\//g, '\\')
@@ -59,6 +61,14 @@ function getAccountId() {
   } catch { return null }
 }
 
+// OWN account only — never fall back to another account's file. A fallback to
+// "any UserGameStats_*_<appid>.bin" was tried and imported 47
+// Ghost of Tsushima unlocks that belonged to the account the game is shared
+// FROM: achievements are per-account even for family-shared games (playing a
+// shared game records YOUR unlocks under YOUR account id), so a missing
+// own-account file means the user genuinely has no local progress — not that
+// it's hiding under a lender id. The purgeForeignStatsUnlocks migration
+// (db/database.js) cleans up what that fallback imported.
 function statsFilesFor(appid) {
   const steam = getSteamPath()
   const acct = getAccountId()
@@ -99,8 +109,11 @@ function webApiBurst(gameId) {
   setTimeout(() => burstScheduled.delete(gameId), 120 * 1000)
 }
 
-async function scanGame(gameId) {
-  const entry = watchers.get(gameId)
+// `entry` = { watcher, statsFile, schemaFile, sessionId }. Passed in rather than
+// looked up, so a one-shot scan never has to register itself in the shared
+// watchers map (that placeholder made a session starting mid-scan skip its real
+// live watcher for the whole session — see scanGameOnce).
+async function scanGame(gameId, entry) {
   if (!entry) return { added: 0 }
   const gamesQ = require('../db/queries/games')
   const achievementsQ = require('../db/queries/achievements')
@@ -128,7 +141,9 @@ async function scanGame(gameId) {
   const newUnlocks = []
   const now = new Date().toISOString()
   for (const ach of localAchs) {
-    if (ach.unlocked_at) continue
+    // unlock_id, not unlocked_at — a recorded unlock whose date Steam never
+    // reported has a NULL unlocked_at and is still unlocked.
+    if (ach.unlock_id != null) continue
     if (!ach.steam_api_name || !unlockedSet.has(ach.steam_api_name)) continue
     // Steam records the real unlock time in the same file (AchievementTimes),
     // so a locally-detected unlock carries its true date — no need to stamp
@@ -137,14 +152,18 @@ async function scanGame(gameId) {
     const ts = unlockedSet.get(ach.steam_api_name)
     const unlocked_at = ts > 0 ? new Date(ts * 1000).toISOString() : now
     try {
-      achievementsQ.addUnlock({
+      // addUnlock is INSERT OR IGNORE — 0 inserted means the unlock was already
+      // recorded (another sync path beat us to it); no toast, no XP for it.
+      const inserted = achievementsQ.addUnlock({
         achievement_id: ach.id,
         session_id: entry.sessionId ?? null,
         unlocked_at,
         source: 'steam_stats',
       })
-      newUnlocks.push({ ...ach, unlocked_at })
-      added++
+      if (inserted > 0) {
+        newUnlocks.push({ ...ach, unlocked_at })
+        added++
+      }
     } catch {}
   }
 
@@ -159,7 +178,7 @@ function scheduleScan(gameId) {
   clearTimeout(scanDebounce.get(gameId))
   scanDebounce.set(gameId, setTimeout(() => {
     scanDebounce.delete(gameId)
-    scanGame(gameId).catch(e =>
+    scanGame(gameId, watchers.get(gameId)).catch(e =>
       logger.warn(`steamStatsWatcher: scan failed for game ${gameId}`, { message: e.message }))
   }, 300))
 }
@@ -239,15 +258,11 @@ async function scanGameOnce(gameId, sessionId = null) {
 
   const files = statsFilesFor(game.steam_app_id)
   if (!files) return { added: 0 }
-  // No watcher for this game (not in a session) — scanGame reads its file paths
-  // from the watchers map, so register a watcher-less entry for the call.
-  const had = watchers.has(gameId)
-  if (!had) watchers.set(gameId, { watcher: null, ...files, sessionId })
-  try {
-    return await scanGame(gameId)
-  } finally {
-    if (!had) watchers.delete(gameId)
-  }
+  // Never register this one-shot in the shared watchers map: a session starting
+  // while it awaits (ensureSchema is a network fetch) would see the map entry,
+  // skip attaching the real live watcher, and then lose it again when this call
+  // cleaned up — leaving that whole session with no instant unlock detection.
+  return await scanGame(gameId, watchers.get(gameId) || { watcher: null, ...files, sessionId })
 }
 
 /**

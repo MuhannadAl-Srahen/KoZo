@@ -1,8 +1,9 @@
 import React, { useState } from 'react'
 import {
-  IconSearch, IconPlus, IconCheck, IconDeviceGamepad2, IconX,
+  IconSearch, IconPlus, IconCheck, IconDeviceGamepad2, IconX, IconAlertTriangle,
 } from '@tabler/icons-react'
 import Modal, { modalStyles as ms } from '../ui/Modal'
+import { LAUNCHERS } from '../../lib/utils'
 import s from './ScanResultModal.module.css'
 
 const BANNER_BG = ['#1a0f2e','#0f1e3a','#0f2a1e','#2a1a0a','#2a0f0f','#1e1a0a','#1a2a0a','#0a1a2a']
@@ -18,14 +19,20 @@ function keyOf(r) {
   return r.install_path || (r.steam_app_id ? `steam:${r.steam_app_id}` : `name:${r.name}`)
 }
 
-const TYPE_STYLE = {
-  Steam:   { color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', border: 'rgba(96,165,250,0.3)' },
-  Cracked: { color: '#fbbf24', bg: 'rgba(251,191,36,0.12)', border: 'rgba(251,191,36,0.3)' },
-  Epic:    { color: '#a78bfa', bg: 'rgba(167,139,250,0.12)', border: 'rgba(167,139,250,0.3)' },
-  GOG:     { color: '#4ade80', bg: 'rgba(74,222,128,0.12)', border: 'rgba(74,222,128,0.3)' },
-  Ubisoft: { color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', border: 'rgba(96,165,250,0.3)' },
-  EA:      { color: '#f97316', bg: 'rgba(249,115,22,0.12)', border: 'rgba(249,115,22,0.3)' },
-  Xbox:    { color: '#4ade80', bg: 'rgba(74,222,128,0.12)', border: 'rgba(74,222,128,0.3)' },
+// Badge colors come from LAUNCHERS (§14c single source of truth) so a game looks
+// identical here and on its Library card — every detected_type lowercases to its
+// LAUNCHERS key. Alpha suffixes match GameCard's sourceBadge.
+function typeStyle(type) {
+  const l = LAUNCHERS[String(type).toLowerCase()] || LAUNCHERS.manual
+  return { color: l.color, bg: l.color + '18', border: l.color + '44' }
+}
+
+// Badge click cycles detected → Cracked → Steam → detected, so the genuinely
+// detected launcher is always reachable again (returning to it deletes the
+// override entirely rather than pinning the same value).
+function nextType(current, detected) {
+  const cycle = [detected, ...['Cracked', 'Steam'].filter(t => t !== detected)]
+  return cycle[(cycle.indexOf(current) + 1) % cycle.length]
 }
 
 export default function ScanResultModal({ results, onClose, onAdd, title }) {
@@ -35,7 +42,7 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
   const [search, setSearch]           = useState('')
   const [typeFilter, setTypeFilter]   = useState('all')
   const [adding, setAdding]           = useState(false)
-  const [addMsg, setAddMsg]           = useState('')
+  const [addMsg, setAddMsg]           = useState(null)    // { type: 'ok'|'err', text }
   // Lazily resolved hashed art URLs for games where both CDN paths 404
   const [resolvedUrls, setResolvedUrls] = useState({})
 
@@ -78,15 +85,15 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
       })
     if (!toAdd.length) return
     setAdding(true)
-    setAddMsg('')
+    setAddMsg(null)
     const res = await window.kozo?.api?.scanner?.addGames?.(toAdd)
     setAdding(false)
     if (res?.ok) {
-      setAddMsg(`Added ${res.data?.added} game${res.data?.added === 1 ? '' : 's'}!`)
+      setAddMsg({ type: 'ok', text: `Added ${res.data?.added} game${res.data?.added === 1 ? '' : 's'}!` })
       onAdd?.(res.data?.added || 0)
       setSelected(new Set())
     } else {
-      setAddMsg('❌ ' + (res?.error || 'Failed'))
+      setAddMsg({ type: 'err', text: res?.error || 'Failed' })
     }
   }
 
@@ -111,10 +118,16 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%' }}>
           {addMsg && (
             <span style={{
+              display: 'flex', alignItems: 'center', gap: 5,
               fontSize: 12,
-              color: addMsg.startsWith('❌') ? '#f87171' : '#4ade80',
+              color: addMsg.type === 'err' ? 'var(--status-dropped)' : 'var(--status-playing)',
               flex: 1,
-            }}>{addMsg}</span>
+            }}>
+              {addMsg.type === 'err'
+                ? <IconAlertTriangle size={13} stroke={2} />
+                : <IconCheck size={13} stroke={2.5} />}
+              {addMsg.text}
+            </span>
           )}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
             <button className={ms.btnCancel} onClick={onClose}>Close</button>
@@ -134,7 +147,7 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
     >
       {/* Toolbar */}
       <div className={s.toolbar}>
-        <div className={s.searchBox}>
+        <div className={`${s.searchBox} hasRing`}>
           <IconSearch size={13} stroke={1.6} className={s.searchIcon} />
           <input className={s.searchInput} placeholder="Filter games…"
             value={search} onChange={e => setSearch(e.target.value)} />
@@ -168,7 +181,7 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
         {filtered.map(r => {
           const key = keyOf(r)
           const type = typeOverrides[key] ?? r.detected_type
-          const ts = TYPE_STYLE[type] || TYPE_STYLE.Cracked
+          const ts = typeStyle(type)
           const isChecked = r.alreadyInLibrary || selected.has(key)
           const name = nameEdits[key] ?? r.name
           // resolvedUrls[appId]: undefined=not tried, null=fetching, ''=failed, string=url
@@ -227,11 +240,16 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
                   style={{ color: ts.color, background: ts.bg, borderColor: ts.border }}
                   onClick={e => {
                     e.stopPropagation()
-                    if (!r.alreadyInLibrary) {
-                      setTypeOverrides(p => ({ ...p, [key]: type === 'Steam' ? 'Cracked' : 'Steam' }))
-                    }
+                    if (r.alreadyInLibrary) return
+                    const next = nextType(type, r.detected_type)
+                    setTypeOverrides(p => {
+                      const n = { ...p }
+                      if (next === r.detected_type) delete n[key]
+                      else n[key] = next
+                      return n
+                    })
                   }}
-                  title={r.alreadyInLibrary ? undefined : 'Click to toggle Steam/Cracked'}
+                  title={r.alreadyInLibrary ? undefined : 'Click to change type'}
                 >
                   {type}
                 </div>

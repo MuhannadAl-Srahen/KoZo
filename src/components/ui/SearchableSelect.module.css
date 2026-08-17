@@ -1,33 +1,37 @@
 .wrap {
   position: relative;
   flex-shrink: 0;
+  min-width: 0;
 }
 
 /* ── Trigger button ─────────────────────────────────────────── */
+/* Adopts the shared input skin (surface, border, radius, hover) so a select and
+   a text field in the same toolbar stop being two different-looking controls.
+   The doubled class name overrides `.input`'s padding regardless of which file
+   the bundler emits first — see the note in Modal.module.css. */
 .trigger {
+  composes: input from '../../styles/controls.module.css';
+  text-align: left;
+  cursor: pointer;
+}
+
+.trigger.trigger {
   display: flex;
   align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 6px 10px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-input);
+  gap: var(--sp-6);
+  padding: var(--sp-6) var(--sp-10);
   color: var(--text-secondary);
-  font-size: 12.5px;
-  cursor: pointer;
-  text-align: left;
-  transition: border-color 0.12s, color 0.12s;
 }
 
 .trigger:hover,
-.triggerOpen {
+.triggerOpen.triggerOpen {
   border-color: var(--ab);
   color: var(--text-primary);
 }
 
 .triggerLabel {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -40,7 +44,7 @@
 .chevron {
   flex-shrink: 0;
   color: var(--text-muted);
-  transition: transform 0.15s;
+  transition: var(--t-transform);
 }
 
 .chevronOpen {
@@ -52,9 +56,9 @@
   display: flex;
   align-items: center;
   color: var(--text-muted);
-  border-radius: 3px;
+  border-radius: var(--r-xs);
   padding: 1px;
-  transition: color 0.1s;
+  transition: var(--t-color);
 }
 
 .clear:hover {
@@ -62,17 +66,24 @@
 }
 
 /* ── Dropdown ───────────────────────────────────────────────── */
+/* Portalled to <body>, so it must outrank every surface it can be opened from —
+   page toolbars AND CardContextMenu AND a modal. That is exactly what
+   --z-popover is for. The old rule declared z-index: 200 here and then an inline
+   `zIndex: 99999` in the JSX silently overrode it, so this file's value was
+   dead text; both now live in one place. */
 .dropdown {
   position: absolute;
-  top: calc(100% + 4px);
+  top: calc(100% + var(--sp-4));
   left: 0;
   right: 0;
   min-width: 180px;
   background: var(--surface-2);
-  border: 1px solid var(--ab);
+  /* Accent-soft border — matches CardContextMenu so every floating chooser
+     shares one edge treatment. */
+  border: 1px solid var(--border-accent-soft);
   border-radius: var(--r-card);
-  box-shadow: var(--shadow-modal);
-  z-index: 200;
+  box-shadow: var(--elev-2);
+  z-index: var(--z-popover);
   overflow: hidden;
 }
 
@@ -80,10 +91,15 @@
 .searchRow {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
+  gap: var(--sp-6);
+  padding: var(--sp-8) var(--sp-10);
   border-bottom: 1px solid var(--border-subtle);
 }
+
+/* The input is focused programmatically on open — suppress its own ring (the
+   dropdown is the focus context) and mark focus on the divider instead. */
+.searchRow input:focus-visible { outline: none; }
+.searchRow:focus-within { border-bottom-color: var(--ab); }
 
 .searchIcon {
   color: var(--text-muted);
@@ -91,48 +107,49 @@
 }
 
 .searchInput {
-  flex: 1;
-  background: transparent;
-  color: var(--text-primary);
-  font-size: 12.5px;
-  border: none;
-  outline: none;
+  composes: inputBare from '../../styles/controls.module.css';
 }
 
-.searchInput::placeholder {
-  color: var(--text-muted);
+.searchInput.searchInput {
+  padding: 0;
+  font-size: var(--fs-sm);
 }
 
 /* ── Options list ───────────────────────────────────────────── */
 .list {
   max-height: 200px;
   overflow-y: auto;
-  padding: 4px 0;
+  padding: var(--sp-4) 0;
+  transform: translateZ(0);
 }
 
 .option {
-  padding: 7px 12px;
-  font-size: 12.5px;
+  padding: var(--sp-6) var(--sp-12);
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
   cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  transition: background 0.08s, color 0.08s;
+  transition: var(--t-control);
 }
 
+/* Hover = accent tint + primary text; the SELECTED option keeps accent text
+   (unified with CardContextMenu's .item / .itemActive). The :hover half of the
+   active rule stops .option:hover repainting the selected row as a plain hover. */
 .option:hover {
-  background: var(--surface-3);
+  background: var(--ad);
   color: var(--text-primary);
 }
 
-.optionActive {
+.optionActive,
+.optionActive:hover {
   color: var(--a);
   background: var(--ad);
 }
 
 .noResults {
-  padding: 10px 12px;
-  font-size: 12px;
+  padding: var(--sp-10) var(--sp-12);
+  font-size: var(--fs-sm);
   color: var(--text-muted);
 }

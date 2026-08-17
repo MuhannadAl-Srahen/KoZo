@@ -1,49 +1,44 @@
 .sectionTitle {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--text-muted);
-  margin-bottom: 8px;
+  margin-bottom: var(--sp-8);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-8);
 }
 
 .count {
-  font-size: 11px;
-  color: var(--text-muted);
-  background: var(--surface-3);
-  border: 1px solid var(--border);
-  border-radius: var(--r-pill);
-  padding: 1px 7px;
+  composes: chip chipSm chipNeutral from '../../styles/controls.module.css';
 }
 
 .loading,
 .empty {
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
-  line-height: 1.5;
-  padding: 8px 2px;
+  line-height: var(--lh-base);
+  padding: var(--sp-8) var(--sp-2);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-8);
 }
 
 .list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--sp-8);
 }
 
 .row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--sp-12);
   background: var(--surface-3);
   border: 1px solid var(--border);
   border-radius: var(--r-input);
-  padding: 10px 12px;
+  padding: var(--sp-10) var(--sp-12);
 }
 
 .rowInfo {
@@ -51,178 +46,129 @@
   min-width: 0;
 }
 
+/* Save locations are absolute Windows paths. They wrap rather than truncate
+   here (the row is the only place the full path is shown), and the JSX pairs
+   them with a title attribute. */
 .path {
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   color: var(--text-primary);
   word-break: break-all;
-  line-height: 1.45;
+  line-height: var(--lh-snug);
 }
 
 .meta {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
-  margin-top: 3px;
+  margin-top: var(--sp-2);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-8);
 }
 
 .tag {
-  font-size: 9.5px;
-  font-weight: 500;
+  composes: chip chipSm chipAccent from '../../styles/controls.module.css';
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--a);
-  background: var(--ad);
-  border: 1px solid var(--ab);
-  border-radius: var(--r-pill);
-  padding: 1px 7px;
 }
 
 .tagAmber {
-  font-size: 9.5px;
-  font-weight: 500;
-  color: #fbbf24;
-  background: rgba(251, 191, 36, 0.1);
-  border: 1px solid rgba(251, 191, 36, 0.25);
-  border-radius: var(--r-pill);
-  padding: 1px 7px;
-  margin-left: 6px;
+  composes: chip chipSm chipWarning from '../../styles/controls.module.css';
+  margin-left: var(--sp-6);
 }
 
 .bkTitle {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 13px;
+  gap: var(--sp-6);
+  font-size: var(--fs-md);
   font-weight: 500;
   color: var(--text-primary);
 }
 
 .bkSource {
-  font-size: 10.5px;
+  font-size: var(--fs-2xs);
   color: var(--text-disabled);
-  margin-top: 3px;
+  margin-top: var(--sp-2);
   word-break: break-all;
 }
 
 .rowBtns {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-6);
   flex-shrink: 0;
 }
 
-.primaryBtn,
-.confirmBtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 6px 11px;
-  border-radius: var(--r-input);
-  border: 1px solid var(--ab);
-  background: var(--ad);
-  color: var(--a);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.12s, border-color 0.12s;
+.primaryBtn {
+  composes: btn btnActive btnSm from '../../styles/controls.module.css';
 }
 
-.primaryBtn:hover { background: var(--ab); }
-.primaryBtn:disabled { opacity: 0.6; cursor: default; }
+.primaryBtn.primaryBtn:hover:not(:disabled) { background: var(--ab); }
 
+/* The second step of "Restore" — deliberately blue, not accent: it is a
+   confirmation, and it must not read as the same button the user just clicked. */
 .confirmBtn {
-  color: var(--status-finished);
-  border-color: rgba(96, 165, 250, 0.4);
-  background: rgba(96, 165, 250, 0.12);
+  composes: btn btnSm from '../../styles/controls.module.css';
 }
-.confirmBtn:hover { background: rgba(96, 165, 250, 0.2); }
+
+.confirmBtn.confirmBtn {
+  color: var(--info);
+  border-color: color-mix(in srgb, var(--info) 40%, transparent);
+  background: var(--info-bg-hover);
+}
+
+.confirmBtn.confirmBtn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--info) 20%, transparent);
+}
 
 .dangerBtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 6px 11px;
-  border-radius: var(--r-input);
-  border: 1px solid rgba(248, 113, 113, 0.4);
-  background: rgba(248, 113, 113, 0.12);
-  color: var(--status-dropped);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.12s;
+  composes: btn btnDanger btnSm from '../../styles/controls.module.css';
 }
-.dangerBtn:hover { background: rgba(248, 113, 113, 0.2); }
-.dangerBtn:disabled { opacity: 0.6; cursor: default; }
 
 .iconBtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 6px 9px;
-  border-radius: var(--r-input);
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 12px;
-  cursor: pointer;
-  transition: border-color 0.12s, color 0.12s;
+  composes: btn btnSecondary btnSm from '../../styles/controls.module.css';
 }
-
-.iconBtn:hover { border-color: var(--ab); color: var(--text-primary); }
-.iconBtn:disabled { opacity: 0.5; cursor: default; }
 
 .banner {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12.5px;
+  gap: var(--sp-8);
+  font-size: var(--fs-sm);
   border-radius: var(--r-input);
-  padding: 8px 11px;
-  margin-bottom: 14px;
+  padding: var(--sp-8) var(--sp-10);
+  margin-bottom: var(--sp-12);
 }
 
 .bannerOk {
-  color: var(--status-playing);
-  background: rgba(74, 222, 128, 0.08);
-  border: 1px solid rgba(74, 222, 128, 0.22);
+  color: var(--success);
+  background: var(--success-bg);
+  border: 1px solid var(--success-border);
   word-break: break-all;
 }
 
 .bannerErr {
-  color: var(--status-dropped);
-  background: rgba(248, 113, 113, 0.08);
-  border: 1px solid rgba(248, 113, 113, 0.22);
+  color: var(--error);
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
 }
 
 .restoreNote {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  font-size: 11.5px;
-  color: #fbbf24;
-  background: rgba(251, 191, 36, 0.07);
-  border: 1px solid rgba(251, 191, 36, 0.2);
+  gap: var(--sp-8);
+  font-size: var(--fs-sm);
+  color: var(--warning);
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-border);
   border-radius: var(--r-input);
-  padding: 8px 11px;
-  margin-top: 12px;
-  line-height: 1.5;
+  padding: var(--sp-8) var(--sp-10);
+  margin-top: var(--sp-12);
+  line-height: var(--lh-base);
 }
 
 .deleteNote {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  font-size: 11.5px;
-  color: var(--status-dropped);
-  background: rgba(248, 113, 113, 0.07);
-  border: 1px solid rgba(248, 113, 113, 0.2);
-  border-radius: var(--r-input);
-  padding: 8px 11px;
-  margin-top: 12px;
-  line-height: 1.5;
+  composes: restoreNote;
+  color: var(--error);
+  background: var(--error-bg);
+  border-color: var(--error-border);
 }

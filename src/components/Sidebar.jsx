@@ -49,11 +49,9 @@ export default function Sidebar() {
   // higher levels, so the level-up toast alone made the whole XP system feel
   // dead between celebrations — this keeps progress visible all the time.
   //
-  // NOTE: the XP-moving events (session:ended, game:updated) are already owned
-  // by the session effect below, whose cleanup calls removeAll() on those
-  // channels. Registering a second listener here would get torn down with it,
-  // so the refresh is triggered FROM that effect via this ref instead — one
-  // owner per channel.
+  // NOTE: the XP-moving events (session:ended, game:updated) are already
+  // subscribed by the session effect below, so the refresh is triggered FROM
+  // that effect via this ref rather than duplicating the subscriptions.
   const refreshXp = useRef(() => {})
   useEffect(() => {
     let cancelled = false
@@ -107,30 +105,26 @@ export default function Sidebar() {
     refresh()
     const onVisible = () => { if (document.visibilityState === 'visible') refresh() }
     document.addEventListener('visibilitychange', onVisible)
+    const offs = []
     if (window.kozo?.events) {
-      window.kozo.events.onSessionStarted(() => refresh())
-      window.kozo.events.onSessionEnded(() => refresh())
-      window.kozo.events.onGameUpdated(() => refresh())
-      // Optimistic "Now Playing" — appears ~one poll after launch.
-      window.kozo.events.onSessionDetected?.(() => refresh())
-      window.kozo.events.onSessionUndetected?.(() => refresh())
-      // Live AFK transitions: flip the card to "Away" the instant it happens.
-      window.kozo.events.onSessionIdle?.(({ gameId, idle, idle_seconds }) => {
-        setActiveSession(prev =>
-          prev && prev.gameId === gameId ? { ...prev, idle, idle_seconds } : prev)
-      })
+      offs.push(
+        window.kozo.events.onSessionStarted(() => refresh()),
+        window.kozo.events.onSessionEnded(() => refresh()),
+        window.kozo.events.onGameUpdated(() => refresh()),
+        // Optimistic "Now Playing" — appears ~one poll after launch.
+        window.kozo.events.onSessionDetected?.(() => refresh()),
+        window.kozo.events.onSessionUndetected?.(() => refresh()),
+        // Live AFK transitions: flip the card to "Away" the instant it happens.
+        window.kozo.events.onSessionIdle?.(({ gameId, idle, idle_seconds }) => {
+          setActiveSession(prev =>
+            prev && prev.gameId === gameId ? { ...prev, idle, idle_seconds } : prev)
+        }),
+      )
     }
     return () => {
       cancelled = true
       document.removeEventListener('visibilitychange', onVisible)
-      if (window.kozo?.events) {
-        window.kozo.events.removeAll('session:started')
-        window.kozo.events.removeAll('session:ended')
-        window.kozo.events.removeAll('game:updated')
-        window.kozo.events.removeAll('session:idle')
-        window.kozo.events.removeAll('session:detected')
-        window.kozo.events.removeAll('session:undetected')
-      }
+      for (const off of offs) off?.()
     }
   }, [])
 
@@ -180,16 +174,21 @@ export default function Sidebar() {
               <span className={`${s.liveDot} ${activeSession.idle ? s.liveDotIdle : ''}`} />
               {activeSession.idle ? 'Away · paused' : 'Now Playing'}
             </div>
-            <div className={s.nowPlayingName}>{activeSession.game_name}</div>
+            <div className={s.nowPlayingName} title={activeSession.game_name}>{activeSession.game_name}</div>
             <div className={s.nowPlayingTime}>
-              {formatSessionTime(activeSession.started_at, activeSession.idle_seconds)}
-              {activeSession.idle && <span className={s.nowPlayingAfk}>AFK — not counting</span>}
+              <span className={s.nowPlayingElapsed}>
+                {formatSessionTime(activeSession.started_at, activeSession.idle_seconds)}
+              </span>
+              {activeSession.idle && (
+                <span className={s.nowPlayingAfk} title="AFK — not counting">AFK — not counting</span>
+              )}
             </div>
           </div>
         )}
 
         <NavLink
           to="/profile"
+          data-gpnav=""
           className={({ isActive }) => `${s.profileChip} ${isActive ? s.profileChipActive : ''}`}
         >
           <span className={s.profileAvatar}>
@@ -198,12 +197,12 @@ export default function Sidebar() {
               : <span className={s.profileInitials}>{initials(profile.name)}</span>}
           </span>
           <span className={s.profileMeta}>
-            <span className={s.profileName}>{profile.name}</span>
+            <span className={s.profileName} title={profile.name}>{profile.name}</span>
             {xp ? (
               <>
                 <span className={s.profileXpRow}>
                   <span className={s.profileLevel}>Lv {xp.level}</span>
-                  <span className={s.profileTier}>{xp.tier}</span>
+                  <span className={s.profileTier} title={xp.tier}>{xp.tier}</span>
                 </span>
                 <span className={s.profileXpBar} title={`${xp.toNextLevel.toLocaleString()} XP to level ${xp.level + 1}`}>
                   <span className={s.profileXpFill} style={{ width: `${xp.progress}%` }} />
@@ -217,9 +216,10 @@ export default function Sidebar() {
 
         <NavLink
           to="/settings"
+          data-gpnav=""
           className={({ isActive }) => `${s.settingsLink} ${isActive ? s.settingsLinkActive : ''}`}
         >
-          <span className={s.navIcon}><IconSettings size={16} stroke={1.6} /></span>
+          <span className={s.navIcon}><IconSettings size={17} stroke={1.6} /></span>
           Settings
         </NavLink>
       </div>

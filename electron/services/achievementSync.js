@@ -13,6 +13,27 @@ function broadcastToRenderers(channel, payload) {
   } catch {}
 }
 
+// Per-game notification silencing for bulk imports (add / scan). This used to
+// be a single global boolean saved-and-restored around each import — with
+// scanner:addGames scheduling N concurrent imports, the interleaved restores
+// left the flag stuck ON (~(N-1)/N odds) and every future unlock toast in the
+// process was silently dropped until restart. A Map<gameId, refcount> can't
+// get stuck (finally always balances its own increment) and no longer silences
+// live unlocks for an UNRELATED game you're playing while an add imports.
+const _silencedGames = new Map()
+function silenceGame(gameId) {
+  _silencedGames.set(gameId, (_silencedGames.get(gameId) || 0) + 1)
+}
+function unsilenceGame(gameId) {
+  const n = (_silencedGames.get(gameId) || 0) - 1
+  if (n > 0) _silencedGames.set(gameId, n)
+  else _silencedGames.delete(gameId)
+}
+function isSilenced(gameId) {
+  // Legacy escape hatch: a few external bulk paths still set the global.
+  return _silencedGames.has(gameId) || !!global.__kozoSilenceAchNotify
+}
+
 // One shared "new unlocks landed" pipeline: backup flag, renderer broadcasts,
 // overlay toast, OS notification (no-op), XP check. Every unlock source (Steam
 // Web API, crack files, local Steam stats) funnels through this so behavior
@@ -21,7 +42,7 @@ function emitNewUnlocks(game, newUnlocks) {
   if (!game || !newUnlocks?.length) return
   try { require('./autoBackup').markDirty() } catch {}
   broadcastToRenderers('game:updated', game.id)
-  if (global.__kozoSilenceAchNotify) return
+  if (isSilenced(game.id)) return
   // Game cover for the overlay toasts. Some callers pass a partial game object —
   // look the art up from the DB when the fields aren't present.
   let artPath = game.banner_local_path ?? null
@@ -151,6 +172,13 @@ async function revalidateProfilePrivacy() {
   const was = settingsQ.getSetting('steam_profile_private') || ''
   const refused = []
 
+  // Steam answered ABOUT this account (vs. we never reached Steam at all). The
+  // fetchers don't throw on network trouble, they return an error string — so
+  // "no error" alone can't be read as proof the profile is public.
+  const CONCLUSIVE_ERRORS = new Set([undefined, null, '', 'no_stats', 'no_stats_for_game', 'steam_error'])
+
+  let unreachable = 0
+
   for (const g of games) {
     let result
     try {
@@ -158,19 +186,24 @@ async function revalidateProfilePrivacy() {
         ? await getPlayerAchievements(g.steam_app_id, apiKey, steamId)
         : await getPlayerAchievementsXml(g.steam_app_id, steamId)
     } catch {
-      continue                              // network blip proves nothing either way
+      unreachable++                         // network blip proves nothing either way
+      continue
     }
-    if (!PRIVACY_ERRORS.has(result.error)) {
-      // Steam talked to us about this account. Whatever the other games say,
-      // they're saying it about ownership, not privacy.
-      setProfilePrivateFlag(null)
-      if (was) logger.info(`Steam profile is readable (confirmed via "${g.name}") — clearing the private-profile warning`)
-      return { checked: true, private: false, changed: !!was, via: g.name }
-    }
-    refused.push(g.name)
+    if (PRIVACY_ERRORS.has(result.error)) { refused.push(g.name); continue }
+    if (!CONCLUSIVE_ERRORS.has(result.error)) { unreachable++; continue }   // timeout/5xx — no verdict
+
+    // Steam talked to us about this account. Whatever the other games say,
+    // they're saying it about ownership, not privacy.
+    setProfilePrivateFlag(null)
+    if (was) logger.info(`Steam profile is readable (confirmed via "${g.name}") — clearing the private-profile warning`)
+    return { checked: true, private: false, changed: !!was, via: g.name }
   }
 
   if (!refused.length) return { checked: false, reason: 'no_conclusive_answer' }
+  // "Private" is only honest when EVERY sampled game refused. If some requests
+  // never reached Steam, the sample is incomplete — leave the stored flag alone
+  // rather than raising a warning banner off a flaky connection.
+  if (unreachable) return { checked: false, reason: 'incomplete_sample', refused: refused.length, unreachable }
   setProfilePrivateFlag('private')
   return { checked: true, private: true, tried: refused }
 }
@@ -404,29 +437,42 @@ async function autoImportSchemaByName(gameId, { force = false } = {}) {
 // moment it's added (via single Add, PC scan, or Steam import).
 async function fetchAndStoreAchievements(gameId) {
   try {
-    const { refreshGameData } = require('./steamApi')
-    const result = await refreshGameData(gameId)
-    if (result) {
-      logger.info(`achievementSync: initial fetch done for game ${gameId}, ${result.achievementCount} achievements`)
+    // Isolated: the unlock import below must still run when Steam is unreachable
+    // (a cracked game's unlocks are read straight off disk and need no network).
+    try {
+      const { refreshGameData } = require('./steamApi')
+      const result = await refreshGameData(gameId)
+      if (result) {
+        logger.info(`achievementSync: initial fetch done for game ${gameId}, ${result.achievementCount} achievements`)
+      }
+    } catch (e) {
+      logger.warn(`achievementSync: initial Steam fetch failed for game ${gameId}`, { message: e.message })
     }
+
+    // Keyless users get their schema here: refreshGameData only fetches one when
+    // an API key exists, and ensureSchema owns the keyless ladder. No-op once the
+    // game already has achievements.
+    await ensureSchema(gameId).catch(() => {})
 
     // Pull existing unlocks. Silence notifications — a freshly added game can have
     // dozens of unlocks and we don't want a toast storm just for adding it.
     const { getDb } = require('../db/database')
     const game = getDb().prepare('SELECT * FROM games WHERE id = ?').get(gameId)
-    const prevSilent = global.__kozoSilenceAchNotify
-    global.__kozoSilenceAchNotify = true
+    // Silence THIS game's import only (per-game refcount — see _silencedGames):
+    // concurrent adds can't corrupt each other, and a live unlock for a game
+    // currently being played still toasts.
+    silenceGame(gameId)
     try {
       if (game?.is_cracked) {
         const { scanGameForCrackAchievements } = require('./crackWatcher')
-        const r = await scanGameForCrackAchievements(gameId).catch(() => ({ added: 0 }))
+        const r = await scanGameForCrackAchievements(gameId, { catchUp: true }).catch(() => ({ added: 0 }))
         if (r?.added) logger.info(`achievementSync: imported ${r.added} crack unlock(s) on add for game ${gameId}`)
       } else {
         const r = await syncPlayerUnlocks(gameId).catch(() => ({ added: 0 }))
         if (r?.added) logger.info(`achievementSync: imported ${r.added} Steam unlock(s) on add for game ${gameId}`)
       }
     } finally {
-      global.__kozoSilenceAchNotify = prevSilent
+      unsilenceGame(gameId)
     }
 
     broadcastToRenderers('game:updated', gameId)
@@ -467,7 +513,9 @@ async function syncAfterSession(gameId, sessionId) {
     const alreadyUnlocked = new Set()
     for (const a of localAchs) {
       nameToAch[a.steam_api_name] = a
-      if (a.unlocked_at) alreadyUnlocked.add(a.id)
+      // Unlocked = an unlock row exists. unlocked_at is nullable (Steam reports
+      // no date for some unlocks), so keying on it re-detected those every pass.
+      if (a.unlock_id != null) alreadyUnlocked.add(a.id)
     }
 
     const newUnlocks = []
@@ -480,12 +528,13 @@ async function syncAfterSession(gameId, sessionId) {
         ? new Date(su.unlocktime * 1000).toISOString()
         : null   // no timestamp from Steam — don't lie with today's date
 
-      achievementsQ.addUnlock({
+      const inserted = achievementsQ.addUnlock({
         achievement_id: ach.id,
         session_id: sessionId ?? null,
         unlocked_at: unlockedAt,
         source: 'steam_api',
       })
+      if (!inserted) continue
 
       newUnlocks.push({ ...ach, unlocked_at: unlockedAt })
       logger.info(`Achievement unlocked: ${ach.display_name} for ${game.name}`)
@@ -531,7 +580,7 @@ async function syncPlayerUnlocks(gameId) {
   const alreadyUnlocked = new Set()
   for (const a of localAchs) {
     nameToAch[a.steam_api_name] = a
-    if (a.unlocked_at) alreadyUnlocked.add(a.id)
+    if (a.unlock_id != null) alreadyUnlocked.add(a.id)
   }
 
   let added = 0
@@ -541,13 +590,14 @@ async function syncPlayerUnlocks(gameId) {
     if (!ach || alreadyUnlocked.has(ach.id)) continue
     const unlockedAt = su.unlocktime > 0
       ? new Date(su.unlocktime * 1000).toISOString()
-      : new Date().toISOString()
-    achievementsQ.addUnlock({
+      : null   // no timestamp from Steam — the UI shows "no date", never a fake one
+    const inserted = achievementsQ.addUnlock({
       achievement_id: ach.id,
       session_id: null,
       unlocked_at: unlockedAt,
       source: 'steam_api',
     })
+    if (!inserted) continue
     newUnlocks.push({ ...ach, unlocked_at: unlockedAt })
     added++
   }

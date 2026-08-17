@@ -23,7 +23,9 @@ function buildPayload() {
   try { achievements = achievementsQ.listAchievementsForGame(sess.game_id) || [] } catch {}
 
   const total = achievements.length
-  const unlocked = achievements.filter(a => a.unlocked_at).length
+  // unlock_id decides unlocked/locked everywhere below: unlocked_at is NULL for
+  // an unlock Steam reported with no date, which is display-only ("no date").
+  const unlocked = achievements.filter(a => a.unlock_id != null).length
 
   const shape = (a) => ({
     name: a.display_name || a.steam_api_name,
@@ -41,14 +43,14 @@ function buildPayload() {
   const rank = (a) => (typeof a.global_unlock_percent === 'number' ? a.global_unlock_percent : 1e9)
   const remaining = achievements
     .map((a, i) => ({ ...a, _i: i }))
-    .filter(a => !a.unlocked_at)
+    .filter(a => a.unlock_id == null)
     .sort((a, b) => (rank(a) - rank(b)) || (a._i - b._i))
     .map(shape)
 
   // A short "you just got these" strip, newest first. Rows with no timestamp
   // (Steam returned unlocktime 0) sort last rather than pretending to be recent.
   const recent = achievements
-    .filter(a => a.unlocked_at)
+    .filter(a => a.unlock_id != null)
     .sort((a, b) => new Date(b.unlocked_at || 0) - new Date(a.unlocked_at || 0))
     .slice(0, 3)
     .map(shape)

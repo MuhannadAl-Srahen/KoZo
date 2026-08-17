@@ -1,16 +1,8 @@
-.searchRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--surface-3);
-  border: 1px solid var(--border);
-  border-radius: var(--r-input);
-  padding: 0 12px;
-  transition: border-color 0.12s;
-}
+/* Shared by six modals (AddGame, EditGame, AddGameToList, AddGamesToCustomList,
+   CreateEditList, EditGameList) — treat every rule here as app-wide. */
 
-.searchRow:focus-within {
-  border-color: var(--ab);
+.searchRow {
+  composes: inputWrap from '../../styles/controls.module.css';
 }
 
 .searchIcon {
@@ -19,36 +11,34 @@
 }
 
 .searchInput {
-  flex: 1;
-  padding: 10px 0;
-  background: transparent;
-  font-size: 13.5px;
-  color: var(--text-primary);
+  composes: inputBare from '../../styles/controls.module.css';
 }
 
-.searchInput::placeholder {
-  color: var(--text-muted);
+.searchInput.searchInput {
+  padding: var(--sp-10) 0;
+  font-size: var(--fs-md);
 }
 
 /* ── Results ──────────────────────────────────────────────── */
 .resultsList {
-  margin-top: 10px;
+  margin-top: var(--sp-10);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--sp-4);
   max-height: 300px;
   overflow-y: auto;
+  transform: translateZ(0);
 }
 
 .resultItem {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 10px;
+  gap: var(--sp-12);
+  padding: var(--sp-8) var(--sp-10);
   border-radius: var(--r-input);
   cursor: pointer;
   border: 1px solid transparent;
-  transition: background 0.1s, border-color 0.1s;
+  transition: var(--t-control);
 }
 
 .resultItem:hover {
@@ -64,7 +54,7 @@
 .resultIcon {
   width: 120px;
   height: 68px;
-  border-radius: 6px;
+  border-radius: var(--r-md);
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -85,7 +75,7 @@
 }
 
 .resultName {
-  font-size: 13px;
+  font-size: var(--fs-md);
   font-weight: 500;
   color: var(--text-primary);
   overflow: hidden;
@@ -94,7 +84,7 @@
 }
 
 .resultMeta {
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   margin-top: 3px;
 }
@@ -107,15 +97,15 @@
 .manualOption {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
+  gap: var(--sp-10);
+  padding: var(--sp-8) var(--sp-10);
   border-radius: var(--r-input);
   cursor: pointer;
   border: 1px solid transparent;
   color: var(--text-secondary);
-  font-size: 13px;
-  margin-top: 4px;
-  transition: background 0.1s, color 0.1s;
+  font-size: var(--fs-md);
+  margin-top: var(--sp-4);
+  transition: var(--t-control);
 }
 
 .manualOption:hover {
@@ -131,34 +121,34 @@
 
 .searchHint {
   text-align: center;
-  padding: 20px 0;
+  padding: var(--sp-20) 0;
   color: var(--text-muted);
-  font-size: 12.5px;
-  line-height: 1.6;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-loose);
 }
 
 .searching {
   text-align: center;
-  padding: 16px 0;
+  padding: var(--sp-16) 0;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 
 /* ── Selected game chip ───────────────────────────────────── */
 .selectedChip {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-8);
   background: var(--surface-2);
   border: 1px solid var(--ab);
   border-radius: var(--r-input);
-  padding: 7px 10px;
+  padding: var(--sp-6) var(--sp-10);
 }
 
 .selectedThumb {
   width: 32px;
   height: 22px;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   overflow: hidden;
   flex-shrink: 0;
   display: flex;
@@ -174,7 +164,8 @@
 
 .selectedChipName {
   flex: 1;
-  font-size: 13px;
+  min-width: 0;
+  font-size: var(--fs-md);
   color: var(--text-primary);
   font-weight: 500;
   white-space: nowrap;
@@ -183,7 +174,7 @@
 }
 
 .selectedChipMeta {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
   white-space: nowrap;
 }
@@ -193,11 +184,11 @@
   align-items: center;
   justify-content: center;
   padding: 3px;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   color: var(--text-muted);
   cursor: pointer;
   flex-shrink: 0;
-  transition: color 0.1s, background 0.1s;
+  transition: var(--t-control);
 }
 
 .selectedChipClear:hover {
@@ -209,36 +200,30 @@
 .divider {
   border: none;
   border-top: 1px solid var(--border-subtle);
-  margin: 16px 0;
+  margin: var(--sp-16) 0;
 }
 
 /* ── Local file picker ────────────────────────────────────── */
 .fileRow {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--sp-10);
+  min-width: 0;
 }
 
 .fileBtn {
-  padding: 7px 14px;
-  border-radius: var(--r-input);
-  border: 1px solid var(--border);
-  background: var(--surface-3);
-  color: var(--text-secondary);
-  font-size: 12.5px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: border-color 0.12s, color 0.12s;
-  flex-shrink: 0;
+  composes: btn btnSecondary btnSm from '../../styles/controls.module.css';
 }
 
-.fileBtn:hover {
-  border-color: var(--ab);
-  color: var(--text-primary);
+.fileBtn.fileBtn {
+  padding: var(--sp-6) var(--sp-12);
+  background: var(--surface-3);
+  font-size: var(--fs-sm);
 }
 
 .fileName {
-  font-size: 12px;
+  min-width: 0;
+  font-size: var(--fs-sm);
   color: var(--a);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -246,12 +231,12 @@
 }
 
 .fileHint {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
 }
 
 .field {
-  margin-bottom: 14px;
+  margin-bottom: var(--sp-12);
 }
 
 .field:last-child {
@@ -260,24 +245,34 @@
 
 .label {
   display: block;
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   font-weight: 500;
   color: var(--text-secondary);
-  margin-bottom: 6px;
+  margin-bottom: var(--sp-6);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
 
+/* The "(optional)" qualifier inside a .label — it must not inherit the label's
+   uppercase/tracking or it reads as part of the field name. */
+.labelNote {
+  color: var(--text-muted);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
 .labelRequired::after {
   content: ' *';
-  color: var(--status-dropped);
+  color: var(--error);
 }
 
 /* Exe row — input + pick-running button side by side */
 .exeRow {
   display: flex;
-  gap: 8px;
+  gap: var(--sp-8);
   align-items: stretch;
+  min-width: 0;
 }
 
 .exeRow .input {
@@ -285,144 +280,164 @@
 }
 
 .pickBtn {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 0 12px;
+  composes: btn btnSecondary btnSm from '../../styles/controls.module.css';
+}
+
+.pickBtn.pickBtn {
+  padding: 0 var(--sp-12);
   background: var(--surface-3);
-  border: 1px solid var(--border);
-  border-radius: var(--r-input);
-  color: var(--text-secondary);
-  font-size: 12.5px;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: border-color 0.12s, color 0.12s, background 0.12s;
+  font-size: var(--fs-sm);
   flex-shrink: 0;
 }
 
-.pickBtn:hover {
+/* Both :not() guards are copied from controls' own hover selector so this rule
+   outranks it (0,5,0 vs 0,4,0) no matter which file the bundler emits first. */
+.pickBtn.pickBtn:hover:not(:disabled):not([aria-disabled='true']) {
   border-color: var(--ab);
   color: var(--a);
   background: var(--ad);
 }
 
 .pickerWrap {
-  margin-top: 8px;
+  margin-top: var(--sp-8);
 }
 
 .input {
-  width: 100%;
-  background: var(--surface-3);
-  border: 1px solid var(--border);
-  border-radius: var(--r-input);
-  padding: 9px 12px;
-  font-size: 13.5px;
-  color: var(--text-primary);
-  transition: border-color 0.12s;
-}
-
-.input:focus {
-  border-color: var(--ab);
-  outline: none;
-}
-
-.input::placeholder {
-  color: var(--text-muted);
+  composes: input from '../../styles/controls.module.css';
 }
 
 .inputHint {
-  font-size: 11px;
-  color: var(--text-muted);
+  composes: fieldHint from '../../styles/controls.module.css';
   margin-top: 5px;
-  line-height: 1.5;
 }
 
 .inputError {
-  border-color: var(--status-dropped) !important;
+  composes: inputInvalid from '../../styles/controls.module.css';
+}
+
+/* An invalid field must stay red on hover — `.input:hover` would otherwise tint
+   it back to the accent and the error state would vanish under the cursor. */
+.inputError.inputError:hover:not(:disabled) {
+  border-color: var(--error-border-strong);
 }
 
 .errorText {
-  font-size: 11px;
-  color: var(--status-dropped);
-  margin-top: 4px;
+  composes: fieldError from '../../styles/controls.module.css';
+  margin-top: var(--sp-4);
 }
 
 /* ── Source pills ─────────────────────────────────────────── */
 .pills {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--sp-6);
 }
 
+/* Pills carry their own resting/hover/active colours rather than composing
+   `.btnSecondary`: a segmented control's ACTIVE state has to beat its own hover,
+   and that ordering is only controllable inside one file. Geometry still comes
+   from the shared vocabulary. */
 .pill {
-  padding: 5px 12px;
-  border-radius: var(--r-pill);
-  border: 1px solid var(--border);
+  composes: btn btnSm btnPill from '../../styles/controls.module.css';
+}
+
+.pill.pill {
+  padding: 5px var(--sp-12);
+  font-size: var(--fs-sm);
   background: transparent;
   color: var(--text-secondary);
-  font-size: 12px;
-  cursor: pointer;
-  transition: background 0.1s, border-color 0.1s, color 0.1s;
+  border-color: var(--border);
 }
 
-.pill:hover {
+.pill.pill:hover:not(:disabled) {
   background: var(--surface-3);
   color: var(--text-primary);
 }
 
-.pillActive {
+.pillActive.pillActive,
+.pillActive.pillActive:hover:not(:disabled) {
   background: var(--ad);
   border-color: var(--ab);
   color: var(--a);
 }
 
+/* Collapsed "Advanced" disclosure in EditGameModal — was ~10 lines of inline
+   style on the element itself. */
+.advancedToggle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  width: 100%;
+  padding: var(--sp-8) 0;
+  margin-top: var(--sp-2);
+  background: none;
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  cursor: pointer;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  transition: var(--t-color);
+}
+
+.advancedToggle:hover { color: var(--text-secondary); }
+
 /* ── Warning ──────────────────────────────────────────────── */
 .warning {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  background: rgba(251, 146, 60, 0.08);
-  border: 1px solid rgba(251, 146, 60, 0.2);
+  gap: var(--sp-8);
+  background: color-mix(in srgb, var(--orange) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--orange) 20%, transparent);
   border-radius: var(--r-input);
-  padding: 10px 12px;
-  font-size: 12px;
-  color: #fb923c;
-  margin-top: 8px;
-  line-height: 1.5;
+  padding: var(--sp-10) var(--sp-12);
+  font-size: var(--fs-sm);
+  color: var(--orange);
+  margin-top: var(--sp-8);
+  line-height: var(--lh-base);
+}
+
+.warningIcon {
+  flex-shrink: 0;
+  margin-top: 1px;
 }
 
 /* ── Confirm-close layer (unsaved changes / discard adds) ────────────────── */
 .confirmOverlay {
   position: absolute;
   inset: 0;
-  z-index: 10;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(2px);
+  z-index: var(--z-sticky);
+  /* No backdrop-filter: this sits INSIDE an already-dimmed modal, so the blur
+     bought nothing and cost a compositor readback on every open. */
+  background: var(--scrim);
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 14px;
+  border-radius: var(--r-lg);
 }
 
 .confirmBox {
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 18px 20px;
+  border-radius: var(--r-card);
+  padding: var(--sp-16) var(--sp-20);
   max-width: 320px;
   text-align: center;
-  box-shadow: var(--shadow-modal);
+  box-shadow: var(--elev-3);
 }
 
 .confirmTitle {
-  font-size: 13.5px;
-  color: var(--text);
-  line-height: 1.5;
-  margin-bottom: 14px;
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+  line-height: var(--lh-base);
+  margin-bottom: var(--sp-12);
 }
 
 .confirmBtns {
   display: flex;
-  gap: 8px;
+  gap: var(--sp-8);
   justify-content: center;
 }

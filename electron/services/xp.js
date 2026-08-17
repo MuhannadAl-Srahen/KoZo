@@ -67,15 +67,21 @@ function computeXp() {
   const db = require('../db/database').getDb()
 
   // Ended sessions plus time elapsed in currently-running ones — so periodic
-  // in-session XP checks can cross a level boundary while you play (orphaned
-  // rows from crashes are closed at boot by fixOrphanedSessions, so any
-  // ended_at IS NULL row here really is live).
+  // in-session XP checks can cross a level boundary while you play. An open row
+  // is capped at its game's last heartbeat + a heartbeat interval: a live
+  // session's last_played_at is at most HEARTBEAT_WRITE_MS old, while a row left
+  // open by a crash stops advancing, so this bounds crash inflation to ~a minute
+  // instead of crediting every hour since.
   const endedSec = db.prepare(`
     SELECT COALESCE(SUM(duration_seconds), 0) AS s FROM sessions WHERE ended_at IS NOT NULL
   `).get().s || 0
   const liveSec = db.prepare(`
-    SELECT COALESCE(SUM(MAX(0, (julianday('now') - julianday(started_at)) * 86400)), 0) AS s
-    FROM sessions WHERE ended_at IS NULL
+    SELECT COALESCE(SUM(MAX(0,
+      MIN(julianday('now'), julianday(COALESCE(g.last_played_at, s.started_at)) + 60.0 / 86400)
+      - julianday(s.started_at)
+    ) * 86400), 0) AS s
+    FROM sessions s LEFT JOIN games g ON g.id = s.game_id
+    WHERE s.ended_at IS NULL
   `).get().s || 0
   const playSec = Math.round(endedSec + liveSec)
 

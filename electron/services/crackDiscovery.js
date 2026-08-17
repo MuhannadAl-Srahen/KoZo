@@ -22,6 +22,8 @@ const logger = require('../logger')
 
 const DISMISSED_SETTING = 'discover_dismissed_appids'
 
+let lastResult = null   // last completed sweep — served while a session is active
+
 // Placeholder app id used to reverse the emulator roots out of buildCandidates.
 // Deriving them means discovery automatically covers every layout the scanner
 // knows; a hand-copied second list would silently drift the moment one is added.
@@ -124,11 +126,18 @@ function unlockInfo(appId) {
 /**
  * Emulator app ids with achievement data that aren't in the library.
  * Returns [{ appId, source, path, unlocked, name, headerImage }].
- * `resolveNames: false` skips the network lookups (used by the cheap startup pass).
+ * `resolveNames: false` skips the network lookups.
  */
 async function discover({ resolveNames = true } = {}) {
   const known = knownAppIds()
   const skip = dismissed()
+
+  // Perf invariant (§10): no disk sweep or network while a game is running —
+  // serve the last completed sweep instead, re-filtered against the live
+  // added/dismissed state so mid-session adds and dismissals still drop out.
+  if (require('./processWatcher').isSessionActive()) {
+    return (lastResult || []).filter(g => !known.has(g.appId) && !skip.has(g.appId))
+  }
   const found = new Map()   // appId -> entry
 
   for (const { root, source } of emulatorRoots()) {
@@ -142,6 +151,11 @@ async function discover({ resolveNames = true } = {}) {
       const info = unlockInfo(appId)
       // A folder with no readable achievement file is just emulator scaffolding.
       if (!info.file) continue
+      // ...and a readable file with ZERO unlocks is scaffolding too: emulators
+      // create these on first run, and they outlive the game by years. Offering
+      // to add a game the user no longer has (or never played) is pure noise —
+      // only surface a folder that actually holds progress worth importing.
+      if (!info.unlocked) continue
       found.set(appId, {
         appId,
         source: info.source || source,
@@ -166,6 +180,7 @@ async function discover({ resolveNames = true } = {}) {
   }
   // Most unlocks first — that's the one most worth adding.
   list.sort((a, b) => b.unlocked - a.unlocked || String(a.name || '').localeCompare(String(b.name || '')))
+  lastResult = list
 
   if (list.length) {
     logger.info(`crackDiscovery: ${list.length} game(s) with achievement data not in the library`,

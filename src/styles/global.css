@@ -1,5 +1,7 @@
 @import '@fontsource/dm-sans/400.css';
 @import '@fontsource/dm-sans/500.css';
+@import '@fontsource/dm-sans/600.css';
+@import '@fontsource/dm-sans/700.css';
 
 *, *::before, *::after {
   box-sizing: border-box;
@@ -15,8 +17,8 @@ html, body, #root {
 body {
   font-family: var(--font);
   font-weight: 400;
-  font-size: 15px;
-  line-height: 1.5;
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
   color: var(--text-primary);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
@@ -26,22 +28,8 @@ body {
 /* ── Scrollbar ───────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: 3px; }
+::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: var(--r-sm); }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
-
-/* ── Text utilities ──────────────────────────────────────────────────── */
-.truncate {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.clamp-2 {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
 
 /* ── Resets ──────────────────────────────────────────────────────────── */
 button {
@@ -54,22 +42,74 @@ button {
   line-height: inherit;
 }
 
+/* NOTE: no blanket `outline: none` here. It used to strip the focus ring from
+   every control in the app, and only 12 elements ever re-added one — so
+   keyboard focus was invisible almost everywhere. `:focus:not(:focus-visible)`
+   below does the job it was actually meant to do. */
 input, textarea, select {
   font-family: inherit;
   font-size: inherit;
   color: inherit;
   background: none;
   border: none;
-  outline: none;
 }
 
+/* ── Focus ───────────────────────────────────────────────────────────── */
+/* One ring, two sources. Both use `outline`, and an element can only carry one
+   outline — so keyboard focus and controller focus can never double up. */
+:focus-visible {
+  outline: var(--focus-w) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+}
+:focus:not(:focus-visible) { outline: none; }
+
+/* A decorated wrapper (search box, exe row) draws the ring itself; the bare
+   input inside it must not draw a second one. */
+.hasRing:focus-within {
+  outline: var(--focus-w) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+}
+.hasRing :focus-visible { outline: none; }
+
+/* Controller-navigation ring (see src/lib/gamepadNav.js). Declared last so it
+   wins ties at equal specificity when a click also grants DOM focus. */
+.gpFocus {
+  outline: var(--focus-w) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+}
+
+/* ── Motion ──────────────────────────────────────────────────────────── */
 @keyframes spin {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
 }
 
 .spin {
-  animation: spin 1s linear infinite;
+  animation: spin 1s var(--ease-linear) infinite;
+}
+
+/* Shared by every "live session" dot (library card, sidebar, game detail,
+   overlay) — this used to be four identical copies. */
+@keyframes livePulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.2; }
+}
+
+@keyframes skeletonSheen {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 25%,
+    var(--surface-3) 37%,
+    var(--surface-2) 63%
+  );
+  background-size: 200% 100%;
+  animation: skeletonSheen 1.4s var(--ease-linear) infinite;
+  border-radius: var(--r-sm);
 }
 
 a { color: inherit; text-decoration: none; }
@@ -83,24 +123,39 @@ ul, ol { list-style: none; }
   overflow: hidden;
 }
 
+/* Ambient accent wash at the top of every page — the single change that makes
+   the app read as a launcher instead of a form. Uses --ad, which applyAccent()
+   rewrites inline, so a custom accent recolours the atmosphere instantly.
+   Pure paint (one gradient, no filter, no extra layer) — no scroll cost. */
 .app-main {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
+  background:
+    radial-gradient(1100px 420px at 16% -8%, var(--ad), transparent 62%),
+    var(--bg);
 }
 
-.page {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px 22px;
-}
-
-/* Controller-navigation focus ring (see src/lib/gamepadNav.js) */
-.gpFocus {
-  outline: 2px solid var(--a);
-  outline-offset: 3px;
-  border-radius: var(--r-card);
+/* ── Reduced motion ──────────────────────────────────────────────────── */
+/* !important is load-bearing, not stylistic: a dozen spinners are inline
+   `style={{ animation: … }}`, and only an important declaration outranks an
+   inline style. Every animation's final keyframe is a sensible resting state
+   (live dots land at opacity 1, entrances land at their end position), so
+   collapsing the duration leaves the UI correct rather than half-drawn. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  /* A spinner communicates progress — slow it, never freeze it. */
+  .spin {
+    animation-duration: 1.6s !important;
+    animation-iteration-count: infinite !important;
+  }
+  /* Skip the confetti nodes outright rather than snapping them. */
+  .confetti { display: none !important; }
 }

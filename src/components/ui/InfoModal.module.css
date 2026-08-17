@@ -1,14 +1,14 @@
 .body {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--sp-12);
 }
 
 .message {
   margin: 0;
-  font-size: 13.5px;
+  font-size: var(--fs-md);
   color: var(--text-primary);
-  line-height: 1.5;
+  line-height: var(--lh-base);
 }
 
 .list {
@@ -16,10 +16,13 @@
   padding-left: 18px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  font-size: 13px;
+  gap: var(--sp-6);
+  font-size: var(--fs-md);
   color: var(--text-secondary);
-  line-height: 1.5;
+  line-height: var(--lh-base);
+  /* Diagnose / launch-error detail lines are file paths — they must wrap rather
+     than push the dialog wider than the window. */
+  overflow-wrap: anywhere;
 }
 
 .list li {
@@ -40,36 +43,36 @@
   flex-shrink: 0;
 }
 
-.success { background: rgba(74,222,128,0.12); color: #4ade80; }
-.error   { background: rgba(248,113,113,0.12); color: #f87171; }
-.warning { background: rgba(251,191,36,0.12); color: #fbbf24; }
-.info    { background: var(--ad);              color: var(--a); }
+.success { background: var(--success-bg); color: var(--success); }
+.error   { background: var(--error-bg);   color: var(--error); }
+.warning { background: var(--warning-bg); color: var(--warning); }
+.info    { background: var(--ad);         color: var(--a); }
 
 .helpBox {
-  margin-top: 4px;
-  padding: 12px 14px;
+  margin-top: var(--sp-4);
+  padding: var(--sp-12) var(--sp-16);
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--r-card);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--sp-8);
 }
 
 .helpTitle {
   display: flex;
   align-items: center;
-  gap: 7px;
-  font-size: 12.5px;
+  gap: var(--sp-6);
+  font-size: var(--fs-sm);
   font-weight: 500;
-  color: var(--status-upcoming);
+  color: var(--warning);
 }
 
 .helpText {
   margin: 0;
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
-  line-height: 1.55;
+  line-height: var(--lh-loose);
 }
 
 .helpText strong {
@@ -77,15 +80,20 @@
   font-weight: 500;
 }
 
+.helpTextSpaced {
+  composes: helpText;
+  margin-top: var(--sp-6);
+}
+
 .helpSteps {
   margin: 0;
-  padding-left: 20px;
+  padding-left: var(--sp-20);
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  font-size: 12.5px;
+  gap: var(--sp-4);
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
-  line-height: 1.5;
+  line-height: var(--lh-base);
 }
 
 .helpSteps li::marker {
@@ -99,23 +107,6 @@
 }
 
 .helpBtn {
+  composes: btn btnSecondary btnSm btnPill from '../../styles/controls.module.css';
   align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: var(--r-pill);
-  border: 1px solid var(--border);
-  background: var(--surface-3);
-  color: var(--text-secondary);
-  font-family: inherit;
-  font-size: 12px;
-  cursor: pointer;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
-}
-
-.helpBtn:hover {
-  border-color: var(--a);
-  color: var(--a);
-  background: var(--ad);
 }

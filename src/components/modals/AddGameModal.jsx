@@ -192,6 +192,7 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
         capsule_fallback: selected?.capsule || null,
         banner_local_path: safeTrim(bannerPath) || null,
         source: selected?.steam_app_id ? 'steam' : source,
+        is_installed: 1,
         is_cracked: isCracked,
       })
 
@@ -236,7 +237,7 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
     >
       {/* Search / selected chip */}
       {!showForm ? (
-        <div className={s.searchRow}>
+        <div className={`${s.searchRow} hasRing`}>
           <IconSearch size={15} stroke={1.6} className={s.searchIcon} />
           <input
             className={s.searchInput}

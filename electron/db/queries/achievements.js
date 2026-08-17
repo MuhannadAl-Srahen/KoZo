@@ -2,17 +2,17 @@ const { getDb } = require('../database')
 
 function listAchievementsForGame(gameId) {
   return getDb().prepare(`
-    SELECT a.*, au.unlocked_at, au.source AS unlock_source, au.session_id
+    SELECT a.*, au.id AS unlock_id, au.unlocked_at, au.source AS unlock_source, au.session_id
     FROM achievements a
     LEFT JOIN achievement_unlocks au ON au.achievement_id = a.id
     WHERE a.game_id = ?
-    ORDER BY au.unlocked_at DESC NULLS LAST, a.global_unlock_percent ASC NULLS LAST
+    ORDER BY (au.id IS NULL), au.unlocked_at DESC NULLS LAST, a.global_unlock_percent ASC NULLS LAST
   `).all(gameId)
 }
 
 function listAllAchievements(filters = {}) {
   let query = `
-    SELECT a.*, au.unlocked_at, au.source AS unlock_source, g.name AS game_name, g.id AS game_id
+    SELECT a.*, au.id AS unlock_id, au.unlocked_at, au.source AS unlock_source, g.name AS game_name, g.id AS game_id
     FROM achievements a
     JOIN games g ON g.id = a.game_id
     LEFT JOIN achievement_unlocks au ON au.achievement_id = a.id
@@ -88,23 +88,34 @@ function getAchievementCounts() {
   `).get()
 }
 
+// Returns the number of rows actually inserted: 0 means this achievement was
+// already unlocked. Callers MUST gate toasts, XP and counters on that — the
+// session-end retry ladder calls this repeatedly for the same unlock.
 function addUnlock(data) {
-  const stmt = getDb().prepare(`
+  const info = getDb().prepare(`
     INSERT OR IGNORE INTO achievement_unlocks (achievement_id, session_id, unlocked_at, source)
     VALUES (@achievement_id, @session_id, @unlocked_at, @source)
-  `)
-  stmt.run(data)
+  `).run({ ...data, unlocked_at: data.unlocked_at ?? null, session_id: data.session_id ?? null })
 
   // Update session achievement count if tied to a session
-  if (data.session_id) {
+  if (info.changes > 0 && data.session_id) {
     getDb().prepare(`
       UPDATE sessions SET achievements_unlocked = achievements_unlocked + 1 WHERE id = ?
     `).run(data.session_id)
   }
+  return info.changes
 }
 
 function removeUnlock(achievementId) {
-  getDb().prepare('DELETE FROM achievement_unlocks WHERE achievement_id = ?').run(achievementId)
+  const db = getDb()
+  // Keep the owning session's counter honest — it used to only ever climb.
+  const row = db.prepare('SELECT session_id FROM achievement_unlocks WHERE achievement_id = ?').get(achievementId)
+  const info = db.prepare('DELETE FROM achievement_unlocks WHERE achievement_id = ?').run(achievementId)
+  if (info.changes > 0 && row?.session_id) {
+    db.prepare('UPDATE sessions SET achievements_unlocked = MAX(0, achievements_unlocked - 1) WHERE id = ?')
+      .run(row.session_id)
+  }
+  return info.changes
 }
 
 module.exports = { listAchievementsForGame, listAllAchievements, bulkUpsertAchievements, getAchievementCounts, addUnlock, removeUnlock }

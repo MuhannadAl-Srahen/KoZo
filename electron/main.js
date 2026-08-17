@@ -134,11 +134,21 @@ function createWindow() {
 function getOrCreateMainWindow(afterShow) {
   clearDestroyTimer()
   if (mainWindow && !mainWindow.isDestroyed()) {
-    if (mainWindow.isMinimized()) mainWindow.restore()
-    mainWindow.show()
-    mainWindow.focus()
-    if (afterShow) afterShow(mainWindow)
-    return mainWindow
+    const win = mainWindow   // the module ref can be nulled before the load ends
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+    // An existing window can still be mid-load (a recreate triggered moments ago
+    // by a caller that passed no callback) — a send into a loading renderer is
+    // dropped on the floor, which is why the recreate path below waits too.
+    if (afterShow) {
+      if (win.webContents.isLoading()) {
+        win.webContents.once('did-finish-load', () => { if (!win.isDestroyed()) afterShow(win) })
+      } else {
+        afterShow(win)
+      }
+    }
+    return win
   }
   createWindow()
   const win = mainWindow
@@ -168,7 +178,12 @@ app.whenReady().then(() => {
       const url = new URL(request.url)
       const filePath = path.resolve(decodeURIComponent(url.pathname.replace(/^\//, '')))
       const ext = path.extname(filePath).toLowerCase()
-      const underData = filePath.toLowerCase().startsWith(app.getPath('userData').toLowerCase())
+      // The separator matters: a bare startsWith would also accept siblings that
+      // merely share the prefix ("…\KoZo Saves", "…\KoZo-backup") and serve any
+      // file type out of them.
+      const base = app.getPath('userData').toLowerCase().replace(/[\\/]+$/, '')
+      const fp = filePath.toLowerCase()
+      const underData = fp === base || fp.startsWith(base + path.sep)
       if (!underData && !MIME[ext]) return new Response('Forbidden', { status: 403 })
       const data = await fs.promises.readFile(filePath)
       return new Response(data, { status: 200, headers: { 'content-type': MIME[ext] || 'application/octet-stream' } })
@@ -185,6 +200,15 @@ app.whenReady().then(() => {
   createWindow()
 
   const watcher = require('./services/processWatcher')
+
+  // Warm the two memoized exec-based lookups (Steam path via reg query, the
+  // Documents dir) BEFORE the watcher can need them: when KoZo starts while a
+  // game is already running, resolveOrphanSessions/first tick would otherwise
+  // pay their cold execSync reg-query spawns mid-gameplay — the one window the
+  // perf invariant exists to protect. One spawn each at app boot is fine.
+  try { require('./services/steamStatsWatcher').getSteamPath?.() } catch {}
+  try { require('./services/crackWatcher').myDocsDir?.() } catch {}
+
   watcher.start()
 
   // The overlay window is created lazily on the first session-start / achievement
@@ -226,9 +250,13 @@ app.whenReady().then(() => {
   require('./services/autoBackup').startPeriodic()
 
   // Silently fill in any missing game genres in the background — no button,
-  // no progress UI. Delayed so it doesn't compete with startup work.
+  // no progress UI. Delayed AND idle-gated like every other background job:
+  // its per-row store fetches + synchronous DB writes must not run while a
+  // game is playing (KoZo is often autostarted alongside one).
   setTimeout(() => {
-    require('./services/steamApi').runGenreBackfill().catch(() => {})
+    watcher.runWhenIdle('genreBackfill', () => {
+      require('./services/steamApi').runGenreBackfill().catch(() => {})
+    })
   }, 8000)
 
   // Automatic achievement catch-up on startup, so unlocks earned while KoZo was
@@ -309,6 +337,8 @@ app.on('will-quit', () => {
   require('./services/processWatcher').stop()
   require('./services/crackWatcher').stopWatching()
   try { require('./services/autoBackup').flush() } catch {}
+  // Save snapshots deferred to idle would otherwise die with the process.
+  try { require('./services/autoSaveBackup').flushPending() } catch {}
   try { globalShortcut.unregisterAll() } catch {}
 })
 

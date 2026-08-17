@@ -81,10 +81,19 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
     setSaving(true)
     const res = await window.kozo?.api?.gameList?.update(item.id, {
       name: name.trim(),
-      status,
+      // Only send status when the user actually changed it. gameList:update runs
+      // statusSync on ANY truthy status, and re-asserting an unchanged
+      // want_to_play/upcoming clears the linked library game's Finished flag —
+      // so a rename or a list toggle would silently cost the milestone.
+      ...(status !== item.status ? { status } : {}),
       rating: status === 'finished' && rating !== '' ? Number(rating) : null,
     })
-    // Apply list-membership diff.
+    if (!res?.ok) {
+      setSaving(false)
+      setErrors({ save: res?.error || 'Failed to save' })
+      return
+    }
+    // Apply list-membership diff — only once the row itself saved.
     for (const l of lists) {
       const now = memberIds.has(l.id)
       const was = initialMemberIds.has(l.id)
@@ -92,11 +101,7 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
       if (!now && was) await window.kozo?.api?.customLists?.removeGame(l.id, item.id)
     }
     setSaving(false)
-    if (res?.ok) {
-      onSaved?.()
-    } else {
-      setErrors({ save: res?.error || 'Failed to save' })
-    }
+    onSaved?.()
   }
 
   async function handleDelete() {

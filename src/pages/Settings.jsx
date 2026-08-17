@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useId } from 'react'
 import {
   IconKey, IconCheck, IconX, IconLoader2, IconClock, IconEye, IconEyeOff, IconLayoutGrid,
   IconUser, IconRefresh, IconExternalLink, IconAlertTriangle,
   IconPalette, IconInfoCircle, IconRocket, IconDeviceGamepad2,
   IconBrandSteam,
   IconSearch, IconPlus, IconMinus, IconFolder, IconTrophy,
-  IconDownload, IconUpload, IconDatabase, IconDeviceFloppy, IconArchive, IconCloud,
+  IconDownload, IconUpload, IconDeviceFloppy, IconArchive, IconCloud,
   IconHistory, IconList, IconChartBar, IconBell, IconBolt,
   IconStar, IconStethoscope,
 } from '@tabler/icons-react'
@@ -15,10 +15,86 @@ import ScanResultModal from '../components/modals/ScanResultModal'
 import SaveManagerModal from '../components/modals/SaveManagerModal'
 import s from './Settings.module.css'
 
+// ── Shared bits ──────────────────────────────────────────────────────────────
+
+// Every "did it work" strip on this page. The variant is an explicit state
+// value: this page used to encode it in the message STRING — setBannerMsg('❌ …')
+// then bannerMsg.startsWith('❌') to pick the colour, and detectMsg.startsWith(
+// 'Detected') / 'Signed in' / 'Waiting' to pick an icon. That put an emoji in a
+// no-emoji codebase and broke the moment any copy was reworded.
+const STATUS_VARIANT = {
+  success: s.statusSuccess,
+  error:   s.statusError,
+  warning: s.statusWarning,
+  info:    s.statusInfo,
+  pending: s.statusInfo,
+  neutral: s.statusNeutral,
+}
+
+function StatusIcon({ type }) {
+  switch (type) {
+    case 'success': return <IconCheck size={13} stroke={2.5} className={s.statusIcon} />
+    case 'error':   return <IconX size={13} stroke={2.5} className={s.statusIcon} />
+    case 'warning': return <IconAlertTriangle size={13} stroke={2} className={s.statusIcon} />
+    case 'pending': return <IconLoader2 size={13} stroke={1.8} className={`${s.statusIcon} spin`} />
+    case 'neutral': return null
+    default:        return <IconInfoCircle size={13} stroke={1.8} className={s.statusIcon} />
+  }
+}
+
+function StatusLine({ type = 'info', icon = true, className = '', children }) {
+  return (
+    <div
+      className={`${s.statusLine} ${STATUS_VARIANT[type] || s.statusInfo} ${className}`}
+      role={type === 'error' ? 'alert' : 'status'}
+    >
+      {icon && <StatusIcon type={type} />}
+      <span>{children}</span>
+    </div>
+  )
+}
+
+// A { type, text } state object rendered straight through.
+function Message({ msg }) {
+  if (!msg?.text) return null
+  return <StatusLine type={msg.type}>{msg.text}</StatusLine>
+}
+
+// The switch was a bare <button> with no role and no aria-checked, wrapped in a
+// <label> that contained no labelable control — so assistive tech read an
+// unlabelled button of unknown state, and the label element did nothing at all.
+// The row is genuinely clickable now (it always looked like it was).
+function ToggleRow({ label, desc, checked, onChange, busy = false }) {
+  const labelId = useId()
+  const toggle = () => { if (!busy) onChange(!checked) }
+  return (
+    <div className={s.toggleRow} onClick={toggle}>
+      <div className={s.toggleInfo}>
+        <div className={s.toggleLabel} id={labelId}>{label}</div>
+        <div className={s.toggleDesc}>{desc}</div>
+      </div>
+      {busy ? (
+        <IconLoader2 size={16} className={`${s.toggleBusy} spin`} />
+      ) : (
+        <button
+          type="button"
+          role="switch"
+          aria-checked={checked}
+          aria-labelledby={labelId}
+          className={`${s.toggle} ${checked ? s.toggleOn : ''}`}
+          onClick={e => { e.stopPropagation(); toggle() }}
+        >
+          <span className={s.toggleThumb} />
+        </button>
+      )}
+    </div>
+  )
+}
+
 // ── Tab: General ─────────────────────────────────────────────────────────────
 
-// Module cache so re-opening General doesn't flash toggles (e.g. controller mode)
-// from their default before the async settings load resolves.
+// Module cache so re-opening General doesn't flash toggles from their default
+// before the async settings load resolves.
 let generalTabCache = null
 
 function GeneralTab() {
@@ -27,8 +103,7 @@ function GeneralTab() {
   const [openAtLogin, setOpenAtLogin]     = useState(generalTabCache?.openAtLogin ?? false)
   const [startMinimized, setStartMinimized] = useState(generalTabCache?.startMinimized ?? false)
   const [startupLoaded, setStartupLoaded] = useState(!!generalTabCache)   // avoids off→on flicker on open
-  const [startupMsg, setStartupMsg]   = useState('')
-  const [startupErr, setStartupErr]   = useState('')
+  const [startupMsg, setStartupMsg]   = useState(null)   // { type, text }
 
   useEffect(() => {
     async function load() {
@@ -60,8 +135,7 @@ function GeneralTab() {
   async function toggleStartup(val) {
     setOpenAtLogin(val)
     if (generalTabCache) generalTabCache.openAtLogin = val
-    setStartupMsg('')
-    setStartupErr('')
+    setStartupMsg(null)
     const res = await window.kozo?.api?.app?.setStartup?.(val)
     // IPC replies are enveloped as { ok, data } — the handler's own result is in
     // `data`. Reading res.method directly (as this used to) is always undefined,
@@ -75,7 +149,7 @@ function GeneralTab() {
       if (!r || r.openAtLogin) {
         setOpenAtLogin(true)
         if (generalTabCache) generalTabCache.openAtLogin = true
-        setStartupErr(r?.error || 'Could not remove KoZo from Windows startup.')
+        setStartupMsg({ type: 'error', text: r?.error || 'Could not remove KoZo from Windows startup.' })
       }
       return
     }
@@ -83,15 +157,15 @@ function GeneralTab() {
     if (!r) {
       setOpenAtLogin(false)
       if (generalTabCache) generalTabCache.openAtLogin = false
-      setStartupErr('Could not register startup: ' + (res?.error || 'unknown error'))
+      setStartupMsg({ type: 'error', text: 'Could not register startup: ' + (res?.error || 'unknown error') })
     } else if (r.ok === false) {
       setOpenAtLogin(false)
       if (generalTabCache) generalTabCache.openAtLogin = false
-      setStartupErr('Could not register startup: ' + (r.error || 'unknown error'))
+      setStartupMsg({ type: 'error', text: 'Could not register startup: ' + (r.error || 'unknown error') })
     } else if (r.method === 'task_scheduler') {
-      setStartupMsg('Registered via Task Scheduler — works even when KoZo runs as administrator.')
+      setStartupMsg({ type: 'success', text: 'Registered via Task Scheduler — works even when KoZo runs as administrator.' })
     } else if (r.method === 'registry') {
-      setStartupMsg('Registered in Windows startup registry.')
+      setStartupMsg({ type: 'success', text: 'Registered in Windows startup registry.' })
     }
   }
 
@@ -109,37 +183,22 @@ function GeneralTab() {
           <span>Launch Behavior</span>
         </div>
         <div className={s.toggleList}>
-          <label className={s.toggleRow}>
-            <div className={s.toggleInfo}>
-              <div className={s.toggleLabel}>Launch on startup</div>
-              <div className={s.toggleDesc}>Start KoZo automatically when Windows boots</div>
-            </div>
-            {startupLoaded ? (
-              <button className={`${s.toggle} ${openAtLogin ? s.toggleOn : ''}`}
-                onClick={() => toggleStartup(!openAtLogin)} type="button">
-                <span className={s.toggleThumb} />
-              </button>
-            ) : (
-              <IconLoader2 size={16} className={s.spin} style={{ color: 'var(--text-muted)' }} />
-            )}
-          </label>
-          <label className={s.toggleRow}>
-            <div className={s.toggleInfo}>
-              <div className={s.toggleLabel}>Start minimized to tray</div>
-              <div className={s.toggleDesc}>Hide the window on startup, only show tray icon</div>
-            </div>
-            {startupLoaded ? (
-              <button className={`${s.toggle} ${startMinimized ? s.toggleOn : ''}`}
-                onClick={() => toggleStartMinimized(!startMinimized)} type="button">
-                <span className={s.toggleThumb} />
-              </button>
-            ) : (
-              <IconLoader2 size={16} className={s.spin} style={{ color: 'var(--text-muted)' }} />
-            )}
-          </label>
+          <ToggleRow
+            label="Launch on startup"
+            desc="Start KoZo automatically when Windows boots"
+            checked={openAtLogin}
+            busy={!startupLoaded}
+            onChange={toggleStartup}
+          />
+          <ToggleRow
+            label="Start minimized to tray"
+            desc="Hide the window on startup, only show tray icon"
+            checked={startMinimized}
+            busy={!startupLoaded}
+            onChange={toggleStartMinimized}
+          />
         </div>
-        {startupMsg && <div className={s.startupMsg}>{startupMsg}</div>}
-        {startupErr && <div className={s.startupErr}>{startupErr}</div>}
+        <Message msg={startupMsg} />
       </section>
 
       <section className={s.section}>
@@ -151,9 +210,11 @@ function GeneralTab() {
           Stop counting playtime after this long with no input, so leaving a game open while
           you're away doesn't inflate your stats. Controller input counts too.
         </p>
-        <div className={s.sensitivityRow}>
+        <div className={s.sensitivityRow} role="group" aria-label="Idle timeout">
           {[['0', 'Off'], ['1', '1m'], ['2', '2m'], ['5', '5m'], ['10', '10m'], ['15', '15m'], ['30', '30m']].map(([v, label]) => (
             <button key={v}
+              type="button"
+              aria-pressed={idlePause === v}
               className={`${s.sensitivityBtn} ${idlePause === v ? s.sensitivityActive : ''}`}
               onClick={() => setIdlePause(v)}>
               {label}
@@ -163,7 +224,7 @@ function GeneralTab() {
       </section>
 
       <div className={s.saveRow}>
-        <button className={`${s.saveBtn} ${saved ? s.saveBtnSaved : ''}`} onClick={save}>
+        <button type="button" className={`${s.saveBtn} ${saved ? s.saveBtnSaved : ''}`} onClick={save}>
           {saved ? <><IconCheck size={14} stroke={2.5} /> Saved</> : 'Save Settings'}
         </button>
       </div>
@@ -184,11 +245,11 @@ function SteamTab() {
   const [steamUserId, setSteamUserId] = useState(steamTabCache?.steamUserId ?? '')
   const [saved, setSaved]           = useState(false)
   const [bannerRefreshing, setBannerRefreshing] = useState(false)
-  const [bannerMsg, setBannerMsg]   = useState('')
+  const [bannerMsg, setBannerMsg]   = useState(null)   // { type, text }
   const [profile, setProfile]       = useState(steamTabCache?.profile ?? null)
   const [profileState, setProfileState] = useState(steamTabCache?.profile ? 'found' : 'idle')
   const [profileMsg, setProfileMsg] = useState('')
-  const [detectMsg, setDetectMsg]   = useState('')
+  const [detectMsg, setDetectMsg]   = useState(null)   // { type, text }
   const [signingIn, setSigningIn]   = useState(false)
   const [steamPersona, setSteamPersona] = useState(steamTabCache?.steamPersona ?? '')
   // Persisted by achievementSync whenever Steam refuses to hand over unlocks.
@@ -197,8 +258,8 @@ function SteamTab() {
   const [privacyChecking, setPrivacyChecking] = useState(false)
 
   useEffect(() => {
-    window.kozo?.events?.onSteamPrivacyChanged?.(v => setPrivacyError(v || ''))
-    return () => window.kozo?.events?.removeAll?.('steam:privacy-changed')
+    const off = window.kozo?.events?.onSteamPrivacyChanged?.(v => setPrivacyError(v || ''))
+    return () => off?.()
   }, [])
 
   useEffect(() => {
@@ -229,20 +290,20 @@ function SteamTab() {
       if (cancelled || !st) return
       if (st.running) {
         setBannerRefreshing(true)
-        setBannerMsg(`Refreshing covers… ${st.done}/${st.total}`)
+        setBannerMsg({ type: 'pending', text: `Refreshing covers… ${st.done}/${st.total}` })
       } else {
         setBannerRefreshing(false)
-        if (st.total > 0) setBannerMsg('Cover images refreshed at 2× quality.')
+        if (st.total > 0) setBannerMsg({ type: 'success', text: 'Cover images refreshed at 2× quality.' })
       }
     }
     window.kozo?.api?.steam?.bannerRefreshStatus?.().then(res => {
       const st = res?.ok ? res.data : res
       if (st?.running) applyState(st)
     })
-    window.kozo?.events?.onBannerRefreshProgress?.(applyState)
+    const off = window.kozo?.events?.onBannerRefreshProgress?.(applyState)
     return () => {
       cancelled = true
-      window.kozo?.events?.removeAll?.('banners:refreshProgress')
+      off?.()
     }
   }, [])
 
@@ -292,13 +353,54 @@ function SteamTab() {
 
   async function doRefreshBanners() {
     setBannerRefreshing(true)
-    setBannerMsg('Refreshing covers…')
+    setBannerMsg({ type: 'pending', text: 'Refreshing covers…' })
     // Covers BOTH systems (Library local banners + Game List remote covers) in
     // one main-process run; the progress event stream drives the message.
     const res = await window.kozo?.api?.steam?.refreshAllBanners?.()
     if (res?.ok === false) {
       setBannerRefreshing(false)
-      setBannerMsg('❌ ' + (res?.error || 'Could not refresh images.'))
+      setBannerMsg({ type: 'error', text: res?.error || 'Could not refresh images.' })
+    }
+  }
+
+  async function detectFromPc() {
+    const r = await window.kozo?.api?.steam?.detectUser?.()
+    const d = r?.ok ? r.data : r
+    if (d?.steamId) {
+      setSteamUserId(d.steamId)
+      setSteamPersona(d.personaName || '')
+      await window.kozo?.api?.settings?.set('steam_user_id', d.steamId)
+      if (d.personaName) await window.kozo?.api?.settings?.set('steam_persona', d.personaName)
+      setProfileState('idle'); setProfile(null)
+      setDetectMsg({ type: 'success', text: d.personaName ? `Detected: ${d.personaName}` : 'Detected your Steam account' })
+      if (apiKey.trim()) loadProfile(apiKey.trim(), d.steamId)
+    } else {
+      setDetectMsg({
+        type: 'error',
+        text: d?.error === 'steam_not_found'
+          ? 'Steam installation not found on this PC.'
+          : 'Could not detect a logged-in Steam account.',
+      })
+    }
+  }
+
+  async function signInWithSteam() {
+    setSigningIn(true)
+    setDetectMsg({ type: 'pending', text: 'Waiting for you to sign in with Steam in the browser…' })
+    const r = await window.kozo?.api?.steam?.signIn?.()
+    setSigningIn(false)
+    const d = r?.ok ? r.data : r
+    if (d?.steamId) {
+      setSteamUserId(d.steamId)
+      setSteamPersona(d.personaName || '')
+      setProfileState('idle'); setProfile(null)
+      setDetectMsg({ type: 'success', text: d.personaName ? `Signed in as ${d.personaName}` : 'Signed in with Steam' })
+      if (apiKey.trim()) loadProfile(apiKey.trim(), d.steamId)
+    } else {
+      setDetectMsg({
+        type: 'error',
+        text: d?.error === 'timeout' ? 'Sign-in timed out — try again.' : 'Steam sign-in failed — try again.',
+      })
     }
   }
 
@@ -311,36 +413,37 @@ function SteamTab() {
           <span>Steam Web API Key</span>
         </div>
         <p className={s.sectionDesc}>
-          <strong style={{ color: 'var(--text-primary)' }}>Optional</strong> — KoZo syncs achievements
+          <strong className={s.strong}>Optional</strong> — KoZo syncs achievements
           without a key as long as your Steam profile's Game details are public. A key adds support for
           private profiles and owned-games data. Get yours at{' '}
-          <span
-            className={s.link}
-            style={{ cursor: 'pointer' }}
+          <button
+            type="button"
+            className={s.linkBtn}
             onClick={() => window.kozo?.api?.shell?.openExternal('https://steamcommunity.com/dev/apikey')}
           >
             steamcommunity.com/dev/apikey
-          </span>
+          </button>
         </p>
         <div className={s.keyRow}>
-          <div className={s.keyInputWrap}>
+          {/* hasRing: the bordered wrapper is the control, so the focus ring is
+              drawn once around the whole row rather than around the bare input. */}
+          <div className={`${s.keyInputWrap} hasRing`}>
             <input type={showKey ? 'text' : 'password'} className={s.keyInput}
               placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" value={apiKey}
+              aria-label="Steam Web API key"
               onChange={e => { setApiKey(e.target.value); setTestState('idle') }}
               spellCheck={false} autoComplete="off" />
-            <button className={s.keyToggle} onClick={() => setShowKey(v => !v)}>
+            <button type="button" className={s.keyToggle} onClick={() => setShowKey(v => !v)}
+              aria-label={showKey ? 'Hide API key' : 'Show API key'}>
               {showKey ? <IconEyeOff size={14} stroke={1.6} /> : <IconEye size={14} stroke={1.6} />}
             </button>
           </div>
-          <button className={s.testBtn} onClick={testKey} disabled={!apiKey.trim() || testState === 'testing'}>
-            {testState === 'testing' ? <IconLoader2 size={13} stroke={1.8} className={s.spin} /> : 'Test'}
+          <button type="button" className={s.testBtn} onClick={testKey} disabled={!apiKey.trim() || testState === 'testing'}>
+            {testState === 'testing' ? <IconLoader2 size={13} stroke={1.8} className="spin" /> : 'Test'}
           </button>
         </div>
         {testState !== 'idle' && testState !== 'testing' && (
-          <div className={`${s.testResult} ${testState === 'valid' ? s.testValid : s.testInvalid}`}>
-            {testState === 'valid' ? <IconCheck size={13} stroke={2.5} /> : <IconX size={13} stroke={2.5} />}
-            {testMsg}
-          </div>
+          <StatusLine type={testState === 'valid' ? 'success' : 'error'}>{testMsg}</StatusLine>
         )}
       </section>
 
@@ -351,19 +454,18 @@ function SteamTab() {
           <span>Your Steam Profile</span>
         </div>
         <p className={s.sectionDesc}>
-          Connects <strong style={{ color: 'var(--text-primary)' }}>automatically</strong> — KoZo reads
+          Connects <strong className={s.strong}>automatically</strong> — KoZo reads
           your logged-in account from the Steam app on this PC. Use "Sign in with Steam" for a
           different account or when Steam isn't installed here. Nothing to type.
         </p>
         {steamUserId && (
-          <div className={s.testResult + ' ' + s.testValid} style={{ marginBottom: 8 }}>
-            <IconCheck size={13} stroke={2.5} />
-            Connected{steamPersona ? <> as <strong>&nbsp;{steamPersona}</strong></> : <> — {steamUserId}</>}
-          </div>
+          <StatusLine type="success">
+            Connected{steamPersona ? <> as <strong>{steamPersona}</strong></> : <> — {steamUserId}</>}
+          </StatusLine>
         )}
         {privacyError && (
           <div className={s.privacyBanner}>
-            <IconAlertTriangle size={15} stroke={1.8} style={{ flexShrink: 0 }} />
+            <IconAlertTriangle size={15} stroke={1.8} className={s.privacyIcon} />
             <div>
               {privacyError === 'profile_not_found'
                 ? <>KoZo couldn't read your Steam profile. Check the Steam ID above.</>
@@ -374,14 +476,14 @@ function SteamTab() {
                     costs you Steam's real unlock dates. If you've already set Game details to Public,
                     hit Re-check.
                   </>}
-              <div className={s.keyRow} style={{ marginTop: 8 }}>
-                <button className={s.testBtn}
+              <div className={s.keyRow}>
+                <button type="button" className={s.testBtn}
                   onClick={() => window.kozo?.api?.shell?.openExternal?.('https://steamcommunity.com/my/edit/settings')}>
                   Open Steam privacy settings
                 </button>
                 {/* Steam caches privacy changes for a moment, and KoZo only
                     re-tests on launch — so give it a way to confirm now. */}
-                <button className={s.testBtn} disabled={privacyChecking}
+                <button type="button" className={s.testBtn} disabled={privacyChecking}
                   onClick={async () => {
                     setPrivacyChecking(true)
                     const res = await window.kozo?.api?.steam?.recheckPrivacy?.()
@@ -390,81 +492,37 @@ function SteamTab() {
                     if (d?.checked && !d.private) setPrivacyError('')
                   }}>
                   {privacyChecking
-                    ? <><IconLoader2 size={13} stroke={1.8} className={s.spin} /> Checking…</>
+                    ? <><IconLoader2 size={13} stroke={1.8} className="spin" /> Checking…</>
                     : <><IconRefresh size={13} stroke={1.8} /> Re-check now</>}
                 </button>
               </div>
             </div>
           </div>
         )}
-        <div className={s.keyRow} style={{ flexWrap: 'wrap' }}>
-          <button className={s.testBtn}
+        <div className={s.keyRow}>
+          <button type="button" className={s.testBtn}
             title="Read your logged-in account from the local Steam install — no typing needed"
-            onClick={async () => {
-              const r = await window.kozo?.api?.steam?.detectUser?.()
-              const d = r?.ok ? r.data : r
-              if (d?.steamId) {
-                setSteamUserId(d.steamId)
-                setSteamPersona(d.personaName || '')
-                await window.kozo?.api?.settings?.set('steam_user_id', d.steamId)
-                if (d.personaName) await window.kozo?.api?.settings?.set('steam_persona', d.personaName)
-                setProfileState('idle'); setProfile(null)
-                setDetectMsg(d.personaName ? `Detected: ${d.personaName}` : 'Detected your Steam account')
-                if (apiKey.trim()) loadProfile(apiKey.trim(), d.steamId)
-              } else {
-                setDetectMsg(d?.error === 'steam_not_found'
-                  ? 'Steam installation not found on this PC.'
-                  : 'Could not detect a logged-in Steam account.')
-              }
-            }}>
+            onClick={detectFromPc}>
             Detect from this PC
           </button>
-          <button className={s.testBtn}
+          <button type="button" className={s.testBtn}
             title="Sign in with Steam in your browser — for a different account or when Steam isn't installed here"
             disabled={signingIn}
-            onClick={async () => {
-              setSigningIn(true)
-              setDetectMsg('Waiting for you to sign in with Steam in the browser…')
-              const r = await window.kozo?.api?.steam?.signIn?.()
-              setSigningIn(false)
-              const d = r?.ok ? r.data : r
-              if (d?.steamId) {
-                setSteamUserId(d.steamId)
-                setSteamPersona(d.personaName || '')
-                setProfileState('idle'); setProfile(null)
-                setDetectMsg(d.personaName ? `Signed in as ${d.personaName}` : 'Signed in with Steam')
-                if (apiKey.trim()) loadProfile(apiKey.trim(), d.steamId)
-              } else {
-                setDetectMsg(d?.error === 'timeout'
-                  ? 'Sign-in timed out — try again.'
-                  : 'Steam sign-in failed — try again.')
-              }
-            }}>
+            onClick={signInWithSteam}>
             <IconBrandSteam size={13} stroke={1.8} />
             {signingIn ? 'Waiting…' : 'Sign in with Steam'}
           </button>
         </div>
-        {detectMsg && (() => {
-          const ok = detectMsg.startsWith('Detected') || detectMsg.startsWith('Signed in')
-          const pending = detectMsg.startsWith('Waiting')
-          return (
-            <div className={`${s.testResult} ${ok || pending ? s.testValid : s.testInvalid}`}>
-              {ok ? <IconCheck size={13} stroke={2.5} />
-                : pending ? <IconLoader2 size={13} stroke={1.8} className={s.spin} />
-                : <IconAlertTriangle size={13} stroke={2} />}
-              {detectMsg}
-            </div>
-          )
-        })()}
+        <Message msg={detectMsg} />
         {profile && profileState === 'found' && (
           <div className={s.profileCard}>
-            {profile.avatar && <img src={profile.avatar} alt="" className={s.profileAvatar} />}
+            {profile.avatar && <img src={profile.avatar} alt="" className={s.profileAvatar} loading="lazy" decoding="async" />}
             <div className={s.profileBody}>
-              <div className={s.profileName}>{profile.persona_name}</div>
-              <div className={s.profileId}>SteamID: {profile.steam_id}</div>
+              <div className={s.profileName} title={profile.persona_name}>{profile.persona_name}</div>
+              <div className={s.profileId} title={profile.steam_id}>SteamID: {profile.steam_id}</div>
             </div>
             {profile.profile_url && (
-              <button className={s.profileLinkBtn}
+              <button type="button" className={s.profileLinkBtn} aria-label="Open Steam profile"
                 onClick={() => window.kozo?.api?.shell?.openExternal(profile.profile_url)}>
                 <IconExternalLink size={13} stroke={1.6} />
               </button>
@@ -472,15 +530,13 @@ function SteamTab() {
           </div>
         )}
         {profileState === 'error' && profileMsg && (
-          <div className={`${s.testResult} ${s.testInvalid}`}>
-            <IconAlertTriangle size={13} stroke={2} /> {profileMsg}
-          </div>
+          <StatusLine type="error">{profileMsg}</StatusLine>
         )}
       </section>
 
       {/* Save */}
-      <div className={s.saveRow} style={{ borderTop: 'none', paddingTop: 0 }}>
-        <button className={`${s.saveBtn} ${saved ? s.saveBtnSaved : ''}`} onClick={save}>
+      <div className={s.saveRowBare}>
+        <button type="button" className={`${s.saveBtn} ${saved ? s.saveBtnSaved : ''}`} onClick={save}>
           {saved ? <><IconCheck size={14} stroke={2.5} /> Saved</> : 'Save'}
         </button>
       </div>
@@ -495,19 +551,13 @@ function SteamTab() {
           Re-downloads every cover at 2× quality (Library + Game List). Use it if covers look blurry or failed to load.
         </p>
         <div className={s.keyRow}>
-          <button className={s.testBtn} disabled={bannerRefreshing} onClick={doRefreshBanners}>
+          <button type="button" className={s.testBtn} disabled={bannerRefreshing} onClick={doRefreshBanners}>
             {bannerRefreshing
-              ? <><IconLoader2 size={13} stroke={1.8} className={s.spin} /> Refreshing…</>
+              ? <><IconLoader2 size={13} stroke={1.8} className="spin" /> Refreshing…</>
               : <><IconRefresh size={13} stroke={1.8} /> Refresh images</>}
           </button>
         </div>
-        {bannerMsg && (
-          <div className={`${s.testResult} ${bannerMsg.startsWith('❌') ? s.testInvalid : s.testValid}`}>
-            {bannerMsg.startsWith('❌')
-              ? <><IconAlertTriangle size={13} stroke={2} /> {bannerMsg.slice(2)}</>
-              : <><IconCheck size={12} stroke={2.5} /> {bannerMsg}</>}
-          </div>
-        )}
+        <Message msg={bannerMsg} />
       </section>
     </div>
   )
@@ -518,7 +568,7 @@ function ScanPCTab() {
   const [paths, setPaths]           = useState([])
   const [scanning, setScanning]     = useState(false)
   const [scanModal, setScanModal]   = useState(null)  // null | results[]
-  const [scanMsg, setScanMsg]       = useState('')
+  const [scanMsg, setScanMsg]       = useState(null)  // { type, text }
   const [addedCount, setAddedCount] = useState(0)
 
   useEffect(() => {
@@ -546,13 +596,13 @@ function ScanPCTab() {
 
   async function runScan() {
     setScanning(true)
-    setScanMsg('')
+    setScanMsg(null)
     const res = await window.kozo?.api?.scanner?.scan?.(paths)
     setScanning(false)
-    if (!res?.ok) { setScanMsg('❌ Scan failed: ' + (res?.error || 'unknown')); return }
+    if (!res?.ok) { setScanMsg({ type: 'error', text: 'Scan failed: ' + (res?.error || 'unknown') }); return }
     const results = res.data || []
     if (results.length === 0) {
-      setScanMsg('No games found in the selected folders. Try adding a custom folder.')
+      setScanMsg({ type: 'neutral', text: 'No games found in the selected folders. Try adding a custom folder.' })
       return
     }
     setScanModal(results)
@@ -579,39 +629,33 @@ function ScanPCTab() {
         <div className={s.pathList}>
           {paths.map((p, i) => (
             <div key={i} className={s.pathRow}>
-              <span className={s.pathText}>{p}</span>
-              <button className={s.pathRemoveBtn} onClick={() => persistPaths(paths.filter((_, j) => j !== i))}>
+              <span className={s.pathText} title={p}>{p}</span>
+              <button type="button" className={s.pathRemoveBtn} aria-label={`Remove ${p}`}
+                onClick={() => persistPaths(paths.filter((_, j) => j !== i))}>
                 <IconMinus size={12} stroke={2} />
               </button>
             </div>
           ))}
-          <button className={s.pathAddBtn} onClick={addFolder}>
+          <button type="button" className={s.pathAddBtn} onClick={addFolder}>
             <IconPlus size={13} stroke={2} /> Add folder
           </button>
         </div>
 
         <div className={s.keyRow}>
-          <button className={s.testBtn} onClick={runScan} disabled={scanning || paths.length === 0}>
+          <button type="button" className={s.testBtn} onClick={runScan} disabled={scanning || paths.length === 0}>
             {scanning
-              ? <><IconLoader2 size={13} stroke={1.8} className={s.spin} /> Scanning…</>
+              ? <><IconLoader2 size={13} stroke={1.8} className="spin" /> Scanning…</>
               : <><IconSearch size={13} stroke={1.8} /> Scan now</>
             }
           </button>
           {addedCount > 0 && (
-            <div className={`${s.testResult} ${s.testValid}`} style={{ padding: '5px 10px', fontSize: 12 }}>
-              <IconCheck size={12} stroke={2.5} /> {addedCount} game{addedCount === 1 ? '' : 's'} added to library
-            </div>
+            <StatusLine type="success">
+              {addedCount} game{addedCount === 1 ? '' : 's'} added to library
+            </StatusLine>
           )}
         </div>
 
-        {scanMsg && !scanMsg.startsWith('❌') && (
-          <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: 0 }}>{scanMsg}</p>
-        )}
-        {scanMsg?.startsWith('❌') && (
-          <div className={`${s.testResult} ${s.testInvalid}`}>
-            <IconAlertTriangle size={13} stroke={2} /> {scanMsg.slice(2)}
-          </div>
-        )}
+        <Message msg={scanMsg} />
       </section>
 
       {/* Results modal */}
@@ -634,8 +678,9 @@ function AppearanceTab() {
   const { accent, setAccent, presets, bgTint, setBgTint } = useAccentColor()
   const [customHex, setCustomHex] = useState(accent)
   useEffect(() => { setCustomHex(accent) }, [accent])
+  const validHex = /^#[0-9A-Fa-f]{6}$/.test(customHex.trim())
   function applyCustom() {
-    if (/^#[0-9A-Fa-f]{6}$/.test(customHex.trim())) setAccent(customHex.trim())
+    if (validHex) setAccent(customHex.trim())
   }
 
   return (
@@ -651,6 +696,8 @@ function AppearanceTab() {
         <div className={s.swatchGrid}>
           {presets.map(p => (
             <button key={p.value}
+              type="button"
+              aria-pressed={accent === p.value}
               className={`${s.swatch} ${accent === p.value ? s.swatchActive : ''}`}
               style={{ '--sw': p.value }} onClick={() => setAccent(p.value)} title={p.label}>
               <span className={s.swatchDot} />
@@ -661,189 +708,28 @@ function AppearanceTab() {
         </div>
         <div className={s.customColorRow}>
           <div className={s.customColorPreview}
-            style={{ background: /^#[0-9A-Fa-f]{6}$/.test(customHex) ? customHex : 'var(--surface-3)' }} />
+            style={{ background: validHex ? customHex.trim() : 'var(--surface-3)' }} />
           <input className={s.customColorInput} value={customHex} maxLength={7}
+            aria-label="Custom accent hex"
             onChange={e => setCustomHex(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && applyCustom()}
             placeholder="#a78bfa" spellCheck={false} />
-          <button className={s.testBtn} onClick={applyCustom}>Apply</button>
+          <button type="button" className={s.testBtn} onClick={applyCustom} disabled={!validHex}>Apply</button>
         </div>
-        <p className={s.sectionDesc} style={{ marginTop: 4 }}>
+        <p className={s.sectionDescQuiet}>
           Enter any hex color. Very dark colors are automatically brightened for readability.
         </p>
 
         {/* Accent-matched dark background */}
-        <div className={s.toggleList} style={{ marginTop: 14 }}>
-          <label className={s.toggleRow}>
-            <div className={s.toggleInfo}>
-              <div className={s.toggleLabel}>Match background to accent</div>
-              <div className={s.toggleDesc}>
-                Tints the app's dark background and cards with your accent color's hue —
-                a themed dark look instead of the stock blue-violet.
-              </div>
-            </div>
-            <button className={`${s.toggle} ${bgTint ? s.toggleOn : ''}`}
-              onClick={() => setBgTint(!bgTint)} type="button">
-              <span className={s.toggleThumb} />
-            </button>
-          </label>
+        <div className={s.toggleList}>
+          <ToggleRow
+            label="Match background to accent"
+            desc="Tints the app's dark background and cards with your accent color's hue — a themed dark look instead of the stock blue-violet."
+            checked={bgTint}
+            onChange={setBgTint}
+          />
         </div>
       </section>
-    </div>
-  )
-}
-
-// ── Tab: Crack Games ─────────────────────────────────────────────────────────
-function CrackTab() {
-  const [scanning, setScanning] = useState(false)
-  const [result, setResult]     = useState(null)
-  const [diagGame, setDiagGame] = useState(null)
-  const [diagResult, setDiagResult] = useState(null)
-  const [games, setGames]       = useState([])
-
-  useEffect(() => {
-    window.kozo?.api?.games?.list().then(res => {
-      if (res?.ok) setGames((res.data || []).filter(g => !!g.is_cracked))
-    })
-  }, [])
-
-  async function scanAll() {
-    setScanning(true); setResult(null)
-    const res = await window.kozo?.api?.crack?.scanAll?.()
-    setScanning(false)
-    if (res?.ok) setResult(res.data)
-    else setResult({ error: res?.error || 'Scan failed' })
-  }
-
-  async function diagnose(gameId) {
-    setDiagGame(gameId); setDiagResult(null)
-    const res = await window.kozo?.api?.crack?.diagnose?.(gameId)
-    setDiagGame(null)
-    if (res?.ok) setDiagResult({ gameId, ...res.data })
-    else setDiagResult({ error: res?.error || 'Failed' })
-  }
-
-  return (
-    <div className={s.tabContent}>
-      <section className={s.section}>
-        <div className={s.sectionHeader}>
-          <IconDeviceGamepad2 size={15} stroke={1.6} />
-          <span>Crack Achievement Scanner</span>
-        </div>
-        <p className={s.sectionDesc}>
-          Scans 40+ known emulator file locations (Goldberg, CODEX, EMPRESS, ALI213,
-          SmartSteamEmu, CreamAPI, SKIDROW, Reloaded, online-fix…) for each cracked game
-          and imports newly unlocked achievements. While a cracked game is running KoZo
-          watches these files live, so unlocks pop up the instant they're written (with a
-          30s safety re-scan as a backup).
-        </p>
-        <div className={s.keyRow}>
-          <button className={s.testBtn} onClick={scanAll} disabled={scanning}>
-            {scanning
-              ? <><IconLoader2 size={13} stroke={1.8} className={s.spin} /> Scanning…</>
-              : <><IconRefresh size={13} stroke={1.8} /> Scan all cracked games now</>
-            }
-          </button>
-        </div>
-        {result && !result.error && (
-          <div className={`${s.testResult} ${result.totalAdded > 0 ? s.testValid : ''}`}
-            style={result.totalAdded === 0 ? { background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text-secondary)' } : undefined}>
-            {result.totalAdded > 0 && <IconCheck size={13} stroke={2.5} />}
-            {result.totalAdded > 0
-              ? `${result.totalAdded} new achievement${result.totalAdded === 1 ? '' : 's'} imported across ${result.gamesScanned} game${result.gamesScanned === 1 ? '' : 's'}`
-              : `Scanned ${result.gamesScanned} game${result.gamesScanned === 1 ? '' : 's'} — already up to date`
-            }
-          </div>
-        )}
-        {result?.error && (
-          <div className={`${s.testResult} ${s.testInvalid}`}>
-            <IconAlertTriangle size={13} stroke={2} /> {result.error}
-          </div>
-        )}
-      </section>
-
-      {games.length > 0 && (
-        <section className={s.section}>
-          <div className={s.sectionHeader}>
-            <span>Cracked games in library ({games.length})</span>
-          </div>
-          <div className={s.crackGameList}>
-            {games.map(g => (
-              <div key={g.id} className={s.crackGameRow}>
-                <div className={s.crackGameName}>{g.name}</div>
-                {g.steam_app_id
-                  ? <button className={s.testBtn} onClick={() => diagnose(g.id)} disabled={diagGame === g.id}
-                      style={{ padding: '5px 12px', fontSize: 12 }}>
-                      {diagGame === g.id ? <IconLoader2 size={11} stroke={1.8} className={s.spin} /> : 'Find files'}
-                    </button>
-                  : <span className={s.crackGameNoId}>No Steam ID — can't scan</span>
-                }
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {diagResult && !diagResult.error && (
-        <section className={s.section}>
-          <div className={s.sectionHeader}><span>Diagnostic — {diagResult.gameName}</span></div>
-          {diagResult.appidMismatch && (
-            <div className={`${s.testResult} ${s.testInvalid}`}>
-              <IconAlertTriangle size={13} stroke={2} />
-              AppID mismatch — KoZo: <strong>{diagResult.appid}</strong> · Game folder: <strong>{diagResult.detectedAppid}</strong>. Edit the game and set the correct Steam App ID.
-            </div>
-          )}
-          {diagResult.keyPaths?.length > 0 && (
-            <div className={s.crackFileList}>
-              {diagResult.keyPaths.map((kp, i) => (
-                <div key={i} className={s.crackFileRow}>
-                  <span className={s.crackFileSource}
-                    style={kp.exists ? undefined : { background: 'rgba(248,113,113,0.12)', borderColor: 'rgba(248,113,113,0.3)', color: '#f87171' }}>
-                    {kp.label}
-                  </span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className={s.crackFilePath}>{kp.path}</div>
-                    {kp.note && <div style={{ fontSize: 10, color: kp.exists ? 'var(--text-secondary)' : '#f87171', marginTop: 2 }}>{kp.note}</div>}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-          {diagResult.found.length === 0 ? (
-            <div className={`${s.testResult} ${s.testInvalid}`} style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                <IconAlertTriangle size={13} stroke={2} />
-                No achievement files found across {diagResult.totalChecked} locations.
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                For ZIP-extracted games using Goldberg: the file is created at
-                <strong style={{ color: 'var(--text-primary)' }}> %APPDATA%\Goldberg SteamEmu Saves\{'{appid}'}\achievements.json</strong> only
-                after your first in-game achievement unlock.
-              </div>
-            </div>
-          ) : (
-            <>
-              <div className={`${s.testResult} ${s.testValid}`}>
-                <IconCheck size={13} stroke={2.5} /> Found {diagResult.found.length} achievement file{diagResult.found.length === 1 ? '' : 's'}
-              </div>
-              <div className={s.crackFileList}>
-                {diagResult.found.map((f, i) => (
-                  <div key={i} className={s.crackFileRow}>
-                    <span className={s.crackFileSource}>{f.source}</span>
-                    <span className={s.crackFilePath}>{f.path}</span>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </section>
-      )}
-
-      {games.length === 0 && (
-        <p className={s.sectionDesc} style={{ fontStyle: 'italic' }}>
-          No cracked games in library yet. Add a game and mark it as "Cracked / offline" in the Copy type field.
-        </p>
-      )}
     </div>
   )
 }
@@ -929,9 +815,17 @@ function DataTab({ onManageSaves }) {
     setImportState('working')
     setImportResult(null)
     try {
-      const res = await window.kozo?.api?.backup?.import()
-      if (!res) { setImportState('idle'); return }   // user cancelled
-      setImportResult(res)
+      // Every IPC reply is an { ok, data } envelope, so the envelope itself is
+      // always truthy — cancel (data === null) and failures have to be read out
+      // of it, or a cancelled picker reports a restore of "undefined" games.
+      const env = await window.kozo?.api?.backup?.import()
+      if (!env?.ok) {
+        setImportResult({ error: env?.error || 'Restore failed' })
+        setImportState('error')
+        return
+      }
+      if (!env.data) { setImportState('idle'); return }   // user cancelled
+      setImportResult(env.data)
       setImportState('done')
     } catch (e) {
       setImportResult({ error: e.message })
@@ -948,122 +842,108 @@ function DataTab({ onManageSaves }) {
           <span>Sync &amp; Backup — your data on any PC</span>
         </div>
         <p className={s.sectionDesc}>
-          No account needed — sync KoZo to <strong style={{ color: 'var(--text-primary)' }}>any folder</strong>:
+          No account needed — sync KoZo to <strong className={s.strong}>any folder</strong>:
           a cloud-synced folder (OneDrive/Drive/Dropbox), a network drive, or a USB stick. It keeps your
           library, playtime, achievements, lists AND game-save backups mirrored there. On a new PC:
           install KoZo, choose the same folder, hit Restore.
         </p>
-        <div className={s.keyRow} style={{ flexWrap: 'wrap' }}>
-          <button className={s.testBtn} onClick={doSyncSetup}>
+        <div className={s.keyRow}>
+          <button type="button" className={s.testBtn} onClick={doSyncSetup}>
             <IconFolder size={13} stroke={1.8} /> {sync?.configured ? 'Change sync folder' : 'Choose sync folder'}
           </button>
           {sync?.configured && (
             <>
-              <button className={s.testBtn} onClick={() => window.kozo?.api?.shell?.openPath?.(sync.folder)}>
+              <button type="button" className={s.testBtn} onClick={() => window.kozo?.api?.shell?.openPath?.(sync.folder)}>
                 <IconExternalLink size={13} stroke={1.8} /> Open folder
               </button>
-              <button className={s.testBtn} onClick={doSyncRestore} disabled={importState === 'working'}>
+              <button type="button" className={s.testBtn} onClick={doSyncRestore} disabled={importState === 'working'}>
                 {importState === 'working'
-                  ? <><IconLoader2 size={13} stroke={1.8} className={s.spin} /> Restoring…</>
+                  ? <><IconLoader2 size={13} stroke={1.8} className="spin" /> Restoring…</>
                   : <><IconDownload size={13} stroke={1.8} /> Restore from sync folder</>}
               </button>
             </>
           )}
-          <button className={s.testBtn} onClick={doImport} disabled={importState === 'working'}>
+          <button type="button" className={s.testBtn} onClick={doImport} disabled={importState === 'working'}>
             <IconUpload size={13} stroke={1.8} /> Restore from file…
           </button>
         </div>
         {sync?.configured && (
-          <div className={s.sectionDesc} style={{ fontSize: 11.5, marginTop: 8, opacity: 0.85 }}>
-            Syncing to <strong style={{ color: 'var(--text-secondary)' }}>{sync.folder}</strong>
+          <p className={s.sectionDescQuiet}>
+            Syncing to <strong className={s.savePath} title={sync.folder}>{sync.folder}</strong>
             {sync.lastBackupAt ? <> — last backup {new Date(sync.lastBackupAt).toLocaleString()}</> : ' — first backup will be written shortly'}
-          </div>
+          </p>
         )}
 
         {importState === 'done' && importResult && (
-          <div className={`${s.testResult} ${s.testValid}`} style={{ marginTop: 8 }}>
-            <IconCheck size={13} stroke={2.5} />
+          <StatusLine type="success">
             Restored — {importResult.games} games, {importResult.sessions} sessions,
             {' '}{importResult.gameList} list items
-          </div>
+          </StatusLine>
         )}
         {importState === 'error' && (
-          <div className={`${s.testResult} ${s.testInvalid}`} style={{ marginTop: 8 }}>
-            <IconAlertTriangle size={13} stroke={2} /> {importResult?.error || 'Restore failed'}
-          </div>
+          <StatusLine type="error">{importResult?.error || 'Restore failed'}</StatusLine>
         )}
+
         {/* ── Game save files — same folder, same section ── */}
-        <div style={{ borderTop: '1px solid var(--border-subtle)', marginTop: 14, paddingTop: 12 }}>
-          <div className={s.sectionHeader} style={{ marginBottom: 6 }}>
+        <div className={s.subSection}>
+          <div className={s.sectionHeader}>
             <IconDeviceFloppy size={14} stroke={1.6} />
             <span>Game save files</span>
           </div>
           <p className={s.sectionDesc}>
             Each game's save files back up into the same folder
-            {backupsDir && <> (<code style={{ fontSize: 11 }}>{backupsDir}</code>)</>} — great for
+            {backupsDir && <> (<code className={s.savePath} title={backupsDir}>{backupsDir}</code>)</>} — great for
             cracked/offline games with no cloud saves.
           </p>
 
           <div className={s.toggleList}>
-            <label className={s.toggleRow}>
-              <div className={s.toggleInfo}>
-                <div className={s.toggleLabel}>Auto-back up saves after each session</div>
-                <div className={s.toggleDesc}>
-                  After you finish playing, snapshots that game's saves automatically — keeps the last two
-                  sessions (older ones are overwritten so backups never balloon in size).
-                </div>
-              </div>
-              <button className={`${s.toggle} ${autoSaveEnabled ? s.toggleOn : ''}`}
-                onClick={() => toggleAutoSave(!autoSaveEnabled)} type="button">
-                <span className={s.toggleThumb} />
-              </button>
-            </label>
+            <ToggleRow
+              label="Auto-back up saves after each session"
+              desc="After you finish playing, snapshots that game's saves automatically — keeps the last two sessions (older ones are overwritten so backups never balloon in size)."
+              checked={autoSaveEnabled}
+              onChange={toggleAutoSave}
+            />
           </div>
 
           {/* Back up every game's saves at once — for moving PCs / formatting */}
           {overview.length > 0 && (
             <div className={s.keyRow}>
-              <button className={s.testBtn} onClick={doBackupAll} disabled={allState === 'working'}>
+              <button type="button" className={s.testBtn} onClick={doBackupAll} disabled={allState === 'working'}>
                 {allState === 'working'
-                  ? <><IconLoader2 size={13} stroke={1.8} className={s.spin} /> Backing up all…</>
+                  ? <><IconLoader2 size={13} stroke={1.8} className="spin" /> Backing up all…</>
                   : <><IconArchive size={13} stroke={1.8} /> Back up all game saves</>}
               </button>
               {allState === 'done' && allResult && (
-                <div className={`${s.testResult} ${(allResult.noSaves || allResult.failed) ? s.testInvalid : s.testValid}`}>
-                  {(allResult.noSaves || allResult.failed)
-                    ? <IconAlertTriangle size={13} stroke={2} />
-                    : <IconCheck size={13} stroke={2.5} />}
+                <StatusLine type={(allResult.noSaves || allResult.failed) ? 'warning' : 'success'}>
                   {allResult.backedUp} backed up
                   {allResult.noSaves ? ` — ${allResult.noSaves} had no detectable save folder (open that game's Save Files to back up manually)` : ''}
                   {allResult.failed ? `, ${allResult.failed} failed` : ''}
-                </div>
+                </StatusLine>
               )}
               {allState === 'error' && (
-                <div className={`${s.testResult} ${s.testInvalid}`}>
-                  <IconAlertTriangle size={13} stroke={2} /> {allResult?.error || 'Backup failed'}
-                </div>
+                <StatusLine type="error">{allResult?.error || 'Backup failed'}</StatusLine>
               )}
             </div>
           )}
 
           {/* Per-game overview — count + newest snapshot at a glance */}
           {overview.length === 0 ? (
-            <p className={s.sectionDesc} style={{ fontStyle: 'italic' }}>No games in your library yet.</p>
+            <p className={s.sectionDescItalic}>No games in your library yet.</p>
           ) : (
             <div className={s.saveGameList}>
               {overview.map(g => (
                 <div key={g.id} className={s.saveGameRow}>
-                  <span className={s.saveGameName}>{g.name}</span>
+                  <span className={s.saveGameName} title={g.name}>{g.name}</span>
                   {g.count > 0 ? (
                     <span className={s.saveBackupInfo}>
-                      <IconCheck size={11} stroke={2.5} style={{ color: 'var(--status-playing)' }} />
+                      <IconCheck size={11} stroke={2.5} className={s.saveBackupTick} />
                       {g.count} backup{g.count === 1 ? '' : 's'}
                       {g.latestAt && <span className={s.saveBackupDate}> · {new Date(g.latestAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>}
                     </span>
                   ) : (
                     <span className={`${s.saveBackupInfo} ${s.saveBackupNone}`}>No backups</span>
                   )}
-                  <button className={s.saveManageBtn} onClick={() => onManageSaves?.({ id: g.id, name: g.name })}>
+                  <button type="button" className={s.saveManageBtn} onClick={() => onManageSaves?.({ id: g.id, name: g.name })}>
                     <IconDeviceFloppy size={12} stroke={1.7} /> Manage
                   </button>
                 </div>
@@ -1072,11 +952,10 @@ function DataTab({ onManageSaves }) {
           )}
         </div>
 
-        <div className={s.sectionDesc} style={{ fontSize: 11.5, marginTop: 10, opacity: 0.8 }}>
+        <p className={s.sectionDescQuiet}>
           Restoring merges data in (matching entries are updated) — it never deletes anything or touches game saves.
-        </div>
+        </p>
       </section>
-
     </div>
   )
 }
@@ -1140,8 +1019,8 @@ const FEATURE_GROUPS = [
 
 function FeaturesTab() {
   return (
-    <div className={`${s.tabContent} ${s.featuresTab}`}>
-      <p className={s.sectionDesc} style={{ marginBottom: 4 }}>
+    <div className={s.tabContent}>
+      <p className={s.sectionDesc}>
         Everything KoZo can do, grouped by area. Most of it runs automatically once you've added
         games and connected Steam.
       </p>
@@ -1195,6 +1074,22 @@ function AboutTab() {
     setUpdState('done')
   }
 
+  // One place decides how an update check reads, instead of a five-deep ternary
+  // inline in the markup.
+  function updateLine(r) {
+    if (r.error) {
+      return ['error', r.error === 'timed_out'
+        ? "Couldn't reach the update server — check your connection."
+        : r.error]
+    }
+    if (r.notConfigured) return ['info', 'Update source not configured yet (set build.publish in package.json).']
+    if (r.noReleases) return ['info', `No releases published on ${r.repo} yet — build the app and publish a GitHub release to enable updates.`]
+    if (r.updateAvailable) {
+      return ['success', `Update ${r.latest} available (you have ${r.current})${r.dev || r.manualOnly ? '' : ' — downloading in the background.'}`]
+    }
+    return ['success', `You're up to date${r.latest ? ` — ${r.latest} is the latest release` : ''}${r.dev ? ' (dev build, checked against GitHub)' : ''}.`]
+  }
+
   return (
     <div className={s.tabContent}>
       <section className={s.section}>
@@ -1209,39 +1104,33 @@ function AboutTab() {
             </div>
           </div>
         </div>
-        <div className={s.keyRow} style={{ marginTop: 10 }}>
-          <button className={s.testBtn} onClick={checkUpdates} disabled={updState === 'checking'}>
+        <div className={s.keyRow}>
+          <button type="button" className={s.testBtn} onClick={checkUpdates} disabled={updState === 'checking'}>
             {updState === 'checking'
-              ? <><IconLoader2 size={13} stroke={1.8} className={s.spin} /> Checking…</>
+              ? <><IconLoader2 size={13} stroke={1.8} className="spin" /> Checking…</>
               : <><IconRefresh size={13} stroke={1.8} /> Check for updates</>}
           </button>
         </div>
-        {updState === 'done' && updResult && (
-          <div className={`${s.testResult} ${updResult.error ? s.testInvalid : s.testValid}`} style={{ marginTop: 8 }}>
-            {updResult.error
-              ? <><IconAlertTriangle size={13} stroke={2} /> {updResult.error === 'timed_out' ? "Couldn't reach the update server — check your connection." : updResult.error}</>
-              : updResult.notConfigured
-                ? <><IconInfoCircle size={13} stroke={1.8} /> Update source not configured yet (set build.publish in package.json).</>
-                : updResult.noReleases
-                  ? <><IconInfoCircle size={13} stroke={1.8} /> No releases published on {updResult.repo} yet — build the app and publish a GitHub release to enable updates.</>
-                  : updResult.updateAvailable
-                    ? <>
-                        <IconCheck size={13} stroke={2.5} />
-                        Update {updResult.latest} available (you have {updResult.current}){updResult.dev || updResult.manualOnly ? '' : ' — downloading in the background.'}
-                        {(updResult.dev || updResult.manualOnly) && updResult.releaseUrl && (
-                          <button
-                            className={s.testBtn}
-                            style={{ marginLeft: 8 }}
-                            onClick={() => window.kozo?.api?.shell?.openExternal(updResult.releaseUrl)}
-                          >
-                            Open release page
-                          </button>
-                        )}
-                      </>
-                    : <><IconCheck size={13} stroke={2.5} /> You're up to date{updResult.latest ? ` — ${updResult.latest} is the latest release` : ''}{updResult.dev ? ' (dev build, checked against GitHub)' : ''}.</>}
-          </div>
-        )}
+        {updState === 'done' && updResult && (() => {
+          const [type, text] = updateLine(updResult)
+          const showLink = updResult.updateAvailable && (updResult.dev || updResult.manualOnly) && updResult.releaseUrl
+          return (
+            <StatusLine type={type}>
+              {text}
+              {showLink && (
+                <>
+                  {' '}
+                  <button type="button" className={s.linkBtn}
+                    onClick={() => window.kozo?.api?.shell?.openExternal(updResult.releaseUrl)}>
+                    Open release page
+                  </button>
+                </>
+              )}
+            </StatusLine>
+          )
+        })()}
       </section>
+
       <section className={s.section}>
         <div className={s.sectionHeader}><IconInfoCircle size={15} stroke={1.6} /><span>Details</span></div>
         <div className={s.aboutDetails}>
@@ -1268,37 +1157,38 @@ function AboutTab() {
           runs the real scanner on it, records the unlock in the database, and fires the
           real in-game overlay toast — then cleans everything up.
         </p>
-        <div className={s.keyRow} style={{ flexWrap: 'wrap' }}>
-          <button className={s.testBtn} onClick={runTrackingTest} disabled={testing}>
+        <div className={s.keyRow}>
+          <button type="button" className={s.testBtn} onClick={runTrackingTest} disabled={testing}>
             {testing
-              ? <><IconLoader2 size={13} stroke={1.8} className={s.spin} /> Testing…</>
+              ? <><IconLoader2 size={13} stroke={1.8} className="spin" /> Testing…</>
               : <><IconTrophy size={13} stroke={1.8} /> Test achievement tracking</>}
           </button>
-          <button className={s.testBtn} onClick={() => window.kozo?.api?.overlay?.test?.()}>
+          <button type="button" className={s.testBtn} onClick={() => window.kozo?.api?.overlay?.test?.()}>
             <IconBell size={13} stroke={1.8} /> Test notifications
           </button>
         </div>
         {testResult && (
-          <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div className={s.statusStack}>
             {(testResult.steps || []).map((st, i) => (
-              <div key={i} className={`${s.testResult} ${st.ok ? s.testValid : s.testInvalid}`} style={{ marginTop: 0 }}>
-                {st.ok ? <IconCheck size={13} stroke={2.5} /> : <IconX size={13} stroke={2.5} />}
-                {st.name}{st.detail ? <span style={{ opacity: 0.7 }}> — {st.detail}</span> : null}
-              </div>
+              <StatusLine key={i} type={st.ok ? 'success' : 'error'}>
+                {st.name}{st.detail ? <span className={s.statusDetail}> — {st.detail}</span> : null}
+              </StatusLine>
             ))}
-            <div className={`${s.testResult} ${testResult.ok ? s.testValid : s.testInvalid}`} style={{ marginTop: 4, fontWeight: 600 }}>
+            <StatusLine type={testResult.ok ? 'success' : 'error'} className={s.statusSummary}>
               {testResult.ok
-                ? <><IconCheck size={13} stroke={2.5} /> Achievement tracking is working on this PC.</>
-                : <><IconAlertTriangle size={13} stroke={2} /> Something failed — see the steps above.</>}
-            </div>
+                ? 'Achievement tracking is working on this PC.'
+                : 'Something failed — see the steps above.'}
+            </StatusLine>
           </div>
         )}
       </section>
+
       <section className={s.section}>
         <div className={s.sectionHeader}><IconRocket size={15} stroke={1.6} /><span>Getting Started</span></div>
         <p className={s.sectionDesc}>New here, or want a refresher on setup and features?</p>
         <div className={s.keyRow}>
           <button
+            type="button"
             className={s.testBtn}
             onClick={() => window.dispatchEvent(new Event('kozo:show-onboarding'))}
           >
@@ -1326,11 +1216,13 @@ export default function Settings() {
   const [saveGame, setSaveGame] = useState(null)   // game whose saves are being managed
   return (
     <div className={s.page}>
-      <div className={s.header}><h1 className={s.title}>Settings</h1></div>
+      <div className={s.toolbar}><h1 className={s.pageTitle}>Settings</h1></div>
       <div className={s.layout}>
-        <nav className={s.nav}>
+        <nav className={s.nav} aria-label="Settings sections">
           {TABS.map(t => (
             <button key={t.key}
+              type="button"
+              aria-current={tab === t.key ? 'page' : undefined}
               className={`${s.navItem} ${tab === t.key ? s.navActive : ''}`}
               onClick={() => setTab(t.key)}>
               {t.label}

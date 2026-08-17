@@ -11,6 +11,8 @@ import CreateEditListModal from '../components/modals/CreateEditListModal'
 import EditGameListModal from '../components/modals/EditGameListModal'
 import SearchableSelect from '../components/ui/SearchableSelect'
 import CardContextMenu from '../components/ui/CardContextMenu'
+import EmptyState from '../components/ui/EmptyState'
+import { CardSkeletonGrid } from '../components/ui/Skeleton'
 import s from './GameList.module.css'
 
 const STATUS_CONFIG = {
@@ -76,43 +78,50 @@ function GridCard({ item, onClick, selectionMode, selected, onToggle, onToggleFa
       <div className={s.cardBanner} style={{ background: bg }}>
         {src
           ? <>
-              <img src={src} alt="" aria-hidden="true" className={s.cardBannerBlur} onError={bannerOnError} />
-              <img src={src} alt="" className={s.cardBannerImg} onError={bannerOnError} />
+              <img src={src} alt="" aria-hidden="true" className={s.cardBannerBlur} loading="lazy" decoding="async" onError={bannerOnError} />
+              <img src={src} alt="" className={s.cardBannerImg} loading="lazy" decoding="async" onError={bannerOnError} />
             </>
           : <IconDeviceGamepad2 size={28} stroke={1.1} style={{ color: 'rgba(255,255,255,0.12)' }} />
         }
-        {!selectionMode && (
-          <>
-            <div
-              className={s.cardStatusBadge}
-              style={{ color: cfg.color, borderColor: cfg.color + '55', background: cfg.color + '18' }}
-            >
-              {cfg.label}
-            </div>
-            {item.rating != null && item.status === 'finished' && (
-              <div className={s.cardRating}>★ {Number(item.rating).toFixed(1)}</div>
-            )}
-            <button
-              className={`${s.cardFavBtn} ${item.is_favorite ? s.cardFavBtnActive : ''}`}
-              onClick={(e) => { e.stopPropagation(); onToggleFav?.(item) }}
-              title={item.is_favorite ? 'Remove from favorites' : 'Pin to top (favorite)'}
-            >
-              <IconStar size={15} stroke={1.8} fill={item.is_favorite === 1 ? 'currentColor' : 'none'} />
-            </button>
-          </>
-        )}
         {selectionMode && (
           <div className={`${s.cardCheckbox} ${selected ? s.cardCheckboxOn : ''}`}>
             {selected && <IconCheck size={12} stroke={3} />}
           </div>
         )}
-      </div>
-      {/* Name + genres below the cover — nothing overlaps the artwork */}
-      <div className={s.cardInfo}>
-        <div className={s.cardName}>{item.name}</div>
-        {genres.length > 0 && (
-          <div className={s.cardGenresLine}>{genres.slice(0, 3).join(' · ')}</div>
+
+        {/* Status LED + name/genres overlaid on the cover — mirrors GameCard. */}
+        {!selectionMode && (
+          <span className={s.cardStatusLed} style={{ '--state-color': cfg.color }} title={cfg.label} />
         )}
+        <div className={s.cardArtScrim} aria-hidden="true" />
+        <div className={s.cardArtInfo}>
+          <div className={s.cardTitleRow}>
+            <div className={s.cardName} title={item.name}>{item.name}</div>
+            {!selectionMode && (
+              <button
+                className={`${s.cardFavBtn} ${item.is_favorite ? s.cardFavBtnActive : ''}`}
+                onClick={(e) => { e.stopPropagation(); onToggleFav?.(item) }}
+                title={item.is_favorite ? 'Remove from favorites' : 'Pin to top (favorite)'}
+                aria-label={item.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
+              >
+                <IconStar size={14} stroke={1.8} fill={item.is_favorite === 1 ? 'currentColor' : 'none'} />
+              </button>
+            )}
+          </div>
+          {genres.length > 0 && (
+            <div className={s.cardGenresLine} title={genres.join(' · ')}>{genres.slice(0, 2).join(' · ')}</div>
+          )}
+        </div>
+      </div>
+
+      {/* Stats strip below the art: status word + rating. */}
+      <div className={s.cardInfo}>
+        <div className={s.cardSubRow}>
+          <span className={s.cardStatusWord} style={{ color: cfg.color }}>{cfg.label}</span>
+          {item.rating != null && item.status === 'finished' && (
+            <span className={s.cardRating}>★ {Number(item.rating).toFixed(1)}</span>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -154,7 +163,8 @@ function ListRow({ item, onClick, selectionMode, selected, onToggle, onToggleFav
 
       {/* Name + genres */}
       <div className={s.listInfo}>
-        <div className={s.listName}>{item.name}</div>
+        {/* title attr: the name truncates and nothing else in the row reveals it */}
+        <div className={s.listName} title={item.name}>{item.name}</div>
         <div className={s.listSub}>
           {genres.length > 0 && (
             <div className={s.listCategory}>{genres.slice(0, 3).join(' · ')}</div>
@@ -388,7 +398,7 @@ export default function GameList() {
           </h1>
 
           {/* Search */}
-          <div className={s.searchBox}>
+          <div className={`${s.searchBox} hasRing`}>
             <IconSearch size={13} stroke={1.6} className={s.searchIcon} />
             <input
               className={s.searchInput}
@@ -414,6 +424,7 @@ export default function GameList() {
                 { value: 'want_to_play', label: 'Want to play' },
                 { value: 'playing',      label: 'Playing' },
                 { value: 'finished',     label: 'Finished' },
+                { value: 'on_hold',      label: 'On hold' },
                 { value: 'dropped',      label: 'Dropped' },
                 { value: 'upcoming',     label: 'Upcoming' },
               ]}
@@ -547,29 +558,21 @@ export default function GameList() {
       {/* Content */}
       <div className={s.content}>
         {loading && (
-          <div className={s.emptyState}>
-            <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Loading…</div>
-          </div>
+          <CardSkeletonGrid
+            gridClassName={view === 'list' ? s.list : (view === 'big' ? s.bigGrid : s.grid)}
+            count={view === 'list' ? 6 : 12}
+          />
         )}
 
         {!loading && items.length === 0 && (
-          <div className={s.emptyState}>
-            <IconDeviceGamepad2 size={48} stroke={1.2} />
-            <div className={s.emptyTitle}>
-              {activeList ? `Nothing in "${activeList.name}" yet` : 'No games here yet'}
-            </div>
-            <div className={s.emptyDesc}>
-              {activeList
-                ? 'Pick games from your Game List, or open any game and tick this list.'
-                : 'Add games to your backlog, wishlist, or track what you\'re playing.'}
-            </div>
-            {activeList && (
-              <button className={s.btnPrimary} style={{ marginTop: 12 }} onClick={() => setAddToList(true)}>
-                <IconPlus size={15} stroke={2} />
-                Add games
-              </button>
-            )}
-          </div>
+          <EmptyState
+            Icon={IconDeviceGamepad2}
+            title={activeList ? `Nothing in "${activeList.name}" yet` : 'No games here yet'}
+            desc={activeList
+              ? 'Pick games from your Game List, or open any game and tick this list.'
+              : "Add games to your backlog, wishlist, or track what you're playing."}
+            action={activeList ? { label: 'Add games', Icon: IconPlus, onClick: () => setAddToList(true) } : undefined}
+          />
         )}
 
         {!loading && items.length > 0 && (view === 'big' || view === 'grid') && (

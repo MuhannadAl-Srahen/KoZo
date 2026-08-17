@@ -2,8 +2,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
-  padding: 4px 0 2px;
+  gap: var(--sp-16);
+  padding: var(--sp-4) 0 var(--sp-2);
 }
 
 /* ── Icon ── */
@@ -11,7 +11,7 @@
   position: relative;
   width: 88px;
   height: 88px;
-  border-radius: 16px;
+  border-radius: var(--r-lg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -32,7 +32,7 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-  border-radius: 16px;
+  border-radius: var(--r-lg);
 }
 
 .checkBadge {
@@ -47,32 +47,29 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #09090f;
+  color: var(--accent-ink);
 }
 
 /* ── Description ── */
 .desc {
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: var(--text-secondary);
   text-align: center;
-  line-height: 1.55;
+  line-height: var(--lh-loose);
   max-width: 320px;
 }
 
 .descHidden {
-  font-size: 12.5px;
+  composes: desc;
   color: var(--text-muted);
-  text-align: center;
-  line-height: 1.55;
-  max-width: 320px;
   font-style: italic;
 }
 
 /* ── How to unlock ── */
 .howTo {
   width: 100%;
-  margin-top: 2px;
-  padding: 11px 12px;
+  margin-top: var(--sp-2);
+  padding: var(--sp-12);
   border-radius: var(--r-input);
   border: 1px solid var(--border);
   background: var(--surface-3);
@@ -81,9 +78,9 @@
 .howToTitle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-6);
   margin-bottom: 9px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -92,29 +89,17 @@
 
 .howToActions {
   display: flex;
-  gap: 8px;
+  gap: var(--sp-8);
 }
 
 .howToBtn {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 7px 10px;
-  border-radius: var(--r-input);
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-family: inherit;
-  cursor: pointer;
-  transition: border-color 0.12s, color 0.12s;
+  composes: btn btnSecondary btnSm from '../../styles/controls.module.css';
 }
 
-.howToBtn:hover {
-  border-color: var(--ab);
-  color: var(--text-primary);
+.howToBtn.howToBtn {
+  flex: 1;
+  padding: var(--sp-6) var(--sp-10);
+  background: var(--surface-2);
 }
 
 .howToExt {
@@ -126,28 +111,47 @@
 .meta {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--sp-10);
 }
 
 .rarityBadge {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 9px;
-  border-radius: var(--r-pill);
-  font-size: 11px;
-  font-weight: 500;
-  border: 1px solid transparent;
+  composes: chip from '../../styles/controls.module.css';
 }
 
-.rarityUltraRare  { background: rgba(167,139,250,0.12); color: #c084fc; border-color: rgba(167,139,250,0.25); }
-.rarityVeryRare   { background: rgba(96,165,250,0.10);  color: #60a5fa; border-color: rgba(96,165,250,0.22); }
-.rarityRare       { background: rgba(52,211,153,0.10);  color: #34d399; border-color: rgba(52,211,153,0.22); }
-.rarityUncommon   { background: rgba(251,191,36,0.10);  color: #fbbf24; border-color: rgba(251,191,36,0.22); }
-.rarityCommon     { background: var(--surface-3);        color: var(--text-secondary); border-color: var(--border); }
+/* Built dynamically as s[`rarity${label.replace(/\s/g,'')}`] in
+   AchievementModal.jsx — the only dynamic class-name site in the app. These
+   look unreferenced to a grep and are NOT dead. Rarity is a fixed semantic
+   scale, so it uses --rarity-* and never follows the accent.
+   Doubled class names because `.chip` sets `border: 1px solid transparent` and
+   is emitted after this file — see the note in Modal.module.css. */
+.rarityUltraRare.rarityUltraRare {
+  background: color-mix(in srgb, var(--rarity-ultra) 12%, transparent);
+  color: var(--rarity-ultra);
+  border-color: color-mix(in srgb, var(--rarity-ultra) 25%, transparent);
+}
+.rarityVeryRare.rarityVeryRare {
+  background: color-mix(in srgb, var(--rarity-very) 10%, transparent);
+  color: var(--rarity-very);
+  border-color: color-mix(in srgb, var(--rarity-very) 22%, transparent);
+}
+.rarityRare.rarityRare {
+  background: color-mix(in srgb, var(--rarity-rare) 10%, transparent);
+  color: var(--rarity-rare);
+  border-color: color-mix(in srgb, var(--rarity-rare) 22%, transparent);
+}
+.rarityUncommon.rarityUncommon {
+  background: color-mix(in srgb, var(--rarity-uncommon) 10%, transparent);
+  color: var(--rarity-uncommon);
+  border-color: color-mix(in srgb, var(--rarity-uncommon) 22%, transparent);
+}
+.rarityCommon.rarityCommon {
+  background: var(--surface-3);
+  color: var(--rarity-common);
+  border-color: var(--border);
+}
 
 .pct {
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
 }
 
@@ -155,52 +159,20 @@
 .unlockedAt {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
+  gap: var(--sp-6);
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
 }
 
 .sourceTag {
-  font-size: 10px;
-  background: var(--surface-3);
-  color: var(--text-muted);
-  padding: 1px 7px;
-  border-radius: var(--r-pill);
-  border: 1px solid var(--border);
+  composes: chip chipSm chipNeutral from '../../styles/controls.module.css';
 }
 
 /* ── Footer buttons ── */
 .btnUnlock {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 18px;
-  border-radius: var(--r-input);
-  border: none;
-  background: var(--a);
-  color: #09090f;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: opacity 0.12s;
+  composes: btn btnPrimary btnMd from '../../styles/controls.module.css';
 }
-
-.btnUnlock:hover    { opacity: 0.88; }
-.btnUnlock:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .btnLock {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 18px;
-  border-radius: var(--r-input);
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 13px;
-  cursor: pointer;
-  transition: border-color 0.12s, color 0.12s;
+  composes: btn btnSecondary btnMd from '../../styles/controls.module.css';
 }
-
-.btnLock:hover    { border-color: var(--ab); color: var(--text-primary); }
-.btnLock:disabled { opacity: 0.4; cursor: not-allowed; }

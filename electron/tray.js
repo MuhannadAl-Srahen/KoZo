@@ -81,26 +81,37 @@ function setupTray(processWatcher) {
 
     // ── What's happening right now ──
     if (sessions.size > 0) {
-      // Each running game is clickable → jumps straight to its page.
+      // Each running game is clickable → jumps straight to its page, and the
+      // label doubles as a mini HUD: elapsed time + achievement progress.
       sessions.forEach((sess, gameId) => {
         const name = sess.game_name || gamesQ.getGame(gameId)?.name || 'Game'
         const dur  = fmtDur(liveElapsed(sess))
         const tag  = sess.idle ? '  ·  away' : ''
-        items.push({ label: `▶  ${name}   ${dur}${tag}`, click: () => openAt(`/game/${gameId}`) })
+        let ach = ''
+        try {
+          const list = require('./db/queries/achievements').listAchievementsForGame(gameId)
+          if (list.length > 0) {
+            const un = list.filter(a => a.unlock_id != null).length
+            ach = `  ·  ${un}/${list.length}`
+          }
+        } catch {}
+        items.push({ label: `▶  ${name}   ${dur}${ach}${tag}`, click: () => openAt(`/game/${gameId}`) })
       })
     } else {
       items.push({ label: paused ? 'Tracking paused' : 'No game running', enabled: false })
     }
 
-    // ── A glanceable stat: time played today ──
+    // ── Glanceable stat, always present so the menu never feels empty ──
     const today = todayPlaytimeSec(sessions)
-    if (today > 0) {
-      items.push({ label: `Played today: ${fmtDur(today)}`, enabled: false })
-    }
+    items.push({ label: today > 0 ? `Played today: ${fmtDur(today)}` : 'Nothing played today', enabled: false })
 
+    // ── Quick destinations ──
     items.push({ type: 'separator' })
-    items.push({ label: 'Open', click: () => show() })
-    items.push({ label: 'Quit', click: () => { app.isQuitting = true; app.quit() } })
+    items.push({ label: 'Open KoZo', click: () => show() })
+    items.push({ label: 'Statistics', click: () => openAt('/statistics') })
+    items.push({ label: 'Profile', click: () => openAt('/profile') })
+    items.push({ type: 'separator' })
+    items.push({ label: 'Quit KoZo', click: () => { app.isQuitting = true; app.quit() } })
 
     return Menu.buildFromTemplate(items)
   }
