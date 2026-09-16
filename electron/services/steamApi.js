@@ -507,6 +507,12 @@ async function refreshBanners(gameId) {
   } catch (e) {
     logger.warn(`Hero banner failed for game ${gameId}`, { message: e.message })
   }
+
+  // The file path is unchanged, so without a new revision the renderer keeps
+  // showing the browser-cached image and the refresh looks like it did nothing.
+  try {
+    getDb().prepare('UPDATE games SET banner_rev = COALESCE(banner_rev, 0) + 1 WHERE id = ?').run(gameId)
+  } catch (_) {}
 }
 
 // Returns { unlocks: [...], error: 'private' | 'no_stats' | string | null }

@@ -27,6 +27,13 @@ function writeLast(total, level) {
   } catch {}
 }
 
+// Advance ONLY the level baseline, leaving the XP total where it was. Used by
+// the mid-session poll: it must still mark a level-up as seen (so the toast
+// fires once, not every 5 minutes), but must not consume the accumulated gain.
+function writeLevelOnly(level) {
+  try { settingsQ().setSetting('xp_last_level', String(level)) } catch {}
+}
+
 function broadcast(channel, payload) {
   try {
     const { BrowserWindow } = require('electron')
@@ -41,7 +48,7 @@ function broadcast(channel, payload) {
  * level-up. Returns { gained, totalXp, level, tier, leveledUp, toNextLevel,
  * nextTier } for the caller. `reason` is for logs; `gameName` flavors the toast.
  */
-function check({ reason = 'unknown', gameName = null, artPath = null, artUrl = null } = {}) {
+function check({ reason = 'unknown', gameName = null, artPath = null, artUrl = null, consumeGain = true } = {}) {
   let xp
   try { xp = require('./xp').computeXp() } catch (e) {
     logger.warn('xpTracker: computeXp failed', { message: e.message })
@@ -49,7 +56,14 @@ function check({ reason = 'unknown', gameName = null, artPath = null, artUrl = n
   }
 
   const last = readLast()
-  writeLast(xp.totalXp, xp.level)
+  // `consumeGain: false` advances only the level baseline. The mid-session poll
+  // runs every 5 minutes and used to rewrite xp_last_total each time, so by the
+  // time endSession asked for the session's XP the baseline was at most five
+  // minutes old: a two-hour session reported "+3 XP". Worse, idle time is
+  // subtracted from the row only at session end, so the total could fall below
+  // the baseline, `gained` clamped to 0, and the summary toast never appeared.
+  if (consumeGain || last.total == null || last.level == null) writeLast(xp.totalXp, xp.level)
+  else writeLevelOnly(xp.level)
 
   // First run ever — establish the baseline silently (no retroactive toasts).
   if (last.total == null || last.level == null) {

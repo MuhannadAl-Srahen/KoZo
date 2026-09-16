@@ -89,10 +89,15 @@ const NESTED_SKIP = new Set([
 
 // A game's own internal folders. When scanning a directory for *sibling* games
 // we skip these so e.g. "<Game>\Binaries" isn't mistaken for its own game.
+// Keep in sync with STRUCTURAL_FOLDERS in src/lib/utils.js, which the Add Game
+// modal uses for the same purpose. 'retail' was missing here, so a game laid out
+// as "<Game>\Retail\<game>.exe" got imported under the name "Retail".
 const STRUCT_FOLDERS = new Set([
   'binaries','bin','win64','win32','x64','x86','data','content','plugins',
   'saved','config','engine','redist','_commonredist','commonredist',
   'soundbanks','movies','locales','resources',
+  'retail','game','client','application','app','shipping','build','release',
+  'dist','system','win','windows','launcher','program',
 ])
 
 // Folders that hold *other* games/apps — never a game themselves. We recurse
@@ -195,13 +200,62 @@ function cleanGameName(folderName) {
   return n || folderName
 }
 
+// Helper/handler executables that ship beside a game but are not the game.
+// NOT_GAME_EXES above is an exact-name list, which only caught the spellings
+// someone thought of — "crs-handler.exe" slipped through it and got stored as a
+// game's executable, so every unrelated process of that name logged a session.
+// Keep in sync with HELPER_EXE_RE in src/lib/utils.js.
+const HELPER_EXE_RE = new RegExp([
+  'cr[as]?sh(pad)?[-_. ]?(handler|report(er)?|dump(er)?)',
+  '^crs[-_. ]',                                  // Crash Reporting Service: crs-handler, crs-uploader
+  '[-_. ](handler|uploader)[-_. 0-9]*\\.exe$',
+  '^(updater|update|patcher|installer|setup|service|helper|daemon|' +
+    'watchdog|telemetry|activation|cleanup|redist\\w*|prereq\\w*)[-_. 0-9]*\\.exe$',
+  'anticheat|battleye|vcredist|dxsetup|dotnetfx',
+].join('|'), 'i')
+
+function isHelperExe(name) {
+  return HELPER_EXE_RE.test(String(name || '').toLowerCase())
+}
+
+const alnum = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+
+// "StellarBlade" → "sb", "Lies of P" → "lop". Splits camelCase as well as
+// separators, because plenty of installdirs are a single squashed word.
+function acronymOf(s) {
+  return String(s || '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .split(/[^A-Za-z0-9]+/).filter(Boolean)
+    .map(w => w[0]).join('').toLowerCase()
+}
+
 function pickBestExe(exes, folderName) {
   if (!exes.length) return null
   if (exes.length === 1) return exes[0].name
-  const slug = folderName.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8)
-  const match = exes.find(e => e.name.toLowerCase().replace(/[^a-z0-9]/g, '').startsWith(slug))
+  // Helpers are only ever a last resort. Without this the size fallback below
+  // could hand back a crash handler as the game's launcher — which is exactly
+  // how StellarBlade ended up tracking "crs-handler.exe".
+  const real = exes.filter(e => !isHelperExe(e.name))
+  const pool = real.length ? real : exes
+  if (pool.length === 1) return pool[0].name
+
+  const slug = alnum(folderName).slice(0, 8)
+  const match = slug && pool.find(e => alnum(e.name.replace(/\.exe$/i, '')).startsWith(slug))
   if (match) return match.name
-  return exes.sort((a, b) => b.size - a.size)[0].name
+
+  // Studios routinely abbreviate: StellarBlade ships SB.exe, Lies of P ships
+  // LOP.exe. Checked before size, since these launchers are usually tiny.
+  const acro = acronymOf(folderName)
+  if (acro.length >= 2) {
+    const byAcro = pool.find(e => alnum(e.name.replace(/\.exe$/i, '')) === acro)
+    if (byAcro) return byAcro.name
+  }
+
+  // Unreal ships the real entry point as "<Project>-Win64-Shipping.exe".
+  const shipping = pool.find(e => /-shipping\.exe$/i.test(e.name))
+  if (shipping) return shipping.name
+
+  return pool.slice().sort((a, b) => b.size - a.size)[0].name
 }
 
 // Does the folder (within 2 levels) carry a file that proves it's a game?
@@ -358,7 +412,13 @@ function scanFolder(folderPath) {
     for (const ent of entries) {
       if (!ent.isDirectory()) continue
       const lower = ent.name.toLowerCase()
-      if (SKIP_FOLDERS.has(lower) || STRUCT_FOLDERS.has(lower)) continue
+      // CONTAINER_NAMES wins over SKIP_FOLDERS. Launcher names appear in BOTH
+      // ("steam", "epic games", "gog galaxy", "ubisoft connect", "origin"), and
+      // skipping first meant a scan of a drive root or Program Files never
+      // descended into any launcher — so it found none of their games. `walk`
+      // still refuses to import a container folder itself, which is the part
+      // SKIP_FOLDERS was protecting.
+      if (!CONTAINER_NAMES.has(lower) && (SKIP_FOLDERS.has(lower) || STRUCT_FOLDERS.has(lower))) continue
       walk(path.join(dir, ent.name), depth + 1)
     }
   }
@@ -417,4 +477,4 @@ function getDefaultScanPaths() {
   return [...new Set(found)]
 }
 
-module.exports = { scanFolder, getDefaultScanPaths, pickBestExe, isGameExe }
+module.exports = { scanFolder, getDefaultScanPaths, pickBestExe, isGameExe, isHelperExe }

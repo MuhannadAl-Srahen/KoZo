@@ -1168,7 +1168,16 @@ function dirsToWatch(game) {
 // debounce window, not just the last event — an emulator commonly writes
 // achievements.ini AND stats.bin within those 500ms, and dropping either loses
 // the unlock for any layout the fixed candidate list doesn't cover.
-function scheduleScan(gameId, changedPath) {
+// `catchUp` marks a pass that may be importing unlocks earned while KoZo (or
+// the watcher) wasn't running — at watch-attach, when a pending folder finally
+// appears, or after the deep scan discovers a save dir. Without it those passes
+// stamped every unlock with today's date, so a game's whole back catalogue read
+// as "unlocked Today" the first time it was watched. The chokidar hit path
+// deliberately does NOT set it: there the file genuinely was just written.
+const pendingCatchUp = new Set()
+
+function scheduleScan(gameId, changedPath, { catchUp = false } = {}) {
+  if (catchUp) pendingCatchUp.add(gameId)
   if (changedPath) {
     let paths = pendingPaths.get(gameId)
     if (!paths) { paths = new Set(); pendingPaths.set(gameId, paths) }
@@ -1185,7 +1194,10 @@ function scheduleScan(gameId, changedPath) {
     // attach, while the game is loading), where a synchronous recursive readdir
     // is exactly the stutter the deferred deep scan was added to remove. The
     // changed paths above replace what that walk would have found.
-    scanGameForCrackAchievements(gameId, { fresh: true, allowWalk: false, extraPaths }).catch(e =>
+    // A real file change wins over a coalesced catch-up: if chokidar saw a
+    // write in this window the unlock genuinely did just happen.
+    const catchUpNow = pendingCatchUp.delete(gameId) && extraPaths.length === 0
+    scanGameForCrackAchievements(gameId, { fresh: true, allowWalk: false, extraPaths, catchUp: catchUpNow }).catch(e =>
       logger.warn(`crackWatcher: live re-scan failed for game ${gameId}`, { message: e.message }))
   }, 500))
 }
@@ -1254,7 +1266,7 @@ function watchGame(gameId) {
         if (!exists(d)) continue
         left.delete(d)
         try { watcher.add(d) } catch {}
-        scheduleScan(gameId)   // catch a file written before the add landed
+        scheduleScan(gameId, null, { catchUp: true })   // catch a file written before the add landed
         logger.info(`crackWatcher: watch dir appeared for "${game.name}": ${d}`)
       }
       if (!left.size) {
@@ -1266,8 +1278,8 @@ function watchGame(gameId) {
 
   logger.info(`crackWatcher: live-watching ${existing.length} folder(s) (+${pending.length} pending) for "${game.name}"`)
   // Immediate catch-up scan at attach time — picks up anything unlocked while
-  // KoZo (or the watcher) wasn't running.
-  scheduleScan(gameId)
+  // KoZo (or the watcher) wasn't running, so those unlocks must NOT be dated now.
+  scheduleScan(gameId, null, { catchUp: true })
 
   // One-time (per app run) background deep scan: if this game has no known
   // save folder yet, sweep the machine's save roots for a folder named after
@@ -1304,7 +1316,7 @@ async function runDeepScan(gameId) {
     try { require('../db/queries/games').updateGame(gameId, { crack_dir: best }) } catch {}
     const w = fileWatchers.get(gameId)
     if (w) { try { w.add(best) } catch {} }
-    scheduleScan(gameId)
+    scheduleScan(gameId, null, { catchUp: true })
     logger.info(`crackWatcher: deep scan found save folder for "${game.name}": ${best}`)
   } catch (e) {
     logger.warn(`crackWatcher: deep scan failed for game ${gameId}`, { message: e.message })

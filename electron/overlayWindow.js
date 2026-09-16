@@ -46,11 +46,16 @@ function getOrCreate() {
   // Click-through: mouse events pass to the game below
   _win.setIgnoreMouseEvents(true, { forward: true })
 
-  const url = app.isPackaged
-    ? `file://${path.join(__dirname, '../renderer-dist/index.html')}?overlay=1`
-    : 'http://localhost:5173?overlay=1'
-
-  _win.loadURL(url)
+  // loadFile (not a hand-built file:// string) because path.join returns
+  // backslashes and no percent-encoding: an all-users install to
+  // "C:\Program Files\KoZo" produced a malformed URL, the overlay never loaded,
+  // and every toast / Alt+K / Alt+J silently did nothing. The main window has
+  // always used loadFile — this keeps the two consistent.
+  if (app.isPackaged) {
+    _win.loadFile(path.join(__dirname, '../renderer-dist/index.html'), { query: { overlay: '1' } })
+  } else {
+    _win.loadURL('http://localhost:5173?overlay=1')
+  }
 
   // Safety net: the overlay normally flushes when its renderer calls overlay.ready()
   // (the handshake). If that IPC is ever lost/delayed (a renderer error before the

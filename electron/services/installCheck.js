@@ -34,6 +34,17 @@ function existsSync(p) {
   try { return fs.existsSync(p) } catch { return false }
 }
 
+// Is the whole volume this path lives on unavailable? Distinguishes "the game
+// was uninstalled or moved" from "the drive it lives on isn't connected right
+// now" — only the first should trigger a hunt for a new location. Returns false
+// for UNC and any path we can't parse a drive letter from, so the caller falls
+// back to its previous behaviour rather than silently skipping relocation.
+async function volumeMissing(p) {
+  const m = /^([a-z]):[\\/]/i.exec(String(p || ''))
+  if (!m) return false
+  return !(await exists(`${m[1]}:\\`))
+}
+
 // ── Relocation ───────────────────────────────────────────────────────────────
 // Marking a game not-installed is only half an answer. If you MOVE a game —
 // to another drive, into a different library — the stored path stays dead
@@ -215,8 +226,18 @@ async function reconcile() {
     // the only path we ever check is the dead one.
     if (!there) {
       let dest = null
-      try { dest = findNewLocation(g) } catch (e) {
-        logger.warn(`installCheck: relocate failed for "${g.name}"`, { message: e.message })
+      // Only hunt for a new location when the game is genuinely gone — not when
+      // its whole VOLUME is simply absent. An unplugged external drive or an
+      // unmounted library made every game on it look moved, and if a second
+      // copy existed anywhere (an old install, a different Steam library) the
+      // relocation permanently rewrote install_path onto that copy and the
+      // original never came back when the drive was reconnected. A missing
+      // drive root means "not available right now", which is what the flag
+      // already expresses.
+      if (!(await volumeMissing(g.install_path))) {
+        try { dest = findNewLocation(g) } catch (e) {
+          logger.warn(`installCheck: relocate failed for "${g.name}"`, { message: e.message })
+        }
       }
       if (dest) {
         try {

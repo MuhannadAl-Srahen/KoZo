@@ -340,6 +340,8 @@ app.on('will-quit', () => {
   // Save snapshots deferred to idle would otherwise die with the process.
   try { require('./services/autoSaveBackup').flushPending() } catch {}
   try { globalShortcut.unregisterAll() } catch {}
+  // Last: both flushes above read the DB, so the handle has to outlive them.
+  try { require('./db/database').closeDatabase() } catch {}
 })
 
 app.on('window-all-closed', () => {

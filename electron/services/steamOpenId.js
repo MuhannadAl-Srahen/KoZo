@@ -73,7 +73,28 @@ function signIn() {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             timeout: 15000,
           })
-          valid = /is_valid\s*:\s*true/i.test(String(check.data))
+          const signatureOk = /is_valid\s*:\s*true/i.test(String(check.data))
+
+          // A valid signature only proves Steam signed SOMETHING — not that it
+          // signed this login, for this app, or the fields we actually read.
+          // Without these checks a signed assertion captured from anywhere
+          // could be replayed at this callback to set steam_user_id.
+          const signed = new Set((params.get('openid.signed') || '').split(','))
+          const signsWhatWeRead = ['claimed_id', 'identity', 'return_to', 'op_endpoint', 'response_nonce']
+            .every(f => signed.has(f))
+          const returnToOk  = params.get('openid.return_to') === attempt.returnTo
+          const endpointOk  = params.get('openid.op_endpoint') === 'https://steamcommunity.com/openid/login'
+          // Steam's nonce is "<ISO8601 timestamp><random>"; reject stale ones.
+          const nonce = params.get('openid.response_nonce') || ''
+          const nonceTs = Date.parse(nonce.slice(0, 20))
+          const nonceOk = Number.isFinite(nonceTs) && Math.abs(Date.now() - nonceTs) < 5 * 60 * 1000
+
+          valid = signatureOk && signsWhatWeRead && returnToOk && endpointOk && nonceOk
+          if (signatureOk && !valid) {
+            logger.warn('steamOpenId: assertion signed but rejected', {
+              signsWhatWeRead, returnToOk, endpointOk, nonceOk,
+            })
+          }
         }
       } catch (e) {
         logger.warn('steamOpenId: callback failed', { message: e.message })
@@ -106,6 +127,9 @@ function signIn() {
       _active = attempt
       const port = server.address().port
       const returnTo = `http://127.0.0.1:${port}/callback`
+      // Remembered so the callback can require the assertion to have been
+      // issued for THIS attempt's return_to, not merely signed by Steam.
+      attempt.returnTo = returnTo
       const q = new URLSearchParams({
         'openid.ns': 'http://specs.openid.net/auth/2.0',
         'openid.mode': 'checkid_setup',
