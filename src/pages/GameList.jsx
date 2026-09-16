@@ -62,7 +62,7 @@ function bannerOnError(e) {
 function GridCard({ item, onClick, selectionMode, selected, onToggle, onToggleFav, onContextMenu }) {
   const cfg = STATUS_CONFIG[item.status] || { label: item.status, color: 'var(--text-muted)' }
   const bg  = getBannerBg(item.id)
-  const src = withBust(item.banner_url, item._imgBust)
+  const src = withBust(item.banner_url, item.banner_rev)
   const genres = parseGenres(item)
 
   function handleClick() {
@@ -130,7 +130,7 @@ function GridCard({ item, onClick, selectionMode, selected, onToggle, onToggleFa
 function ListRow({ item, onClick, selectionMode, selected, onToggle, onToggleFav, onContextMenu }) {
   const cfg = STATUS_CONFIG[item.status] || { label: item.status, color: 'var(--text-muted)' }
   const bg  = getBannerBg(item.id)
-  const src = withBust(item.banner_url, item._imgBust)
+  const src = withBust(item.banner_url, item.banner_rev)
   const genres = parseGenres(item)
 
   function handleClick() {
@@ -202,6 +202,10 @@ function ListRow({ item, onClick, selectionMode, selected, onToggle, onToggleFav
 export default function GameList() {
   const [items, setItems]       = useState([])
   const [total, setTotal]       = useState(0)
+  // Unfiltered count. `total` is whatever the CURRENT filter returned, so using
+  // it for the "All" chip and the page title made both shrink to the size of
+  // the active filter — the All chip literally disagreeing with itself.
+  const [allTotal, setAllTotal] = useState(0)
   const [page, setPage]         = useState(1)
   const [statusFilter, setStatusFilter] = useState('')
   const [genreFilter, setGenreFilter]   = useState('')
@@ -283,8 +287,15 @@ export default function GameList() {
     for (const id of selectedIds) {
       await window.kozo?.api?.gameList?.delete(id)
     }
+    // Deleting shifts every page, so the whole cache is stale, not just page 1.
+    pageCache.clear()
     await loadItems(1)
     setPage(1)
+    // Same refresh the single-item delete does — without these the custom-list
+    // chips and genre dropdown keep counting rows that no longer exist.
+    loadLists()
+    loadGenres()
+    loadAllTotal()
     setDeleting(false)
     exitSelection()
   }
@@ -299,10 +310,21 @@ export default function GameList() {
     if (res?.ok) setGenreOptions(res.data ?? [])
   }, [])
 
+  // One cheap unfiltered row just for its `total`. Refreshed alongside the
+  // lists and genres, i.e. after every mutation that can change the count.
+  const loadAllTotal = useCallback(async () => {
+    const res = await window.kozo?.api?.gameList?.list({ limit: 1, offset: 0 })
+    if (res?.ok) setAllTotal(res.data?.total ?? 0)
+  }, [])
+
   const loadItems = useCallback(async (pg = 1, { silent = false, status = statusFilter, genre = genreFilter, listId = activeListId, search = searchText } = {}) => {
     if (!window.kozo?.api) return
     const cacheKey = JSON.stringify([pg, status, genre, listId, (search || '').trim()])
-    const cached = pageCache.get(cacheKey)
+    // A silent reload is always a post-mutation reconcile (favorite toggled,
+    // status changed, item dropped). Serving the cache there re-applied the
+    // PRE-mutation rows on top of the optimistic update, so the star visibly
+    // flicked back off until the refetch landed. Cache is for navigation only.
+    const cached = silent ? null : pageCache.get(cacheKey)
     if (cached) {
       // Serve instantly — no spinner, no unmount, no cover re-download.
       setItems(cached.items)
@@ -335,6 +357,7 @@ export default function GameList() {
   useEffect(() => {
     loadLists()
     loadGenres()
+    loadAllTotal()
     loadItems(1, { status: '', genre: '', listId: null })
   }, [])
 
@@ -375,6 +398,7 @@ export default function GameList() {
     loadItems(page)
     loadLists()
     loadGenres()
+    loadAllTotal()
   }
 
   const totalPages = Math.ceil(total / PAGE_SIZE)
@@ -387,7 +411,7 @@ export default function GameList() {
         <div className={s.toolbar}>
           <h1 className={s.pageTitle}>
             Game List
-            {total > 0 && <span className={s.pageTitleCount}>{total}</span>}
+            {allTotal > 0 && <span className={s.pageTitleCount}>{allTotal}</span>}
             {switching && (
               <IconLoader2
                 size={14}
@@ -515,7 +539,7 @@ export default function GameList() {
             onClick={() => handleListChange(null)}
           >
             All
-            <span className={s.listChipCount}>{total}</span>
+            <span className={s.listChipCount}>{allTotal}</span>
           </button>
           {customLists.map(l => (
             <button
@@ -720,6 +744,7 @@ export default function GameList() {
             await loadItems(page)
             loadLists()
             loadGenres()
+            loadAllTotal()
           }}
           deleteLabel="Remove from list"
           deleteHint="Removes this entry from your Game List. Library data is not affected."

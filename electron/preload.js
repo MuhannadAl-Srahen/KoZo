@@ -99,9 +99,11 @@ contextBridge.exposeInMainWorld('kozo', {
       setAutoBackup: (enabled) => ipcRenderer.invoke('saves:setAutoBackup', enabled),
     },
     stats: {
-      get: (period) => ipcRenderer.invoke('stats:get', period),
-      dayActivity: (day) => ipcRenderer.invoke('stats:dayActivity', day),
-      hourActivity: (hour) => ipcRenderer.invoke('stats:hourActivity', hour),
+      // includeHidden: count games the user hid from the Library. Default false
+      // so Statistics matches what the Library actually shows.
+      get: (period, includeHidden) => ipcRenderer.invoke('stats:get', period, includeHidden),
+      dayActivity: (day, includeHidden) => ipcRenderer.invoke('stats:dayActivity', day, includeHidden),
+      hourActivity: (hour, includeHidden) => ipcRenderer.invoke('stats:hourActivity', hour, includeHidden),
       xp: () => ipcRenderer.invoke('stats:xp'),
       xpHistory: (limit) => ipcRenderer.invoke('stats:xpHistory', limit),
     },

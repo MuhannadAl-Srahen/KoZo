@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   IconSearch, IconPlus, IconCheck, IconAlertTriangle,
   IconDeviceGamepad2, IconCrosshair, IconFolderOpen, IconX,
@@ -6,7 +6,9 @@ import {
 import Modal, { modalStyles as ms } from '../ui/Modal'
 import RunningProcessPicker from '../ui/RunningProcessPicker'
 import ImageCropModal from './ImageCropModal'
-import { detectLauncherFromPath } from '../../lib/utils'
+import {
+  detectLauncherFromPath, deriveGameNameFromPath, exeLooksUnrelated, isHelperExe,
+} from '../../lib/utils'
 import s from './AddGameModal.module.css'
 
 const KNOWN_SYSTEM_EXES = new Set([
@@ -63,9 +65,10 @@ function bannerError(e, game) {
 }
 
 export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInstallPath }) {
-  const initialQuery = prefillInstallPath
-    ? (prefillInstallPath.split(/[\\/]/).pop() || '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim()
-    : ''
+  // dialog:pickExe hands back path.dirname(exe), whose leaf is often a
+  // structural folder ("…\007 First Light\Retail"). Taking it verbatim named
+  // that game "Retail"; deriveGameNameFromPath climbs out to the real title.
+  const initialQuery = deriveGameNameFromPath(prefillInstallPath)
 
   const [query, setQuery]         = useState(initialQuery)
   const [results, setResults]     = useState([])
@@ -73,13 +76,7 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
   const [selected, setSelected]   = useState(null)
   const [isManual, setIsManual]   = useState(!!prefillExe && !initialQuery)
 
-  const guessNameFromPath = (p) => {
-    if (!p) return ''
-    const folder = p.split(/[\\/]/).pop() || ''
-    return folder.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim()
-  }
-
-  const [name, setName]               = useState(prefillInstallPath ? guessNameFromPath(prefillInstallPath) : '')
+  const [name, setName]               = useState(initialQuery)
   const [exeName, setExeName]         = useState(prefillExe || '')
   const [installPath, setInstallPath] = useState(prefillInstallPath || '')
   const [bannerPath, setBannerPath]   = useState('')
@@ -132,10 +129,13 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
     setBannerPath('')
     setErrors({})
     setDupWarn(false)
-    if (!prefillExe) {
-      const guess = (game.name || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12) + '.exe'
-      setExeName(guess)
-    }
+    // Deliberately NOT guessed. This used to invent the executable from the
+    // title — "Hollow Knight" became "hollowknigh.exe" (truncated at 12 chars)
+    // — and processWatcher matches sessions purely on exe name, so the game
+    // silently never tracked a single minute. A wrong name is worse than none:
+    // it also looks plausible enough to pass the mismatch check below.
+    // A Steam game still launches via steam://run/<appid> without it.
+    if (!prefillExe) setExeName('')
     if (!prefillInstallPath) setInstallPath('')
   }
 
@@ -156,6 +156,18 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
     setExeWarn(KNOWN_SYSTEM_EXES.has(val.toLowerCase().trim()))
   }
 
+  // Advisory only. Nothing else in KoZo ever checks that a game is pointed at
+  // its OWN executable, so a wrong pick here silently credits another game's
+  // playtime forever. Derived rather than set alongside every exe change so it
+  // also re-evaluates when the user edits the name.
+  const mismatch = useMemo(() => {
+    const exe = exeName.trim()
+    if (!exe || !name.trim()) return null
+    if (isHelperExe(exe)) return 'helper'
+    if (exeLooksUnrelated(name, installPath, exe)) return 'unrelated'
+    return null
+  }, [name, exeName, installPath])
+
   async function checkDuplicate(appId) {
     if (!appId) return false
     const res = await window.kozo?.api?.games?.list()
@@ -166,7 +178,10 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
   async function handleSave() {
     const newErrors = {}
     if (!name.trim())    newErrors.name = 'Game name is required'
-    if (!exeName.trim()) newErrors.exeName = 'Executable name is required'
+    // A Steam game launches through steam://run/<appid>, so the exe is only
+    // needed for playtime tracking — don't block the add on it (the hint below
+    // says what is lost). Everything else still needs it to launch at all.
+    if (!exeName.trim() && !selected?.steam_app_id) newErrors.exeName = 'Executable name is required'
     if (exeName.trim() && !exeName.toLowerCase().trim().endsWith('.exe')) newErrors.exeName = 'Must end in .exe'
     if (Object.keys(newErrors).length) { setErrors(newErrors); return }
 
@@ -387,12 +402,32 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
 
             {errors.exeName
               ? <div className={s.errorText}>{errors.exeName}</div>
-              : <div className={s.inputHint}>Click "Browse" to find the .exe on disk, or "Pick running" if the game is already open.</div>
+              : <div className={s.inputHint}>
+                  {!exeName.trim() && selected?.steam_app_id
+                    ? 'Optional for Steam games — Play works without it, but KoZo can only track playtime once it knows the executable.'
+                    : 'Click "Browse" to find the .exe on disk, or "Pick running" if the game is already open.'}
+                </div>
             }
             {exeWarn && (
               <div className={s.warning}>
                 <IconAlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
                 This looks like a Windows system process. Are you sure?
+              </div>
+            )}
+            {!exeWarn && mismatch === 'helper' && (
+              <div className={s.warning}>
+                <IconAlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+                "{exeName.trim()}" looks like a crash handler or helper process, not the
+                game itself. Games often start these in the background, so KoZo would log
+                sessions you never played.
+              </div>
+            )}
+            {!exeWarn && mismatch === 'unrelated' && (
+              <div className={s.warning}>
+                <IconAlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+                "{exeName.trim()}" doesn't look like it belongs to "{name.trim()}". Every
+                minute that executable runs will be credited to this game — double-check
+                it's the right one.
               </div>
             )}
           </div>

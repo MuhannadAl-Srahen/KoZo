@@ -114,7 +114,11 @@ async function checkForUpdates() {
     return {
       current: app.getVersion(),
       latest,
-      updateAvailable: !!(latest && latest !== app.getVersion()),
+      // isNewer, not `!==` — a string compare reports an "update" whenever the
+      // installed build is AHEAD of the latest release (a local build, or right
+      // after bumping the version), and that update can never download.
+      // Matches the dev branch above.
+      updateAvailable: !!(latest && isNewer(latest, app.getVersion())),
     }
   } catch (e) {
     const msg = e?.message || ''

@@ -100,8 +100,41 @@ function resolveGameId(gameName) {
 // `auto-latest` slot. A folder therefore belongs to the first game that wrote a
 // snapshot into it and any other game falls through to "<name> (2)". Existing
 // folders are never renamed.
+// A folder records the id of the game that owns it (meta.json gameId), so a
+// renamed game can find its history again instead of starting a brand new
+// folder. Without this, renaming a game orphaned every snapshot taken under the
+// old title AND silently restarted the two-slot rolling protection from zero —
+// the user keeps playing believing they're covered. Cached per process; the
+// miss path is one readdir of the backups root.
+const ownedDirCache = new Map()   // gameId -> absolute dir
+
+function findDirOwnedBy(root, gameId) {
+  if (gameId == null) return null
+  const key = String(gameId)
+  const cached = ownedDirCache.get(key)
+  if (cached && fs.existsSync(cached)) return cached
+  ownedDirCache.delete(key)
+  let entries = []
+  try { entries = fs.readdirSync(root, { withFileTypes: true }) } catch { return null }
+  for (const e of entries) {
+    if (!e.isDirectory() || e.name === AUTO_TMP_ID) continue
+    const dir = path.join(root, e.name)
+    const owner = folderOwner(dir)
+    if (owner && owner.gameId != null && String(owner.gameId) === key) {
+      ownedDirCache.set(key, dir)
+      return dir
+    }
+  }
+  return null
+}
+
 function gameDir(gameName, gameId = resolveGameId(gameName)) {
   const root = rootDir()
+  // Adopt this game's existing folder before deriving one from the (possibly
+  // new) title. Only an id match counts — a name match is what the collision
+  // logic below already handles.
+  const owned = findDirOwnedBy(root, gameId)
+  if (owned) return owned
   let base = sanitize(gameName)
   const legacy = legacySanitize(gameName)
   if (legacy && legacy !== base && !fs.existsSync(path.join(root, base)) && fs.existsSync(path.join(root, legacy))) {
@@ -131,19 +164,27 @@ function backupDir(gameName, backupId) {
 }
 
 function measure(dir) {
-  let files = 0, bytes = 0
+  let files = 0, bytes = 0, newest = 0
   function walk(d) {
     if (files > 100000) return
     let entries = []
     try { entries = fs.readdirSync(d, { withFileTypes: true }) } catch { return }
     for (const e of entries) {
       const p = path.join(d, e.name)
-      if (e.isFile()) { files++; try { bytes += fs.statSync(p).size } catch {} }
+      if (e.isFile()) {
+        files++
+        // newest mtime as well as size: most games rewrite a fixed-length save
+        // slot in place, so file count and total bytes are IDENTICAL after
+        // every play session. Comparing only those two made the rolling auto
+        // backup skip as "unchanged" forever after the first snapshot — the
+        // saves it was protecting were the one thing it never captured again.
+        try { const st = fs.statSync(p); bytes += st.size; if (st.mtimeMs > newest) newest = st.mtimeMs } catch {}
+      }
       else if (e.isDirectory()) walk(p)
     }
   }
   walk(dir)
-  return { files, bytes }
+  return { files, bytes, newest }
 }
 
 function readMeta(dir) {
@@ -185,6 +226,9 @@ function listBackups(gameName) {
   const out = []
   for (const e of entries) {
     if (!e.isDirectory()) continue
+    // Half-written staging folder from an interrupted auto snapshot — not a
+    // restore point, and offering it as one would restore a partial save.
+    if (e.name === AUTO_TMP_ID) continue
     const meta = readMeta(path.join(dir, e.name))
     // A folder written before the ownership rule can hold two colliding games'
     // snapshots — never list (and so never restore/delete) another game's. Only
@@ -251,6 +295,9 @@ function deleteBackup(gameName, backupId) {
 // timestamped snapshots — those are deliberate restore points and are untouched.
 const AUTO_ID      = 'auto-latest'
 const AUTO_PREV_ID = 'auto-prev'
+// Staging folder for a new rolling snapshot; never a restore point, so it is
+// filtered out of listBackups.
+const AUTO_TMP_ID  = '.auto-staging'
 
 // Remove legacy per-session auto snapshots (from before the two-slot model)
 // and any stray auto folders other than the rolling slots.
@@ -279,11 +326,55 @@ function autoBackupGame(gameName, sourcePath) {
   // Dedupe against the existing rolling snapshot.
   if (fs.existsSync(dataDest)) {
     const prev = measure(dataDest)
-    if (prev.files === cur.files && prev.bytes === cur.bytes) {
+    // The snapshot's own files carry the copy's mtimes, not the source's, so
+    // the source mtime recorded at capture time is kept in meta.json and
+    // compared against the source now. 2s of slack absorbs filesystem
+    // timestamp granularity (FAT32/exFAT on an external drive).
+    const prevMeta = readMeta(dest)
+    const known = Number(prevMeta.sourceNewest) || 0
+    const unchangedShape = prev.files === cur.files && prev.bytes === cur.bytes
+    const unchangedTime  = known > 0 ? cur.newest <= known + 2000 : false
+    if (unchangedShape && unchangedTime) {
       cleanupLegacyAutos(gameName)
       return { skipped: 'unchanged' }
     }
   }
+
+  // Build the replacement in a staging folder BEFORE touching either rolling
+  // slot. The rotation below deletes auto-prev and moves auto-latest onto it,
+  // so copying in place meant that between the rotation and a successful
+  // fs.cpSync the game had NO surviving snapshot — and cpSync is the step most
+  // likely to fail here (the game may still hold its save file open, the drive
+  // may be full, the source may have vanished). A failure then destroyed the
+  // very saves this feature exists to protect. Staging first makes the swap the
+  // only destructive step, and it only runs once the new copy is on disk.
+  const stage     = path.join(dir, AUTO_TMP_ID)
+  const stageData = path.join(stage, 'data')
+  fs.rmSync(stage, { recursive: true, force: true })   // leftovers from a crash
+  let files = 0, bytes = 0
+  try {
+    fs.mkdirSync(stageData, { recursive: true })
+    fs.cpSync(sourcePath, stageData, { recursive: true })
+    ;({ files, bytes } = measure(stageData))
+  } catch (e) {
+    fs.rmSync(stage, { recursive: true, force: true })
+    logger.warn(`saveBackup: auto snapshot copy failed for "${gameName}" — existing snapshots left intact`, { message: e.message })
+    return { skipped: 'copy-failed' }
+  }
+  // An empty copy would otherwise rotate a good snapshot out for nothing.
+  if (!files) {
+    fs.rmSync(stage, { recursive: true, force: true })
+    return { skipped: 'empty' }
+  }
+
+  const meta = {
+    id: AUTO_ID, gameId, gameName: gameName || '', source: sourcePath,
+    createdAt: new Date().toISOString(), files, bytes, label: 'auto',
+    // Newest mtime IN THE SOURCE at capture time — the dedupe check above
+    // compares against this, since the copy's own mtimes are the copy's.
+    sourceNewest: cur.newest || 0,
+  }
+  fs.writeFileSync(path.join(stage, 'meta.json'), JSON.stringify(meta, null, 2), 'utf8')
 
   // Rotate: current latest becomes the "previous session" slot.
   if (fs.existsSync(dest)) {
@@ -303,15 +394,8 @@ function autoBackupGame(gameName, sourcePath) {
     }
   }
 
-  // Write the fresh latest snapshot.
-  fs.mkdirSync(dataDest, { recursive: true })
-  fs.cpSync(sourcePath, dataDest, { recursive: true })
-  const { files, bytes } = measure(dataDest)
-  const meta = {
-    id: AUTO_ID, gameId, gameName: gameName || '', source: sourcePath,
-    createdAt: new Date().toISOString(), files, bytes, label: 'auto',
-  }
-  fs.writeFileSync(path.join(dest, 'meta.json'), JSON.stringify(meta, null, 2), 'utf8')
+  // Swap the staged copy in. Same directory, so this is an atomic rename.
+  fs.renameSync(stage, dest)
 
   cleanupLegacyAutos(gameName)
   logger.info(`saveBackup: refreshed rolling auto save for "${gameName}" (${files} files)`)

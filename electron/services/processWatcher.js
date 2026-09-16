@@ -374,9 +374,17 @@ function heartbeatSession(game, session, gapMs, now) {
   if (now - (session._lastHeartbeatWriteAt || 0) >= HEARTBEAT_WRITE_MS) {
     session._lastHeartbeatWriteAt = now
     try {
-      require('../db/database').getDb()
-        .prepare('UPDATE games SET last_played_at = ? WHERE id = ?')
+      const db = require('../db/database').getDb()
+      db.prepare('UPDATE games SET last_played_at = ? WHERE id = ?')
         .run(new Date(now).toISOString(), game.id)
+      // Persist idle onto the OPEN row on the same throttle. idle_seconds used
+      // to live only in memory until endSession, so services/xp.js counted a
+      // live session's full wall clock — walk away for an hour and XP climbed
+      // by 60, sometimes crossing a level and firing a celebration that
+      // silently reverted the moment the session ended and the idle time was
+      // finally subtracted. It also means a crash no longer loses the idle.
+      db.prepare('UPDATE sessions SET idle_seconds = ? WHERE id = ?')
+        .run(Math.round(session.idle_seconds || 0), session.id)
     } catch {}
   }
 
@@ -400,6 +408,9 @@ function heartbeatSession(game, session, gapMs, now) {
         gameName: game.name,
         artPath: game.banner_local_path || game.hero_local_path || null,
         artUrl: game.banner_url || null,
+        // Detect a level-up mid-session, but leave the XP total for the
+        // session-end summary to report in full.
+        consumeGain: false,
       })
     } catch {}
   }

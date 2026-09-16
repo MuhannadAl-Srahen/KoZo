@@ -196,22 +196,31 @@ handle('saves:setAutoBackup', (enabled) => {
 
 // Back up the best-found save location for EVERY game in the library at once
 // (e.g. before formatting the PC). Returns a per-game summary.
-handle('saves:backupAll', () => {
+handle('saves:backupAll', async () => {
   const db = require('./db/database').getDb()
   const { findSaveLocations } = require('./services/saveFinder')
   const { backupSave } = require('./services/saveBackup')
   const games = db.prepare('SELECT * FROM games').all()
   const results = []
+  // Both findSaveLocations (walks AppData/Documents/Saved Games for every game)
+  // and backupSave (recursive fs.cpSync) are fully synchronous. Run back to
+  // back over a whole library they blocked the main process for as long as the
+  // copy took — the window froze, the process-watcher tick couldn't fire, and a
+  // session running at the time stopped being heartbeated. Yielding between
+  // games doesn't make the copies async, but it does let the event loop turn.
   for (const g of games) {
+    await new Promise(r => setImmediate(r))
     let locs = []
     try { locs = findSaveLocations(g) } catch {}
     if (!locs.length) { results.push({ name: g.name, status: 'no_saves' }); continue }
+    await new Promise(r => setImmediate(r))
     try {
       const meta = backupSave(g.name, locs[0].path)
       results.push({ name: g.name, status: 'ok', files: meta.files })
     } catch (e) {
       results.push({ name: g.name, status: 'error', error: e.message })
     }
+    broadcast('saves:backupAllProgress', { done: results.length, total: games.length, name: g.name })
   }
   return {
     backedUp: results.filter(r => r.status === 'ok').length,
@@ -1182,7 +1191,16 @@ handle('steam:refreshAllBanners', async () => {
           await refreshBanners(job.id)
         } else {
           const url = await resolveBannerUrl(job.appId)
-          if (url) gameListQ.updateGameListItem(job.id, { banner_url: url })
+          if (url) {
+            gameListQ.updateGameListItem(job.id, { banner_url: url })
+            // Re-resolving usually returns the SAME url, so bump the revision
+            // or the browser just serves its cached copy and nothing changes.
+            try {
+              require('./db/database').getDb()
+                .prepare('UPDATE game_list SET banner_rev = COALESCE(banner_rev, 0) + 1 WHERE id = ?')
+                .run(job.id)
+            } catch (_) {}
+          }
         }
         upgraded++
       } catch {}
@@ -1464,7 +1482,21 @@ async function importBackupFile(filePath) {
   const doImport = db.transaction(() => {
     for (const t of TABLES) counts[t] = upsertRows(t, data[t])
   })
-  doImport()
+  // INSERT OR REPLACE DELETEs the conflicting row before re-inserting it, and
+  // sessions/achievements are ON DELETE CASCADE from games — so restoring a
+  // backup used to wipe every session, achievement and unlock belonging to any
+  // game whose id appeared in it, including everything recorded since the
+  // backup was taken. With foreign keys off the children survive and stay
+  // correctly linked (the row is replaced under the same id), which turns a
+  // destructive overwrite into a merge. The pragma is a no-op INSIDE a
+  // transaction, so it has to be toggled around it — same as the
+  // achievement_unlocks migration in db/database.js.
+  db.pragma('foreign_keys = OFF')
+  try {
+    doImport()
+  } finally {
+    db.pragma('foreign_keys = ON')
+  }
 
   broadcast('game:updated', null)
 
@@ -1596,8 +1628,23 @@ handle('sync:restore', async () => {
 })
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
-handle('stats:get', (period) => {
+// "Hide from library" only ever hid the card in the Library grid — every stats
+// query joined `games` without checking is_hidden, so a game the user had
+// deliberately removed from view still topped their charts. Statistics now
+// excludes hidden games by default and offers a toggle to bring them back.
+// `alias` is the sessions table's alias in the calling query, never user input.
+const visibleOnly = (includeHidden, alias = 'sessions') =>
+  includeHidden ? '' : `AND EXISTS (SELECT 1 FROM games gh WHERE gh.id = ${alias}.game_id AND gh.is_hidden = 0)`
+
+// Same idea for achievement rows, which reach games through `achievements`.
+const visibleAch = (includeHidden, alias = 'au') =>
+  includeHidden ? '' : `AND EXISTS (
+    SELECT 1 FROM achievements ah JOIN games gh ON gh.id = ah.game_id
+    WHERE ah.id = ${alias}.achievement_id AND gh.is_hidden = 0)`
+
+handle('stats:get', (period, includeHidden = false) => {
   const db = require('./db/database').getDb()
+  const vis = visibleOnly(includeHidden)
   const now = Date.now()
   const periodMs = {
     '1d': 86400000,
@@ -1610,13 +1657,14 @@ handle('stats:get', (period) => {
 
   const playtime = db.prepare(`
     SELECT COALESCE(SUM(duration_seconds), 0) AS seconds FROM sessions
-    WHERE ended_at IS NOT NULL AND started_at >= ?
+    WHERE ended_at IS NOT NULL AND started_at >= ? ${vis}
   `).get(since)
 
   const topGames = db.prepare(`
     SELECT g.id, g.name, g.banner_local_path, SUM(s.duration_seconds) AS seconds
     FROM sessions s JOIN games g ON g.id = s.game_id
     WHERE s.ended_at IS NOT NULL AND s.started_at >= ?
+      ${includeHidden ? '' : 'AND g.is_hidden = 0'}
     GROUP BY g.id ORDER BY seconds DESC LIMIT 5
   `).all(since)
 
@@ -1625,7 +1673,7 @@ handle('stats:get', (period) => {
   // previous bar for anyone east of Greenwich.
   const dailyActivity = db.prepare(`
     SELECT DATE(started_at, 'localtime') AS day, SUM(duration_seconds) AS seconds
-    FROM sessions WHERE ended_at IS NOT NULL AND started_at >= ?
+    FROM sessions WHERE ended_at IS NOT NULL AND started_at >= ? ${vis}
     GROUP BY day ORDER BY day ASC
   `).all(since)
 
@@ -1635,7 +1683,7 @@ handle('stats:get', (period) => {
     SELECT CAST(strftime('%H', started_at, 'localtime') AS INTEGER) AS hour,
            SUM(duration_seconds) AS seconds
     FROM sessions
-    WHERE ended_at IS NOT NULL AND DATE(started_at, 'localtime') = DATE('now', 'localtime')
+    WHERE ended_at IS NOT NULL AND DATE(started_at, 'localtime') = DATE('now', 'localtime') ${vis}
     GROUP BY hour
   `).all()
 
@@ -1643,15 +1691,17 @@ handle('stats:get', (period) => {
     SELECT s.id, s.duration_seconds, g.name AS game_name, g.banner_local_path, s.started_at
     FROM sessions s JOIN games g ON g.id = s.game_id
     WHERE s.ended_at IS NOT NULL AND s.started_at >= ?
+      ${includeHidden ? '' : 'AND g.is_hidden = 0'}
     ORDER BY s.duration_seconds DESC LIMIT 5
   `).all(since)
 
   const sessionCount = db.prepare(`
-    SELECT COUNT(*) AS count FROM sessions WHERE ended_at IS NOT NULL AND started_at >= ?
+    SELECT COUNT(*) AS count FROM sessions WHERE ended_at IS NOT NULL AND started_at >= ? ${vis}
   `).get(since)
 
   const gamesPlayedCount = db.prepare(`
-    SELECT COUNT(DISTINCT game_id) AS count FROM sessions WHERE ended_at IS NOT NULL AND started_at >= ?
+    SELECT COUNT(DISTINCT game_id) AS count FROM sessions
+    WHERE ended_at IS NOT NULL AND started_at >= ? ${vis}
   `).get(since)
 
   const recentAchievements = db.prepare(`
@@ -1660,19 +1710,29 @@ handle('stats:get', (period) => {
     JOIN achievements a ON a.id = au.achievement_id
     JOIN games g ON g.id = a.game_id
     WHERE au.unlocked_at >= ?
+      ${includeHidden ? '' : 'AND g.is_hidden = 0'}
     ORDER BY au.unlocked_at DESC LIMIT 5
   `).all(since)
 
   // Period-filtered unlock count so the "Unlocked" stat card shows how many
   // were unlocked in the selected period, not all time.
+  const ach = visibleAch(includeHidden)
   const unlockedInPeriod = period === 'all'
-    ? db.prepare(`SELECT COUNT(DISTINCT achievement_id) AS n FROM achievement_unlocks`).get().n
-    : db.prepare(`SELECT COUNT(DISTINCT achievement_id) AS n FROM achievement_unlocks WHERE unlocked_at >= ? AND unlocked_at IS NOT NULL`).get(since).n
+    ? db.prepare(`SELECT COUNT(DISTINCT achievement_id) AS n FROM achievement_unlocks au WHERE 1=1 ${ach}`).get().n
+    : db.prepare(`SELECT COUNT(DISTINCT achievement_id) AS n FROM achievement_unlocks au
+                  WHERE au.unlocked_at >= ? AND au.unlocked_at IS NOT NULL ${ach}`).get(since).n
   const achievementCounts = {
     unlocked: unlockedInPeriod || 0,
-    total: (achievementsQ.getAchievementCounts()?.total) || 0,
+    total: includeHidden
+      ? (achievementsQ.getAchievementCounts()?.total) || 0
+      : db.prepare(`SELECT COUNT(*) AS n FROM achievements a
+                    JOIN games g ON g.id = a.game_id WHERE g.is_hidden = 0`).get().n || 0,
   }
-  const weeklyPlaytime = sessionsQ.getWeeklyPlaytime()
+  const weeklyPlaytime = includeHidden
+    ? sessionsQ.getWeeklyPlaytime()
+    : db.prepare(`SELECT COALESCE(SUM(duration_seconds), 0) AS seconds FROM sessions
+                  WHERE ended_at IS NOT NULL AND started_at >= ? ${vis}`)
+        .get(new Date(now - 7 * 86400000).toISOString())
 
   return {
     playtime, topGames, dailyActivity, hourlyActivity, longestSessions,
@@ -1683,15 +1743,16 @@ handle('stats:get', (period) => {
 
 // Drill-down for one calendar day (clicked in the Daily Activity chart).
 // `day` is a LOCAL YYYY-MM-DD key (same basis as dailyActivity above).
-handle('stats:dayActivity', (day) => {
+handle('stats:dayActivity', (day, includeHidden = false) => {
   const db = require('./db/database').getDb()
+  const hide = includeHidden ? '' : 'AND g.is_hidden = 0'
 
   // Per-game playtime + session count for that day.
   const games = db.prepare(`
     SELECT g.id, g.name, g.banner_local_path, g.source, g.is_cracked,
            SUM(s.duration_seconds) AS seconds, COUNT(*) AS sessions
     FROM sessions s JOIN games g ON g.id = s.game_id
-    WHERE s.ended_at IS NOT NULL AND DATE(s.started_at, 'localtime') = ?
+    WHERE s.ended_at IS NOT NULL AND DATE(s.started_at, 'localtime') = ? ${hide}
     GROUP BY g.id ORDER BY seconds DESC
   `).all(day)
 
@@ -1703,7 +1764,7 @@ handle('stats:dayActivity', (day) => {
     FROM achievement_unlocks au
     JOIN achievements a ON a.id = au.achievement_id
     JOIN games g ON g.id = a.game_id
-    WHERE au.unlocked_at IS NOT NULL AND DATE(au.unlocked_at, 'localtime') = ?
+    WHERE au.unlocked_at IS NOT NULL AND DATE(au.unlocked_at, 'localtime') = ? ${hide}
     ORDER BY au.unlocked_at DESC
   `).all(day)
 
@@ -1711,7 +1772,7 @@ handle('stats:dayActivity', (day) => {
   const sessions = db.prepare(`
     SELECT s.id, s.duration_seconds, g.name AS game_name, s.started_at
     FROM sessions s JOIN games g ON g.id = s.game_id
-    WHERE s.ended_at IS NOT NULL AND DATE(s.started_at, 'localtime') = ?
+    WHERE s.ended_at IS NOT NULL AND DATE(s.started_at, 'localtime') = ? ${hide}
     ORDER BY s.duration_seconds DESC LIMIT 8
   `).all(day)
 
@@ -1722,9 +1783,10 @@ handle('stats:dayActivity', (day) => {
 // `hour` is a local-time hour 0–23 (same basis as hourlyActivity's strftime
 // '%H','localtime'). Mirrors stats:dayActivity so the lower panels re-scope the
 // same way they do for a clicked day.
-handle('stats:hourActivity', (hour) => {
+handle('stats:hourActivity', (hour, includeHidden = false) => {
   const db = require('./db/database').getDb()
   const h = String(hour).padStart(2, '0')
+  const hide = includeHidden ? '' : 'AND g.is_hidden = 0'
 
   const games = db.prepare(`
     SELECT g.id, g.name, g.banner_local_path, g.source, g.is_cracked,
@@ -1732,7 +1794,7 @@ handle('stats:hourActivity', (hour) => {
     FROM sessions s JOIN games g ON g.id = s.game_id
     WHERE s.ended_at IS NOT NULL
       AND DATE(s.started_at, 'localtime') = DATE('now', 'localtime')
-      AND strftime('%H', s.started_at, 'localtime') = ?
+      AND strftime('%H', s.started_at, 'localtime') = ? ${hide}
     GROUP BY g.id ORDER BY seconds DESC
   `).all(h)
 
@@ -1745,7 +1807,7 @@ handle('stats:hourActivity', (hour) => {
     JOIN games g ON g.id = a.game_id
     WHERE au.unlocked_at IS NOT NULL
       AND DATE(au.unlocked_at, 'localtime') = DATE('now', 'localtime')
-      AND strftime('%H', au.unlocked_at, 'localtime') = ?
+      AND strftime('%H', au.unlocked_at, 'localtime') = ? ${hide}
     ORDER BY au.unlocked_at DESC
   `).all(h)
 
@@ -1754,7 +1816,7 @@ handle('stats:hourActivity', (hour) => {
     FROM sessions s JOIN games g ON g.id = s.game_id
     WHERE s.ended_at IS NOT NULL
       AND DATE(s.started_at, 'localtime') = DATE('now', 'localtime')
-      AND strftime('%H', s.started_at, 'localtime') = ?
+      AND strftime('%H', s.started_at, 'localtime') = ? ${hide}
     ORDER BY s.duration_seconds DESC LIMIT 8
   `).all(h)
 

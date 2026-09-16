@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import {
   IconTrophy, IconClock, IconHistory, IconDeviceGamepad2, IconFlame, IconLoader2, IconX,
-  IconChartBar,
+  IconChartBar, IconEye, IconEyeOff,
 } from '@tabler/icons-react'
 import { formatPlaytime, localDayKey } from '../lib/utils'
 import EmptyState from '../components/ui/EmptyState'
@@ -282,21 +282,35 @@ export default function Statistics() {
   const [selectedHour, setSelectedHour] = useState(null)   // 24h view
   const [hourDetail, setHourDetail] = useState(null)
   const [hourLoading, setHourLoading] = useState(false)
+  // Games hidden from the Library are excluded by default so these numbers
+  // reconcile with what the Library actually shows. Remembered per browser
+  // since it's a view preference, not data.
+  const [includeHidden, setIncludeHidden] = useState(() => {
+    try { return localStorage.getItem('kozo:stats-include-hidden') === '1' } catch { return false }
+  })
 
-  const load = useCallback(async (p) => {
+  const load = useCallback(async (p, hidden = includeHidden) => {
     if (!window.kozo?.api) return
     // First ever load → show loading placeholder
     // Subsequent loads (period switch) → keep old data visible, show subtle spinner
     if (!stats) setLoading(true)
     else setFetching(true)
 
-    const res = await window.kozo.api.stats.get(p)
+    const res = await window.kozo.api.stats.get(p, hidden)
     if (res?.ok) setStats(res.data)
     setLoading(false)
     setFetching(false)
-  }, [stats])
+  }, [stats, includeHidden])
 
   useEffect(() => { load('7d') }, [])
+
+  function toggleHidden() {
+    const next = !includeHidden
+    setIncludeHidden(next)
+    try { localStorage.setItem('kozo:stats-include-hidden', next ? '1' : '0') } catch {}
+    // Drill-downs re-fetch on their own effects; the period data does not.
+    load(period, next)
+  }
 
   // Fetch the per-day breakdown whenever a bar is selected. A failed read must
   // still resolve to an EMPTY detail, not null — the panels treat a null detail
@@ -305,7 +319,7 @@ export default function Statistics() {
     if (!selectedDay) { setDayDetail(null); return }
     let cancelled = false
     setDayLoading(true)
-    Promise.resolve(window.kozo?.api?.stats?.dayActivity?.(selectedDay))
+    Promise.resolve(window.kozo?.api?.stats?.dayActivity?.(selectedDay, includeHidden))
       .then(res => {
         if (cancelled) return
         setDayDetail(res?.ok ? res.data : EMPTY_DETAIL)
@@ -313,14 +327,14 @@ export default function Statistics() {
       })
       .catch(() => { if (!cancelled) { setDayDetail(EMPTY_DETAIL); setDayLoading(false) } })
     return () => { cancelled = true }
-  }, [selectedDay])
+  }, [selectedDay, includeHidden])
 
   // Fetch the per-hour breakdown whenever an hour bar is selected (24h view).
   useEffect(() => {
     if (selectedHour == null) { setHourDetail(null); return }
     let cancelled = false
     setHourLoading(true)
-    Promise.resolve(window.kozo?.api?.stats?.hourActivity?.(selectedHour))
+    Promise.resolve(window.kozo?.api?.stats?.hourActivity?.(selectedHour, includeHidden))
       .then(res => {
         if (cancelled) return
         setHourDetail(res?.ok ? res.data : EMPTY_DETAIL)
@@ -328,7 +342,7 @@ export default function Statistics() {
       })
       .catch(() => { if (!cancelled) { setHourDetail(EMPTY_DETAIL); setHourLoading(false) } })
     return () => { cancelled = true }
-  }, [selectedHour])
+  }, [selectedHour, includeHidden])
 
   function handlePeriod(p) { setPeriod(p); setSelectedDay(null); setSelectedHour(null); load(p) }
 
@@ -369,6 +383,19 @@ export default function Statistics() {
         {fetching && (
           <IconLoader2 size={15} stroke={1.8} className="spin" style={{ color: 'var(--text-muted)' }} />
         )}
+        <button
+          type="button"
+          className={`${s.periodBtn} ${includeHidden ? s.periodBtnActive : s.periodBtnIdle}`}
+          aria-pressed={includeHidden}
+          onClick={toggleHidden}
+          title={includeHidden
+            ? 'Counting games you hid from the Library'
+            : 'Games hidden from the Library are not counted'}
+          style={{ marginRight: 8, display: 'inline-flex', alignItems: 'center', gap: 5 }}
+        >
+          {includeHidden ? <IconEye size={13} stroke={1.7} /> : <IconEyeOff size={13} stroke={1.7} />}
+          Hidden
+        </button>
         <div className={s.periodBtns}>
           {PERIODS.map(p => (
             <button
