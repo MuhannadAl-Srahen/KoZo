@@ -201,7 +201,12 @@ export default function GameDetail() {
   // Per-game reset. The route has no key, so /game/A → /game/B (the tray's
   // now-playing item does exactly that) reuses this instance with only `id`
   // changing — reset per-game state so game A never renders under game B's URL.
+  // idRef is the CURRENT id readable from inside an async callback that was
+  // started under the previous one, so a late resolve can bail instead of
+  // writing the old game's data into the new game's page.
+  const idRef = useRef(id)
   useEffect(() => {
+    idRef.current = id
     setLoading(true)
   }, [id])
 
@@ -212,14 +217,27 @@ export default function GameDetail() {
   const autoSyncedRef = useRef(null)
   useEffect(() => {
     if (loading || !game?.id || autoSyncedRef.current === game.id) return
-    autoSyncedRef.current = game.id
+    const myId = game.id
+    autoSyncedRef.current = myId
     ;(async () => {
       try {
         if (game.is_cracked) {
-          await window.kozo?.api?.crack?.scanGame?.(game.id)
+          const res = await window.kozo?.api?.crack?.scanGame?.(myId)
+          // Report what the scan found. This used to live in a SECOND effect
+          // that re-fetched the game and ran the very same scan 800ms later —
+          // so opening any cracked game did the whole install-tree walk and
+          // forced Steam schema fetch twice.
+          if (res?.ok && (res.data?.added > 0 || res.data?.hits?.length > 0)) {
+            if (Number(idRef.current) !== myId) return
+            const sources = [...new Set((res.data.hits || []).map(h => h.source))]
+            setCrackScanInfo({ added: res.data.added, sources })
+          }
         } else if (game.steam_app_id) {
-          await window.kozo?.api?.steam?.refresh?.(game.id)
+          await window.kozo?.api?.steam?.refresh?.(myId)
         }
+        // Navigating A → B mid-await left this awaiting call holding game A's
+        // `load`, which then wrote A's data over B's page.
+        if (Number(idRef.current) !== myId) return
         load()   // reflect anything the sync found
       } catch { /* silent — manual sync in the menu surfaces errors */ }
     })()
@@ -260,24 +278,9 @@ export default function GameDetail() {
     return () => { for (const off of offs) off?.() }
   }, [load])
 
-  // Auto-scan crack files when a cracked game page opens
-  useEffect(() => {
-    if (!id) return
-    let cancelled = false
-    const timer = setTimeout(async () => {
-      if (cancelled) return
-      const gRes = await window.kozo?.api?.games?.get(Number(id))
-      if (cancelled || !gRes?.ok || !gRes.data?.is_cracked) return
-      const res = await window.kozo?.api?.crack?.scanGame?.(Number(id))
-      if (cancelled || !res?.ok) return
-      if (res.data?.added > 0 || res.data?.hits?.length > 0) {
-        const sources = [...new Set((res.data.hits || []).map(h => h.source))]
-        setCrackScanInfo({ added: res.data.added, sources })
-        if (res.data.added > 0) load()
-      }
-    }, 800)
-    return () => { cancelled = true; clearTimeout(timer) }
-  }, [id])
+  // (The crack auto-scan lives in the autoSync effect above — it used to be
+  // duplicated here behind an 800ms timer, running the same install-tree walk
+  // and forced Steam schema fetch a second time on every cracked game's page.)
 
   // Close the menu if user clicks outside
   useEffect(() => {
@@ -528,7 +531,13 @@ export default function GameDetail() {
               variant: 'primary',
               onClick: async () => {
                 setInfo(null)
-                await window.kozo?.api?.games?.update(Number(id), { manual_appid: Number(suggested) })
+                // Write to whichever column the resolver actually reads.
+                // crackWatcher takes `steam_app_id || manual_appid`, so setting
+                // manual_appid on a game that already has a steam_app_id was a
+                // no-op — the button reported success and changed nothing.
+                await window.kozo?.api?.games?.update(Number(id), game?.steam_app_id
+                  ? { steam_app_id: Number(suggested) }
+                  : { manual_appid: Number(suggested) })
                 await load()
                 handleCrackFiles()
               },

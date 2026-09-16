@@ -563,6 +563,99 @@ function SteamTab() {
   )
 }
 
+// Emulator save folders on this PC that hold real achievement progress for a
+// game the library doesn't have. services/crackDiscovery.js + its two IPC
+// channels were fully implemented but nothing ever called them — this is the
+// surface that was missing. It only ever LISTS; adding is the user's choice.
+function CrackedOnThisPC() {
+  const [found, setFound]   = useState(null)   // null = not run yet
+  const [busy, setBusy]     = useState(false)
+  const [addingId, setAdding] = useState(null)
+  const [msg, setMsg]       = useState(null)
+
+  async function scan() {
+    setBusy(true); setMsg(null)
+    const res = await window.kozo?.api?.crack?.discover?.()
+    setBusy(false)
+    if (!res?.ok) { setMsg({ type: 'error', text: 'Lookup failed: ' + (res?.error || 'unknown') }); return }
+    setFound(res.data || [])
+  }
+
+  async function add(g) {
+    setAdding(g.appId)
+    const res = await window.kozo?.api?.games?.add?.({
+      name: g.name || `App ${g.appId}`,
+      steam_app_id: String(g.appId),
+      exe_name: '',
+      install_path: null,
+      is_cracked: 1,
+      source: 'cracked',
+    })
+    setAdding(null)
+    if (res?.ok) {
+      setFound(prev => (prev || []).filter(x => x.appId !== g.appId))
+      setMsg({ type: 'success', text: `Added ${g.name || g.appId}. Set its executable in Edit to track playtime.` })
+    } else {
+      setMsg({ type: 'error', text: 'Could not add: ' + (res?.error || 'unknown') })
+    }
+  }
+
+  async function dismiss(g) {
+    await window.kozo?.api?.crack?.dismissDiscovered?.(g.appId)
+    setFound(prev => (prev || []).filter(x => x.appId !== g.appId))
+  }
+
+  return (
+    <section className={s.section}>
+      <div className={s.sectionHeader}>
+        <IconTrophy size={15} stroke={1.6} />
+        <span>Achievement data on this PC</span>
+      </div>
+      <p className={s.sectionDesc}>
+        Looks for emulator save folders holding unlocked achievements for games that aren't
+        in your library yet. Nothing is added automatically.
+      </p>
+
+      <div className={s.keyRow}>
+        <button type="button" className={s.testBtn} onClick={scan} disabled={busy}>
+          {busy
+            ? <><IconLoader2 size={13} stroke={1.8} className="spin" /> Looking…</>
+            : <><IconSearch size={13} stroke={1.8} /> Look for achievement data</>
+          }
+        </button>
+      </div>
+
+      {found && found.length === 0 && (
+        <StatusLine type="neutral">
+          Nothing found that isn't already in your library.
+        </StatusLine>
+      )}
+
+      {found && found.length > 0 && (
+        <div className={s.pathList}>
+          {found.map(g => (
+            <div key={g.appId} className={s.pathRow}>
+              <span className={s.pathText} title={g.path}>
+                {g.name || `App ${g.appId}`} · {g.unlocked} unlocked · {g.source}
+              </span>
+              <button type="button" className={s.testBtn} disabled={addingId === g.appId}
+                onClick={() => add(g)} style={{ marginRight: 6 }}>
+                {addingId === g.appId ? 'Adding…' : 'Add'}
+              </button>
+              <button type="button" className={s.pathRemoveBtn} aria-label={`Never ask about ${g.name || g.appId}`}
+                title="Never ask about this one again" onClick={() => dismiss(g)}>
+                <IconMinus size={12} stroke={2} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Message msg={msg} />
+    </section>
+  )
+}
+
 // ── Tab: Scan PC ─────────────────────────────────────────────────────────────
 function ScanPCTab() {
   const [paths, setPaths]           = useState([])
@@ -657,6 +750,8 @@ function ScanPCTab() {
 
         <Message msg={scanMsg} />
       </section>
+
+      <CrackedOnThisPC />
 
       {/* Results modal */}
       {scanModal && (

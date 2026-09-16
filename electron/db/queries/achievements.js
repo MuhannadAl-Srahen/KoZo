@@ -67,7 +67,14 @@ function bulkUpsertAchievements(gameId, achievements) {
       description = excluded.description,
       icon_url = excluded.icon_url,
       icon_locked_url = excluded.icon_locked_url,
-      global_unlock_percent = excluded.global_unlock_percent,
+      -- COALESCE, not a bare assignment. getGlobalAchievementPercentages
+      -- returns {} on ANY failure (a timeout, a 500, a rate-limit), so every
+      -- row arrives with global_unlock_percent = null and one transient blip
+      -- used to erase a game's entire rarity data — on a call that re-fires
+      -- every time its detail page is opened. Rarity feeds the Ultra-Rare
+      -- badges and the XP rarity bonus. A null now means "not known this
+      -- time", never "zero".
+      global_unlock_percent = COALESCE(excluded.global_unlock_percent, global_unlock_percent),
       is_hidden = excluded.is_hidden
   `)
   const run = getDb().transaction(() => {
@@ -91,17 +98,55 @@ function getAchievementCounts() {
 // Returns the number of rows actually inserted: 0 means this achievement was
 // already unlocked. Callers MUST gate toasts, XP and counters on that — the
 // session-end retry ladder calls this repeatedly for the same unlock.
+// Which session should an unlock be filed under when the caller doesn't say?
+// Every automatic path (the 10s Steam poll, the crack watcher, the local stats
+// watcher) passed session_id: null, so sessions.achievements_unlocked never left
+// zero and the per-session counters on the Sessions page and GameDetail were
+// permanently wrong. Resolved from the DB rather than plumbed through five call
+// sites — an unlock belongs to the session that was open when it landed.
+// The grace window catches session-end syncs: endSession closes the row and
+// THEN runs a sync (plus retries) for unlocks earned in the final minutes.
+const SESSION_GRACE_MS = 5 * 60 * 1000
+
+function sessionForAchievement(achievementId, unlockedAt) {
+  try {
+    const db = getDb()
+    // A dated unlock only belongs to a session it actually falls inside. Without
+    // this, importing a game's whole back-catalogue (games:add does exactly
+    // that) while that same game is running would credit every historical
+    // unlock to the current session. An undated unlock is "just now".
+    const open = db.prepare(`
+      SELECT s.id FROM sessions s
+      JOIN achievements a ON a.game_id = s.game_id
+      WHERE a.id = ? AND s.ended_at IS NULL
+        AND (? IS NULL OR julianday(?) >= julianday(s.started_at))
+      ORDER BY s.started_at DESC LIMIT 1
+    `).get(achievementId, unlockedAt ?? null, unlockedAt ?? null)
+    if (open) return open.id
+    const recent = db.prepare(`
+      SELECT s.id FROM sessions s
+      JOIN achievements a ON a.game_id = s.game_id
+      WHERE a.id = ? AND s.ended_at IS NOT NULL
+        AND (julianday('now') - julianday(s.ended_at)) * 86400000 <= ?
+        AND (? IS NULL OR julianday(?) >= julianday(s.started_at))
+      ORDER BY s.ended_at DESC LIMIT 1
+    `).get(achievementId, SESSION_GRACE_MS, unlockedAt ?? null, unlockedAt ?? null)
+    return recent ? recent.id : null
+  } catch { return null }
+}
+
 function addUnlock(data) {
+  const sessionId = data.session_id ?? sessionForAchievement(data.achievement_id, data.unlocked_at ?? null)
   const info = getDb().prepare(`
     INSERT OR IGNORE INTO achievement_unlocks (achievement_id, session_id, unlocked_at, source)
     VALUES (@achievement_id, @session_id, @unlocked_at, @source)
-  `).run({ ...data, unlocked_at: data.unlocked_at ?? null, session_id: data.session_id ?? null })
+  `).run({ ...data, unlocked_at: data.unlocked_at ?? null, session_id: sessionId })
 
   // Update session achievement count if tied to a session
-  if (info.changes > 0 && data.session_id) {
+  if (info.changes > 0 && sessionId) {
     getDb().prepare(`
       UPDATE sessions SET achievements_unlocked = achievements_unlocked + 1 WHERE id = ?
-    `).run(data.session_id)
+    `).run(sessionId)
   }
   return info.changes
 }

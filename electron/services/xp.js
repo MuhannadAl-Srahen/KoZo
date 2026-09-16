@@ -75,11 +75,15 @@ function computeXp() {
   const endedSec = db.prepare(`
     SELECT COALESCE(SUM(duration_seconds), 0) AS s FROM sessions WHERE ended_at IS NOT NULL
   `).get().s || 0
+  // Idle is subtracted here too, exactly as endSession subtracts it from the
+  // closed row. Without it a session left running while away kept earning XP
+  // (60/hour) and could cross a level boundary — firing a celebration that
+  // silently reverted at session end, when the idle time was finally removed.
   const liveSec = db.prepare(`
     SELECT COALESCE(SUM(MAX(0,
       MIN(julianday('now'), julianday(COALESCE(g.last_played_at, s.started_at)) + 60.0 / 86400)
       - julianday(s.started_at)
-    ) * 86400), 0) AS s
+    ) * 86400 - COALESCE(s.idle_seconds, 0)), 0) AS s
     FROM sessions s LEFT JOIN games g ON g.id = s.game_id
     WHERE s.ended_at IS NULL
   `).get().s || 0

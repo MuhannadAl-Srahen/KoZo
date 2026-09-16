@@ -18,7 +18,25 @@ function getLogStream() {
   const logFile = path.join(logsDir, `kozo-${date}.log`)
   logStream = fs.createWriteStream(logFile, { flags: 'a' })
   logDate = date
+  pruneOldLogs(logsDir)
   return logStream
+}
+
+// One file per day and nothing ever deleted them, so a tray install accumulated
+// a file for every day it had ever run. Runs only when the stream rolls (first
+// write of a new day), so this is at most one readdir per day.
+const KEEP_LOG_DAYS = 14
+
+function pruneOldLogs(logsDir) {
+  try {
+    const stale = fs.readdirSync(logsDir)
+      .filter(f => /^kozo-\d{4}-\d{2}-\d{2}\.log$/.test(f))
+      .sort()                                   // filename sorts chronologically
+      .slice(0, -KEEP_LOG_DAYS)
+    for (const f of stale) {
+      try { fs.unlinkSync(path.join(logsDir, f)) } catch (_) {}
+    }
+  } catch (_) {}
 }
 
 function formatLine(level, msg, data) {

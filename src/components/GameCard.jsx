@@ -56,7 +56,7 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
             it. If the image fails to load the icon shows again. */}
         <Icon size={iconSize} className={s.bannerIcon} stroke={1.1} style={{ zIndex: 0 }} />
         {(() => {
-          const localSrc = game.banner_local_path ? fileUrl(game.banner_local_path, game._imgBust) : null
+          const localSrc = game.banner_local_path ? fileUrl(game.banner_local_path, game.banner_rev) : null
           const src = localSrc || game.banner_url
           if (!src) return null
           // A local banner file can go missing (e.g. after a backup restore that
@@ -234,7 +234,7 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite, onConte
       <div className={s.listThumb} style={{ background: bg }}>
         <Icon size={20} stroke={1.2} style={{ color: 'rgba(255,255,255,0.15)', position: 'relative', zIndex: 0 }} />
         {(() => {
-          const localSrc = game.banner_local_path ? fileUrl(game.banner_local_path, game._imgBust) : null
+          const localSrc = game.banner_local_path ? fileUrl(game.banner_local_path, game.banner_rev) : null
           const src = localSrc || game.banner_url
           if (!src) return null
           function handleError(e) {

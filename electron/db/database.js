@@ -40,7 +40,42 @@ function initDatabase() {
     const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8')
     db.exec(schema)
 
-    // Additive migrations — safe to run on every startup
+    runMigrations()
+
+    seedDefaults()
+    // Open sessions are NOT closed here — processWatcher.resolveOrphanSessions
+    // owns that, and it can tell "game still running, resume as one session"
+    // from "game closed while KoZo was off, cap at the last heartbeat".
+    purgeOcrUnlocks()
+    purgeForeignStatsUnlocks()
+    repairExeMisattribution()
+
+    return db
+  } catch (err) {
+    // ONLY a genuinely unreadable file justifies moving the user's database
+    // aside. This catch used to swallow everything — a locked file, a transient
+    // EPERM from antivirus, a bug in one of the migrations below — and respond
+    // by renaming their entire library to .bak and starting empty.
+    const code = String(err?.code || '')
+    const msg  = String(err?.message || '')
+    const corrupt =
+      /SQLITE_CORRUPT|SQLITE_NOTADB|SQLITE_FORMAT/.test(code) ||
+      /file is not a database|database disk image is malformed|file is encrypted/i.test(msg)
+    if (!corrupt) {
+      try { require('../logger').error('initDatabase failed (NOT treated as corruption)', { code, message: msg }) } catch (_) {}
+      throw err
+    }
+    return recoverDatabase(dbPath, backupPath, err)
+  }
+}
+
+// Additive migrations — safe to run on every startup, and REQUIRED after any
+// db.exec(schema): schema.sql only describes the original tables, so a database
+// created from it alone is ~16 columns short. The corrupt-DB recovery path used
+// to skip these entirely and left the app running against that partial schema
+// until the next restart.
+function runMigrations() {
+  {
     try { db.exec('ALTER TABLE games ADD COLUMN hero_local_path TEXT') } catch (_) {}
     try { db.exec('ALTER TABLE games ADD COLUMN last_steam_sync_at TIMESTAMP') } catch (_) {}
     try { db.exec('ALTER TABLE games ADD COLUMN steam_playtime_min INTEGER DEFAULT 0') } catch (_) {}
@@ -74,22 +109,29 @@ function initDatabase() {
     // Launch this game's exe elevated (UAC) every time — set manually, or auto-set
     // the first time a non-elevated launch fails/silently no-ops (see games:launch).
     try { db.exec('ALTER TABLE games ADD COLUMN run_as_admin INTEGER DEFAULT 0') } catch (_) {}
+    // AFK seconds, persisted onto the OPEN session row on the heartbeat's own
+    // throttle. It was in-memory only, so services/xp.js credited a live
+    // session's full wall clock and AFK time produced XP (and level-ups) that
+    // vanished again when the session ended and the idle was subtracted.
+    try { db.exec('ALTER TABLE sessions ADD COLUMN idle_seconds INTEGER DEFAULT 0') } catch (_) {}
+    // Cover-art revision, bumped every time the art is re-fetched. "Refresh
+    // Cover Images" re-downloads into the SAME path / re-resolves the SAME
+    // remote URL, so the browser served its cached copy and the screen never
+    // changed. The cards read this as their cache-buster (they previously read
+    // `_imgBust`, which nothing anywhere ever assigned).
+    try { db.exec('ALTER TABLE games ADD COLUMN banner_rev INTEGER DEFAULT 0') } catch (_) {}
+    try { db.exec('ALTER TABLE game_list ADD COLUMN banner_rev INTEGER DEFAULT 0') } catch (_) {}
 
     relaxUnlockedAtNotNull()
     migrateCategoriesToCustomLists()
     dedupeGameList()
-    seedDefaults()
-    // Open sessions are NOT closed here — processWatcher.resolveOrphanSessions
-    // owns that, and it can tell "game still running, resume as one session"
-    // from "game closed while KoZo was off, cap at the last heartbeat".
-    purgeOcrUnlocks()
-    purgeForeignStatsUnlocks()
+  }
+}
 
-    return db
-  } catch (err) {
-    // Corrupted DB: backup and start fresh. Close the handle first — on Windows
-    // renaming a file SQLite still holds open fails silently, and the retry then
-    // reopens the same corrupt file.
+// Corrupted DB: move it aside and start fresh.
+function recoverDatabase(dbPath, backupPath, err) {
+    // Close the handle first — on Windows renaming a file SQLite still holds
+    // open fails silently, and the retry then reopens the same corrupt file.
     try { if (db) db.close() } catch (_) {}
     db = null
     if (fs.existsSync(dbPath)) {
@@ -104,6 +146,10 @@ function initDatabase() {
 
       const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8')
       db.exec(schema)
+      // Same migrations as the normal path — without these the fresh database
+      // is missing every column added since schema.sql was written, and the
+      // very first games:add would throw.
+      runMigrations()
       seedDefaults()
     } catch (fatal) {
       db = null
@@ -113,7 +159,6 @@ function initDatabase() {
     try { require('../logger').warn('initDatabase: recovered from an unreadable database', { message: err.message }) } catch (_) {}
 
     return db
-  }
 }
 
 // achievement_unlocks.unlocked_at was created NOT NULL, but Steam reports
@@ -391,4 +436,102 @@ function purgeForeignStatsUnlocks() {
   } catch (_) {}
 }
 
-module.exports = { initDatabase, getDb }
+// One-time repair for games that were pointed at ANOTHER game's executable.
+// Nothing in KoZo ever cross-checked a game's title against the exe it tracks,
+// so a wrong pick in the Add Game flow silently credited that exe's playtime to
+// the wrong game — for months. Two causes, both now fixed at the source:
+//   • AddGameModal named a game after the LAST path segment, so browsing to
+//     "…\007 First Light\Retail\007FirstLight.exe" created a game called
+//     "Retail" (fixed: deriveGameNameFromPath in src/lib/utils.js).
+//   • pcScanner's exe picker fell back to "largest file", which handed back
+//     StellarBlade's crs-handler.exe (fixed: isHelperExe + acronym matching).
+// Each entry only fires if the row STILL matches exactly what was diagnosed —
+// the same double-guard trackingSelfTest uses — so this can never rewrite a
+// row the user has already corrected by hand.
+const EXE_MISATTRIBUTION_FIXES = [
+  {
+    // 85 sessions / 52.8 h of League of Legends were filed under Ruined King.
+    // The playtime is real, only the label was wrong, so the sessions stay and
+    // the game is renamed. Ruined King's Steam art + achievement schema are
+    // dropped (League of Legends is not on Steam and has no Steam achievements;
+    // this row had 0 unlocks, so nothing earned is lost).
+    match: { name: 'Ruined King: A League of Legends Story™', exe_name: 'League of Legends.exe' },
+    set: {
+      name: 'League of Legends', manual_appid: null, steam_app_id: null,
+      banner_url: null, banner_local_path: null, hero_local_path: null, source: 'manual',
+    },
+    dropAchievements: true,
+  },
+  {
+    // Named after its own "Retail" subfolder. Tracking was correct all along —
+    // the exe, art, appid and 24 unlocks all belong to 007 First Light.
+    match: { name: 'Retail', exe_name: '007FirstLight.exe' },
+    set: { name: '007 First Light' },
+  },
+  {
+    // crs-handler.exe is Unreal's crash reporter, not the game. Every unrelated
+    // process of that name started a phantom StellarBlade session.
+    match: { name: 'StellarBlade', exe_name: 'crs-handler.exe' },
+    set: { exe_name: 'SB.exe' },
+    // crs-handler.exe is Sony's Crash Reporting Service, shipped in every one
+    // of their PC ports — so a session of The Last of Us Part I started a
+    // StellarBlade session at the same millisecond and ran for its whole 24
+    // minutes. The exe was wrong from the moment the game was added, so every
+    // session ever recorded against it came from another game's process.
+    dropAllSessions: true,
+  },
+]
+
+function repairExeMisattribution() {
+  const done = db.prepare("SELECT value FROM settings WHERE key = 'exe_misattribution_repair_v1'").get()
+  if (done) return
+
+  const run = db.transaction(() => {
+    const applied = []
+    for (const fix of EXE_MISATTRIBUTION_FIXES) {
+      const row = db.prepare('SELECT id FROM games WHERE name = ? AND exe_name = ?')
+        .get(fix.match.name, fix.match.exe_name)
+      if (!row) continue
+
+      const cols = Object.keys(fix.set)
+      db.prepare(`UPDATE games SET ${cols.map(c => `${c} = ?`).join(', ')} WHERE id = ?`)
+        .run(...cols.map(c => fix.set[c]), row.id)
+
+      if (fix.dropAchievements) {
+        db.prepare('DELETE FROM achievements WHERE game_id = ?').run(row.id)
+      }
+      if (fix.dropAllSessions) {
+        db.prepare('DELETE FROM sessions WHERE game_id = ?').run(row.id)
+        // total_playtime_seconds is a denormalised counter, so clearing the
+        // sessions alone would leave the card still showing the phantom time.
+        db.prepare(`UPDATE games SET total_playtime_seconds = 0, first_played_at = NULL,
+                                     last_played_at = NULL WHERE id = ?`).run(row.id)
+      }
+      applied.push(`${fix.match.name} → ${fix.set.name || fix.set.exe_name}`)
+    }
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('exe_misattribution_repair_v1', '1')").run()
+    return applied
+  })
+
+  let applied = []
+  try { applied = run() } catch (e) {
+    console.error('repairExeMisattribution failed:', e.message)
+    return
+  }
+  if (!applied.length) return
+  try {
+    require('../logger').info(`repairExeMisattribution: corrected ${applied.length} game(s): ${applied.join('; ')}`)
+  } catch (_) {}
+}
+
+// Close on quit so SQLite runs its shutdown checkpoint and folds the WAL back
+// into the database. Without it the -wal file is never truncated: it had grown
+// to 3.9 MB against a 0.6 MB database. Safe to call more than once.
+function closeDatabase() {
+  if (!db) return
+  try { db.pragma('wal_checkpoint(TRUNCATE)') } catch (_) {}
+  try { db.close() } catch (_) {}
+  db = null
+}
+
+module.exports = { initDatabase, getDb, closeDatabase }
