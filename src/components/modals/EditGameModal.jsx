@@ -5,7 +5,8 @@ import {
 } from '@tabler/icons-react'
 import Modal, { modalStyles as ms } from '../ui/Modal'
 import RunningProcessPicker from '../ui/RunningProcessPicker'
-import { FOREIGN_LAUNCHERS } from '../../lib/utils'
+import ImageCropModal from './ImageCropModal'
+import { FOREIGN_LAUNCHERS, fileUrl } from '../../lib/utils'
 import cs from '../../styles/controls.module.css'
 import s from './AddGameModal.module.css'
 
@@ -28,6 +29,12 @@ export default function EditGameModal({ game, onClose, onSaved }) {
   const [saving, setSaving]           = useState(false)
   const [saved, setSaved]             = useState(false)
   const [showPicker, setShowPicker]   = useState(false)
+  // Cover art. Add Game could always set one, Edit never could — so a game
+  // already in the library that Steam has no art for (anything not on Steam:
+  // League of Legends, a launcher-exclusive, an emulated title) was stuck with
+  // the placeholder forever, with no way to fix it from the UI.
+  const [coverPath, setCoverPath]     = useState(game.banner_local_path || '')
+  const [cropSrc, setCropSrc]         = useState(null)
   const [showAdvanced, setShowAdvanced] = useState(false)
 
   function onExeChange(val) {
@@ -64,6 +71,10 @@ export default function EditGameModal({ game, onClose, onSaved }) {
         source,
         steam_app_id: sid ? Number(sid) : null,
         run_as_admin: runAsAdmin,
+        banner_local_path: coverPath.trim() || null,
+        // A hand-picked cover must outrank the remote Steam URL, or the card
+        // would keep falling back to whatever art the app id resolves to.
+        ...(coverPath.trim() && coverPath !== game.banner_local_path ? { banner_url: null } : {}),
       })
       setSaving(false)
       if (res?.ok) {
@@ -80,6 +91,7 @@ export default function EditGameModal({ game, onClose, onSaved }) {
   }
 
   return (
+   <>
     <Modal
       title={`Edit "${game.name}"`}
       icon={<IconEdit size={16} stroke={1.6} />}
@@ -337,7 +349,61 @@ export default function EditGameModal({ game, onClose, onSaved }) {
       </div>
       </>}
 
+      <div className={s.field}>
+        <label className={s.label}>
+          Cover image{' '}
+          <span style={{ color: 'var(--text-secondary)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
+            (optional)
+          </span>
+        </label>
+        <div className={s.fileRow}>
+          {coverPath && (
+            <img
+              src={fileUrl(coverPath, Date.now())}
+              alt=""
+              style={{
+                width: 34, height: 51, objectFit: 'cover',
+                borderRadius: 4, border: '1px solid var(--border)', flexShrink: 0,
+              }}
+            />
+          )}
+          <button
+            type="button"
+            className={s.fileBtn}
+            onClick={async () => {
+              const res = await window.kozo?.api?.dialog?.pickImageData?.()
+              if (res?.ok && res.data?.dataUrl) setCropSrc(res.data.dataUrl)
+            }}
+          >
+            {coverPath ? 'Change cover' : 'Choose image'}
+          </button>
+          {coverPath
+            ? <button type="button" className={s.fileBtn} onClick={() => setCoverPath('')}>Remove</button>
+            : <span className={s.fileHint}>No file chosen</span>
+          }
+        </div>
+        <div className={s.inputHint}>
+          Steam supplies art automatically, but only for games that are on Steam. Set your
+          own here for anything it can't find — League of Legends, launcher exclusives,
+          emulated titles.
+        </div>
+      </div>
+
       {errors.save && <div className={s.errorText} role="alert">{errors.save}</div>}
     </Modal>
+
+    {/* Sibling, not a child — same as AddGameModal. Modal portals to body, so
+        a crop modal declared inside another modal's subtree still escapes it,
+        but keeping them siblings matches the pattern used everywhere else. */}
+    {cropSrc && (
+      <ImageCropModal
+        src={cropSrc}
+        kind="cover"
+        title="Adjust cover"
+        onCancel={() => setCropSrc(null)}
+        onDone={(path) => { setCoverPath(path); setCropSrc(null) }}
+      />
+    )}
+   </>
   )
 }
