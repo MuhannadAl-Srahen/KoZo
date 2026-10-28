@@ -98,7 +98,7 @@ function check() {
   try {
     const db = require('../db/database').getDb()
     const rows = db.prepare(`
-      SELECT id, name, steam_app_id, release_date FROM game_list
+      SELECT id, name, steam_app_id, release_date, banner_url, game_id FROM game_list
       WHERE status = 'upcoming' AND release_date IS NOT NULL
         AND (release_notified IS NULL OR release_notified = 0)
     `).all()
@@ -117,13 +117,7 @@ function check() {
     setUnseen([...unseen, ...released.filter(r => !known.has(r.id))
       .map(r => ({ id: r.id, name: r.name, steam_app_id: r.steam_app_id ?? null, release_date: r.release_date }))])
 
-    try {
-      require('../overlayWindow').sendReleaseFlash({
-        games: released.map(r => ({ name: r.name, release_date: r.release_date })),
-      })
-    } catch (e) {
-      logger.warn('releaseWatch: overlay notify failed', { message: e.message })
-    }
+    sendReleaseToast(released).catch(e => logger.warn('releaseWatch: overlay notify failed', { message: e.message }))
 
     try {
       const { BrowserWindow } = require('electron')
@@ -137,6 +131,45 @@ function check() {
   } catch (e) {
     logger.warn('releaseWatch: check failed', { message: e.message })
   }
+}
+
+// The "Out Now" toast carries the game's cover, the same way "Now Playing"
+// does: the local library cover when the game is in the Library, else Steam's
+// portrait (cached GetItems call, capped at 4s so the toast is never late),
+// else the Game List's own art.
+async function releaseArt(rows) {
+  let assets = new Map()
+  try {
+    const ids = rows.map(r => r.steam_app_id).filter(Boolean)
+    if (ids.length) {
+      assets = await Promise.race([
+        require('./steamApi').getAppAssets(ids),
+        new Promise(resolve => setTimeout(() => resolve(new Map()), 4000)),
+      ])
+    }
+  } catch {}
+  const db = require('../db/database').getDb()
+  return rows.map(r => {
+    const a = r.steam_app_id ? assets.get(Number(r.steam_app_id)) : null
+    let artPath = null
+    try {
+      const lib = r.game_id
+        ? db.prepare('SELECT banner_local_path FROM games WHERE id = ?').get(r.game_id)
+        : (r.steam_app_id ? db.prepare('SELECT banner_local_path FROM games WHERE steam_app_id = ?').get(String(r.steam_app_id)) : null)
+      artPath = lib?.banner_local_path || null
+    } catch {}
+    return {
+      name: r.name,
+      release_date: r.release_date,
+      artPath,
+      artUrl: a?.portrait || a?.header || r.banner_url || null,
+    }
+  })
+}
+
+async function sendReleaseToast(rows) {
+  const games = await releaseArt(rows)
+  require('../overlayWindow').sendReleaseFlash({ games })
 }
 
 // Refresh store dates first (a delay must not fire a toast), then check.
@@ -158,4 +191,4 @@ function start() {
   _timer = setInterval(idleRefresh, CHECK_EVERY_MS)
 }
 
-module.exports = { start, check, refreshUpcomingDates, getUnseen, dismiss }
+module.exports = { start, check, refreshUpcomingDates, getUnseen, dismiss, sendReleaseToast }

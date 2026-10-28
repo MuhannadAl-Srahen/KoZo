@@ -1733,6 +1733,18 @@ handle('overlay:test', () => {
       .prepare('SELECT name, banner_local_path, banner_url FROM games WHERE banner_local_path IS NOT NULL OR banner_url IS NOT NULL LIMIT 1').get()
     if (g) ow.sendSessionStarted({ gameName: g.name, gameId: 0, artPath: g.banner_local_path || null, artUrl: g.banner_url || null })
   } catch {}
+  // And the "Out Now" toast a tracked release gets, using a Game List game
+  // (upcoming first) so the preview shows real cover art.
+  try {
+    const row = require('./db/database').getDb().prepare(`
+      SELECT id, name, steam_app_id, release_date, banner_url, game_id FROM game_list
+      ORDER BY (status = 'upcoming') DESC, (steam_app_id IS NULL) ASC LIMIT 1`).get()
+    if (row) {
+      setTimeout(() => {
+        require('./services/releaseWatch').sendReleaseToast([{ ...row, release_date: row.release_date || 'today' }]).catch(() => {})
+      }, 1500)
+    }
+  } catch {}
   return true
 })
 

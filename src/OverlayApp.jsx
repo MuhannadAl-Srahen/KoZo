@@ -578,16 +578,24 @@ function ReleaseToast({ toast, onDismiss }) {
         <span className={s.toastHeaderText}>Out Now</span>
       </div>
       <div className={s.toastBody}>
-        <div className={`${s.toastIcon} ${s.releaseIcon}`}>
-          <IconCalendarEvent size={22} stroke={1.5} style={{ color: 'var(--a)' }} />
-        </div>
+        {/* Cover art like "Now Playing"; the calendar icon only when there's none. */}
+        {(() => {
+          const art = games.find(g => g.artPath || g.artUrl)
+          return art
+            ? <ToastArt key={art.artPath || art.artUrl} artPath={art.artPath} artUrl={art.artUrl} className={s.liveGlow} />
+            : (
+              <div className={`${s.toastIcon} ${s.releaseIcon}`}>
+                <IconCalendarEvent size={22} stroke={1.5} style={{ color: 'var(--a)' }} />
+              </div>
+            )
+        })()}
         <div className={s.toastInfo}>
           <div className={s.toastName}>
             {one ? one.name : `${games.length} games you're waiting for`}
           </div>
           <div className={s.toastDesc}>
             {one
-              ? `Released ${one.release_date}. Find it under "Out now" in your Game List`
+              ? `Released ${one.release_date}. It's under "Out now" in your Game List`
               : games.map(g => g.name).slice(0, 4).join(', ')}
           </div>
         </div>
