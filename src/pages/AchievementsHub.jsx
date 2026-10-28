@@ -5,6 +5,7 @@ import { fileUrl, formatDate, rarityLabel, rarityColor, timeAgo } from '../lib/u
 import Modal from '../components/ui/Modal'
 import EmptyState from '../components/ui/EmptyState'
 import { Skeleton, RowSkeleton } from '../components/ui/Skeleton'
+import useCardZoom from '../lib/useCardZoom'
 import s from './AchievementsHub.module.css'
 
 // Compact "when": "2h ago" / "Jun 12"
@@ -43,6 +44,7 @@ function AchIcon({ url, size = 40 }) {
 }
 
 export default function AchievementsHub() {
+  const zoomStyle = useCardZoom('achievements', 'grid', { grid: 240 })   // Ctrl + mouse wheel tile size
   const navigate = useNavigate()
   const [data, setData] = useState(null)
   const [feedModal, setFeedModal] = useState(false)
@@ -165,7 +167,7 @@ export default function AchievementsHub() {
           {rarest.length > 0 && (
             <section className={s.section}>
               <div className={s.sectionTitle}><IconDiamond size={14} stroke={1.7} /> Your rarest trophies</div>
-              <div className={s.rareGrid}>
+              <div className={s.rareGrid} style={zoomStyle}>
                 {rarestKeyed.map(({ a, key }) => (
                   <button key={key} className={s.rareCard} data-gpnav=""
                     style={{ '--rc': rarityColor(a.global_unlock_percent) || 'var(--rarity-common)' }}

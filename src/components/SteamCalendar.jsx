@@ -8,6 +8,7 @@ import EmptyState from './ui/EmptyState'
 import SteamGameModal from './SteamGameModal'
 import { PanelSkeleton } from './ui/Skeleton'
 import { parseRelease, localDayKey, monthKey, formatMonthKey } from '../lib/utils'
+import useCardZoom from '../lib/useCardZoom'
 import s from './SteamCalendar.module.css'
 
 // Steam-style release calendar: popular games coming soon plus the most
@@ -157,6 +158,7 @@ export default function SteamCalendar({ trackedAppIds, onTrack, onUntrack }) {
   const [view, setView]       = useState(() => {
     try { return localStorage.getItem('kozo:calendar:view') === 'month' ? 'month' : 'days' } catch { return 'days' }
   })
+  const zoomStyle = useCardZoom('calendar', view === 'days' ? 'grid' : 'month', { grid: 150 })   // Ctrl + mouse wheel poster size
   const [dayOpen, setDayOpen] = useState(null)    // { label, games }
   const [detail, setDetail]   = useState(null)    // game
   const [busyId, setBusyId]   = useState(null)
@@ -256,7 +258,7 @@ export default function SteamCalendar({ trackedAppIds, onTrack, onUntrack }) {
   )
 
   return (
-    <div className={s.wrap}>
+    <div className={s.wrap} style={zoomStyle}>
       <div className={s.nav}>
         <button className={s.navBtn} onClick={() => shiftMonth(-1)} aria-label="Previous month"><IconChevronLeft size={16} /></button>
         <div className={s.monthLabel}>{formatMonthKey(mKey, 'long')}</div>

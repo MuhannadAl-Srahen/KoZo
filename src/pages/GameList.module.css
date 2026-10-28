@@ -891,3 +891,19 @@
   background: var(--a);
   color: #09090f;
 }
+
+/* Small cards (Ctrl + mouse wheel): two-line names, no genres line, and the
+   status word and month chip wrap onto separate lines instead of colliding. */
+.card { container-type: inline-size; }
+@container (max-width: 190px) {
+  .cardName {
+    font-size: var(--fs-sm);
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .cardGenresLine { display: none; }
+  .cardSubRow { flex-wrap: wrap; justify-content: flex-start; row-gap: var(--sp-4); }
+  .cardStatusWord { white-space: nowrap; }
+}

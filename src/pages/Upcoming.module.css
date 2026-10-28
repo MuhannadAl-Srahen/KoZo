@@ -52,7 +52,7 @@
    window widens, so no breakpoint is involved at any size. */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 280px), 1fr));   /* Ctrl+wheel */
   gap: var(--sp-12);
   contain: layout style;
 }

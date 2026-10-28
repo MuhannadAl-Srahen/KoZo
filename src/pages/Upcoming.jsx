@@ -10,6 +10,7 @@ import { Skeleton, CardSkeletonGrid, PanelSkeleton } from '../components/ui/Skel
 import SteamCalendar from '../components/SteamCalendar'
 import SteamGameModal from '../components/SteamGameModal'
 import ReleasedPanel from '../components/ReleasedPanel'
+import useCardZoom from '../lib/useCardZoom'
 import s from './Upcoming.module.css'
 
 // Keep Upcoming data hot between route changes to avoid full visual resets.
@@ -192,6 +193,8 @@ export default function Upcoming() {
   const [items, setItems] = useState(upcomingCache)
   const [detail, setDetail] = useState(null)   // { item, rel } | null
   const [tab, setTab] = useState(() => localStorage.getItem('kozo:upcoming:tab') || 'mine')
+  // Ctrl + mouse wheel card size (the Steam calendar tab has its own).
+  const zoomStyle = useCardZoom('upcoming', tab === 'mine' ? 'grid' : 'off', { grid: 280 })
   // Steam appids already on the Game List: appid → { id, status }. The calendar
   // marks them tracked and can untrack entries that are still Upcoming.
   const [trackedAppIds, setTrackedAppIds] = useState(() => new Map())
@@ -329,7 +332,7 @@ export default function Upcoming() {
       </div>
 
       <div className={s.content}>
-        <div className={s.inner}>
+        <div className={s.inner} style={zoomStyle}>
           <ReleasedPanel onChanged={load} />
           {tab === 'steam' && <SteamCalendar trackedAppIds={trackedAppIds} onTrack={trackGame} onUntrack={untrackGame} />}
 
