@@ -22,7 +22,16 @@ export default function MediaGallery({ items = [], height }) {
 
   return (
     <div className={s.gallery}>
-      <div className={s.viewer} style={height ? { height } : undefined}>
+      <div
+        className={s.viewer}
+        style={height ? { height } : undefined}
+        tabIndex={0}
+        onMouseEnter={(e) => e.currentTarget.focus({ preventScroll: true })}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowRight') { e.preventDefault(); step(1) }
+          if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1) }
+        }}
+      >
         <img
           key={cur.full || cur.thumb}
           className={s.viewerImg}
