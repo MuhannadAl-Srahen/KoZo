@@ -354,6 +354,81 @@ async function getStoreArt(appId, _retried = false) {
   }
 }
 
+// ── Real store art (hashed asset paths) ─────────────────────────────────────
+// Newer titles keep their portrait cover and library hero under HASHED paths
+// (store_item_assets/steam/apps/<id>/<hash>/library_capsule_2x.jpg), so the
+// classic steam/apps/<id>/library_600x900_2x.jpg 404s and cards fell back to a
+// letterboxed wide header (or no hero at all). IStoreBrowseService/GetItems is
+// public, keyless, batches many appids, and returns the exact filenames.
+const ASSET_BASE = 'https://shared.akamai.steamstatic.com/store_item_assets/'
+const ASSET_TTL_MS = 24 * 60 * 60 * 1000
+const assetCache = new Map()   // appid → { at, assets }
+
+function assetUrl(a, ...keys) {
+  if (!a?.asset_url_format) return null
+  for (const k of keys) {
+    if (a[k]) return ASSET_BASE + a.asset_url_format.replace('${FILENAME}', a[k])
+  }
+  return null
+}
+
+// appIds → Map(appid → { portrait, hero, header, capsule } absolute URLs, any may be null).
+async function getAppAssets(appIds) {
+  const ids = [...new Set((appIds || []).map(Number).filter(n => Number.isFinite(n) && n > 0))]
+  const out = new Map()
+  const missing = []
+  for (const id of ids) {
+    const hit = assetCache.get(id)
+    if (hit && Date.now() - hit.at < ASSET_TTL_MS) out.set(id, hit.assets)
+    else missing.push(id)
+  }
+  for (let i = 0; i < missing.length; i += 50) {
+    const batch = missing.slice(i, i + 50)
+    try {
+      const input = {
+        ids: batch.map(appid => ({ appid })),
+        context: { language: 'english', country_code: 'US' },
+        data_request: { include_assets: true },
+      }
+      const data = await getJSON('https://api.steampowered.com/IStoreBrowseService/GetItems/v1/', { input_json: JSON.stringify(input) })
+      for (const item of data?.response?.store_items || []) {
+        const a = item.assets
+        const assets = {
+          portrait: assetUrl(a, 'library_capsule_2x', 'library_capsule'),
+          hero:     assetUrl(a, 'library_hero_2x', 'library_hero'),
+          header:   assetUrl(a, 'header_2x', 'header'),
+          capsule:  assetUrl(a, 'main_capsule_2x', 'main_capsule'),
+        }
+        assetCache.set(item.appid, { at: Date.now(), assets })
+        out.set(item.appid, assets)
+      }
+    } catch (e) {
+      logger.warn('getAppAssets failed', { message: e.message, count: batch.length })
+    }
+  }
+  return out
+}
+
+async function assetsFor(appId) {
+  return (await getAppAssets([appId])).get(Number(appId)) || null
+}
+
+// Library hero (wide art on GameDetail): classic path first, then the hashed one.
+async function downloadHero(appId, gameId) {
+  const heroPath = path.join(getBannersDir(), `${gameId}_hero.jpg`)
+  const urls = [`https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_hero.jpg`]
+  const a = await assetsFor(appId).catch(() => null)
+  if (a?.hero) urls.push(a.hero)
+  for (const url of urls) {
+    try {
+      await downloadFile(url, heroPath)
+      require('../db/database').getDb().prepare('UPDATE games SET hero_local_path = ? WHERE id = ?').run(heroPath, gameId)
+      return heroPath
+    } catch { /* next */ }
+  }
+  throw new Error(`No hero art for appId ${appId}`)
+}
+
 // Returns the best WORKING remote cover URL for a 2:3 card without downloading:
 // the true portrait when it exists, else the real (hashed) header, else the
 // 231px capsule. Used for remote-only surfaces like the Game List.
@@ -363,6 +438,8 @@ async function resolveBannerUrl(appId) {
     const r = await getAxios().head(portrait, { timeout: 8000 })
     if (r.status === 200) return portrait
   } catch { /* no portrait — resolve real art below */ }
+  const a = await assetsFor(appId).catch(() => null)
+  if (a?.portrait) return a.portrait
   const art = await getStoreArt(appId)
   return art?.header_image || art?.capsule_image || portrait
 }
@@ -371,12 +448,16 @@ async function downloadBanner(appId, gameId, extraUrls = []) {
   const destPath = path.join(getBannersDir(), `${gameId}.jpg`)
   // Try the appid-path images first — fast, and they exist for the vast majority
   // of released games (true 600×900 portrait is best for the 2:3 library card).
+  // A real portrait always beats a wide header: when the classic portrait path
+  // 404s (newer titles), the hashed portrait from GetItems comes next.
+  const a = await assetsFor(appId).catch(() => null)
   const urls = [
     `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_600x900_2x.jpg`,
     `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_600x900.jpg`,
+    a?.portrait,
     `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/header.jpg`,
     `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/capsule_616x353.jpg`,
-  ]
+  ].filter(Boolean)
   for (const url of urls) {
     try {
       await downloadFile(url, destPath)
@@ -464,12 +545,7 @@ async function refreshGameData(gameId) {
 
   // Hero banner (wide landscape, used in GameDetail)
   try {
-    const heroPath = path.join(getBannersDir(), `${gameId}_hero.jpg`)
-    await downloadFile(
-      `https://cdn.akamai.steamstatic.com/steam/apps/${game.steam_app_id}/library_hero.jpg`,
-      heroPath
-    )
-    getDb().prepare('UPDATE games SET hero_local_path = ? WHERE id = ?').run(heroPath, gameId)
+    await downloadHero(game.steam_app_id, gameId)
     logger.info(`Hero banner downloaded for game ${gameId}`)
   } catch (e) {
     logger.warn(`Hero banner download failed for game ${gameId}`, { message: e.message })
@@ -507,12 +583,7 @@ async function refreshBanners(gameId) {
 
   // Hero banner (game detail page wide banner)
   try {
-    const heroPath = path.join(getBannersDir(), `${gameId}_hero.jpg`)
-    await downloadFile(
-      `https://cdn.akamai.steamstatic.com/steam/apps/${game.steam_app_id}/library_hero.jpg`,
-      heroPath
-    )
-    getDb().prepare('UPDATE games SET hero_local_path = ? WHERE id = ?').run(heroPath, gameId)
+    await downloadHero(game.steam_app_id, gameId)
   } catch (e) {
     logger.warn(`Hero banner failed for game ${gameId}`, { message: e.message })
   }
@@ -824,6 +895,7 @@ async function getComingSoon(feed = 'soon', page = 0) {
 }
 
 module.exports = {
+  getAppAssets, downloadHero,
   getComingSoon, parseComingSoonHtml,
   testApiKey, searchGames, findAppByName, refreshGameData, refreshBanners, downloadBanner,
   getStoreArt, getStoreDetails, resolveBannerUrl, resolveSteamId, runGenreBackfill, storeRemoteFallback,

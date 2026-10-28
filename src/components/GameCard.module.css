@@ -34,8 +34,7 @@
 /* Unavailable/hidden games dim the ARTWORK IMAGES only — the overlaid name and
    the stats strip keep full contrast so half this library (not installed)
    doesn't read as broken. */
-.cardDimmed .bannerImg,
-.cardDimmed .bannerBlur { opacity: 0.45; }
+.cardDimmed .bannerImg { opacity: 0.45; }
 .cardSelected {
   border-color: var(--a);
   box-shadow: var(--ring-select);
@@ -70,29 +69,17 @@
   aspect-ratio: 2 / 3;
 }
 
-/* Foreground cover — `contain` shows the WHOLE image. True 2:3 posters fill the
-   card exactly; landscape art (e.g. a header for a game with no portrait) is
-   shown in full and centered, with the blurred layer filling the gaps. */
+/* The cover always FILLS the 2:3 card. Steam's real portrait (hashed asset
+   paths included — steamApi.getAppAssets) fits exactly; a game that only has
+   wide art is cropped to fill rather than letterboxed on a blurred backdrop. */
 .bannerImg {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;
+  object-position: center 30%;
   position: absolute;
   inset: 0;
   z-index: 1;
-}
-
-/* Blurred, zoomed copy behind the cover so landscape art fills the 2:3 frame
-   nicely instead of leaving empty bars. Invisible for true portrait covers. */
-.bannerBlur {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  filter: blur(16px) brightness(0.55) saturate(1.1);
-  transform: scale(1.18);
 }
 
 .bannerIcon { color: rgba(255,255,255,0.10); position: relative; z-index: 1; }
@@ -371,22 +358,13 @@
   border-radius: 6px;
 }
 
-/* Contained foreground cover — shows full image without cropping */
+/* Thumbnail cover — fills the frame like the grid cards */
 .listThumbImg {
   width: 100%; height: 100%;
-  object-fit: contain;
+  object-fit: cover;
+  object-position: center 30%;
   position: absolute; inset: 0;
   z-index: 1;
-}
-
-/* Blurred fill behind the cover for landscape art */
-.listThumbBlur {
-  width: 100%; height: 100%;
-  object-fit: cover;
-  position: absolute; inset: 0;
-  z-index: 0;
-  filter: blur(12px) brightness(0.5) saturate(1.1);
-  transform: scale(1.2);
 }
 
 /* Green bar on left edge of thumbnail when LIVE.

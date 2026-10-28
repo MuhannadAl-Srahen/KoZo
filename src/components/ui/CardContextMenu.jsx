@@ -120,9 +120,6 @@ export default function CardContextMenu({
               {game.is_hidden ? <IconEye size={13} /> : <IconEyeOff size={13} />}
               {game.is_hidden ? 'Unhide from library' : 'Hide from library'}
             </button>
-            {!game.is_hidden && (
-              <div className={s.hint}>Hidden games keep tracking time, achievements and XP.</div>
-            )}
           </>
         )}
 

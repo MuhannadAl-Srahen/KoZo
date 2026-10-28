@@ -70,6 +70,7 @@ contextBridge.exposeInMainWorld('kozo', {
       signIn: () => ipcRenderer.invoke('steam:signIn'),
       storeDetails: (appId) => ipcRenderer.invoke('steam:storeDetails', appId),
       comingSoon: (feed, page) => ipcRenderer.invoke('steam:comingSoon', feed, page),
+      appAssets: (appIds) => ipcRenderer.invoke('steam:appAssets', appIds),
       lastSyncError: (gameId) => ipcRenderer.invoke('steam:lastSyncError', gameId),
       recheckPrivacy: () => ipcRenderer.invoke('steam:recheckPrivacy'),
       getProfile: (overrides) => ipcRenderer.invoke('steam:getProfile', overrides),

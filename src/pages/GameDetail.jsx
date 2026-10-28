@@ -298,14 +298,31 @@ export default function GameDetail() {
   const heroCdnUrl = game?.steam_app_id
     ? `https://cdn.akamai.steamstatic.com/steam/apps/${game.steam_app_id}/library_hero.jpg`
     : null
-  const heroPrimary = !game ? null
-    : game.hero_local_path ? fileUrl(game.hero_local_path, bust)
-    : (heroCdnUrl ?? fileUrl(game.banner_local_path, bust))
+  // Newer Steam titles keep their hero under a hashed path the classic CDN URL
+  // misses — look the real one up (steam:appAssets) as the next rung.
+  const [hashedHero, setHashedHero] = useState(null)
+  const artAppId = game?.steam_app_id || game?.manual_appid || null
+  useEffect(() => {
+    setHashedHero(null)
+    if (!artAppId) return
+    let alive = true
+    window.kozo?.api?.steam?.appAssets?.([artAppId]).then(res => {
+      if (alive && res?.ok) setHashedHero(res.data?.[artAppId]?.hero || null)
+    })
+    return () => { alive = false }
+  }, [artAppId])
+  const heroSources = !game ? [] : [
+    game.hero_local_path ? fileUrl(game.hero_local_path, bust) : null,
+    heroCdnUrl,
+    hashedHero,
+    game.hero_local_path ? null : fileUrl(game.banner_local_path, bust),
+  ].filter((u, i, all) => u && all.indexOf(u) === i)
+  const heroKey = heroSources.join('|')
   const [heroStage, setHeroStage] = useState(0)
-  useEffect(() => { setHeroStage(0) }, [heroPrimary])
-  const heroUrl = heroStage === 0 ? heroPrimary : heroStage === 1 ? heroCdnUrl : null
+  useEffect(() => { setHeroStage(0) }, [heroKey])
+  const heroUrl = heroSources[heroStage] || null
   function handleHeroError() {
-    setHeroStage(st => (st === 0 && heroCdnUrl && heroPrimary !== heroCdnUrl) ? 1 : 2)
+    setHeroStage(st => st + 1)
   }
 
   // Removing archives the game: it leaves the Library, history is kept.
@@ -856,8 +873,7 @@ export default function GameDetail() {
                   </button>
                 )}
 
-                <button className={s.menuItem} onClick={toggleHidden}
-                  title="Hidden games leave the Library grid but keep tracking time, achievements and XP">
+                <button className={s.menuItem} onClick={toggleHidden}>
                   {game.is_hidden ? <IconEye size={14} stroke={1.6} /> : <IconEyeOff size={14} stroke={1.6} />}
                   {game.is_hidden ? 'Unhide from library' : 'Hide from library'}
                 </button>

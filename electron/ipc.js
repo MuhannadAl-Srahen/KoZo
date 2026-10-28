@@ -74,6 +74,13 @@ async function addLibraryGame(data) {
       logger.warn(`Banner download failed for game ${game.id}`, { message: e.message })
     }
 
+    // Wide hero for GameDetail — new titles keep it under a hashed path.
+    try {
+      game.hero_local_path = await require('./services/steamApi').downloadHero(game.steam_app_id, game.id)
+    } catch (e) {
+      logger.warn(`Hero download failed for game ${game.id}`, { message: e.message })
+    }
+
     // Steam store genres — power auto-grouping on the Game List and genre chips.
     try {
       const { getStoreArt } = require('./services/steamApi')
@@ -1201,6 +1208,8 @@ handle('steam:signIn', () => require('./services/steamOpenId').signIn())
 // Store-page details (description, developers, screenshots) for the Upcoming popup.
 handle('steam:storeDetails', (appId) => require('./services/steamApi').getStoreDetails(appId))
 handle('steam:comingSoon', (feed, page) => require('./services/steamApi').getComingSoon(feed, page))
+// appIds → { [appid]: { portrait, hero, header, capsule } } real store art URLs.
+handle('steam:appAssets', async (appIds) => Object.fromEntries(await require('./services/steamApi').getAppAssets(appIds)))
 
 // Called when the Upcoming tab opens: warms the store-details cache for every
 // upcoming game (so popups open instantly) AND backfills missing release dates
@@ -1228,7 +1237,7 @@ handle('steam:getProfile', async (overrides) => {
 // the Settings tab can leave/return mid-run and still show the live counter.
 const bannerRefreshState = { running: false, done: 0, total: 0 }
 handle('banners:refreshStatus', () => ({ ...bannerRefreshState }))
-handle('steam:refreshAllBanners', async () => {
+async function refreshAllBannersJob() {
   if (bannerRefreshState.running) return { alreadyRunning: true }
 
   const { refreshBanners, resolveBannerUrl } = require('./services/steamApi')
@@ -1281,7 +1290,25 @@ handle('steam:refreshAllBanners', async () => {
   bk()
   broadcast('game:updated', null)
   return { upgraded }
-})
+}
+handle('steam:refreshAllBanners', refreshAllBannersJob)
+
+// One-time art repair: covers/heroes fetched before KoZo knew about Steam's
+// hashed asset paths are wide headers or missing for newer titles. Re-run the
+// image refresh once, when no game is running.
+setTimeout(() => {
+  try {
+    const settingsQ = require('./db/queries/settings')
+    if (settingsQ.getSetting('art_repair_v1') === '1') return
+    require('./services/processWatcher').runWhenIdle('artRepair', async () => {
+      try {
+        await refreshAllBannersJob()
+        settingsQ.setSetting('art_repair_v1', '1')
+        logger.info('art repair: Steam covers and heroes refreshed')
+      } catch (e) { logger.warn('art repair failed', { message: e.message }) }
+    })
+  } catch {}
+}, 30000)
 
 // ── App system settings (startup, minimize) ───────────────────────────────────
 const TASK_NAME = 'KoZo_AutoStart'

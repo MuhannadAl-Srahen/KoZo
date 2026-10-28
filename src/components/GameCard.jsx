@@ -71,17 +71,8 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
               return
             }
             img.style.display = 'none'
-            if (img.className.includes(s.bannerImg)) {
-              const b = img.previousElementSibling
-              if (b) b.style.display = 'none'
-            }
           }
-          return (
-            <>
-              <img src={src} className={s.bannerBlur} alt="" aria-hidden="true" loading="lazy" decoding="async" onError={handleError} />
-              <img src={src} className={s.bannerImg} alt="" loading="lazy" decoding="async" onError={handleError} />
-            </>
-          )
+          return <img src={src} className={s.bannerImg} alt="" loading="lazy" decoding="async" onError={handleError} />
         })()}
 
         {/* Status LED — top-left corner of the cover, on a dark ring plate so it
@@ -247,17 +238,8 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite, onConte
               return
             }
             img.style.display = 'none'
-            if (img.className.includes(s.listThumbImg)) {
-              const b = img.previousElementSibling
-              if (b?.tagName === 'IMG') b.style.display = 'none'
-            }
           }
-          return (
-            <>
-              <img src={src} className={s.listThumbBlur} alt="" aria-hidden="true" loading="lazy" decoding="async" onError={handleError} />
-              <img src={src} className={s.listThumbImg} alt="" loading="lazy" decoding="async" onError={handleError} />
-            </>
-          )
+          return <img src={src} className={s.listThumbImg} alt="" loading="lazy" decoding="async" onError={handleError} />
         })()}
         {game._isLive && !selectionMode && <div className={s.listLiveBar} />}
         {selectionMode && (
