@@ -73,14 +73,26 @@ function findTarget(id) {
 
 // Card placement: right of the target, else below, else above, else left;
 // always clamped inside the window.
+// Card placement: below the target, else above, else right, else left. Any
+// candidate whose card would overlap the target is rejected, so the card never
+// hides the control it is talking about. Always clamped inside the window.
 function placeCard(rect, cardH) {
   const vw = window.innerWidth, vh = window.innerHeight
   const clampX = (x) => Math.max(12, Math.min(x, vw - CARD_W - 12))
   const clampY = (y) => Math.max(12, Math.min(y, vh - cardH - 12))
-  if (rect.right + GAP + CARD_W < vw - 12) return { left: rect.right + GAP, top: clampY(rect.top + rect.height / 2 - cardH / 2) }
-  if (rect.bottom + GAP + cardH < vh - 12) return { left: clampX(rect.left + rect.width / 2 - CARD_W / 2), top: rect.bottom + GAP }
-  if (rect.top - GAP - cardH > 12) return { left: clampX(rect.left + rect.width / 2 - CARD_W / 2), top: rect.top - GAP - cardH }
-  return { left: clampX(rect.left - GAP - CARD_W), top: clampY(rect.top) }
+  const centerX = clampX(rect.left + rect.width / 2 - CARD_W / 2)
+  const centerY = clampY(rect.top + rect.height / 2 - cardH / 2)
+  const candidates = [
+    { left: centerX, top: rect.bottom + GAP },
+    { left: centerX, top: rect.top - GAP - cardH },
+    { left: rect.right + GAP, top: centerY },
+    { left: rect.left - GAP - CARD_W, top: centerY },
+  ]
+  const fits = (c) => c.left >= 12 && c.top >= 12 && c.left + CARD_W <= vw - 12 && c.top + cardH <= vh - 12
+  const overlaps = (c) => !(c.left + CARD_W <= rect.left || c.left >= rect.right || c.top + cardH <= rect.top || c.top >= rect.bottom)
+  const pick = candidates.find(c => fits(c) && !overlaps(c)) || candidates.find(c => !overlaps({ left: clampX(c.left), top: clampY(c.top) }))
+  const c = pick || candidates[0]
+  return { left: clampX(c.left), top: clampY(c.top) }
 }
 
 export default function Tour({ onDone }) {
@@ -92,6 +104,12 @@ export default function Tour({ onDone }) {
   const cardRef = useRef(null)
   const step = STEPS[index]
   const centered = !step.target
+  // A real dialog (Scan results, Add Game…) is open: step aside until it closes.
+  const [paused, setPaused] = useState(false)
+  useEffect(() => {
+    const t = setInterval(() => setPaused(!!document.querySelector('[role="dialog"]')), 200)
+    return () => clearInterval(t)
+  }, [])
 
   async function finish(then) {
     try { await window.kozo?.api?.settings?.set('onboarding_done', '1') } catch {}
@@ -133,7 +151,7 @@ export default function Tour({ onDone }) {
 
   // "Click it to continue" steps advance when the real control is clicked.
   useEffect(() => {
-    if (!step.clickToContinue) return
+    if (!step.clickToContinue && !step.action) return
     const el = findTarget(step.target)
     if (!el) return
     const onClick = () => setTimeout(() => setIndex(i => i + 1), 120)
@@ -147,6 +165,7 @@ export default function Tour({ onDone }) {
 
   useEffect(() => {
     const onKey = (e) => {
+      if (paused) return   // keys belong to the open dialog
       if (e.key === 'Escape') finish()
       if (e.key === 'ArrowRight' && !step.clickToContinue) next()
       if (e.key === 'ArrowLeft') back()
@@ -155,14 +174,17 @@ export default function Tour({ onDone }) {
     return () => window.removeEventListener('keydown', onKey)
   })
 
+  // Run the real control (Scan PC, Add Game). Its click listener above moves
+  // the tour on; the tour hides while that dialog is open and comes back after.
   function runAction() {
-    const el = findTarget(step.target)
-    finish(() => el?.click())
+    findTarget(step.target)?.click()
   }
 
-  const progress = (
+  // Dots for the spotlight steps only, so they match "Step x of y".
+  const at = TARGETED.indexOf(step)
+  const progress = at >= 0 && (
     <div className={s.dots}>
-      {STEPS.map((_, i) => <span key={i} className={`${s.dot} ${i === index ? s.dotActive : ''} ${i < index ? s.dotDone : ''}`} />)}
+      {TARGETED.map((st, i) => <span key={i} className={`${s.dot} ${i === at ? s.dotActive : ''} ${i < at ? s.dotDone : ''}`} />)}
     </div>
   )
 
@@ -170,6 +192,8 @@ export default function Tour({ onDone }) {
     left: rect.left - PAD, top: rect.top - PAD, width: rect.width + PAD * 2, height: rect.height + PAD * 2,
   }
   const cardPos = rect ? placeCard({ ...rect, right: rect.right + PAD, bottom: rect.bottom + PAD, top: rect.top - PAD, left: rect.left - PAD }, cardH) : null
+
+  if (paused) return null
 
   return createPortal(
     <div className={s.root}>
