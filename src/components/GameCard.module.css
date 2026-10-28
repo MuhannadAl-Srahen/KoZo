@@ -34,7 +34,7 @@
 /* Unavailable/hidden games dim the ARTWORK IMAGES only — the overlaid name and
    the stats strip keep full contrast so half this library (not installed)
    doesn't read as broken. */
-.cardDimmed .bannerImg { filter: grayscale(0.6) brightness(0.5); }
+.cardDimmed .bannerImg { filter: brightness(0.62) saturate(0.85); }   /* dimmer, never grey */
 .cardSelected {
   border-color: var(--a);
   box-shadow: var(--ring-select);
