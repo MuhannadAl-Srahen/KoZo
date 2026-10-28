@@ -72,7 +72,7 @@ src/                 renderer (React)
 | `/game/:id` | GameDetail |
 | `/game-list` | GameList (paged, 20 per page) |
 | `/achievements` | AchievementsHub |
-| `/upcoming` | Upcoming (My upcoming + Steam calendar tab: `components/SteamCalendar.jsx`, data from `steam:comingSoon`) |
+| `/upcoming` | Upcoming (My upcoming + Steam calendar tab: `components/SteamCalendar.jsx`, data from `steam:comingSoon`; layouts Strip, Featured, Week, Days, Month plus a TBA view for undated games; `wishRank` = place in the most-wishlisted feed) |
 | `/sessions` | Sessions |
 | `/statistics` | Statistics |
 | `/profile` | Profile |
@@ -108,7 +108,8 @@ src/                 renderer (React)
 - `preload.js` exposes `kozo.rev`; `UpdateBanner` (PRELOAD_REV) shows a "quit and reopen" bar when the main process is older than the UI. Bump both together whenever preload or IPC changes.
 - Add Game / Add to Game List also search SteamGridDB (`sgdb:searchGames`) and list non-Steam hits with covers; the pick travels as `sgdb_id`/`sgdb_cover` to `addLibraryGame`. `applyArt` also sets the linked `game_list.banner_url`, and Game List rows expose `game_banner_local_path` as a cover fallback.
 - Settings → Appearance customization lives in `context/AppearanceContext.jsx` (setting `appearance`, JSON): UI scale via `kozo.ui.setZoom` (preload webFrame), `data-density` / `data-corners` token overrides at the end of `styles/variables.css`, `data-hide-*` card-detail attributes (rules at the end of GameCard/GameList css), sidebar order + hidden tabs (`Sidebar.jsx` reads `prefs.nav`), start page (`StartPage` in App.jsx), wallpaper (`Wallpaper` in App.jsx, picked via `appearance:pickWallpaper`).
-- Adult (18+) toggle is behind a password: `RestrictedContent` in Settings.jsx compares a SHA-256 hash; turning it off never asks.
+- Adult (18+) toggle is behind a password: `RestrictedContent` (Settings → About → Dev) compares a SHA-256 hash; turning it off never asks.
+- Settings → Features rows are links: each `FEATURE_GROUPS` item has `go` (a route, `tab:<settings tab>`, or `overlay:test`). Library opens Scan PC on `/?scan=1` and Add Game on `/?add=1`.
 - Add Game search ranks Steam + SteamGridDB hits together (`lib/searchRank.js`).
 - `MediaGallery` shows the cached thumbnail first and fades the full image in, and preloads neighbours; calendar `Cover` shows a shimmer until art arrives and never crops wide-only art.
 - Text fields draw focus rings inset (global.css) so scroll panels can't clip them. Card grids use container queries for small sizes.
