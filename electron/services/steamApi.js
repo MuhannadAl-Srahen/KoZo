@@ -872,7 +872,9 @@ function parseComingSoonHtml(html) {
     const name = decodeEntities((chunk.match(/<span class="title">([\s\S]*?)<\/span>/) || [])[1]).trim()
     const release = decodeEntities((chunk.match(/search_released[^>]*>([\s\S]*?)<\/div>/) || [])[1]).replace(/\s+/g, ' ').trim()
     const capsule = (chunk.match(/<img src="([^"]+)"/) || [])[1] || null
-    if (name) items.push({ appid, name, release: release || null, capsule })
+    const price = decodeEntities((chunk.match(/discount_final_price[^>]*>([^<]*)</) || [])[1]).trim() || null
+    const prepurchase = /prepurchase_tag/.test(chunk)
+    if (name) items.push({ appid, name, release: release || null, capsule, price, prepurchase })
   }
   return items
 }

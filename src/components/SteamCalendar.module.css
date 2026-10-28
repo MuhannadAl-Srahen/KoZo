@@ -1,5 +1,6 @@
-.wrap { display: flex; flex-direction: column; gap: var(--sp-12); }
+.wrap { display: flex; flex-direction: column; gap: var(--sp-16); }
 
+/* ── Toolbar ─────────────────────────────────────────────────── */
 .nav {
   display: flex;
   align-items: center;
@@ -7,15 +8,15 @@
   gap: var(--sp-8);
 }
 .monthLabel {
-  min-width: 150px;
+  min-width: 160px;
   text-align: center;
-  font-size: var(--fs-md);
+  font-size: var(--fs-lg, 18px);
   font-weight: 700;
   color: var(--text-primary);
 }
 .spacer { flex: 1; }
 
-.navBtn, .textBtn, .viewBtn {
+.navBtn, .textBtn {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-4);
@@ -26,22 +27,205 @@
   font-family: inherit;
   font-size: var(--fs-xs);
   cursor: pointer;
+  transition: var(--t-control);
 }
-.navBtn { padding: var(--sp-4); }
-.textBtn { padding: var(--sp-4) var(--sp-10); }
-.navBtn:hover, .textBtn:hover, .viewBtn:hover { background: var(--neutral-bg-hover); color: var(--text-primary); }
+.navBtn { padding: var(--sp-6); }
+.textBtn { padding: var(--sp-6) var(--sp-12); }
+.navBtn:hover, .textBtn:hover { background: var(--neutral-bg-hover); color: var(--text-primary); }
 
-.viewToggle { display: inline-flex; gap: var(--sp-2); }
-.viewBtn { padding: var(--sp-4) var(--sp-6); }
-.viewBtnActive { background: var(--ad); border-color: var(--ab); color: var(--a); }
+.viewToggle {
+  display: inline-flex;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border-radius: var(--r-input);
+  background: var(--neutral-bg);
+}
+.viewBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: var(--sp-4) var(--sp-12);
+  border: none;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.viewBtn:hover { color: var(--text-primary); }
+.viewBtnActive { background: var(--ad); color: var(--a); }
 
-/* Month grid — 7 columns; scrolls sideways instead of crushing on narrow windows. */
+.muted { color: var(--text-muted); font-size: var(--fs-xs); }
+
+/* ── Days view: a poster wall per release day ────────────────── */
+.daySection { display: flex; flex-direction: column; gap: var(--sp-10); }
+.dayHead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-10);
+  padding: var(--sp-8) 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--neutral-border);
+}
+.dayHeadMain { font-size: var(--fs-md); font-weight: 700; color: var(--text-primary); }
+.dayHeadSub { font-size: var(--fs-xs); color: var(--text-secondary); }
+.dayHeadCount { margin-left: auto; font-size: var(--fs-2xs); color: var(--text-muted); }
+.dayHeadToday .dayHeadMain { color: var(--a); }
+
+.posterGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--sp-12);
+}
+
+/* Poster card */
+.poster {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--r-card);
+  background: var(--surface-2);
+  border: 1px solid var(--neutral-border);
+  overflow: hidden;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.poster:hover {
+  transform: translateY(-3px);
+  border-color: var(--ab);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+}
+.posterTracked { border-color: var(--a); box-shadow: 0 0 0 1px var(--ab); }
+
+.posterHit {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  padding: 0;
+  border: none;
+  background: var(--surface-3);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+.posterArt {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 30%;
+}
+.posterShade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(8, 8, 14, 0.92) 0%, rgba(8, 8, 14, 0.35) 34%, transparent 58%);
+  pointer-events: none;
+}
+.posterCountdown, .posterPrice {
+  position: absolute;
+  top: var(--sp-8);
+  padding: 2px var(--sp-8);
+  border-radius: var(--r-pill);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  backdrop-filter: blur(6px);
+}
+.posterCountdown { left: var(--sp-8); background: rgba(10, 10, 18, 0.72); color: var(--text-primary); }
+.posterPrice { right: var(--sp-8); background: color-mix(in srgb, var(--success) 22%, rgba(10, 10, 18, 0.72)); color: var(--success); }
+.posterMark {
+  position: absolute;
+  bottom: var(--sp-8);
+  right: var(--sp-8);
+  display: inline-flex;
+  padding: 3px;
+  border-radius: var(--r-sm);
+  background: var(--a);
+  color: var(--accent-ink);
+}
+.posterName {
+  position: absolute;
+  left: var(--sp-10);
+  right: var(--sp-10);
+  bottom: var(--sp-8);
+  color: #fff;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+}
+.posterTracked .posterName { right: 30px; }
+
+.posterActions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: var(--sp-6) var(--sp-8);
+}
+.trackBtn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  padding: var(--sp-4) 0;
+  border: 1px solid var(--ab);
+  border-radius: var(--r-md);
+  background: var(--ad);
+  color: var(--a);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.trackBtn:hover { background: var(--a); color: var(--accent-ink); }
+.trackBtn:disabled { opacity: 0.6; cursor: default; }
+.trackedTag {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--a);
+}
+.iconBtn {
+  display: inline-flex;
+  padding: var(--sp-6);
+  border: 1px solid var(--neutral-border);
+  border-radius: var(--r-md);
+  background: var(--neutral-bg);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.iconBtn:hover { color: var(--text-primary); background: var(--neutral-bg-hover); }
+
+/* Wide art standing in for a missing portrait — keep the subject in frame. */
+.coverWideFallback { object-position: center center; }
+.coverEmpty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-disabled);
+}
+
+/* ── Month view: a big grid with art in every release day ────── */
 .gridScroll { overflow-x: auto; }
 .grid {
   display: grid;
-  grid-template-columns: repeat(7, minmax(120px, 1fr));
-  gap: var(--sp-4);
-  min-width: 860px;
+  grid-template-columns: repeat(7, minmax(130px, 1fr));
+  gap: var(--sp-6);
+  min-width: 920px;
 }
 .weekday {
   padding: var(--sp-4) var(--sp-6);
@@ -52,85 +236,108 @@
   color: var(--text-muted);
 }
 .day {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-4);
-  min-height: 110px;
-  padding: var(--sp-6);
+  position: relative;
+  min-height: 176px;
   border-radius: var(--r-card);
   background: var(--surface-2);
   border: 1px solid var(--neutral-border);
+  overflow: hidden;
 }
-.dayOutside { opacity: 0.35; }
+.dayHasGames { cursor: pointer; }
+.dayHasGames:hover { border-color: var(--ab); }
+.dayOutside { opacity: 0.3; }
 .dayPast { opacity: 0.6; }
 .dayToday { border-color: var(--a); box-shadow: 0 0 0 1px var(--ab); }
-.dayNum { font-size: var(--fs-xs); font-weight: 600; color: var(--text-secondary); }
-.dayToday .dayNum { color: var(--a); }
-
-.chip {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: var(--sp-6);
+.dayBg {
+  position: absolute;
+  inset: 0;
   width: 100%;
-  padding: var(--sp-2);
-  padding-right: var(--sp-6);
-  border: 1px solid transparent;
-  border-radius: var(--r-sm);
-  background: var(--surface-3);
-  color: var(--text-primary);
-  font-family: inherit;
-  font-size: var(--fs-2xs);
-  text-align: left;
-  cursor: pointer;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(10px) brightness(0.35) saturate(1.2);
+  transform: scale(1.15);
 }
-.chip:hover { border-color: var(--ab); background: var(--neutral-bg-hover); }
-.chipTracked { border-color: var(--ab); background: var(--ad); }
-.chipArt { width: 46px; height: 17px; object-fit: cover; border-radius: var(--r-xs); flex-shrink: 0; }
-.chipName { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chipMark { flex-shrink: 0; color: var(--a); margin-left: auto; }
-
-.more {
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--a);
-  font-family: inherit;
-  font-size: var(--fs-2xs);
-  text-align: left;
-  cursor: pointer;
-}
-
-/* Month-only / TBA strips */
-.strip {
+.dayInner {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--sp-6);
-  padding: var(--sp-10);
-  border-radius: var(--r-card);
-  background: var(--surface-2);
-  border: 1px dashed var(--neutral-border);
+  height: 100%;
+  padding: var(--sp-8);
 }
-.stripLabel {
+.dayNum { font-size: var(--fs-sm); font-weight: 700; color: var(--text-primary); }
+.dayToday .dayNum { color: var(--a); }
+.dayPosters { display: flex; gap: var(--sp-6); }
+.dayPoster {
+  width: 50%;
+  max-width: 66px;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border-radius: var(--r-sm);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+}
+.dayFoot { display: flex; align-items: center; gap: var(--sp-6); margin-top: auto; min-width: 0; }
+.dayLead {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.dayMore {
+  flex-shrink: 0;
+  padding: 1px var(--sp-6);
+  border-radius: var(--r-pill);
+  background: var(--a);
+  color: var(--accent-ink);
   font-size: var(--fs-2xs);
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--text-muted);
 }
-.stripGames, .listGames {
+
+/* ── Detail modal ────────────────────────────────────────────── */
+.detailHero {
+  position: relative;
+  aspect-ratio: 16 / 7;
+  margin-bottom: var(--sp-12);
+  border-radius: var(--r-card);
+  overflow: hidden;
+  background: var(--surface-3);
+}
+.detailArt { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.detailShade { position: absolute; inset: 0; background: linear-gradient(to top, rgba(8, 8, 14, 0.75), transparent 55%); }
+.detailCountdown {
+  position: absolute;
+  left: var(--sp-12);
+  bottom: var(--sp-12);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-10);
+  border-radius: var(--r-pill);
+  background: var(--a);
+  color: var(--accent-ink);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+}
+.detailMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-12);
+  margin-bottom: var(--sp-10);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+}
+.detailMeta strong { color: var(--text-primary); }
+.detailPrice { color: var(--success); font-weight: 600; }
+.detailDesc { margin: 0 0 var(--sp-10); color: var(--text-secondary); line-height: 1.5; }
+.shots {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
   gap: var(--sp-6);
+  margin-top: var(--sp-10);
 }
-
-/* List view */
-.list { display: flex; flex-direction: column; gap: var(--sp-12); }
-.listDay { display: flex; flex-direction: column; gap: var(--sp-6); }
-.listDate { font-size: var(--fs-xs); font-weight: 700; color: var(--text-secondary); }
-.listDateToday { color: var(--a); }
-
-.muted { color: var(--text-muted); font-size: var(--fs-xs); }
-
-.detailArt { width: 100%; aspect-ratio: 460 / 215; object-fit: cover; border-radius: var(--r-card); margin-bottom: var(--sp-10); }
-.detailRelease { font-weight: 600; color: var(--text-primary); margin-bottom: var(--sp-6); }
+.shots img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: var(--r-sm); }
