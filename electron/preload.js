@@ -195,6 +195,7 @@ contextBridge.exposeInMainWorld('kozo', {
       onSessionUndetected: sub('session:undetected', pass),
       onAchievementUnlocked: sub('achievement:unlocked', pass),
       onGameUpdated: sub('game:updated', pass),
+      onScanProgress: sub('scanner:progress', pass),
       onBannerRefreshProgress: sub('banners:refreshProgress', pass),
       // Steam refused (or resumed allowing) a player-unlock read — library-wide,
       // driven by achievementSync.recordSyncError.

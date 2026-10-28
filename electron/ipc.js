@@ -1029,9 +1029,14 @@ handle('scanner:getDefaultPaths', () => {
   return getDefaultScanPaths()
 })
 
+// Name → Steam match, kept for the session so a rescan doesn't look names up again.
+const scanMatchCache = new Map()
+
 handle('scanner:scan', async (paths) => {
-  const { scanFolder } = require('./services/pcScanner')
+  const { scanInWorker } = require('./services/scanWorker')
   const { findAppByName } = require('./services/steamApi')
+  const fsx = require('fs')
+  const pathMod = require('path')
   const db = require('./db/database').getDb()
 
   // Existing library: track both install paths AND steam appids for dedup
@@ -1039,11 +1044,25 @@ handle('scanner:scan', async (paths) => {
   const existingPaths = new Set(existingRows.filter(g => g.install_path).map(g => g.install_path.toLowerCase()))
   const existingAppIds = new Set(existingRows.filter(g => g.steam_app_id).map(g => String(g.steam_app_id)))
 
+  // Skip folders that aren't there (an unplugged drive) and folders inside
+  // another selected folder (C:\ already covers C:\...\steamapps\common).
+  const norm = (p) => pathMod.resolve(String(p || '')).replace(/[\\/]+$/, '').toLowerCase()
+  const existing = [...new Set((paths || []).filter(p => { try { return fsx.existsSync(p) } catch { return false } }).map(p => pathMod.resolve(p)))]
+  const roots = existing.filter(p => !existing.some(o => o !== p && norm(p).startsWith(norm(o) + pathMod.sep)))
+
+  // Every folder scans in its own worker, in parallel; the app stays usable.
+  let foldersDone = 0
+  broadcast('scanner:progress', { stage: 'folders', done: 0, total: roots.length })
+  const perRoot = await Promise.all(roots.map(p => scanInWorker(p).then(r => {
+    broadcast('scanner:progress', { stage: 'folders', done: ++foldersDone, total: roots.length })
+    return r
+  })))
+
   const results = []
   const seenPath = new Set()
   const seenAppId = new Set()
-  for (const p of (paths || [])) {
-    for (const g of scanFolder(p)) {
+  for (const list of perRoot) {
+    for (const g of list) {
       const pathKey = g.install_path.toLowerCase()
       if (seenPath.has(pathKey)) continue
       // Dedup duplicate appid within the same scan (e.g. same game in two folders)
@@ -1054,16 +1073,24 @@ handle('scanner:scan', async (paths) => {
     }
   }
 
-  // Enrich cracked games (no appid) by matching their name to a Steam title —
-  // gives them real cover art + a clean name, just like Add Game. Done with a
-  // small concurrency pool so a big scan doesn't fire hundreds of requests.
-  const toMatch = results.filter(g => !g.steam_app_id && g.name)
-  let idx = 0
+  // Enrich cracked games (no appid) by matching their name to a Steam title,
+  // which gives them real cover art and a clean name, just like Add Game. Games
+  // already in the library are skipped (nothing to add), and lookups are cached
+  // and capped at 6 s each so one slow request can't stall the scan.
+  const toMatch = results.filter(g => !g.steam_app_id && g.name && !existingPaths.has(g.install_path.toLowerCase()))
+  const timeout = (ms) => new Promise(r => setTimeout(() => r(null), ms))
+  let idx = 0, matched = 0
+  if (toMatch.length) broadcast('scanner:progress', { stage: 'matching', done: 0, total: toMatch.length })
   async function worker() {
     while (idx < toMatch.length) {
       const g = toMatch[idx++]
       try {
-        const match = await findAppByName(g.name)
+        const key = g.name.toLowerCase()
+        let match = scanMatchCache.get(key)
+        if (match === undefined) {
+          match = await Promise.race([findAppByName(g.name).catch(() => null), timeout(6000)])
+          scanMatchCache.set(key, match || null)
+        }
         if (match && !seenAppId.has(String(match.steam_app_id))) {
           seenAppId.add(String(match.steam_app_id))
           g.steam_app_id = match.steam_app_id
@@ -1071,9 +1098,10 @@ handle('scanner:scan', async (paths) => {
           g.matched_from_name = true          // (cracked copy keeps is_cracked = 1)
         }
       } catch {}
+      broadcast('scanner:progress', { stage: 'matching', done: ++matched, total: toMatch.length })
     }
   }
-  await Promise.all(Array.from({ length: Math.min(5, toMatch.length) }, worker))
+  await Promise.all(Array.from({ length: Math.min(10, toMatch.length) }, worker))
 
   // Mark which results are already in the library (after appid enrichment).
   for (const g of results) {
@@ -1347,6 +1375,52 @@ setTimeout(() => {
     })
   } catch {}
 }, 30000)
+
+// Every launch, once idle: games that still have no cover (or a Steam game with
+// no hero) get another try. Steam first (demos fall back to their full game),
+// then SteamGridDB when a key is set. A game that still finds nothing is left
+// alone for 3 days (setting art_missing_tried) so this never hammers anything.
+async function fillMissingArt() {
+  const fsx = require('fs')
+  const settingsQ = require('./db/queries/settings')
+  const steamApi = require('./services/steamApi')
+  const sgdb = require('./services/steamGridDb')
+  const has = (p) => { try { return !!p && fsx.existsSync(p) } catch { return false } }
+  let tried = {}
+  try { tried = JSON.parse(settingsQ.getSetting('art_missing_tried') || '{}') } catch {}
+  const now = Date.now()
+  const rows = require('./db/database').getDb().prepare('SELECT * FROM games').all()
+    .filter(g => !has(g.banner_local_path) || (g.steam_app_id && !has(g.hero_local_path)))
+    .filter(g => !tried[g.id] || now - tried[g.id] > 3 * 86400000)
+  let changed = 0
+  for (const g of rows) {
+    if (require('./services/processWatcher').isSessionActive()) break
+    let got = false
+    if (g.steam_app_id) {
+      if (!has(g.banner_local_path)) {
+        try {
+          const p = await steamApi.downloadBanner(g.steam_app_id, g.id)
+          require('./db/database').getDb().prepare('UPDATE games SET banner_local_path = ?, banner_rev = COALESCE(banner_rev, 0) + 1 WHERE id = ?').run(p, g.id)
+          got = true
+        } catch {}
+      }
+      if (!has(g.hero_local_path)) {
+        try { await steamApi.downloadHero(g.steam_app_id, g.id); got = true } catch {}
+      }
+    }
+    const fresh = require('./db/database').getDb().prepare('SELECT * FROM games WHERE id = ?').get(g.id)
+    if (!has(fresh.banner_local_path) && await sgdb.autoArt(fresh)) got = true
+    if (got) { changed++; broadcast('game:updated', g.id); delete tried[g.id] }
+    else tried[g.id] = now
+  }
+  settingsQ.setSetting('art_missing_tried', JSON.stringify(tried))
+  if (changed) { bk(); logger.info(`art: filled missing covers for ${changed} game(s)`) }
+}
+setTimeout(() => {
+  require('./services/processWatcher').runWhenIdle('fillMissingArt', () => {
+    fillMissingArt().catch(e => logger.warn('art: missing-art pass failed', { message: e.message }))
+  })
+}, 45000)
 
 // ── App system settings (startup, minimize) ───────────────────────────────────
 const TASK_NAME = 'KoZo_AutoStart'

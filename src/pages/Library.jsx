@@ -25,12 +25,35 @@ const VIEW_OPTIONS = [
 
 const SORT_OPTIONS = [
   { value: 'last_played', label: 'Last played'  },
+  { value: 'month',       label: 'Month played' },
   { value: 'last_added',  label: 'Last added'   },
   { value: 'most_played', label: 'Most played'  },
   { value: 'achievements',label: 'Achievements' },
   { value: 'custom',      label: 'Custom order' },
 ]
 const SORT_VALUES = new Set(SORT_OPTIONS.map(o => o.value))
+
+// "Month played" sort: the grid splits into one section per month of
+// last_played_at (local time), newest first; never-played games come last.
+function monthGroups(games) {
+  const groups = new Map()
+  const sorted = [...games].sort((a, b) =>
+    (b.last_played_at ? new Date(b.last_played_at) : 0) - (a.last_played_at ? new Date(a.last_played_at) : 0)
+    || a.name.localeCompare(b.name))
+  for (const g of sorted) {
+    const d = g.last_played_at ? new Date(g.last_played_at) : null
+    const key = d && !isNaN(d) ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` : 'never'
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        label: key === 'never' ? 'Not played yet' : d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
+        games: [],
+      })
+    }
+    groups.get(key).games.push(g)
+  }
+  return [...groups.values()]
+}
 
 function sortGames(games, sortBy) {
   // Custom order: exactly the user's drag order — no favorite pinning, no
@@ -93,6 +116,7 @@ export default function Library() {
   const [prefillExe, setPrefillExe]                 = useState('')
   const [prefillInstallPath, setPrefillInstallPath] = useState('')
   const [scanning, setScanning]     = useState(false)
+  const [scanProgress, setScanProgress] = useState(null)   // { stage, done, total }
   const [scanModal, setScanModal]   = useState(null)  // null | scan results[]
 
   const [search, setSearch]         = useState('')
@@ -270,6 +294,8 @@ export default function Library() {
   const runScan = useCallback(async () => {
     if (!window.kozo?.api || scanning) return
     setScanning(true)
+    setScanProgress(null)
+    const off = window.kozo.events?.onScanProgress?.(setScanProgress)
     try {
       let paths = []
       const saved = await window.kozo.api.settings.get('scan_paths')
@@ -283,6 +309,7 @@ export default function Library() {
       const res = await window.kozo.api.scanner?.scan?.(paths)
       if (res?.ok) setScanModal(res.data || [])
     } finally {
+      off?.()
       setScanning(false)
     }
   }, [scanning])
@@ -335,6 +362,38 @@ export default function Library() {
   // not playtime/achievement totals.
   const stats = computeStats(games)
   const gridClass = view === 'big' ? s.bigGrid : view === 'small' ? s.smallGrid : s.listGrid
+
+  // One grid card with drag-to-reorder (any sort but Month played).
+  function renderCard(game) {
+    const draggable = !selectionMode && sortBy !== 'month'
+    return (
+      <div
+        key={game.id}
+        data-gpnav=""
+        className={dragOverId === game.id ? s.cardDragOver : undefined}
+        draggable={draggable || undefined}
+        onDragStart={draggable ? (e) => {
+          dragIdRef.current = game.id
+          e.dataTransfer.setData('text/plain', String(game.id))
+          e.dataTransfer.effectAllowed = 'move'
+        } : undefined}
+        onDragOver={draggable ? (e) => { e.preventDefault(); setDragOverId(game.id) } : undefined}
+        onDragLeave={draggable ? () => setDragOverId(prev => prev === game.id ? null : prev) : undefined}
+        onDrop={draggable ? (e) => { e.preventDefault(); handleCardDrop(game.id) } : undefined}
+        onDragEnd={draggable ? () => { dragIdRef.current = null; setDragOverId(null) } : undefined}
+      >
+        <GameCard
+          game={game}
+          view={view}
+          selectionMode={selectionMode}
+          selected={selectedIds.has(game.id)}
+          onToggle={toggleGame}
+          onFavorite={handleFavorite}
+          onContextMenu={(e, g) => setCtxMenu({ x: e.clientX, y: e.clientY, game: g })}
+        />
+      </div>
+    )
+  }
 
   return (
     <div className={s.page}>
@@ -413,12 +472,15 @@ export default function Library() {
             data-tour="scan-pc"
             title="Scan your PC for installed games to add (folders configured in Settings → Scan PC)"
             disabled={scanning}
+            aria-busy={scanning || undefined}
             onClick={runScan}
           >
             {scanning
               ? <IconLoader2 size={15} stroke={1.6} style={{ animation: 'spin 1s linear infinite' }} />
               : <IconScan size={15} stroke={1.6} />}
-            {scanning ? 'Scanning…' : 'Scan PC'}
+            {!scanning ? 'Scan PC'
+              : scanProgress?.stage === 'matching' ? `Matching ${scanProgress.done}/${scanProgress.total}`
+              : 'Scanning…'}
           </button>
 
           {games.length > 0 && (
@@ -531,40 +593,23 @@ export default function Library() {
           />
         )}
 
-        {!loading && games.length > 0 && (
+        {!loading && games.length > 0 && sortBy !== 'month' && (
           <div className={gridClass} style={zoomStyle}>
-            {gamesWithLive.map(game => {
-              const draggable = !selectionMode
-              return (
-                <div
-                  key={game.id}
-                  data-gpnav=""
-                  className={dragOverId === game.id ? s.cardDragOver : undefined}
-                  draggable={draggable || undefined}
-                  onDragStart={draggable ? (e) => {
-                    dragIdRef.current = game.id
-                    e.dataTransfer.setData('text/plain', String(game.id))
-                    e.dataTransfer.effectAllowed = 'move'
-                  } : undefined}
-                  onDragOver={draggable ? (e) => { e.preventDefault(); setDragOverId(game.id) } : undefined}
-                  onDragLeave={draggable ? () => setDragOverId(prev => prev === game.id ? null : prev) : undefined}
-                  onDrop={draggable ? (e) => { e.preventDefault(); handleCardDrop(game.id) } : undefined}
-                  onDragEnd={draggable ? () => { dragIdRef.current = null; setDragOverId(null) } : undefined}
-                >
-                  <GameCard
-                    game={game}
-                    view={view}
-                    selectionMode={selectionMode}
-                    selected={selectedIds.has(game.id)}
-                    onToggle={toggleGame}
-                    onFavorite={handleFavorite}
-                    onContextMenu={(e, g) => setCtxMenu({ x: e.clientX, y: e.clientY, game: g })}
-                  />
-                </div>
-              )
-            })}
+            {gamesWithLive.map(renderCard)}
           </div>
         )}
+
+        {!loading && games.length > 0 && sortBy === 'month' && monthGroups(gamesWithLive).map(grp => (
+          <section key={grp.key} className={s.monthSection}>
+            <div className={s.monthHeader}>
+              <span className={s.monthLabel}>{grp.label}</span>
+              <span className={s.monthCount}>{grp.games.length} {grp.games.length === 1 ? 'game' : 'games'}</span>
+            </div>
+            <div className={gridClass} style={zoomStyle}>
+              {grp.games.map(renderCard)}
+            </div>
+          </section>
+        ))}
 
         {/* Shelves — collapsed sections at the bottom instead of mixing into
             the grid; expand to manage them (right-click still works) */}
