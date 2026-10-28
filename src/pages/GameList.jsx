@@ -64,6 +64,7 @@ function GridCard({ item, onClick, selectionMode, selected, onToggle, onToggleFa
   const bg  = getBannerBg(item.id)
   const src = withBust(item.banner_url, item.banner_rev)
   const genres = parseGenres(item)
+  const [failed, setFailed] = useState(null)   // src that failed: show the generated cover
 
   function handleClick() {
     if (selectionMode) { onToggle?.(item.id) } else { onClick(item) }
@@ -77,8 +78,10 @@ function GridCard({ item, onClick, selectionMode, selected, onToggle, onToggleFa
       onContextMenu={selectionMode ? undefined : (e) => { e.preventDefault(); onContextMenu?.(e, item) }}
     >
       <div className={s.cardBanner} style={{ background: bg }}>
-        <GeneratedCover name={item.name} />
-        {src && <img src={src} alt="" className={s.cardBannerImg} loading="lazy" decoding="async" onError={bannerOnError} />}
+        {src && failed !== src
+          ? <img src={src} alt="" className={s.cardBannerImg} loading="lazy" decoding="async"
+              onError={(e) => { if (e.target.src.includes('_2x')) e.target.src = e.target.src.replace('_2x', ''); else setFailed(src) }} />
+          : <GeneratedCover name={item.name} />}
         {selectionMode && (
           <div className={`${s.cardCheckbox} ${selected ? s.cardCheckboxOn : ''}`}>
             {selected && <IconCheck size={12} stroke={3} />}

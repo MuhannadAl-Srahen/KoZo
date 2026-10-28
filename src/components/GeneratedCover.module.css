@@ -23,21 +23,11 @@
 }
 .icon {
   position: absolute;
-  top: 12px;
-  right: 12px;
-  color: rgba(255, 255, 255, 0.55);
-}
-.mono {
-  position: absolute;
-  top: 38%;
+  top: 40%;
   left: 50%;
+  width: clamp(28px, 34cqw, 96px);
+  height: clamp(28px, 34cqw, 96px);
   transform: translate(-50%, -50%);
-  font-size: clamp(22px, 32cqw, 84px);
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  color: rgba(255, 255, 255, 0.9);
-  text-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
-  line-height: 1;
+  color: rgba(255, 255, 255, 0.22);
 }
-.compact .mono { font-size: 18px; top: 50%; }
-.compact .icon { display: none; }
+.compact .icon { top: 50%; width: 18px; height: 18px; }

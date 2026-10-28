@@ -316,6 +316,7 @@ export default function GameDetail() {
     heroCdnUrl,
     hashedHero,
     game.hero_local_path ? null : fileUrl(game.banner_local_path, bust),
+    game.banner_url || null,
   ].filter((u, i, all) => u && all.indexOf(u) === i)
   const heroKey = heroSources.join('|')
   const [heroStage, setHeroStage] = useState(0)
@@ -999,7 +1000,7 @@ export default function GameDetail() {
         <div className={s.contentInner}>
           {tab === 'achievements' && (
             <>
-              {syncPrivacyError && (
+              {syncPrivacyError && total > 0 && (
                 <div className={s.privacyBanner}>
                   <IconAlertTriangle size={15} stroke={1.8} className={s.privacyIcon} />
                   <div>

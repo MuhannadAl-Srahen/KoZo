@@ -33,6 +33,7 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
   const accent   = accentOf(game)
   const genres   = parseGenres(game)
   const [launchError, setLaunchError] = React.useState(null)
+  const [imgFailed, setImgFailed] = React.useState(null)   // src that failed to load
   const [launchWarning, setLaunchWarning] = React.useState(null)
 
   function handleClick() {
@@ -54,13 +55,11 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
       onContextMenu={onContextMenu ? (e) => { e.preventDefault(); onContextMenu(e, game) } : undefined}
     >
       <div className={s.banner} style={{ background: bg }}>
-        {/* A generated poster is the base layer; the real cover sits on top.
-            If the image is missing or fails to load, the poster shows. */}
-        <GeneratedCover name={game.name} Icon={src?.Icon || Icon} />
         {(() => {
           const localSrc = game.banner_local_path ? fileUrl(game.banner_local_path, game.banner_rev) : null
-          const src = localSrc || game.banner_url
-          if (!src) return null
+          const imgSrc = localSrc || game.banner_url
+          // No art, or every source failed: a generated cover instead of a blank tile.
+          if (!imgSrc || imgFailed === imgSrc) return <GeneratedCover name={game.name} Icon={src?.Icon || Icon} />
           // A local banner file can go missing (e.g. after a backup restore that
           // only round-trips DB rows, not the banners folder) — fall back to the
           // remote cover instead of just going blank.
@@ -71,9 +70,9 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
               img.src = game.banner_url
               return
             }
-            img.style.display = 'none'
+            setImgFailed(imgSrc)
           }
-          return <img src={src} className={s.bannerImg} alt="" loading="lazy" decoding="async" onError={handleError} />
+          return <img src={imgSrc} className={s.bannerImg} alt="" loading="lazy" decoding="async" onError={handleError} />
         })()}
 
         {/* Status LED — top-left corner of the cover, on a dark ring plate so it

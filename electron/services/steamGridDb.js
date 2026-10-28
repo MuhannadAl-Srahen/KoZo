@@ -83,21 +83,43 @@ async function applyArt(gameId, coverUrl, heroUrl) {
   return db.prepare('SELECT * FROM games WHERE id = ?').get(gameId)
 }
 
-// Best-effort automatic art for a game with no Steam appid and no cover yet.
-// Returns true when a cover was applied.
+// SteamGridDB also knows most Steam games by appid, which covers the ones Steam
+// itself serves no art for. 404 → [].
+async function gridsForSteam(appId) {
+  const data = await call(`/grids/steam/${appId}`, getKey(), { dimensions: '600x900,342x482,660x930', types: 'static', nsfw: 'false' })
+  return data.map(g => ({ id: g.id, url: g.url, thumb: g.thumb || g.url }))
+}
+async function heroesForSteam(appId) {
+  const data = await call(`/heroes/steam/${appId}`, getKey(), { types: 'static', nsfw: 'false' })
+  return data.map(h => ({ id: h.id, url: h.url, thumb: h.thumb || h.url }))
+}
+
+function hasFile(p) {
+  try { return !!p && require('fs').existsSync(p) } catch { return false }
+}
+
+// Best-effort automatic art for a game with no cover yet: by Steam appid when
+// it has one, else by name. Returns true when a cover was applied.
 async function autoArt(game) {
-  if (!getKey() || !game?.id || game.steam_app_id) return false
-  if (game.banner_local_path) {
-    try { if (require('fs').existsSync(game.banner_local_path)) return false } catch {}
-  }
+  if (!getKey() || !game?.id) return false
+  if (hasFile(game.banner_local_path)) return false
   try {
-    const [match] = await searchGame(game.name)
-    if (!match) return false
-    const [cover] = await grids(match.id)
-    if (!cover) return false
-    const [hero] = await heroes(match.id).catch(() => [])
-    await applyArt(game.id, cover.url, game.hero_local_path ? null : hero?.url)
-    logger.info(`steamGridDb: cover applied for "${game.name}" (matched "${match.name}")`)
+    let cover = null, hero = null, label = ''
+    if (game.steam_app_id) {
+      ;[cover] = await gridsForSteam(game.steam_app_id).catch(() => [])
+      if (cover) { [hero] = await heroesForSteam(game.steam_app_id).catch(() => []); label = `appid ${game.steam_app_id}` }
+    }
+    if (!cover) {
+      const name = String(game.name || '').replace(/[\s:]*\b(demo|playtest|prologue)\b\s*$/i, '').trim()
+      const [match] = await searchGame(name)
+      if (!match) return false
+      ;[cover] = await grids(match.id)
+      if (!cover) return false
+      ;[hero] = await heroes(match.id).catch(() => [])
+      label = `"${match.name}"`
+    }
+    await applyArt(game.id, cover.url, hasFile(game.hero_local_path) ? null : hero?.url)
+    logger.info(`steamGridDb: cover applied for "${game.name}" (matched ${label})`)
     return true
   } catch (e) {
     if (e.message !== 'no_key') logger.warn(`steamGridDb: auto art failed for "${game.name}"`, { message: e.message })
@@ -105,11 +127,12 @@ async function autoArt(game) {
   }
 }
 
-// Every non-Steam library game without a cover (first key save, or Refresh images).
+// Every library game still without a cover file (key saved, Refresh images,
+// startup art pass).
 async function autoArtAll() {
   if (!getKey()) return 0
   const db = require('../db/database').getDb()
-  const rows = db.prepare('SELECT * FROM games WHERE steam_app_id IS NULL').all()
+  const rows = db.prepare('SELECT * FROM games').all().filter(g => !hasFile(g.banner_local_path))
   let applied = 0
   for (const g of rows) {
     if (await autoArt(g)) applied++

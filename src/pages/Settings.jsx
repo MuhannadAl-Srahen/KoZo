@@ -604,8 +604,12 @@ function SteamGridDbSection() {
   }, [])
 
   async function save() {
+    if (!window.kozo?.api?.sgdb?.setKey) {
+      setState('error'); setMsg('Restart KoZo to finish updating, then save the key again.')
+      return
+    }
     setState('saving')
-    const res = await window.kozo?.api?.sgdb?.setKey?.(key)
+    const res = await window.kozo.api.sgdb.setKey(key).catch(e => ({ ok: false, error: e?.message }))
     const d = res?.ok ? res.data : null
     if (d?.valid) {
       setSaved(key.trim())

@@ -1,9 +1,10 @@
 import React from 'react'
+import { IconDeviceGamepad2 } from '@tabler/icons-react'
 import s from './GeneratedCover.module.css'
 
-// The base layer of every cover: a styled poster made from the game's name, so
-// a game with no art (or art that fails to load) still gets a real-looking
-// cover instead of an empty tile. The real image, when there is one, sits on top.
+// Shown only when a game has no cover image at all (or it failed to load): a
+// soft gradient tinted from the game's name with a faint launcher icon, so the
+// tile still looks intentional. Never drawn underneath real art.
 
 function hueOf(name) {
   let h = 0
@@ -11,20 +12,12 @@ function hueOf(name) {
   return h % 360
 }
 
-function initials(name) {
-  const words = String(name || '?').replace(/[^\p{L}\p{N}\s]/gu, ' ').trim().split(/\s+/).filter(Boolean)
-  if (!words.length) return '?'
-  if (words.length === 1) return words[0].slice(0, 2).toUpperCase()
-  return (words[0][0] + words[1][0]).toUpperCase()
-}
-
 export default function GeneratedCover({ name, Icon, compact = false }) {
-  const hue = hueOf(name)
+  const Glyph = Icon || IconDeviceGamepad2
   return (
-    <div className={`${s.cover} ${compact ? s.compact : ''}`} style={{ '--h': hue }} aria-hidden="true">
+    <div className={`${s.cover} ${compact ? s.compact : ''}`} style={{ '--h': hueOf(name) }} aria-hidden="true">
       <span className={s.glow} />
-      {Icon && <Icon className={s.icon} size={compact ? 14 : 18} stroke={1.6} />}
-      <span className={s.mono}>{initials(name)}</span>
+      <Glyph className={s.icon} stroke={1.3} />
       <span className={s.lines} />
     </div>
   )

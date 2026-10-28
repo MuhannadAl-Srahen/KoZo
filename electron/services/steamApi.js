@@ -438,8 +438,33 @@ async function assetsFor(appId) {
   return (await getAppAssets([appId])).get(Number(appId)) || null
 }
 
+// Demos, playtests and prologues usually have hidden store pages, so Steam
+// serves no art for their own appid (Valor Mortis Demo → nothing). Their full
+// game does: "Valor Mortis Demo" → "Valor Mortis" → its appid. null when the
+// name doesn't look like a demo or no full game matches.
+const DEMO_SUFFIX_RE = /[\s:\-\u2013\u2014]*\b(demo|playtest|prologue|beta|open beta|closed beta|test server|trial)\b\s*$/i
+const parentCache = new Map()
+async function parentArtAppId(appId, name) {
+  const key = Number(appId)
+  if (parentCache.has(key)) return parentCache.get(key)
+  let n = name
+  if (!n) {
+    try { n = require('../db/database').getDb().prepare('SELECT name FROM games WHERE steam_app_id = ?').get(String(appId))?.name } catch {}
+  }
+  const base = String(n || '').replace(DEMO_SUFFIX_RE, '').trim()
+  let parent = null
+  if (base && base.length >= 2 && base !== String(n).trim()) {
+    try {
+      const m = await findAppByName(base)
+      if (m && Number(m.steam_app_id) !== key) parent = Number(m.steam_app_id)
+    } catch {}
+  }
+  parentCache.set(key, parent)
+  return parent
+}
+
 // Library hero (wide art on GameDetail): classic path first, then the hashed one.
-async function downloadHero(appId, gameId) {
+async function downloadHero(appId, gameId, _viaParent = false) {
   const heroPath = path.join(getBannersDir(), `${gameId}_hero.jpg`)
   const urls = [`https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_hero.jpg`]
   const a = await assetsFor(appId).catch(() => null)
@@ -451,13 +476,25 @@ async function downloadHero(appId, gameId) {
       return heroPath
     } catch { /* next */ }
   }
+  if (!_viaParent) {
+    const parent = await parentArtAppId(appId)
+    if (parent) return downloadHero(parent, gameId, true)
+  }
   throw new Error(`No hero art for appId ${appId}`)
 }
 
 // Returns the best WORKING remote cover URL for a 2:3 card without downloading:
 // the true portrait when it exists, else the real (hashed) header, else the
 // 231px capsule. Used for remote-only surfaces like the Game List.
-async function resolveBannerUrl(appId) {
+async function resolveBannerUrl(appId, _viaParent = false) {
+  if (!_viaParent) {
+    // A hidden demo page has no art of its own: use the full game's.
+    const a0 = await assetsFor(appId).catch(() => null)
+    if (!a0?.portrait && !a0?.header) {
+      const parent = await parentArtAppId(appId)
+      if (parent) return resolveBannerUrl(parent, true)
+    }
+  }
   const portrait = `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_600x900_2x.jpg`
   try {
     const r = await getAxios().head(portrait, { timeout: 8000 })
@@ -469,7 +506,7 @@ async function resolveBannerUrl(appId) {
   return art?.header_image || art?.capsule_image || portrait
 }
 
-async function downloadBanner(appId, gameId, extraUrls = []) {
+async function downloadBanner(appId, gameId, extraUrls = [], _viaParent = false) {
   const destPath = path.join(getBannersDir(), `${gameId}.jpg`)
   // Try the appid-path images first — fast, and they exist for the vast majority
   // of released games (true 600×900 portrait is best for the 2:3 library card).
@@ -503,6 +540,10 @@ async function downloadBanner(appId, gameId, extraUrls = []) {
       logger.info(`Banner downloaded for ${appId} from ${url}`)
       return destPath
     } catch { /* try next */ }
+  }
+  if (!_viaParent) {
+    const parent = await parentArtAppId(appId)
+    if (parent) return downloadBanner(parent, gameId, [], true)
   }
   throw new Error(`No banner found for appId ${appId}`)
 }
@@ -926,7 +967,7 @@ module.exports = {
   getBannersDir, downloadFile,
   getAppAssets, downloadHero,
   getComingSoon, parseComingSoonHtml,
-  testApiKey, searchGames, findAppByName, refreshGameData, refreshBanners, downloadBanner,
+  testApiKey, searchGames, findAppByName, parentArtAppId, refreshGameData, refreshBanners, downloadBanner,
   getStoreArt, getStoreDetails, resolveBannerUrl, resolveSteamId, runGenreBackfill, storeRemoteFallback,
   getSchemaForGame, getSchemaKeyless, getGlobalAchievementPercentages, getPlayerAchievements, getPlayerAchievementsXml,
   getPlayerSummary, getOwnedGames,
