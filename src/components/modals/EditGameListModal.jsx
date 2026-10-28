@@ -3,6 +3,7 @@ import { IconEdit, IconTrash, IconStar, IconBrandSteam, IconCheck } from '@table
 import Modal, { modalStyles as ms } from '../ui/Modal'
 import { LIST_STATUSES, LIST_STATUS_ORDER } from '../../lib/cardModel'
 import MonthPicker from '../ui/MonthPicker'
+import MediaGallery from '../ui/MediaGallery'
 import { formatMonthKey } from '../../lib/utils'
 import s from './AddGameModal.module.css'
 
@@ -18,6 +19,26 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
   const [errors, setErrors]         = useState({})
   const [plannedMonth, setPlannedMonth] = useState(item.planned_month || null)   // play plan 'YYYY-MM'
   const [pickingMonth, setPickingMonth] = useState(false)
+  // Game media for the header gallery: Steam art + store screenshots.
+  const [media, setMedia] = useState([])
+  useEffect(() => {
+    const appId = item.steam_app_id
+    if (!appId) return
+    let alive = true
+    Promise.all([
+      window.kozo?.api?.steam?.appAssets?.([appId]),
+      window.kozo?.api?.steam?.storeDetails?.(appId),
+    ]).then(([assets, details]) => {
+      if (!alive) return
+      const a = assets?.ok ? assets.data?.[appId] : null
+      const lead = a?.hero || a?.capsule || a?.header
+      setMedia([
+        ...(lead ? [{ thumb: a.capsule || a.header || lead, full: lead }] : []),
+        ...(details?.ok ? (details.data?.media || []) : []),
+      ])
+    })
+    return () => { alive = false }
+  }, [item.steam_app_id])
   const [confirmingClose, setConfirmingClose] = useState(false)
 
   // Custom-list membership (Spotify-playlist style, many-to-many).
@@ -127,7 +148,7 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
       icon={<IconEdit size={17} stroke={1.6} />}
       onClose={onClose}
       onRequestClose={requestClose}
-      width={460}
+      width={media.length ? 640 : 460}
       footer={
         <div style={{ display: 'flex', gap: 8, width: '100%', alignItems: 'center' }}>
           <button
@@ -163,6 +184,12 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
         </div>
       }
     >
+      {media.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <MediaGallery items={media} />
+        </div>
+      )}
+
       <div className={s.field}>
         <label className={`${s.label} ${s.labelRequired}`}>Game name</label>
         <input
