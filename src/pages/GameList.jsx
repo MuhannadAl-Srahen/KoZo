@@ -149,12 +149,7 @@ function ListRow({ item, onClick, selectionMode, selected, onToggle, onToggleFav
       {/* Portrait thumbnail with blurred fill */}
       <div className={s.listThumb} style={{ background: bg }}>
         <IconDeviceGamepad2 size={20} stroke={1.1} style={{ color: 'rgba(255,255,255,0.12)', position: 'relative', zIndex: 0 }} />
-        {src && (
-          <>
-            <img src={src} alt="" aria-hidden="true" className={s.listThumbBlur} onError={bannerOnError} />
-            <img src={src} alt="" className={s.listThumbImg} onError={bannerOnError} />
-          </>
-        )}
+        {src && <img src={src} alt="" className={s.listThumbImg} loading="lazy" decoding="async" onError={bannerOnError} />}
         {selectionMode && (
           <div className={s.listThumbCheck}>
             <div className={`${s.listCheckbox} ${selected ? s.listCheckboxOn : ''}`}>

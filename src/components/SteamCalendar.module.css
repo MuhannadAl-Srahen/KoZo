@@ -134,10 +134,11 @@
   border-radius: var(--r-pill);
   font-size: var(--fs-2xs);
   font-weight: 700;
-  backdrop-filter: blur(6px);
 }
-.posterCountdown { left: var(--sp-8); background: rgba(10, 10, 18, 0.72); color: var(--text-primary); }
-.posterPrice { right: var(--sp-8); background: color-mix(in srgb, var(--success) 22%, rgba(10, 10, 18, 0.72)); color: var(--success); }
+/* Solid chips, no backdrop blur: a blur per chip on hundreds of posters made
+   scrolling the calendar expensive. */
+.posterCountdown { left: var(--sp-8); background: rgba(10, 10, 18, 0.86); color: var(--text-primary); }
+.posterPrice { right: var(--sp-8); background: color-mix(in srgb, var(--success) 18%, rgba(10, 10, 18, 0.88)); color: var(--success); }
 .posterMark {
   position: absolute;
   bottom: var(--sp-8);

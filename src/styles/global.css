@@ -158,6 +158,7 @@ html[data-wallpaper] .app-main {
 .app-wallpaper-img {
   position: absolute;
   inset: -40px;               /* room for the blur so edges don't fade in */
+  transform: translateZ(0);   /* own layer: the blur is drawn once, not on every page repaint */
   background-size: cover;
   background-position: center;
 }
@@ -183,4 +184,11 @@ html[data-wallpaper] .app-main {
   }
   /* Skip the confetti nodes outright rather than snapping them. */
   .confetti { display: none !important; }
+}
+
+/* KoZo is hidden or behind another window: stop every animation (see App.jsx). */
+html[data-inactive] *,
+html[data-inactive] *::before,
+html[data-inactive] *::after {
+  animation-play-state: paused !important;
 }

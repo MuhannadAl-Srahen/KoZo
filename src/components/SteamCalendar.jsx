@@ -80,9 +80,11 @@ function dayHeading(key) {
 // whole (contained) over a blurred copy of itself instead of being cropped into
 // a portrait ("GHT N"). `g.art === null` means art hasn't arrived yet: a
 // shimmer, never the blurry 231px search capsule stretched over the card.
-function Cover({ g, wide = false, className }) {
+// `hero` asks for the 3840px library hero (only the Featured banner needs it);
+// every other wide spot uses the 616px store capsule.
+function Cover({ g, wide = false, hero = false, className }) {
   const srcs = (wide
-    ? [g.art?.hero, g.art?.header, g.art?.capsule, g.capsule]
+    ? (hero ? [g.art?.hero, g.art?.header, g.art?.capsule, g.capsule] : [g.art?.capsule, g.art?.header, g.capsule])
     : [g.art?.portrait, g.art?.header, g.art?.capsule, g.capsule]).filter(Boolean)
   const [i, setI] = useState(0)
   useEffect(() => { setI(0) }, [srcs[0]])
@@ -93,8 +95,8 @@ function Cover({ g, wide = false, className }) {
   if (!wide && src !== g.art?.portrait) {
     return (
       <span className={`${className} ${s.coverWide}`}>
-        <img className={s.coverWideBg} src={src} alt="" aria-hidden="true" decoding="async" />
-        <img className={s.coverWideFg} src={src} alt="" decoding="async" onError={next} />
+        <img className={s.coverWideBg} src={src} alt="" aria-hidden="true" loading="lazy" decoding="async" />
+        <img className={s.coverWideFg} src={src} alt="" loading="lazy" decoding="async" onError={next} />
       </span>
     )
   }
@@ -274,7 +276,7 @@ function FeaturedView({ games, buckets, todayKey, trackedAppIds, onOpen, renderT
   const [hover, setHover] = useState(false)
   useEffect(() => {
     if (hover || featured.length < 2) return
-    const t = setInterval(() => setI(n => (n + 1) % featured.length), 6000)
+    const t = setInterval(() => { if (!document.hidden && document.hasFocus()) setI(n => (n + 1) % featured.length) }, 6000)
     return () => clearInterval(t)
   }, [hover, featured.length])
   const cur = featured[Math.min(i, featured.length - 1)]
@@ -287,7 +289,7 @@ function FeaturedView({ games, buckets, todayKey, trackedAppIds, onOpen, renderT
       {cur && (
         <div className={s.hero} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
           <button className={s.heroHit} onClick={() => onOpen(cur)}>
-            <Cover key={cur.appid} g={cur} wide className={s.heroArt} />
+            <Cover key={cur.appid} g={cur} wide hero className={s.heroArt} />
             <span className={s.heroShade} />
             <span className={s.heroText}>
               <span className={s.heroKicker}><IconFlame size={13} /> Most wishlisted #{Math.min(i, featured.length - 1) + 1}</span>

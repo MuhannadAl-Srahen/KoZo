@@ -322,6 +322,10 @@ export default function GameDetail() {
   const [heroStage, setHeroStage] = useState(0)
   useEffect(() => { setHeroStage(0) }, [heroKey])
   const heroUrl = heroSources[heroStage] || null
+  // The blurred fill behind the hero only matters when the hero is narrow
+  // portrait art standing in for a missing wide banner. A real hero fills the
+  // area itself, so decoding and blurring a second 4K copy was wasted work.
+  const heroIsFallback = !!heroUrl && !!game && (heroUrl === fileUrl(game.banner_local_path, bust) || heroUrl === game.banner_url)
   function handleHeroError() {
     setHeroStage(st => st + 1)
   }
@@ -734,10 +738,12 @@ export default function GameDetail() {
           <Icon size={72} stroke={1} className={s.heroIcon} />
           {heroUrl && (
             <React.Fragment key={heroUrl}>
-              <img
-                src={heroUrl} className={s.heroBlur} alt="" aria-hidden="true"
-                decoding="async" onError={handleHeroError}
-              />
+              {heroIsFallback && (
+                <img
+                  src={heroUrl} className={s.heroBlur} alt="" aria-hidden="true"
+                  decoding="async" onError={handleHeroError}
+                />
+              )}
               <img
                 src={heroUrl} className={s.heroImg} alt=""
                 decoding="async" onError={handleHeroError}

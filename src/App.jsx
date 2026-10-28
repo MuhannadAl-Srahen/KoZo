@@ -19,6 +19,21 @@ import Tour from './components/Tour'
 import LevelUpCelebration from './components/LevelUpCelebration'
 import UpdateBanner from './components/UpdateBanner'
 
+// While KoZo is hidden, minimized or behind another window (usually a game),
+// every CSS animation pauses: live-session pulses, shimmers and spinners kept
+// the GPU drawing frames nobody could see.
+if (typeof window !== 'undefined') {
+  const mark = () => {
+    const inactive = document.hidden || !document.hasFocus()
+    if (inactive) document.documentElement.dataset.inactive = ''
+    else delete document.documentElement.dataset.inactive
+  }
+  document.addEventListener('visibilitychange', mark)
+  window.addEventListener('blur', mark)
+  window.addEventListener('focus', mark)
+  mark()
+}
+
 // Controller navigation — must live under the router so useNavigate works.
 function GamepadNav() {
   const navigate = useNavigate()

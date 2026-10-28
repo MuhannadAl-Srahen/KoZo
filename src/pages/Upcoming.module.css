@@ -114,7 +114,6 @@
   border-radius: var(--r-pill);
   background: var(--scrim-chip);
   border: 1px solid var(--ab);
-  backdrop-filter: blur(8px);
   color: var(--a);
   font-size: var(--fs-xs);
   font-weight: 700;
@@ -143,7 +142,6 @@
   background: var(--scrim-chip);
   color: var(--on-art);
   cursor: pointer;
-  backdrop-filter: blur(6px);
 }
 .cardAction:hover { color: var(--a); border-color: var(--ab); }
 .cardActionConfirm {

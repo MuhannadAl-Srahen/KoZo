@@ -37,10 +37,9 @@
   align-items: center;
   justify-content: center;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(8, 8, 14, 0.55);
+  background: rgba(8, 8, 14, 0.72);
   color: #fff;
   cursor: pointer;
-  backdrop-filter: blur(6px);
   opacity: 0.85;
   transition: opacity 0.15s ease, background 0.15s ease;
 }
@@ -109,7 +108,6 @@
   background: color-mix(in srgb, var(--surface-1) 88%, transparent);
   color: var(--text-primary);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(6px);
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
 }

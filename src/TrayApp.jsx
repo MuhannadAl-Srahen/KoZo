@@ -46,7 +46,8 @@ export default function TrayApp() {
     document.body.style.background = 'transparent'
     load()
     const off = window.kozo?.events?.onTrayRefresh?.(load)
-    const t = setInterval(() => setTick(n => n + 1), 1000)
+    // Live session clock: only redraw while the popup is actually showing.
+    const t = setInterval(() => { if (!document.hidden) setTick(n => n + 1) }, 1000)
     const onKey = (e) => { if (e.key === 'Escape') act('hide') }
     window.addEventListener('keydown', onKey)
     return () => { off?.(); clearInterval(t); window.removeEventListener('keydown', onKey) }
