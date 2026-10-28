@@ -135,6 +135,19 @@
 }
 .hiddenHeader:hover { color: var(--text-secondary); }
 
+/* Month played sort: one section per month */
+.monthSection + .monthSection { margin-top: var(--sp-24); }
+.monthHeader {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-12);
+  padding-bottom: var(--sp-6);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.monthLabel { font-size: var(--fs-lg); font-weight: 700; color: var(--text-primary); }
+.monthCount { font-size: var(--fs-xs); color: var(--text-muted); }
+
 .btnSecondary {
   display: flex;
   align-items: center;
