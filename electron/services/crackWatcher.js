@@ -1073,6 +1073,9 @@ async function scanAllCrackedGames() {
     const r = await scanGameForCrackAchievements(g.id, { catchUp: true })
     perGame.push({ gameId: g.id, name: g.name, added: r.added, sources: r.hits.map(h => h.source) })
     totalAdded += r.added
+    // Each game's folder walk is synchronous: let the main process breathe
+    // (IPC, windows) between games instead of blocking for the whole library.
+    await new Promise(resolve => setImmediate(resolve))
   }
   return { totalAdded, perGame, gamesScanned: games.length }
 }

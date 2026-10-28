@@ -148,8 +148,14 @@ async function refreshAndCheck() {
 function start() {
   if (_timer) return
   setTimeout(check, 12000)             // once shortly after startup (no network)
-  setTimeout(() => { refreshAndCheck() }, 60000)
-  _timer = setInterval(() => { refreshAndCheck() }, CHECK_EVERY_MS)
+  // The network refresh waits until no game is running (runWhenIdle), so it
+  // never adds store requests and DB writes on top of a play session.
+  const idleRefresh = () => {
+    try { require('./processWatcher').runWhenIdle('releaseRefresh', () => { refreshAndCheck() }) }
+    catch { refreshAndCheck() }
+  }
+  setTimeout(idleRefresh, 60000)
+  _timer = setInterval(idleRefresh, CHECK_EVERY_MS)
 }
 
 module.exports = { start, check, refreshUpcomingDates, getUnseen, dismiss }

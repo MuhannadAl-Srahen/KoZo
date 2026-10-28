@@ -82,6 +82,7 @@ async function applyArt(gameId, coverUrl, heroUrl) {
   if (coverUrl) {
     const dest = path.join(dir, `${gameId}.jpg`)
     await steamApi.downloadFile(coverUrl, dest)
+    steamApi.shrinkCover(dest)
     db.prepare('UPDATE games SET banner_local_path = ?, banner_url = NULL, banner_rev = COALESCE(banner_rev, 0) + 1 WHERE id = ?').run(dest, gameId)
     // Game List cards load remote art only: give the linked list row the cover too.
     db.prepare('UPDATE game_list SET banner_url = ? WHERE game_id = ?').run(coverUrl, gameId)

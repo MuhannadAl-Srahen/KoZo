@@ -307,6 +307,16 @@ async function getSchemaKeyless(appId) {
 // Richer store info for the Upcoming detail popup — description, developers,
 // screenshots etc. Cached 1h per appid; the Upcoming tab prefetches on load so
 // opening a popup is instant.
+// Every in-memory cache here is capped: re-setting a key moves it to the end,
+// and past the cap the oldest entries go (Maps keep insertion order). Browsing
+// the Steam calendar for a long session used to grow these without limit.
+const CACHE_MAX = 500
+function capSet(map, key, value, max = CACHE_MAX) {
+  map.delete(key)
+  map.set(key, value)
+  while (map.size > max) map.delete(map.keys().next().value)
+}
+
 const _detailsCache = new Map()
 async function getStoreDetails(appId) {
   const hit = _detailsCache.get(appId)
@@ -338,7 +348,7 @@ async function getStoreDetails(appId) {
   } catch (e) {
     logger.warn(`getStoreDetails failed for ${appId}`, { message: e.message })
   }
-  _detailsCache.set(appId, { at: Date.now(), result })
+  capSet(_detailsCache, appId, { at: Date.now(), result })
   return result
 }
 
@@ -424,7 +434,7 @@ async function getAppAssets(appIds) {
           header:   assetUrl(a, 'header_2x', 'header'),
           capsule:  assetUrl(a, 'main_capsule_2x', 'main_capsule'),
         }
-        assetCache.set(item.appid, { at: Date.now(), assets })
+        capSet(assetCache, item.appid, { at: Date.now(), assets }, 2000)
         out.set(item.appid, assets)
       }
     } catch (e) {
@@ -459,7 +469,7 @@ async function parentArtAppId(appId, name) {
       if (m && Number(m.steam_app_id) !== key) parent = Number(m.steam_app_id)
     } catch {}
   }
-  parentCache.set(key, parent)
+  capSet(parentCache, key, parent)
   return parent
 }
 
@@ -506,6 +516,24 @@ async function resolveBannerUrl(appId, _viaParent = false) {
   return art?.header_image || art?.capsule_image || portrait
 }
 
+// Library covers are shown at roughly 170 to 380 px wide, but Steam's portrait
+// is 1200x1800: about 8.6 MB of decoded image memory per card. Stored covers
+// are scaled down to 600 px wide (about 2.2 MB decoded), which is still sharp
+// at the largest card size. Best effort: on any failure the file stays as is.
+const COVER_MAX_W = 600
+function shrinkCover(file) {
+  try {
+    const { nativeImage } = require('electron')
+    const img = nativeImage.createFromPath(file)
+    if (img.isEmpty()) return false
+    const { width } = img.getSize()
+    if (width <= COVER_MAX_W) return false
+    const small = img.resize({ width: COVER_MAX_W, quality: 'best' })
+    fs.writeFileSync(file, small.toJPEG(88))
+    return true
+  } catch { return false }
+}
+
 async function downloadBanner(appId, gameId, extraUrls = [], _viaParent = false) {
   const destPath = path.join(getBannersDir(), `${gameId}.jpg`)
   // Try the appid-path images first — fast, and they exist for the vast majority
@@ -525,6 +553,7 @@ async function downloadBanner(appId, gameId, extraUrls = [], _viaParent = false)
   for (const url of urls) {
     try {
       await downloadFile(url, destPath)
+      shrinkCover(destPath)
       logger.info(`Banner downloaded for ${appId} from ${url}`)
       return destPath
     } catch { /* try next */ }
@@ -539,6 +568,7 @@ async function downloadBanner(appId, gameId, extraUrls = [], _viaParent = false)
   for (const url of hashed) {
     try {
       await downloadFile(url, destPath)
+      shrinkCover(destPath)
       logger.info(`Banner downloaded for ${appId} from ${url}`)
       return destPath
     } catch { /* try next */ }
@@ -843,7 +873,7 @@ async function getPlayerAchievementsXml(appId, steamId) {
     logger.warn(`getPlayerAchievementsXml failed for ${appId}`, { message: e.message })
     result = { error: e.message || 'network_error' }
   }
-  _xmlCache.set(key, { at: Date.now(), result })
+  capSet(_xmlCache, key, { at: Date.now(), result }, 200)
   return result
 }
 
@@ -961,11 +991,12 @@ async function getComingSoon(feed = 'soon', page = 0) {
   })
   const items = parseComingSoonHtml(res.data?.results_html)
   const total = Number(res.data?.total_count) || 0
-  comingSoonCache.set(key, { at: Date.now(), items, total })
+  capSet(comingSoonCache, key, { at: Date.now(), items, total }, 100)
   return { items, total, page: p, pageSize: COMING_SOON_PAGE }
 }
 
 module.exports = {
+  shrinkCover,
   getBannersDir, downloadFile,
   getAppAssets, downloadHero,
   getComingSoon, parseComingSoonHtml,

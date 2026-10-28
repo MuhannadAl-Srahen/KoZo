@@ -13,11 +13,9 @@
 //
 // The C# is compiled once at process start, then the loop is cheap. The probe
 // is also started LAZILY (see syncControllerProbe in processWatcher): it only
-// spins up once the keyboard/mouse have already gone quiet for a while, and is
-// killed the moment real input returns. During normal keyboard-and-mouse play
-// there is no probe process at all — the OS idle timer already proves you're
-// active, so a second PowerShell process polling XInput would tell us nothing
-// we don't know and would sit resident for the whole session.
+// spins up once the keyboard/mouse have already gone quiet for a while, then
+// stays until the session ends (restarting it after every pause cost a C#
+// compile each time). During steady keyboard-and-mouse play it never starts.
 
 const { spawn } = require('child_process')
 const fs   = require('fs')
@@ -28,6 +26,8 @@ const logger = require('../logger')
 let proc        = null
 let lastInputAt = 0
 let scriptPath  = null
+let failedAt    = 0   // last spawn error: don't retry every tick
+const RETRY_AFTER_MS = 5 * 60 * 1000
 
 const PS_SCRIPT = `
 param([int]$ParentPid = 0)
@@ -76,19 +76,27 @@ while ($true) {
 function start({ idleMs = 0 } = {}) {
   if (proc) return
   if (process.platform !== 'win32') return   // XInput is Windows-only
+  if (failedAt && Date.now() - failedAt < RETRY_AFTER_MS) return
   try {
     if (!scriptPath) {
       scriptPath = path.join(os.tmpdir(), 'kozo-controller-probe.ps1')
       fs.writeFileSync(scriptPath, PS_SCRIPT, 'utf8')
     }
-    proc = spawn('powershell.exe',
+    const child = spawn('powershell.exe',
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, String(process.pid)],
       { windowsHide: true })
+    proc = child
     lastInputAt = Date.now() - Math.max(0, idleMs)
-    proc.stdout.on('data', () => { lastInputAt = Date.now() })
-    proc.stderr.on('data', () => {})
-    proc.on('exit', () => { proc = null })
-    proc.on('error', (e) => { logger.warn('controllerInput spawn error: ' + e.message); proc = null })
+    child.stdout.on('data', () => { lastInputAt = Date.now() })
+    child.stderr.on('data', () => {})
+    // Only clear the reference if it is still THIS child: an old probe exiting
+    // late must not orphan a newer one.
+    child.on('exit', () => { if (proc === child) proc = null })
+    child.on('error', (e) => {
+      logger.warn('controllerInput spawn error: ' + e.message)
+      failedAt = Date.now()
+      if (proc === child) proc = null
+    })
     logger.info('controllerInput: gamepad activity probe started')
   } catch (e) {
     logger.warn('controllerInput.start: ' + e.message)

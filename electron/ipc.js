@@ -1473,6 +1473,7 @@ async function fillMissingArt() {
       }
     }
     const fresh = require('./db/database').getDb().prepare('SELECT * FROM games WHERE id = ?').get(g.id)
+    if (!fresh) continue   // deleted while this pass was running
     if (!has(fresh.banner_local_path) && await sgdb.autoArt(fresh)) got = true
     if (got) { changed++; broadcast('game:updated', g.id); delete tried[g.id] }
     else tried[g.id] = now
@@ -1480,6 +1481,28 @@ async function fillMissingArt() {
   settingsQ.setSetting('art_missing_tried', JSON.stringify(tried))
   if (changed) { bk(); logger.info(`art: filled missing covers for ${changed} game(s)`) }
 }
+// One time: covers downloaded before covers were stored at card size get
+// shrunk too (1200x1800 → 600x900, about 6 MB less image memory per card).
+setTimeout(() => {
+  try {
+    const settingsQ = require('./db/queries/settings')
+    if (settingsQ.getSetting('covers_resized_v1') === '1') return
+    require('./services/processWatcher').runWhenIdle('coversResize', async () => {
+      const fsx = require('fs')
+      const { shrinkCover } = require('./services/steamApi')
+      const rows = require('./db/database').getDb().prepare('SELECT id, banner_local_path FROM games WHERE banner_local_path IS NOT NULL').all()
+      let n = 0
+      for (const g of rows) {
+        if (require('./services/processWatcher').isSessionActive()) return   // try again next launch
+        try { if (fsx.existsSync(g.banner_local_path) && shrinkCover(g.banner_local_path)) n++ } catch {}
+        await new Promise(r => setImmediate(r))
+      }
+      settingsQ.setSetting('covers_resized_v1', '1')
+      if (n) logger.info(`covers: shrank ${n} stored cover(s) to card size`)
+    })
+  } catch {}
+}, 40000)
+
 setTimeout(() => {
   require('./services/processWatcher').runWhenIdle('fillMissingArt', () => {
     fillMissingArt().catch(e => logger.warn('art: missing-art pass failed', { message: e.message }))

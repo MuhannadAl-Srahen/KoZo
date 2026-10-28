@@ -89,7 +89,10 @@ async function writeNow({ force = false } = {}) {
     const file = path.join(dir, 'kozo-autobackup.json')
     const tmp  = `${file}.tmp`
     // Atomic replace: a half-written temp file can never become the backup.
-    await fs.promises.writeFile(tmp, JSON.stringify(buildPayload(), null, 2), 'utf8')
+    // Compact JSON: about a third smaller to write and to cloud-sync.
+    dirty = false
+    lastWrite = Date.now()
+    await fs.promises.writeFile(tmp, JSON.stringify(buildPayload()), 'utf8')
     await fs.promises.rename(tmp, file)
     logger.info(`autoBackup: saved ${file}`)
     return true
@@ -105,7 +108,15 @@ async function writeNow({ force = false } = {}) {
   }
 }
 
+// Set by every data change. The 5-minute timer only writes when something
+// changed (it used to dump the whole DB 288 times a day while idle), with one
+// write every 30 minutes as a safety net for writers that don't mark it.
+let dirty = true
+let lastWrite = 0
+const SAFETY_MS = 30 * 60 * 1000
+
 function markDirty() {
+  dirty = true
   if (!getConfig().enabled) return
   clearTimeout(debounceTimer)
   debounceTimer = setTimeout(() => { writeNow().catch(() => {}) }, DEBOUNCE_MS)
@@ -123,7 +134,7 @@ function flush() {
     // Own temp name: an async writeNow() may still hold `${file}.tmp` open,
     // which would make this rename fail with EPERM on Windows.
     const tmp  = `${file}.flush.tmp`
-    fs.writeFileSync(tmp, JSON.stringify(buildPayload(), null, 2), 'utf8')
+    fs.writeFileSync(tmp, JSON.stringify(buildPayload()), 'utf8')
     fs.renameSync(tmp, file)
     logger.info(`autoBackup: saved ${file} (flush)`)
     return true
@@ -137,7 +148,8 @@ function startPeriodic() {
   if (periodicTimer) return
   periodicTimer = setInterval(() => {
     // writeNow's own gate defers this to the end of the session.
-    if (getConfig().enabled) writeNow().catch(() => {})
+    if (!getConfig().enabled) return
+    if (dirty || Date.now() - lastWrite > SAFETY_MS) writeNow().catch(() => {})
   }, PERIODIC_MS)
 }
 

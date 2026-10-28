@@ -30,7 +30,12 @@ const GAME_ROW_TTL_MS      = 60 * 1000
 // 30s) cuts the worst-case in-app lag by ~20s; the GET is cheap (one request) and
 // well under Steam's rate limits even with several games running.
 const ACHIEVEMENT_SYNC_MS = 10 * 1000
-function getAchievementSyncMs() {
+// When the Steam app's local stats file for the game is being watched, unlocks
+// already arrive instantly from disk, so the Web API is only a slow backstop
+// (360 requests an hour per game was pure waste in that case).
+const ACHIEVEMENT_SYNC_LOCAL_MS = 60 * 1000
+function getAchievementSyncMs(gameId) {
+  try { if (require('./steamStatsWatcher').isWatching(gameId)) return ACHIEVEMENT_SYNC_LOCAL_MS } catch {}
   return ACHIEVEMENT_SYNC_MS
 }
 
@@ -401,7 +406,7 @@ function heartbeatSession(game, session, gapMs, now) {
   // watch + safety-net timer already cover it without duplicating the
   // sync-fs-I/O pass on this hot cadence).
   const lastSync = midSessionSyncAt.get(game.id) || 0
-  if (now - lastSync >= getAchievementSyncMs()) {
+  if (now - lastSync >= getAchievementSyncMs(game.id)) {
     midSessionSyncAt.set(game.id, now)
     runAchievementSync(game.id, game.name, { skipCrackScan: true })
   }
@@ -447,9 +452,11 @@ function syncControllerProbe() {
       // Seed the probe with the keyboard/mouse idle time — see start()'s note.
       ci.start({ idleMs: sysIdleSec * 1000 })
     }
-  } else if (sysIdleSec < 2) {
-    ci.stop()   // real kb/mouse input is back; the gamepad adds nothing
   }
+  // Once started, the probe stays for the rest of the session. Killing it on
+  // every return of keyboard/mouse input meant a fresh powershell.exe plus a
+  // C# compile (csc.exe, 1-2s of CPU) after every cutscene or pause, mid-game.
+  // It costs next to nothing while running (one check every 2s).
 }
 
 // Cheap heartbeat for ticks between full scans (see FULL_SCAN_EVERY_TICKS):
@@ -884,6 +891,13 @@ function endSession(gameId, session, forcedEndAt) {
 // live (precise playtime/AFK) or a launch is being confirmed; idle KoZo relaxes
 // — detection latency is bounded by the sensitivity window (default 15s) anyway.
 const POLL_IDLE_MS = 20000
+// After 10 quiet minutes (no session, no launch being confirmed) the idle scan
+// relaxes further. Each scan spawns fastlist.exe, ~4,300 times a day at 20s.
+// A launch is still caught well inside a minute; the next session, detection
+// or nudge() (window shown) brings the fast cadence straight back.
+const POLL_DEEP_IDLE_MS = 45000
+const DEEP_IDLE_AFTER_MS = 10 * 60 * 1000
+let lastActivityAt = Date.now()
 
 // While a session is already active, only 1 tick in this many does the real
 // ps-list scan (spawns fastlist.exe) — the rest use lightTick()'s free PID
@@ -920,7 +934,10 @@ function scheduleNextTick() {
   // Fast cadence while a session is live OR a launch is mid-confirmation
   // (detectingGames non-empty) — a just-launched game still gets checked at
   // 5s so its session starts on time even though full idle scans back off.
-  const delay = (activeSessions.size > 0 || detectingGames.size > 0) ? POLL_MS : POLL_IDLE_MS
+  const busy = activeSessions.size > 0 || detectingGames.size > 0
+  if (busy) lastActivityAt = Date.now()
+  const delay = busy ? POLL_MS
+    : (Date.now() - lastActivityAt > DEEP_IDLE_AFTER_MS ? POLL_DEEP_IDLE_MS : POLL_IDLE_MS)
   const gen = ++tickGen
   clearTimeout(pollTimer)
   pollTimer = setTimeout(async () => {
@@ -950,6 +967,7 @@ function scheduleNextTick() {
 // Without it a launch from inside KoZo can wait out the whole 20s idle poll
 // before "Now Playing" lights up, which reads as the app not noticing.
 function nudge() {
+  lastActivityAt = Date.now()   // back to the normal idle cadence
   if (!pollTimer || paused) return
   const gen = ++tickGen   // supersede whatever is pending OR in flight
   clearTimeout(pollTimer)
