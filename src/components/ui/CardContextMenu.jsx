@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { IconStar, IconEye, IconEyeOff, IconCircleOff, IconPencil, IconTrash, IconBrandSteam, IconArchive, IconArrowBackUp } from '@tabler/icons-react'
 import { STATUS_META } from '../GameCard'
@@ -24,6 +24,7 @@ export default function CardContextMenu({
   deleteConfirmLabel = 'Confirm remove',
   deleteIsArchive = false,   // archive icon + non-destructive wording
   onRestore,               // optional — "Restore to library" (archived games)
+  onDeleteForever,         // optional — with deleteIsArchive: a second choice that deletes the history too
   extraItems = [],         // optional — [{ label, Icon, onClick }] plain actions
   statuses = STATUS_META,
   statusField = 'completion_status',
@@ -33,16 +34,20 @@ export default function CardContextMenu({
   const [pos, setPos] = useState({ left: x, top: y })
   const [confirmDel, setConfirmDel] = useState(false)
 
-  useEffect(() => {
-    // Clamp inside the viewport once we know the menu's real size.
+  // Keep the whole menu on screen, measured before paint and again whenever it
+  // grows (the Remove choices expand it). Opens upward when there's no room
+  // below the cursor; never above the top edge either.
+  useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
     const r = el.getBoundingClientRect()
+    const vw = window.innerWidth, vh = window.innerHeight
+    const top = y + r.height + 8 > vh ? y - r.height : y
     setPos({
-      left: Math.min(x, window.innerWidth - r.width - 8),
-      top: Math.min(y, window.innerHeight - r.height - 8),
+      left: Math.max(8, Math.min(x, vw - r.width - 8)),
+      top: Math.max(8, Math.min(top, vh - r.height - 8)),
     })
-  }, [x, y])
+  }, [x, y, confirmDel])
 
   useEffect(() => {
     function onKey(e) { if (e.key === 'Escape') onClose() }
@@ -140,18 +145,32 @@ export default function CardContextMenu({
         {onDelete && (
           <>
             <div className={s.divider} />
-            <button
-              className={`${s.item} ${deleteIsArchive ? '' : s.itemDanger}`}
-              onClick={() => {
-                if (!confirmDel) { setConfirmDel(true); return }
-                onDelete(game)
-                onClose()
-              }}
-            >
-              {deleteIsArchive ? <IconArchive size={13} /> : <IconTrash size={13} />}
-              {confirmDel ? deleteConfirmLabel : deleteLabel}
-            </button>
-            {confirmDel && deleteHint && <div className={s.hint}>{deleteHint}</div>}
+            {deleteIsArchive && onDeleteForever && confirmDel ? (
+              // Remove from library: keep the history (archive) or delete it too.
+              <div className={s.choice}>
+                <button className={s.item} onClick={() => { onDelete(game); onClose() }}>
+                  <IconArchive size={13} />
+                  Keep history
+                </button>
+                <button className={`${s.item} ${s.itemDanger}`} onClick={() => { onDeleteForever(game); onClose() }}>
+                  <IconTrash size={13} />
+                  Delete with history
+                </button>
+              </div>
+            ) : (
+              <button
+                className={`${s.item} ${deleteIsArchive ? '' : s.itemDanger}`}
+                onClick={() => {
+                  if (!confirmDel) { setConfirmDel(true); return }
+                  onDelete(game)
+                  onClose()
+                }}
+              >
+                {deleteIsArchive ? <IconArchive size={13} /> : <IconTrash size={13} />}
+                {confirmDel ? deleteConfirmLabel : deleteLabel}
+              </button>
+            )}
+            {confirmDel && deleteHint && !(deleteIsArchive && onDeleteForever) && <div className={s.hint}>{deleteHint}</div>}
           </>
         )}
       </div>

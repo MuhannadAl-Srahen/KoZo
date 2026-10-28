@@ -174,7 +174,22 @@ handle('shell:openExternal', (url) => {
   }
   return true
 })
-handle('games:delete', (id) => { gamesQ.deleteGame(id); bk(); broadcast('game:updated', id); return true })
+// Delete for good: the game with its sessions and achievements (both cascade).
+// Its Game List row stays, unlinked. The cover and banner files go too.
+handle('games:delete', (ids) => {
+  const fsx = require('fs')
+  const list = (Array.isArray(ids) ? ids : [ids]).map(Number).filter(Number.isFinite)
+  for (const id of list) {
+    const g = gamesQ.getGame(id)
+    gamesQ.deleteGame(id)
+    for (const f of [g?.banner_local_path, g?.hero_local_path]) {
+      if (f && /[\\/]banners[\\/]/i.test(f)) { try { fsx.unlinkSync(f) } catch {} }
+    }
+    broadcast('game:updated', id)
+  }
+  bk()
+  return list.length
+})
 
 // Archive instead of delete: the game leaves the Library grid but its sessions,
 // achievements and XP stay. Restoring is just flipping the flag back.

@@ -326,11 +326,13 @@ export default function GameDetail() {
     setHeroStage(st => st + 1)
   }
 
-  // Removing archives the game: it leaves the Library, history is kept.
-  async function handleDelete() {
+  // Remove from the Library: keep the history (archive, restorable) or delete
+  // the game with its playtime, sessions and achievements.
+  async function handleDelete(withHistory = false) {
     if (!confirmDelete) { setConfirmDelete(true); return }
     setDeleting(true)
-    await window.kozo?.api?.games?.archive([Number(id)])
+    if (withHistory) await window.kozo?.api?.games?.delete(Number(id))
+    else await window.kozo?.api?.games?.archive([Number(id)])
     navigate('/')
   }
 
@@ -895,16 +897,17 @@ export default function GameDetail() {
                 ) : (
                   <div className={s.menuConfirm}>
                     <div className={s.menuConfirmText}>
-                      Remove "{game.name}" from the Library? Playtime, sessions and achievements are kept. Restore it any time from Archived.
+                      Remove "{game.name}" from the Library?
                     </div>
                     <div className={s.menuConfirmBtns}>
-                      <button className={s.menuCancelBtn} onClick={() => setConfirmDelete(false)}>Cancel</button>
+                      <button className={s.menuCancelBtn} onClick={() => setConfirmDelete(false)} disabled={deleting}>Cancel</button>
+                      <button className={s.menuCancelBtn} onClick={() => handleDelete(false)} disabled={deleting}>Keep history</button>
                       <button
                         className={`${s.menuDeleteBtn} ${deleting ? s.menuItemBusy : ''}`}
-                        onClick={handleDelete}
+                        onClick={() => handleDelete(true)}
                         aria-busy={deleting || undefined}
                       >
-                        {deleting ? 'Archiving…' : 'Remove'}
+                        {deleting ? 'Removing…' : 'Delete with history'}
                       </button>
                     </div>
                   </div>

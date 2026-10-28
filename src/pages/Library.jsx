@@ -4,7 +4,7 @@ import {
   IconPlus, IconLayoutGrid, IconList, IconLayoutColumns,
   IconDeviceGamepad2, IconScan, IconLoader2, IconCheckbox, IconSquare,
   IconX, IconCheck, IconSearch, IconEyeOff, IconChevronRight, IconChevronDown,
-  IconArchive, IconFlag, IconCalendarEvent,
+  IconArchive, IconFlag, IconCalendarEvent, IconTrash,
 } from '@tabler/icons-react'
 import GameCard, { formatPlaytime, STATUS_META } from '../components/GameCard'
 import AddGameModal from '../components/modals/AddGameModal'
@@ -221,10 +221,12 @@ export default function Library() {
 
   // "Remove" archives: the games leave the Library but keep playtime,
   // sessions and achievements (restore any time from the Archived shelf).
-  async function handleBulkDelete() {
+  // Remove the selected games: keep their history (archive) or delete it too.
+  async function handleBulkDelete(withHistory = false) {
     if (!confirmDelete) { setConfirmDelete(true); return }
     setBulkDeleting(true)
-    await window.kozo?.api?.games?.archive([...selectedIds])
+    if (withHistory) await window.kozo?.api?.games?.delete([...selectedIds])
+    else await window.kozo?.api?.games?.archive([...selectedIds])
     await loadGames()
     loadWeekPlaytime({ invalidate: true })
     setBulkDeleting(false)
@@ -560,20 +562,24 @@ export default function Library() {
             confirmDelete ? (
               <div className={s.confirmRow}>
                 <span className={s.confirmText}>
-                  Archive {selectedIds.size} game{selectedIds.size !== 1 ? 's' : ''}? Playtime and achievements are kept.
+                  Remove {selectedIds.size} game{selectedIds.size !== 1 ? 's' : ''}?
                 </span>
-                <button className={s.btnSecondary} onClick={() => setConfirmDelete(false)}>
+                <button className={s.btnSecondary} onClick={() => setConfirmDelete(false)} disabled={bulkDeleting}>
                   Cancel
                 </button>
-                <button className={s.btnDanger} onClick={handleBulkDelete} disabled={bulkDeleting}>
+                <button className={s.btnSecondary} onClick={() => handleBulkDelete(false)} disabled={bulkDeleting}>
                   <IconArchive size={14} stroke={1.6} />
-                  {bulkDeleting ? 'Archiving…' : 'Confirm'}
+                  Keep history
+                </button>
+                <button className={s.btnDanger} onClick={() => handleBulkDelete(true)} disabled={bulkDeleting}>
+                  <IconTrash size={14} stroke={1.6} />
+                  {bulkDeleting ? 'Removing…' : 'Delete with history'}
                 </button>
               </div>
             ) : (
-              <button className={s.btnDanger} onClick={handleBulkDelete}>
-                <IconArchive size={14} stroke={1.6} />
-                Archive {selectedIds.size}
+              <button className={s.btnDanger} onClick={() => handleBulkDelete()}>
+                <IconTrash size={14} stroke={1.6} />
+                Remove {selectedIds.size}
               </button>
             )
           )}
@@ -697,8 +703,12 @@ export default function Library() {
           } : undefined}
           deleteIsArchive
           deleteLabel="Remove from library"
-          deleteConfirmLabel="Confirm (history is kept)"
-          deleteHint="Moves it to Archived. Playtime, sessions and achievements are kept."
+          onDeleteForever={async (game) => {
+            setGames(prev => { const u = prev.filter(g => g.id !== game.id); libraryCache = u; return u })
+            await window.kozo?.api?.games?.delete(game.id)
+            loadGames({ silent: true })
+            loadWeekPlaytime({ invalidate: true })
+          }}
           extraItems={[
             { label: 'Plan for month…', Icon: IconCalendarEvent, onClick: (g) => setPlanIds([g.id]) },
           ]}
