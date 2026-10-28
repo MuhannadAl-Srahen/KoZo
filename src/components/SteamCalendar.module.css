@@ -228,8 +228,19 @@
 }
 .iconBtn:hover { color: var(--text-primary); background: var(--neutral-bg-hover); }
 
-/* Wide art standing in for a missing portrait — keep the subject in frame. */
-.coverWideFallback { object-position: center center; }
+/* No portrait: the wide art is shown whole over a blurred, darkened copy of
+   itself, so titles are never cropped. The span takes the cover's own box. */
+.coverWide { display: block; overflow: hidden; background: var(--surface-3); }
+.coverWideBg, .coverWideFg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.coverWideBg { object-fit: cover; filter: blur(14px) brightness(0.45) saturate(1.2); transform: scale(1.2); }
+.coverWideFg { object-fit: contain; object-position: center 38%; }
+/* Art still loading: a shimmer in the cover's box */
+.coverPending { display: block; }
 .coverEmpty {
   display: flex;
   align-items: center;
@@ -287,6 +298,7 @@
 .dayToday .dayNum { color: var(--a); }
 .dayPosters { display: flex; gap: var(--sp-6); }
 .dayPoster {
+  position: relative;
   width: 50%;
   max-width: 66px;
   aspect-ratio: 2 / 3;

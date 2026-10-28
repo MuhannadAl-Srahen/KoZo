@@ -66,25 +66,29 @@ function dayHeading(key) {
   return { main: d.toLocaleDateString(undefined, { weekday: 'long' }), sub: d.toLocaleDateString(undefined, { month: 'long', day: 'numeric' }) }
 }
 
-// Portrait first, then wide art, then the search capsule — skipping any that 404.
+// Portrait cover when Steam has one. Without a portrait, the wide art is shown
+// whole (contained) over a blurred copy of itself instead of being cropped into
+// a portrait ("GHT N"). `g.art === null` means art hasn't arrived yet: a
+// shimmer, never the blurry 231px search capsule stretched over the card.
 function Cover({ g, wide = false, className }) {
   const srcs = (wide
     ? [g.art?.hero, g.art?.header, g.art?.capsule, g.capsule]
-    : [g.art?.portrait, g.art?.header, g.capsule]).filter(Boolean)
+    : [g.art?.portrait, g.art?.header, g.art?.capsule, g.capsule]).filter(Boolean)
   const [i, setI] = useState(0)
   useEffect(() => { setI(0) }, [srcs[0]])
+  if (g.art === null) return <span className={`${className} ${s.coverPending} skeleton`} />
   if (i >= srcs.length) return <div className={`${className} ${s.coverEmpty}`}><IconBrandSteam size={22} /></div>
-  const portraitMissing = !wide && srcs[i] !== g.art?.portrait
-  return (
-    <img
-      className={`${className} ${portraitMissing ? s.coverWideFallback : ''}`}
-      src={srcs[i]}
-      alt=""
-      loading="lazy"
-      decoding="async"
-      onError={() => setI(n => n + 1)}
-    />
-  )
+  const src = srcs[i]
+  const next = () => setI(n => n + 1)
+  if (!wide && src !== g.art?.portrait) {
+    return (
+      <span className={`${className} ${s.coverWide}`}>
+        <img className={s.coverWideBg} src={src} alt="" aria-hidden="true" decoding="async" />
+        <img className={s.coverWideFg} src={src} alt="" decoding="async" onError={next} />
+      </span>
+    )
+  }
+  return <img className={className} src={src} alt="" loading="lazy" decoding="async" onError={next} />
 }
 
 // Track / Untrack. Untrack only removes entries still marked Upcoming; a game
@@ -151,6 +155,8 @@ function PosterCard({ g, tracked, info, onOpen, onTrack, onUntrack, busy, compac
 export default function SteamCalendar({ trackedAppIds, onTrack, onUntrack }) {
   const [games, setGames]     = useState(() => calendarCache?.games || [])
   const [art, setArt]         = useState(() => calendarCache?.art || {})
+  // App ids whose art request finished (found or not); the rest show a shimmer.
+  const [artTried, setArtTried] = useState(() => new Set(Object.keys(calendarCache?.art || {}).map(Number)))
   const [pages, setPages]     = useState(() => calendarCache?.pages || { soon: 0, wishlist: 0 })
   const [loading, setLoading] = useState(!calendarCache)
   const [error, setError]     = useState(null)
@@ -190,9 +196,15 @@ export default function SteamCalendar({ trackedAppIds, onTrack, onUntrack }) {
     if (failed.length && !fresh.length) setError(failed[0]?.error || 'Could not reach the Steam store.')
     setLoading(false)
 
-    const needArt = nextGames.map(g => g.appid).filter(id => !art[id])
-    if (needArt.length) {
-      const res = await window.kozo?.api?.steam?.appAssets?.(needArt)
+    await fetchArt(nextGames.map(g => g.appid).filter(id => !art[id]))
+  }
+
+  // Portrait art for these games, 100 per request so the first covers show
+  // quickly. Every id is marked tried afterwards, found or not.
+  async function fetchArt(ids) {
+    for (let k = 0; k < ids.length; k += 100) {
+      const chunk = ids.slice(k, k + 100)
+      const res = await window.kozo?.api?.steam?.appAssets?.(chunk).catch(() => null)
       if (res?.ok) {
         setArt(prev => {
           const merged = { ...prev, ...res.data }
@@ -200,17 +212,23 @@ export default function SteamCalendar({ trackedAppIds, onTrack, onUntrack }) {
           return merged
         })
       }
+      setArtTried(prev => { const n = new Set(prev); chunk.forEach(id => n.add(Number(id))); return n })
     }
   }
 
-  useEffect(() => { if (!calendarCache) loadPages(START_PAGES) }, [])
+  useEffect(() => {
+    if (!calendarCache) { loadPages(START_PAGES); return }
+    // Cached games whose art never arrived (an earlier request failed): ask again.
+    const missing = calendarCache.games.map(g => g.appid).filter(id => !calendarCache.art?.[id])
+    if (missing.length) fetchArt(missing)
+  }, [])
 
   // Bucket every game by its release: exact day, month-only, or later/TBA.
   const buckets = useMemo(() => {
     const byDay = new Map(), byMonth = new Map(), later = []
     for (const g of games) {
       const rel = parseRelease(g.release)
-      const entry = { ...g, rel, art: art[g.appid] || art[String(g.appid)] || null }
+      const entry = { ...g, rel, art: art[g.appid] || art[String(g.appid)] || (artTried.has(Number(g.appid)) ? {} : null) }
       if (rel.ts != null && rel.precision === 'day') {
         const k = localDayKey(new Date(rel.ts))
         if (!byDay.has(k)) byDay.set(k, [])
@@ -224,7 +242,7 @@ export default function SteamCalendar({ trackedAppIds, onTrack, onUntrack }) {
       }
     }
     return { byDay, byMonth, later }
-  }, [games, art])
+  }, [games, art, artTried])
 
   const mKey = monthKey(month)
   const todayKey = localDayKey(new Date())
