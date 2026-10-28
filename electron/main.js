@@ -243,6 +243,32 @@ Close any program that may be using it and start KoZo again.`)
     try { require('./logger').warn('Library → Game List sync failed', { message: e.message }) } catch {}
   }
 
+  // One-time: remove games a buggy Scan PC imported from temp/installer folders
+  // ("Setup", hash-named folders under C:\Temp\…). Only rows with no playtime
+  // and no sessions are touched; their Game List copies go with them.
+  try {
+    const settingsQ = require('./db/queries/settings')
+    if (settingsQ.getSetting('purged_junk_scan_games') !== '1') {
+      const { isJunkFolder } = require('./services/pcScanner')
+      const db = require('./db/database').getDb()
+      const junk = db.prepare(`
+        SELECT g.id, g.name, g.install_path FROM games g
+        WHERE COALESCE(g.total_playtime_seconds, 0) = 0
+          AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.game_id = g.id)
+      `).all().filter(g => g.install_path && isJunkFolder(g.install_path))
+      db.transaction(() => {
+        for (const g of junk) {
+          db.prepare('DELETE FROM game_list WHERE game_id = ?').run(g.id)
+          db.prepare('DELETE FROM games WHERE id = ?').run(g.id)
+        }
+      })()
+      settingsQ.setSetting('purged_junk_scan_games', '1')
+      if (junk.length) require('./logger').info(`Removed ${junk.length} non-game scan import(s)`, { games: junk.map(g => g.name) })
+    }
+  } catch (e) {
+    try { require('./logger').warn('junk scan cleanup failed', { message: e.message }) } catch {}
+  }
+
   require('./ipc')
 
   createWindow()
