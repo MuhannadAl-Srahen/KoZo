@@ -18,7 +18,7 @@ function getBannersDir() {
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
 // Uses axios for automatic gzip decompression and redirect following
 
-async function getJSON(url, params = {}) {
+async function getJSON(url, params = {}, extraHeaders = {}) {
   const axios = getAxios()
   const res = await axios.get(url, {
     params,
@@ -26,9 +26,23 @@ async function getJSON(url, params = {}) {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       'Accept-Encoding': 'gzip, deflate, br',
+      ...extraHeaders,
     },
   })
   return res.data
+}
+
+// Settings → "Show adult (18+) games". Steam's store search silently drops
+// adult-only titles for anonymous requests; ignore_preferences + the age-gate
+// cookie brings them back. Only search and the calendar feeds use this.
+const MATURE_COOKIE = 'wants_mature_content=1; birthtime=631152001; lastagecheckage=1-0-1990; mature_content=1'
+function showAdult() {
+  try { return require('../db/queries/settings').getSetting('show_adult_games') === '1' } catch { return false }
+}
+function adultSearchOpts() {
+  return showAdult()
+    ? { params: { ignore_preferences: 1 }, headers: { Cookie: MATURE_COOKIE } }
+    : { params: {}, headers: {} }
 }
 
 async function downloadFile(url, destPath) {
@@ -100,7 +114,9 @@ async function testApiKey(key) {
 async function searchGames(query) {
   if (!query || query.trim().length < 2) return []
   try {
+    const adult = adultSearchOpts()
     const data = await getJSON('https://store.steampowered.com/search/results/', {
+      ...adult.params,
       term: query.trim(),
       json: 1,
       count: 20,
@@ -109,7 +125,7 @@ async function searchGames(query) {
       // would list "Blood and Wine", "...Soundtrack", "Temerian Armor Set"). The
       // user adds playable games, not their add-ons, so filter those out at source.
       category1: 998,
-    })
+    }, adult.headers)
     const items = data?.items ?? []
     return items
       .map(item => {
@@ -891,13 +907,14 @@ function parseComingSoonHtml(html) {
 async function getComingSoon(feed = 'soon', page = 0) {
   const filter = COMING_SOON_FEEDS[feed] || COMING_SOON_FEEDS.soon
   const p = Math.max(0, Math.floor(Number(page) || 0))
-  const key = `${filter}:${p}`
+  const adult = adultSearchOpts()
+  const key = `${filter}:${p}:${showAdult() ? 'adult' : 'safe'}`
   const hit = comingSoonCache.get(key)
   if (hit && Date.now() - hit.at < COMING_SOON_TTL_MS) return { items: hit.items, total: hit.total, page: p, pageSize: COMING_SOON_PAGE }
   const res = await getAxios().get('https://store.steampowered.com/search/results/', {
-    params: { filter, infinite: 1, start: p * COMING_SOON_PAGE, count: COMING_SOON_PAGE, cc: 'us', l: 'english', category1: 998 },
+    params: { ...adult.params, filter, infinite: 1, start: p * COMING_SOON_PAGE, count: COMING_SOON_PAGE, cc: 'us', l: 'english', category1: 998 },
     timeout: 15000,
-    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', ...adult.headers },
   })
   const items = parseComingSoonHtml(res.data?.results_html)
   const total = Number(res.data?.total_count) || 0

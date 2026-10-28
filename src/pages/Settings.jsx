@@ -104,6 +104,7 @@ function GeneralTab() {
   const [startMinimized, setStartMinimized] = useState(generalTabCache?.startMinimized ?? false)
   const [startupLoaded, setStartupLoaded] = useState(!!generalTabCache)   // avoids off→on flicker on open
   const [startupMsg, setStartupMsg]   = useState(null)   // { type, text }
+  const [showAdult, setShowAdult]     = useState(generalTabCache?.showAdult ?? false)
 
   useEffect(() => {
     async function load() {
@@ -113,6 +114,8 @@ function GeneralTab() {
       if (res?.ok) {
         c.idlePause   = res.data?.idle_pause_min || '5'
         setIdlePause(c.idlePause)
+        c.showAdult   = res.data?.show_adult_games === '1'
+        setShowAdult(c.showAdult)
       }
       const startup = await window.kozo.api.app?.getStartup?.()
       if (startup?.ok) { c.openAtLogin = startup.data?.openAtLogin ?? false; setOpenAtLogin(c.openAtLogin) }
@@ -199,6 +202,26 @@ function GeneralTab() {
           />
         </div>
         <Message msg={startupMsg} />
+      </section>
+
+      <section className={s.section}>
+        <div className={s.sectionHeader}>
+          <IconEye size={15} stroke={1.6} />
+          <span>Content</span>
+        </div>
+        <div className={s.toggleList}>
+          <ToggleRow
+            label="Show adult (18+) games"
+            desc="Include adult only titles in game search and the Steam calendar. Steam hides them unless this is on."
+            checked={showAdult}
+            onChange={async (v) => {
+              setShowAdult(v)
+              generalTabCache = { ...(generalTabCache || {}), showAdult: v }
+              await window.kozo.api.settings.set('show_adult_games', v ? '1' : '0')
+              window.dispatchEvent(new Event('kozo:adult-changed'))
+            }}
+          />
+        </div>
       </section>
 
       <section className={s.section}>

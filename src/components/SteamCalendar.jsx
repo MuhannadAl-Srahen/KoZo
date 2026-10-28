@@ -26,6 +26,8 @@ const DAY_MS = 86400000
 
 // Survives tab switches: the feeds are cached in main for 6h anyway.
 let calendarCache = null   // { games, pages, art }
+// The adult-games setting changes what the feeds return — start over.
+if (typeof window !== 'undefined') window.addEventListener('kozo:adult-changed', () => { calendarCache = null })
 
 function monthStart(d) { return new Date(d.getFullYear(), d.getMonth(), 1) }
 function dayStart(ts) { const d = new Date(ts); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() }
