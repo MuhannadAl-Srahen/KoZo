@@ -58,10 +58,12 @@ src/                 renderer (React)
 | xp, xpTracker | XP is a pure function of the DB; the tracker emits `xp:levelup` and the overlay toast. |
 | saveFinder, saveBackup, autoSaveBackup | Find save folders; manual backups are timestamped, auto backups keep two slots (`auto-latest` / `auto-prev`) under `saves_backup_dir`. |
 | autoBackup | JSON dump of the DB tables to `auto_backup_dir`. Debounced after changes, every 5 min, and a synchronous flush on quit. |
-| statusSync, releaseWatch, installCheck | Keep game status and list status in step; flag upcoming games once released; update the installed flag and relocate moved games. |
+| statusSync, installCheck | Keep game status and list status in step; update the installed flag and relocate moved games. |
+| releaseWatch | Refreshes tracked upcoming games' Steam dates (delays), then flags released ones: overlay toast once, plus the `unseen_releases` setting behind the "Now out" panel (`ReleasedPanel`) and the Upcoming sidebar badge. Runs at startup, every 6h, and when the main window is shown. |
 | statusFlash (Alt+K), achievementListFlash (Alt+J) | Overlay info panels. |
 | controllerInput | PowerShell XInput probe, so controller play doesn't count as AFK. |
-| appUpdater, trackingSelfTest, notifications | Auto-update; Settings → "Test achievement tracking"; notifications is a no-op. |
+| appUpdater | electron-updater: broadcasts `app:update` state for `UpdateBanner`, and `app:whatsNew` shows release notes once after an update. |
+| trackingSelfTest, notifications | Settings → "Test achievement tracking"; notifications is a no-op. |
 
 ## Renderer
 | Route | Page |
@@ -70,7 +72,7 @@ src/                 renderer (React)
 | `/game/:id` | GameDetail |
 | `/game-list` | GameList (paged, 20 per page) |
 | `/achievements` | AchievementsHub |
-| `/upcoming` | Upcoming |
+| `/upcoming` | Upcoming (My upcoming + Steam calendar tab: `components/SteamCalendar.jsx`, data from `steam:comingSoon`) |
 | `/sessions` | Sessions |
 | `/statistics` | Statistics |
 | `/profile` | Profile |

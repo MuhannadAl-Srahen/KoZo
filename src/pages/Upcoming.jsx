@@ -8,6 +8,7 @@ import Modal, { modalStyles as ms } from '../components/ui/Modal'
 import EmptyState from '../components/ui/EmptyState'
 import { Skeleton, CardSkeletonGrid, PanelSkeleton } from '../components/ui/Skeleton'
 import SteamCalendar from '../components/SteamCalendar'
+import ReleasedPanel from '../components/ReleasedPanel'
 import s from './Upcoming.module.css'
 
 // Persist the last working art source per game across tab switches so cards don't
@@ -294,6 +295,7 @@ export default function Upcoming() {
 
       <div className={s.content}>
         <div className={s.inner}>
+          <ReleasedPanel onChanged={load} />
           {tab === 'steam' && <SteamCalendar trackedAppIds={trackedAppIds} onTrack={trackGame} />}
 
           {tab === 'mine' && items.length === 0 && (

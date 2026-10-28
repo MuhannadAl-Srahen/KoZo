@@ -12,6 +12,7 @@ import ScanResultModal from '../components/modals/ScanResultModal'
 import SearchableSelect from '../components/ui/SearchableSelect'
 import CardContextMenu from '../components/ui/CardContextMenu'
 import EmptyState from '../components/ui/EmptyState'
+import ReleasedPanel from '../components/ReleasedPanel'
 import { CardSkeletonGrid } from '../components/ui/Skeleton'
 import s from './Library.module.css'
 
@@ -493,6 +494,7 @@ export default function Library() {
 
       {/* Game grid */}
       <div className={s.content}>
+        <ReleasedPanel onChanged={() => loadGames({ silent: true })} />
         {/* Three distinct states. The old version could show two messages at
             once (empty search AND empty library), and showed NOTHING at all
             when a status filter matched nothing — a blank page with no

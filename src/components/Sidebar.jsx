@@ -42,6 +42,14 @@ export default function Sidebar() {
   const [activeSession, setActiveSession] = useState(null)
   const [sessionTick, setSessionTick] = useState(0)
   const [profile, setProfile] = useState({ name: 'Player', avatar: '' })
+  // Tracked games released but not yet acknowledged → badge on "Upcoming".
+  const [newReleases, setNewReleases] = useState(0)
+  useEffect(() => {
+    let alive = true
+    window.kozo?.api?.releases?.unseen?.().then(res => { if (alive && res?.ok) setNewReleases((res.data || []).length) })
+    const off = window.kozo?.events?.onReleasesChanged?.((list) => setNewReleases((list || []).length))
+    return () => { alive = false; off?.() }
+  }, [])
   const [xp, setXp] = useState(null)
   const location = useLocation()
 
@@ -162,6 +170,9 @@ export default function Sidebar() {
               <Icon size={17} stroke={1.6} />
             </span>
             {label}
+            {path === '/upcoming' && newReleases > 0 && (
+              <span className={s.navBadge} title={`${newReleases} tracked game${newReleases !== 1 ? 's' : ''} just released`}>{newReleases}</span>
+            )}
           </NavLink>
         ))}
       </nav>

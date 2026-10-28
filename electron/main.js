@@ -122,7 +122,12 @@ function createWindow() {
     }
   })
   mainWindow.on('hide', () => { if (!app.isQuitting) armDestroyTimer() })
-  mainWindow.on('show', clearDestroyTimer)
+  mainWindow.on('show', () => {
+    clearDestroyTimer()
+    // Cheap DB-only pass, so a release that passed while KoZo sat in the tray
+    // shows up the moment the window opens.
+    try { require('./services/releaseWatch').check() } catch {}
+  })
   // destroy() (the unload-in-tray path below) skips 'close' but still fires
   // 'closed' — clear the module ref so getOrCreateMainWindow knows to recreate.
   mainWindow.on('closed', () => { mainWindow = null })

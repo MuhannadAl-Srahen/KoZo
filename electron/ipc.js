@@ -1206,34 +1206,10 @@ handle('steam:comingSoon', (feed, page) => require('./services/steamApi').getCom
 // upcoming game (so popups open instantly) AND backfills missing release dates
 // — fixes released games (e.g. Dead Cells added long ago) sitting in "No date
 // yet" forever. Serialized with a small delay to respect Steam's rate limits.
-let _upcomingRefreshing = false
-handle('gameList:refreshUpcomingInfo', async () => {
-  if (_upcomingRefreshing) return { skipped: true }
-  _upcomingRefreshing = true
-  try {
-    const { getStoreDetails } = require('./services/steamApi')
-    const db = require('./db/database').getDb()
-    const rows = db.prepare("SELECT id, steam_app_id, release_date, genres FROM game_list WHERE status = 'upcoming' AND steam_app_id IS NOT NULL").all()
-    let filled = 0
-    for (const row of rows) {
-      const d = await getStoreDetails(row.steam_app_id)
-      if (d) {
-        if (!row.release_date && d.release_date) {
-          gameListQ.updateGameListItem(row.id, { release_date: d.release_date })
-          filled++
-        }
-        if ((!row.genres || row.genres === '[]') && d.genres?.length) {
-          gameListQ.updateGameListItem(row.id, { genres: JSON.stringify(d.genres) })
-        }
-      }
-      await new Promise(r => setTimeout(r, 250))
-    }
-    if (filled > 0) { bk(); broadcast('game:updated', null) }
-    return { filled, checked: rows.length }
-  } finally {
-    _upcomingRefreshing = false
-  }
-})
+// Delegates to releaseWatch, which also updates CHANGED dates (delays).
+handle('gameList:refreshUpcomingInfo', () => require('./services/releaseWatch').refreshUpcomingDates())
+handle('releases:unseen', () => require('./services/releaseWatch').getUnseen())
+handle('releases:dismiss', (ids) => { require('./services/releaseWatch').dismiss(ids); return true })
 
 // Returns persona name and avatar so the user can confirm the right account is loaded.
 handle('steam:getProfile', async (overrides) => {
