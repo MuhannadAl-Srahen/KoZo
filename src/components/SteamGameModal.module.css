@@ -1,0 +1,93 @@
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  gap: var(--sp-20);
+}
+@media (max-width: 760px) {
+  .layout { grid-template-columns: 1fr; }
+}
+
+.mediaCol { min-width: 0; }
+.noMedia {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--r-card);
+  background: var(--surface-3);
+  color: var(--text-disabled);
+}
+
+.infoCol { display: flex; flex-direction: column; gap: var(--sp-12); min-width: 0; }
+
+.countdown {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: var(--sp-4) var(--sp-12);
+  border-radius: var(--r-pill);
+  background: var(--a);
+  color: var(--accent-ink);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+
+.facts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  padding: var(--sp-12);
+  border-radius: var(--r-card);
+  background: var(--surface-2);
+  border: 1px solid var(--neutral-border);
+}
+.fact {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  min-width: 0;
+}
+.fact strong { margin-left: auto; color: var(--text-primary); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.factLabel { color: var(--text-muted); }
+.price { color: var(--success) !important; }
+
+.chips { display: flex; flex-wrap: wrap; gap: var(--sp-6); }
+.chip {
+  padding: 2px var(--sp-10);
+  border-radius: var(--r-pill);
+  background: var(--ad);
+  border: 1px solid var(--ab);
+  color: var(--a);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+.chipMuted {
+  padding: 2px var(--sp-8);
+  border-radius: var(--r-pill);
+  background: var(--neutral-bg);
+  color: var(--text-secondary);
+  font-size: var(--fs-2xs);
+}
+
+.desc { margin: 0; color: var(--text-secondary); line-height: 1.6; font-size: var(--fs-sm); }
+.muted { margin: 0; color: var(--text-muted); font-size: var(--fs-xs); }
+
+.footer { display: flex; align-items: center; gap: var(--sp-8); width: 100%; }
+.spacer { flex: 1; }
+.ghostBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: var(--sp-6) var(--sp-12);
+  border: 1px solid var(--neutral-border);
+  border-radius: var(--r-input);
+  background: var(--neutral-bg);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.ghostBtn:hover { background: var(--neutral-bg-hover); color: var(--text-primary); }

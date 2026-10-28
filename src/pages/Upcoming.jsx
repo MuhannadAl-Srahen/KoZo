@@ -8,12 +8,9 @@ import Modal, { modalStyles as ms } from '../components/ui/Modal'
 import EmptyState from '../components/ui/EmptyState'
 import { Skeleton, CardSkeletonGrid, PanelSkeleton } from '../components/ui/Skeleton'
 import SteamCalendar from '../components/SteamCalendar'
+import SteamGameModal from '../components/SteamGameModal'
 import ReleasedPanel from '../components/ReleasedPanel'
 import s from './Upcoming.module.css'
-
-// Persist the last working art source per game across tab switches so cards don't
-// re-run fallback image probing (hero -> header -> portrait) every time.
-const wideArtIndexCache = new Map()
 
 // Keep Upcoming data hot between route changes to avoid full visual resets.
 let upcomingCache = null
@@ -45,47 +42,39 @@ function countdown(rel) {
   return relativeLabel(rel.ts - now, true)
 }
 
-// The stored banner_url is a PORTRAIT cover — wide cards want Steam's wide art.
-// capsule_616x353 first: it matches the rendered card size and exists for
-// virtually every store page, unreleased ones included. The old order started
-// at library_hero (3840×1240) — every card decoded a wallpaper-sized bitmap,
-// and unreleased games usually 404 on it, so first paint burned a failed
-// request per card before the real art even started. That was the page's lag.
+// Wide card art. Steam's 616×353 capsule first: it matches the card size, so
+// it decodes fast and sharp. The library hero is a ~3840px wallpaper and made
+// every card lag, so it only appears in the detail gallery.
 function wideArtSources(item, art) {
   const id = item.steam_app_id
   const srcs = []
-  // Real store art first (hashed paths — newer titles 404 on the classic ones).
-  if (art?.hero) srcs.push(art.hero)
+  if (art?.capsule) srcs.push(art.capsule)
   if (art?.header) srcs.push(art.header)
   if (id) {
     srcs.push(`https://cdn.akamai.steamstatic.com/steam/apps/${id}/capsule_616x353.jpg`)
     srcs.push(`https://cdn.akamai.steamstatic.com/steam/apps/${id}/header.jpg`)
   }
   if (item.banner_url) srcs.push(item.banner_url)
-  return srcs
+  return [...new Set(srcs)]
 }
 
+// Walks the source list on error. Keyed by the first source so new art
+// (arriving from steam:appAssets) restarts the ladder instead of sticking.
 function WideArt({ item, art, className }) {
-  const cacheKey = `${item?.id ?? item?.steam_app_id ?? item?.name}:${art?.hero ? 'a' : ''}`
-  const [idx, setIdx] = useState(() => wideArtIndexCache.get(cacheKey) ?? 0)
   const srcs = wideArtSources(item, art)
-  useEffect(() => {
-    setIdx(wideArtIndexCache.get(cacheKey) ?? 0)
-  }, [cacheKey])
-  if (idx >= srcs.length) return null
+  const [idx, setIdx] = useState(0)
+  const [loaded, setLoaded] = useState(false)
+  useEffect(() => { setIdx(0); setLoaded(false) }, [srcs[0]])
+  if (idx >= srcs.length) return <div className={`${className} ${s.artEmpty}`}><IconCalendar size={26} stroke={1.3} /></div>
   return (
     <img
-      className={className}
+      className={`${className} ${loaded ? s.artLoaded : ''}`}
       src={srcs[idx]}
       alt=""
       loading="lazy"
       decoding="async"
-      onLoad={() => wideArtIndexCache.set(cacheKey, idx)}
-      onError={() => setIdx((i) => {
-        const next = i + 1
-        wideArtIndexCache.set(cacheKey, next)
-        return next
-      })}
+      onLoad={() => setLoaded(true)}
+      onError={() => setIdx(i => i + 1)}
     />
   )
 }
@@ -102,91 +91,35 @@ function badgeClassFor(rel) {
   return ''
 }
 
-// ── Detail popup — richer store info, Steam link, quick status ───────────────
+// ── Detail popup: the shared store-style game modal ───────────────────────────
 function DetailModal({ item, rel, art, onClose, onStatus }) {
-  const [details, setDetails] = useState(undefined)   // undefined = loading, null = unavailable
-
-  useEffect(() => {
-    let cancelled = false
-    if (item.steam_app_id) {
-      window.kozo?.api?.steam?.storeDetails?.(item.steam_app_id).then(res => {
-        if (!cancelled) setDetails(res?.ok ? res.data : null)
-      })
-    } else {
-      setDetails(null)
-    }
-    return () => { cancelled = true }
-  }, [item.id])
-
-  const genres = details?.genres?.length ? details.genres : parseGenres(item)
-
   return (
-    <Modal title={item.name} icon={<IconCalendar size={17} stroke={1.6} />} width={620} onClose={onClose}>
-      <div className={s.detailHero}>
-        <WideArt item={item} art={art} className={s.detailArt} />
-        <span className={s.detailGrad} />
-        <span className={`${s.badge} ${s.detailBadge} ${badgeClassFor(rel)}`}>
-          {countdown(rel)}
-        </span>
-      </div>
-
-      <div className={s.detailMeta}>
-        {item.release_date && <span className={s.detailDate}><IconCalendar size={13} stroke={1.7} /> {item.release_date}</span>}
-        {genres.length > 0 && <span className={s.detailGenres}>{genres.slice(0, 4).join(' · ')}</span>}
-      </div>
-
-      {details === undefined && <PanelSkeleton lines={3} />}
-      {details?.description && <p className={s.detailDesc}>{details.description}</p>}
-      {details?.developers?.length > 0 && (
-        <div className={s.detailDevs}>
-          By <strong>{details.developers.join(', ')}</strong>
-          {details.publishers?.length > 0 && details.publishers.join() !== details.developers.join() && (
-            <> · Published by {details.publishers.join(', ')}</>
-          )}
-        </div>
-      )}
-      {details === null && !item.steam_app_id && (
-        <p className={`${s.detailDesc} ${s.detailDescMuted}`}>No Steam page linked for this game.</p>
-      )}
-
-      <div className={s.detailActions}>
-        {item.steam_app_id && (
-          <button
-            className={ms.btnPrimary}
-            onClick={() => window.kozo?.api?.shell?.openExternal(`https://store.steampowered.com/app/${item.steam_app_id}`)}
-          >
-            <IconBrandSteam size={14} stroke={1.8} /> View on Steam
+    <SteamGameModal
+      appId={item.steam_app_id}
+      name={item.name}
+      release={item.release_date}
+      countdown={countdown(rel)}
+      art={art}
+      fallbackArt={wideArtSources(item, null)}
+      onClose={onClose}
+      actions={
+        <>
+          <button className={ms.btnCancel} onClick={() => onStatus('want_to_play')}>
+            <IconBookmark size={13} stroke={1.8} /> Want to play
           </button>
-        )}
-        <button className={ms.btnCancel} onClick={() => onStatus('want_to_play')}>
-          <IconBookmark size={13} stroke={1.8} /> Want to play
-        </button>
-        <button className={ms.btnCancel} onClick={() => onStatus('playing')}>
-          <IconPlayerPlayFilled size={12} /> Playing
-        </button>
-      </div>
-    </Modal>
+          <button className={ms.btnPrimary} onClick={() => onStatus('playing')}>
+            <IconPlayerPlayFilled size={12} /> Playing
+          </button>
+        </>
+      }
+    />
   )
 }
 
 // ── Card ──────────────────────────────────────────────────────────────────────
-// Big countdown block: "12 / days", "Out / now", "This / month", "TBA".
-function countdownParts(rel) {
-  if (!rel || rel.ts == null) return { big: 'TBA', unit: 'no date yet' }
-  const now = Date.now()
-  if (rel.until <= now) return { big: 'Out', unit: 'now' }
-  if (rel.vague && rel.ts <= now) return { big: 'This', unit: rel.precision === 'month' ? 'month' : 'year' }
-  if (rel.precision === 'year') return { big: rel.label, unit: 'expected' }
-  const days = Math.ceil((rel.ts - now) / 86400000)
-  if (days <= 1 && !rel.vague) return { big: '1', unit: 'day' }
-  if (days < 60) return { big: `${rel.vague ? '~' : ''}${days}`, unit: 'days' }
-  const months = Math.round(days / 30.4)
-  return { big: `~${months}`, unit: months === 1 ? 'month' : 'months' }
-}
-
 // How far along the wait is, from when it was added to the list to release.
 function waitProgress(item, rel) {
-  if (!rel || rel.ts == null || !item.added_at) return null
+  if (!rel || rel.ts == null || rel.vague || !item.added_at) return null
   const start = new Date(item.added_at).getTime()
   const end = rel.ts
   if (!Number.isFinite(start) || end <= start) return null
@@ -195,7 +128,6 @@ function waitProgress(item, rel) {
 
 function UpcomingCard({ item, rel, art, onOpen, onStatus }) {
   const genres = parseGenres(item).slice(0, 3)
-  const cd = countdownParts(rel)
   const progress = waitProgress(item, rel)
   const out = rel?.until != null && rel.until <= Date.now()
   const open = () => onOpen({ item, rel })
@@ -209,35 +141,34 @@ function UpcomingCard({ item, rel, art, onOpen, onStatus }) {
       onClick={open}
       onKeyDown={(e) => { if (e.key === 'Enter') open() }}
     >
-      <WideArt item={item} art={art} className={s.cardArt} />
-      <span className={s.cardGrad} />
-
-      <div className={`${s.countdown} ${badgeClassFor(rel)}`}>
-        <span className={s.countdownBig}>{cd.big}</span>
-        <span className={s.countdownUnit}>{cd.unit}</span>
-      </div>
-
-      <div className={s.cardActions}>
-        {item.steam_app_id && (
-          <button className={s.cardAction} title="Steam page"
-            onClick={stop(() => window.kozo?.api?.shell?.openExternal(`https://store.steampowered.com/app/${item.steam_app_id}`))}>
-            <IconBrandSteam size={14} stroke={1.8} />
+      <div className={s.cardMedia}>
+        <WideArt item={item} art={art} className={s.cardArt} />
+        <span className={`${s.pill} ${badgeClassFor(rel)}`}>{countdown(rel)}</span>
+        <div className={s.cardActions}>
+          {item.steam_app_id && (
+            <button className={s.cardAction} title="Steam page"
+              onClick={stop(() => window.kozo?.api?.shell?.openExternal(`https://store.steampowered.com/app/${item.steam_app_id}`))}>
+              <IconBrandSteam size={14} stroke={1.8} />
+            </button>
+          )}
+          <button className={s.cardAction} title="Move to Want to play" onClick={stop(() => onStatus(item, 'want_to_play'))}>
+            <IconBookmark size={14} stroke={1.8} />
           </button>
-        )}
-        <button className={s.cardAction} title="Move to Want to play" onClick={stop(() => onStatus(item, 'want_to_play'))}>
-          <IconBookmark size={14} stroke={1.8} />
-        </button>
-      </div>
-
-      <div className={s.cardBody}>
-        <div className={s.cardName} title={item.name}>{item.name}</div>
-        <div className={s.cardMetaRow}>
-          <span className={s.cardDate}><IconCalendar size={12} stroke={1.8} /> {item.release_date || 'To be announced'}</span>
-          {genres.map(g => <span key={g} className={s.cardGenre}>{g}</span>)}
         </div>
+      </div>
+      <div className={s.cardInfo}>
+        <div className={s.cardName} title={item.name}>{item.name}</div>
+        <div className={s.cardDate}>
+          <IconCalendar size={13} stroke={1.8} />
+          {item.release_date || 'Release date not announced'}
+        </div>
+        {genres.length > 0 && (
+          <div className={s.cardGenres}>{genres.map(g => <span key={g} className={s.cardGenre}>{g}</span>)}</div>
+        )}
         {progress != null && (
-          <div className={s.cardProgress} title={`${Math.round(progress * 100)}% of the wait done`}>
-            <span style={{ width: `${progress * 100}%` }} />
+          <div className={s.cardWait}>
+            <div className={s.cardProgress}><span style={{ width: `${progress * 100}%` }} /></div>
+            <span className={s.cardWaitLabel}>{Math.round(progress * 100)}% of the wait</span>
           </div>
         )}
       </div>

@@ -5,6 +5,7 @@ import {
 } from '@tabler/icons-react'
 import Modal, { modalStyles as ms } from './ui/Modal'
 import EmptyState from './ui/EmptyState'
+import SteamGameModal from './SteamGameModal'
 import { PanelSkeleton } from './ui/Skeleton'
 import { parseRelease, localDayKey, monthKey, formatMonthKey } from '../lib/utils'
 import s from './SteamCalendar.module.css'
@@ -151,19 +152,25 @@ export default function SteamCalendar({ trackedAppIds, onTrack }) {
     for (const g of fresh) if (!byId.has(g.appid)) byId.set(g.appid, g)
     const nextGames = [...byId.values()]
 
-    // Real portrait covers for everything new (one batched lookup in main).
-    const needArt = nextGames.map(g => g.appid).filter(id => !art[id])
-    let nextArt = art
-    if (needArt.length) {
-      const res = await window.kozo?.api?.steam?.appAssets?.(needArt)
-      if (res?.ok) nextArt = { ...art, ...res.data }
-    }
-    calendarCache = { games: nextGames, pages: nextPages, art: nextArt }
+    // Show the games right away; real portrait covers stream in afterwards
+    // (cards use the search capsule until then).
+    calendarCache = { games: nextGames, pages: nextPages, art }
     setGames(nextGames)
     setPages(nextPages)
-    setArt(nextArt)
     if (failed.length && !fresh.length) setError(failed[0]?.error || 'Could not reach the Steam store.')
     setLoading(false)
+
+    const needArt = nextGames.map(g => g.appid).filter(id => !art[id])
+    if (needArt.length) {
+      const res = await window.kozo?.api?.steam?.appAssets?.(needArt)
+      if (res?.ok) {
+        setArt(prev => {
+          const merged = { ...prev, ...res.data }
+          if (calendarCache) calendarCache.art = merged
+          return merged
+        })
+      }
+    }
   }
 
   useEffect(() => { if (!calendarCache) loadPages(START_PAGES) }, [])
@@ -240,7 +247,7 @@ export default function SteamCalendar({ trackedAppIds, onTrack }) {
       {error && !games.length && (
         <EmptyState Icon={IconBrandSteam} title="Steam calendar unavailable" desc={`${error} Check your connection and try again.`} />
       )}
-      {loading && !games.length && <PanelSkeleton lines={6} />}
+      {loading && !games.length && view === 'days' && <PanelSkeleton lines={6} />}
 
       {view === 'days' ? (
         <>
@@ -341,54 +348,22 @@ export default function SteamCalendar({ trackedAppIds, onTrack }) {
 }
 
 function DetailModal({ g, tracked, busy, onTrack, onClose }) {
-  const [details, setDetails] = useState(undefined)   // undefined = loading, null = unavailable
-  useEffect(() => {
-    let alive = true
-    window.kozo?.api?.steam?.storeDetails?.(g.appid).then(res => { if (alive) setDetails(res?.ok ? res.data : null) })
-    return () => { alive = false }
-  }, [g.appid])
-
   return (
-    <Modal
-      title={g.name}
-      icon={<IconBrandSteam size={17} stroke={1.6} />}
+    <SteamGameModal
+      appId={g.appid}
+      name={g.name}
+      release={g.release}
+      countdown={countdownLabel(g.rel)}
+      art={g.art}
+      fallbackArt={[g.capsule]}
       onClose={onClose}
-      width={620}
-      footer={
-        <div style={{ display: 'flex', gap: 8, width: '100%' }}>
-          <button className={ms.btnGhost} onClick={() => window.kozo?.api?.shell?.openExternal?.(`https://store.steampowered.com/app/${g.appid}`)}>
-            <IconBrandSteam size={14} /> Steam page
-          </button>
-          <div style={{ flex: 1 }} />
-          {tracked ? (
-            <button className={ms.btnCancel} disabled><IconCheck size={14} /> Tracked</button>
-          ) : (
-            <button className={ms.btnPrimary} onClick={onTrack} disabled={busy}>
-              <IconBookmark size={14} /> {busy ? 'Adding…' : 'Track release'}
-            </button>
-          )}
-        </div>
-      }
-    >
-      <div className={s.detailHero}>
-        <Cover g={g} wide className={s.detailArt} />
-        <span className={s.detailShade} />
-        <span className={s.detailCountdown}><IconClock size={13} /> {countdownLabel(g.rel)}</span>
-      </div>
-      <div className={s.detailMeta}>
-        <span>Release: <strong>{g.release || 'To be announced'}</strong></span>
-        {(g.prepurchase || g.price) && <span className={s.detailPrice}>{g.prepurchase ? `Pre-purchase · ${g.price || ''}` : g.price}</span>}
-        {details?.genres?.length > 0 && <span className={s.muted}>{details.genres.slice(0, 4).join(' · ')}</span>}
-      </div>
-      {details === undefined && <PanelSkeleton lines={3} />}
-      {details?.description && <p className={s.detailDesc}>{details.description}</p>}
-      {details?.developers?.length > 0 && <div className={s.muted}>By {details.developers.join(', ')}</div>}
-      {details?.screenshots?.length > 0 && (
-        <div className={s.shots}>
-          {details.screenshots.map(src => <img key={src} src={src} alt="" loading="lazy" />)}
-        </div>
+      actions={tracked ? (
+        <button className={ms.btnCancel} disabled><IconCheck size={14} /> Tracked</button>
+      ) : (
+        <button className={ms.btnPrimary} onClick={onTrack} disabled={busy}>
+          <IconBookmark size={14} /> {busy ? 'Adding…' : 'Track release'}
+        </button>
       )}
-      {!tracked && <div className={s.muted} style={{ marginTop: 10 }}>Tracking adds it to your Game List as Upcoming, and KoZo tells you when it's out.</div>}
-    </Modal>
+    />
   )
 }

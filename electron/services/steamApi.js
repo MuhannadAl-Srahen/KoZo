@@ -310,6 +310,13 @@ async function getStoreDetails(appId) {
         coming_soon: !!d.release_date?.coming_soon,
         header_image: d.header_image || null,
         screenshots: (d.screenshots || []).slice(0, 4).map(sc => sc.path_thumbnail).filter(Boolean),
+        // Gallery: thumbnails for the strip, full size for the viewer / lightbox.
+        media: (d.screenshots || []).slice(0, 12)
+          .map(sc => ({ thumb: sc.path_thumbnail, full: sc.path_full || sc.path_thumbnail }))
+          .filter(m => m.thumb),
+        price: d.is_free ? 'Free to play' : (d.price_overview?.final_formatted || null),
+        categories: (d.categories || []).map(c => c.description).filter(Boolean).slice(0, 6),
+        website: d.website || null,
       }
     }
   } catch (e) {
@@ -382,8 +389,10 @@ async function getAppAssets(appIds) {
     if (hit && Date.now() - hit.at < ASSET_TTL_MS) out.set(id, hit.assets)
     else missing.push(id)
   }
-  for (let i = 0; i < missing.length; i += 50) {
-    const batch = missing.slice(i, i + 50)
+  const batches = []
+  for (let i = 0; i < missing.length; i += 50) batches.push(missing.slice(i, i + 50))
+  // Batches run in parallel — the calendar asks for a few hundred at once.
+  await Promise.all(batches.map(async (batch) => {
     try {
       const input = {
         ids: batch.map(appid => ({ appid })),
@@ -405,7 +414,7 @@ async function getAppAssets(appIds) {
     } catch (e) {
       logger.warn('getAppAssets failed', { message: e.message, count: batch.length })
     }
-  }
+  }))
   return out
 }
 

@@ -1,0 +1,114 @@
+.gallery { display: flex; flex-direction: column; gap: var(--sp-8); }
+
+.viewer {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--r-card);
+  overflow: hidden;
+  background: var(--surface-3);
+}
+.viewerImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  cursor: zoom-in;
+  animation: fadeIn 0.2s ease;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.arrow, .expand {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(8, 8, 14, 0.55);
+  color: #fff;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+.viewer:hover .arrow, .viewer:hover .expand { opacity: 1; }
+.arrow { top: 50%; width: 34px; height: 34px; margin-top: -17px; border-radius: 50%; }
+.arrowLeft { left: var(--sp-10); }
+.arrowRight { right: var(--sp-10); }
+.arrow:hover, .expand:hover { background: var(--a); color: var(--accent-ink); }
+.expand { top: var(--sp-10); right: var(--sp-10); padding: var(--sp-6); border-radius: var(--r-md); }
+.counter {
+  position: absolute;
+  bottom: var(--sp-10);
+  right: var(--sp-10);
+  padding: 2px var(--sp-8);
+  border-radius: var(--r-pill);
+  background: rgba(8, 8, 14, 0.6);
+  color: #fff;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+}
+
+.strip {
+  display: flex;
+  gap: var(--sp-6);
+  overflow-x: auto;
+  padding-bottom: var(--sp-2);
+  scrollbar-width: thin;
+}
+.thumb {
+  flex: 0 0 auto;
+  width: 104px;
+  aspect-ratio: 16 / 9;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--surface-3);
+  cursor: pointer;
+  opacity: 0.65;
+  transition: opacity 0.15s ease, border-color 0.15s ease;
+}
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb:hover { opacity: 1; }
+.thumbActive { opacity: 1; border-color: var(--a); }
+
+/* Full-screen viewer */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 72px;
+  background: rgba(4, 4, 8, 0.92);
+  animation: fadeIn 0.15s ease;
+}
+.lightboxImg {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--r-card);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+.lbArrow, .lbClose {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  cursor: pointer;
+}
+.lbArrow { top: 50%; width: 46px; height: 46px; margin-top: -23px; border-radius: 50%; }
+.lbArrow.arrowLeft { left: 16px; }
+.lbArrow.arrowRight { right: 16px; }
+.lbArrow:hover, .lbClose:hover { background: var(--a); color: var(--accent-ink); }
+.lbClose { top: 16px; right: 16px; width: 40px; height: 40px; border-radius: 50%; }
+.lbCounter {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: var(--fs-xs);
+}
