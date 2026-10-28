@@ -11,6 +11,7 @@ import {
 } from '@tabler/icons-react'
 import HoneycombLogo from './HoneycombLogo'
 import { fileUrl } from '../lib/utils'
+import { useAppearance } from '../context/AppearanceContext'
 import s from './Sidebar.module.css'
 
 function initials(name) {
@@ -19,7 +20,7 @@ function initials(name) {
   return (parts[0][0] + (parts[1]?.[0] || '')).toUpperCase()
 }
 
-const NAV_ITEMS = [
+export const NAV_ITEMS = [
   { path: '/',              label: 'Library',      Icon: IconLayoutGrid },
   { path: '/game-list',     label: 'Game List',    Icon: IconList },
   { path: '/achievements',  label: 'Achievements', Icon: IconTrophy },
@@ -39,6 +40,12 @@ function formatSessionTime(startedAt, idleSeconds = 0) {
 }
 
 export default function Sidebar() {
+  // Tab order and hidden tabs come from Settings → Appearance.
+  const { prefs } = useAppearance()
+  const navItems = prefs.nav
+    .filter(n => !n.hidden)
+    .map(n => NAV_ITEMS.find(i => i.path === n.path))
+    .filter(Boolean)
   const [activeSession, setActiveSession] = useState(null)
   const [sessionTick, setSessionTick] = useState(0)
   const [profile, setProfile] = useState({ name: 'Player', avatar: '' })
@@ -156,7 +163,7 @@ export default function Sidebar() {
 
       {/* Navigation */}
       <nav className={s.nav}>
-        {NAV_ITEMS.map(({ path, label, Icon }) => (
+        {navItems.map(({ path, label, Icon }) => (
           <NavLink
             key={path}
             to={path}

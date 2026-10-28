@@ -76,30 +76,33 @@ async function addLibraryGame(data) {
       logger.warn(`Banner download failed for game ${game.id}`, { message: e.message })
     }
 
-    // Wide hero for GameDetail — new titles keep it under a hashed path.
-    try {
-      game.hero_local_path = await require('./services/steamApi').downloadHero(game.steam_app_id, game.id)
-    } catch (e) {
-      logger.warn(`Hero download failed for game ${game.id}`, { message: e.message })
-    }
-
-    // Steam store genres — power auto-grouping on the Game List and genre chips.
-    try {
-      const { getStoreArt } = require('./services/steamApi')
-      const art = await getStoreArt(game.steam_app_id)
-      if (art?.genres?.length) {
-        gamesQ.updateGame(game.id, { genres: JSON.stringify(art.genres) })
-        game.genres = JSON.stringify(art.genres)
-      }
-    } catch (e) {
-      logger.warn(`Genre fetch failed for game add`, { gameId: game.id, message: e.message })
-      // The self-healing backfill will pick this game up shortly.
-      require('./services/steamApi').runGenreBackfill().catch(() => {})
-    }
-
     // Achievements sync in background — doesn't block the add response
     const { fetchAndStoreAchievements } = require('./services/achievementSync')
+    // Hero art and genres used to be awaited here one after another, so the
+    // dialog sat on "Adding…" well after the cover was ready. They now finish
+    // in the background and the card updates when they land.
     setImmediate(async () => {
+      // Wide hero for GameDetail — new titles keep it under a hashed path.
+      try {
+        game.hero_local_path = await require('./services/steamApi').downloadHero(game.steam_app_id, game.id)
+      } catch (e) {
+        logger.warn(`Hero download failed for game ${game.id}`, { message: e.message })
+      }
+
+      // Steam store genres — power auto-grouping on the Game List and genre chips.
+      try {
+        const { getStoreArt } = require('./services/steamApi')
+        const art = await getStoreArt(game.steam_app_id)
+        if (art?.genres?.length) {
+          gamesQ.updateGame(game.id, { genres: JSON.stringify(art.genres) })
+          game.genres = JSON.stringify(art.genres)
+        }
+      } catch (e) {
+        logger.warn(`Genre fetch failed for game add`, { gameId: game.id, message: e.message })
+        // The self-healing backfill will pick this game up shortly.
+        require('./services/steamApi').runGenreBackfill().catch(() => {})
+      }
+      try { broadcast('game:updated', game.id) } catch {}
       await fetchAndStoreAchievements(game.id)
       try {
         broadcast('game:updated', game.id)
@@ -1356,6 +1359,28 @@ handle('steam:refreshAllBanners', async () => {
 // ── SteamGridDB (covers for non-Steam games) ─────────────────────────────────
 handle('sgdb:test', (key) => require('./services/steamGridDb').testKey(key))
 handle('sgdb:search', (name) => require('./services/steamGridDb').searchGame(name))
+// Settings → Appearance → Background: copy the chosen picture into KoZo's own
+// folder (so moving or deleting the original doesn't break it) and return
+// that path. Earlier wallpapers are removed. null when the dialog is cancelled.
+handle('appearance:pickWallpaper', async () => {
+  const { dialog, app } = require('electron')
+  const fsx = require('fs')
+  const pathMod = require('path')
+  const r = await dialog.showOpenDialog({
+    title: 'Choose a background picture',
+    properties: ['openFile'],
+    filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'] }],
+  })
+  if (r.canceled || !r.filePaths?.[0]) return null
+  const src = r.filePaths[0]
+  const dir = app.getPath('userData')
+  for (const f of fsx.readdirSync(dir)) {
+    if (/^wallpaper-\d+\./.test(f)) { try { fsx.unlinkSync(pathMod.join(dir, f)) } catch {} }
+  }
+  const dest = pathMod.join(dir, `wallpaper-${Date.now()}${pathMod.extname(src).toLowerCase()}`)
+  fsx.copyFileSync(src, dest)
+  return dest
+})
 handle('sgdb:searchGames', (q) => require('./services/steamGridDb').searchWithCovers(q))
 handle('sgdb:grids', (sgdbId) => require('./services/steamGridDb').grids(sgdbId))
 handle('sgdb:heroes', (sgdbId) => require('./services/steamGridDb').heroes(sgdbId))

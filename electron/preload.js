@@ -1,10 +1,14 @@
-const { contextBridge, ipcRenderer } = require('electron')
+const { contextBridge, ipcRenderer, webFrame } = require('electron')
 
 contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 6,
+  rev: 7,
+  // Settings → Appearance → UI scale.
+  ui: {
+    setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
+  },
   api: {
     games: {
       list: () => ipcRenderer.invoke('games:list'),
@@ -132,6 +136,7 @@ contextBridge.exposeInMainWorld('kozo', {
       pickImageData: () => ipcRenderer.invoke('image:pickData'),
       saveCroppedImage: (payload) => ipcRenderer.invoke('image:saveCropped', payload),
       pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
+      pickWallpaper: () => ipcRenderer.invoke('appearance:pickWallpaper'),
     },
     backup: {
       import: () => ipcRenderer.invoke('backup:import'),

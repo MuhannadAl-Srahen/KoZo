@@ -8,7 +8,7 @@ import s from './UpdateBanner.module.css'
 //   • a one-time "What's new" card the first launch after an update installed.
 // State comes from electron/services/appUpdater.js (app:update / app:updateState).
 // Must match `rev` in electron/preload.js.
-const PRELOAD_REV = 6
+const PRELOAD_REV = 7
 
 export default function UpdateBanner() {
   // The UI reloaded with new code but the main process is still the old one.

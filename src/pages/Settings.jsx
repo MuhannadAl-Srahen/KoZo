@@ -7,9 +7,12 @@ import {
   IconSearch, IconPlus, IconMinus, IconFolder, IconTrophy,
   IconDownload, IconUpload, IconDeviceFloppy, IconArchive, IconCloud,
   IconHistory, IconList, IconChartBar, IconBell, IconBolt,
-  IconStar, IconStethoscope,
+  IconStar, IconStethoscope, IconLock, IconArrowUp, IconArrowDown, IconPhoto, IconLayoutCards, IconTextSize, IconLayoutSidebar,
 } from '@tabler/icons-react'
 import { useAccentColor } from '../context/AccentColorContext'
+import { useAppearance, DEFAULT_APPEARANCE } from '../context/AppearanceContext'
+import { NAV_ITEMS } from '../components/Sidebar'
+import SearchableSelect from '../components/ui/SearchableSelect'
 import HoneycombLogo from '../components/HoneycombLogo'
 import ScanResultModal from '../components/modals/ScanResultModal'
 import SaveManagerModal from '../components/modals/SaveManagerModal'
@@ -64,6 +67,55 @@ function Message({ msg }) {
 // <label> that contained no labelable control — so assistive tech read an
 // unlabelled button of unknown state, and the label element did nothing at all.
 // The row is genuinely clickable now (it always looked like it was).
+// Adult (18+) games stay behind a password so only the owner can turn them on.
+// Only the SHA-256 of the password lives here. Turning the option OFF never
+// asks; while it is on the toggle shows directly so it can be switched off.
+const RESTRICTED_HASH = '76eb6786bd76e44f0652bdfbbb35c5c847b3c822d932c05811fd18ccad0e641a'
+async function sha256Hex(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('')
+}
+function RestrictedContent({ showAdult, onChange }) {
+  const [unlocked, setUnlocked] = useState(false)
+  const [pw, setPw] = useState('')
+  const [wrong, setWrong] = useState(false)
+  async function unlock() {
+    if ((await sha256Hex(pw)) === RESTRICTED_HASH) { setUnlocked(true); setPw(''); setWrong(false) }
+    else setWrong(true)
+  }
+  if (unlocked || showAdult) {
+    return (
+      <div className={s.toggleList}>
+        <ToggleRow
+          label="Show adult (18+) games"
+          desc="Include adult only titles in game search and the Steam calendar. Steam hides them unless this is on."
+          checked={showAdult}
+          onChange={onChange}
+        />
+      </div>
+    )
+  }
+  return (
+    <>
+      <p className={s.sectionDesc}>
+        <IconLock size={13} stroke={1.8} style={{ verticalAlign: '-2px', marginRight: 4 }} />
+        Restricted content is locked. Enter the password to change it.
+      </p>
+      <div className={s.keyRow}>
+        <div className={`${s.keyInputWrap} hasRing`}>
+          <input type="password" className={s.keyInput} placeholder="Password" value={pw}
+            aria-label="Password for restricted content"
+            onChange={e => { setPw(e.target.value); setWrong(false) }}
+            onKeyDown={e => { if (e.key === 'Enter' && pw) unlock() }}
+            autoComplete="off" spellCheck={false} />
+        </div>
+        <button type="button" className={s.testBtn} onClick={unlock} disabled={!pw}>Unlock</button>
+      </div>
+      {wrong && <StatusLine type="error">Wrong password.</StatusLine>}
+    </>
+  )
+}
+
 function ToggleRow({ label, desc, checked, onChange, busy = false }) {
   const labelId = useId()
   const toggle = () => { if (!busy) onChange(!checked) }
@@ -209,19 +261,15 @@ function GeneralTab() {
           <IconEye size={15} stroke={1.6} />
           <span>Content</span>
         </div>
-        <div className={s.toggleList}>
-          <ToggleRow
-            label="Show adult (18+) games"
-            desc="Include adult only titles in game search and the Steam calendar. Steam hides them unless this is on."
-            checked={showAdult}
-            onChange={async (v) => {
-              setShowAdult(v)
-              generalTabCache = { ...(generalTabCache || {}), showAdult: v }
-              await window.kozo.api.settings.set('show_adult_games', v ? '1' : '0')
-              window.dispatchEvent(new Event('kozo:adult-changed'))
-            }}
-          />
-        </div>
+        <RestrictedContent
+          showAdult={showAdult}
+          onChange={async (v) => {
+            setShowAdult(v)
+            generalTabCache = { ...(generalTabCache || {}), showAdult: v }
+            await window.kozo.api.settings.set('show_adult_games', v ? '1' : '0')
+            window.dispatchEvent(new Event('kozo:adult-changed'))
+          }}
+        />
       </section>
 
       <section className={s.section}>
@@ -870,6 +918,181 @@ function ScanPCTab() {
   )
 }
 
+// Segmented choice row (UI scale, spacing, corners, background mode).
+function Segmented({ value, options, onChange, label }) {
+  return (
+    <div className={s.segRow}>
+      <span className={s.segLabel}>{label}</span>
+      <div className={s.seg} role="radiogroup" aria-label={label}>
+        {options.map(o => (
+          <button key={String(o.value)} type="button" role="radio" aria-checked={value === o.value}
+            className={`${s.segBtn} ${value === o.value ? s.segBtnOn : ''}`} onClick={() => onChange(o.value)}>
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function SliderRow({ label, value, min, max, unit, onChange }) {
+  return (
+    <label className={s.segRow}>
+      <span className={s.segLabel}>{label}</span>
+      <input type="range" className={s.slider} min={min} max={max} value={value}
+        onChange={e => onChange(Number(e.target.value))} />
+      <span className={s.sliderValue}>{value}{unit}</span>
+    </label>
+  )
+}
+
+const START_PAGES = [
+  ...NAV_ITEMS.map(n => ({ value: n.path, label: n.label })),
+  { value: '/profile', label: 'Profile' },
+]
+
+// Settings → Appearance: size and density, card details, sidebar and start
+// page, background picture. Every change applies at once (AppearanceContext).
+function AppearanceCustomize() {
+  const { prefs, setPrefs } = useAppearance()
+  const [games, setGames] = useState([])
+  useEffect(() => {
+    window.kozo?.api?.games?.list?.().then(r => {
+      if (r?.ok) setGames((r.data || []).filter(g => g.hero_local_path || g.banner_local_path))
+    })
+  }, [])
+  const setCard = (k, v) => setPrefs(p => ({ ...p, cards: { ...p.cards, [k]: v } }))
+  const setBg = (patch) => setPrefs(p => ({ ...p, bg: { ...p.bg, ...patch } }))
+  function moveNav(i, d) {
+    setPrefs(p => {
+      const nav = [...p.nav]
+      const j = i + d
+      if (j < 0 || j >= nav.length) return p
+      ;[nav[i], nav[j]] = [nav[j], nav[i]]
+      return { ...p, nav }
+    })
+  }
+  const toggleNav = (path) => setPrefs(p => ({ ...p, nav: p.nav.map(n => (n.path === path ? { ...n, hidden: !n.hidden } : n)) }))
+  async function chooseImage() {
+    const r = await window.kozo?.api?.dialog?.pickWallpaper?.()
+    if (r?.ok && r.data) setBg({ mode: 'image', image: r.data })
+  }
+
+  return (
+    <>
+      <section className={s.section}>
+        <div className={s.sectionHeader}>
+          <IconTextSize size={15} stroke={1.6} />
+          <span>Size and density</span>
+        </div>
+        <div className={s.segList}>
+          <Segmented label="UI scale" value={prefs.scale} onChange={v => setPrefs({ scale: v })}
+            options={[{ value: 0.9, label: '90%' }, { value: 1, label: '100%' }, { value: 1.1, label: '110%' }, { value: 1.25, label: '125%' }]} />
+          <Segmented label="Spacing" value={prefs.density} onChange={v => setPrefs({ density: v })}
+            options={[{ value: 'comfortable', label: 'Comfortable' }, { value: 'compact', label: 'Compact' }]} />
+          <Segmented label="Corners" value={prefs.corners} onChange={v => setPrefs({ corners: v })}
+            options={[{ value: 'sharp', label: 'Sharp' }, { value: 'default', label: 'Default' }, { value: 'round', label: 'Round' }]} />
+        </div>
+      </section>
+
+      <section className={s.section}>
+        <div className={s.sectionHeader}>
+          <IconLayoutCards size={15} stroke={1.6} />
+          <span>Card details</span>
+        </div>
+        <p className={s.sectionDesc}>Choose what game cards show in the Library and the Game List.</p>
+        <div className={s.toggleList}>
+          <ToggleRow label="Genres" desc="The genre line under the game name." checked={prefs.cards.genres} onChange={v => setCard('genres', v)} />
+          <ToggleRow label="Stats row" desc="Achievements, last played and playtime in the Library; the status in the Game List." checked={prefs.cards.stats} onChange={v => setCard('stats', v)} />
+          <ToggleRow label="Achievement progress bar" desc="The thin bar above the stats in the Library." checked={prefs.cards.progress} onChange={v => setCard('progress', v)} />
+          <ToggleRow label="Status dot" desc="The colored dot in the corner of the cover." checked={prefs.cards.statusDot} onChange={v => setCard('statusDot', v)} />
+          <ToggleRow label="Play plan month" desc="The month chip on games you planned to play." checked={prefs.cards.planChip} onChange={v => setCard('planChip', v)} />
+        </div>
+      </section>
+
+      <section className={s.section}>
+        <div className={s.sectionHeader}>
+          <IconLayoutSidebar size={15} stroke={1.6} />
+          <span>Sidebar and start page</span>
+        </div>
+        <p className={s.sectionDesc}>Reorder the sidebar tabs or hide the ones you don't use. Library always stays.</p>
+        <div className={s.navList}>
+          {prefs.nav.map((n, i) => {
+            const item = NAV_ITEMS.find(x => x.path === n.path)
+            if (!item) return null
+            return (
+              <div key={n.path} className={`${s.navRow} ${n.hidden ? s.navRowHidden : ''}`}>
+                <item.Icon size={16} stroke={1.6} />
+                <span className={s.navRowLabel}>{item.label}</span>
+                <button type="button" className={s.navRowBtn} onClick={() => moveNav(i, -1)} disabled={i === 0}
+                  aria-label={`Move ${item.label} up`}><IconArrowUp size={14} /></button>
+                <button type="button" className={s.navRowBtn} onClick={() => moveNav(i, 1)} disabled={i === prefs.nav.length - 1}
+                  aria-label={`Move ${item.label} down`}><IconArrowDown size={14} /></button>
+                <button type="button" className={s.navRowBtn} onClick={() => toggleNav(n.path)} disabled={n.path === '/'}
+                  aria-label={n.hidden ? `Show ${item.label}` : `Hide ${item.label}`} title={n.hidden ? 'Show' : 'Hide'}>
+                  {n.hidden ? <IconEyeOff size={14} /> : <IconEye size={14} />}
+                </button>
+              </div>
+            )
+          })}
+        </div>
+        <div className={s.segRow}>
+          <span className={s.segLabel}>Start page</span>
+          <SearchableSelect value={prefs.startPage} onChange={v => setPrefs({ startPage: v || '/' })}
+            options={START_PAGES} searchable={false} width={200} placeholder="Library" />
+        </div>
+      </section>
+
+      <section className={s.section}>
+        <div className={s.sectionHeader}>
+          <IconPhoto size={15} stroke={1.6} />
+          <span>Background</span>
+        </div>
+        <p className={s.sectionDesc}>Put a picture behind every page. Cards and panels stay solid so text is easy to read.</p>
+        <div className={s.segList}>
+          <Segmented label="Picture" value={prefs.bg.mode} onChange={v => setBg({ mode: v })}
+            options={[{ value: 'off', label: 'Off' }, { value: 'image', label: 'My image' }, { value: 'game', label: "A game's art" }]} />
+          {prefs.bg.mode === 'image' && (
+            <div className={s.segRow}>
+              <span className={s.segLabel}>Image</span>
+              <button type="button" className={s.testBtn} onClick={chooseImage}>
+                <IconPhoto size={14} stroke={1.7} /> {prefs.bg.image ? 'Change picture' : 'Choose picture'}
+              </button>
+            </div>
+          )}
+          {prefs.bg.mode === 'game' && (
+            <div className={s.segRow}>
+              <span className={s.segLabel}>Game</span>
+              <SearchableSelect
+                value={prefs.bg.gameId}
+                onChange={v => {
+                  const g = games.find(x => String(x.id) === String(v))
+                  setBg({ gameId: v || null, gameArt: g ? (g.hero_local_path || g.banner_local_path) : null })
+                }}
+                options={games.map(g => ({ value: g.id, label: g.name }))}
+                placeholder="Pick a game"
+                width={260}
+              />
+            </div>
+          )}
+          {prefs.bg.mode !== 'off' && (
+            <>
+              <SliderRow label="Blur" value={prefs.bg.blur} min={0} max={30} unit="px" onChange={v => setBg({ blur: v })} />
+              <SliderRow label="Darkness" value={prefs.bg.dim} min={40} max={95} unit="%" onChange={v => setBg({ dim: v })} />
+            </>
+          )}
+        </div>
+      </section>
+
+      <div>
+        <button type="button" className={s.testBtn} onClick={() => setPrefs(DEFAULT_APPEARANCE)}>
+          <IconRefresh size={14} stroke={1.7} /> Reset appearance
+        </button>
+      </div>
+    </>
+  )
+}
+
 // ── Tab: Appearance ──────────────────────────────────────────────────────────
 function AppearanceTab() {
   const { accent, setAccent, presets, bgTint, setBgTint } = useAccentColor()
@@ -927,6 +1150,8 @@ function AppearanceTab() {
           />
         </div>
       </section>
+
+      <AppearanceCustomize />
     </div>
   )
 }

@@ -148,6 +148,21 @@ ul, ol { list-style: none; }
     var(--bg);
 }
 
+/* Settings → Appearance → Background. The picture sits behind every page
+   inside .app-main (its own stacking context); cards and panels stay solid. */
+.app-main { position: relative; isolation: isolate; }
+html[data-wallpaper] .app-main {
+  background: radial-gradient(1100px 420px at 16% -8%, var(--ad), transparent 62%);
+}
+.app-wallpaper { position: absolute; inset: 0; z-index: -1; overflow: hidden; background: var(--bg); }
+.app-wallpaper-img {
+  position: absolute;
+  inset: -40px;               /* room for the blur so edges don't fade in */
+  background-size: cover;
+  background-position: center;
+}
+.app-wallpaper-dim { position: absolute; inset: 0; background: var(--bg); }
+
 /* ── Reduced motion ──────────────────────────────────────────────────── */
 /* !important is load-bearing, not stylistic: a dozen spinners are inline
    `style={{ animation: … }}`, and only an important declaration outranks an

@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react'
-import { HashRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
+import { HashRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { AccentColorProvider } from './context/AccentColorContext'
+import { AppearanceProvider, useAppearance } from './context/AppearanceContext'
+import { fileUrl } from './lib/utils'
 import { initGamepadNav } from './lib/gamepadNav'
 import Sidebar from './components/Sidebar'
 import Library from './pages/Library'
@@ -22,6 +24,39 @@ function GamepadNav() {
   const navigate = useNavigate()
   useEffect(() => initGamepadNav({ navigate }), [navigate])
   return null
+}
+
+// Settings → Appearance → Start page: open there once, on launch.
+function StartPage() {
+  const { prefs, loaded } = useAppearance()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [done, setDone] = useState(false)
+  useEffect(() => {
+    if (!loaded || done) return
+    setDone(true)
+    if (location.pathname === '/' && prefs.startPage && prefs.startPage !== '/') navigate(prefs.startPage, { replace: true })
+  }, [loaded])
+  return null
+}
+
+// Settings → Appearance → Background: a picture behind every page, blurred and
+// darkened so the cards and text on top stay readable.
+function Wallpaper() {
+  const { prefs } = useAppearance()
+  const bg = prefs.bg
+  const path = bg.mode === 'image' ? bg.image : bg.mode === 'game' ? bg.gameArt : null
+  useEffect(() => {
+    if (path) document.documentElement.dataset.wallpaper = ''
+    else delete document.documentElement.dataset.wallpaper
+  }, [path])
+  if (!path) return null
+  return (
+    <div className="app-wallpaper" aria-hidden="true">
+      <div className="app-wallpaper-img" style={{ backgroundImage: `url("${fileUrl(path)}")`, filter: `blur(${bg.blur}px)` }} />
+      <div className="app-wallpaper-dim" style={{ opacity: bg.dim / 100 }} />
+    </div>
+  )
 }
 
 export default function App() {
@@ -56,10 +91,13 @@ export default function App() {
 
   return (
     <AccentColorProvider>
+     <AppearanceProvider>
       <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <StartPage />
         <div className="app-layout">
           <Sidebar />
           <div className="app-main">
+            <Wallpaper />
             <UpdateBanner />
             <Routes>
               <Route path="/" element={<Library />} />
@@ -82,6 +120,7 @@ export default function App() {
         <LevelUpCelebration />
         {showOnboarding && <Tour onDone={() => setShowOnboarding(false)} />}
       </HashRouter>
+     </AppearanceProvider>
     </AccentColorProvider>
   )
 }

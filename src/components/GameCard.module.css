@@ -690,3 +690,11 @@
   font-size: var(--fs-2xs);
   white-space: nowrap;
 }
+
+/* Settings → Appearance → Card details (attributes on <html>) */
+:global(html[data-hide-genres]) .bannerGenres { display: none; }
+:global(html[data-hide-stats]) .meta { display: none; }
+:global(html[data-hide-progress]) .achTrack { display: none; }
+:global(html[data-hide-stats][data-hide-progress]) .gameInfo { display: none; }
+:global(html[data-hide-status-dot]) .statusLed { display: none; }
+:global(html[data-hide-plan-chip]) .planChip { display: none; }

@@ -907,3 +907,9 @@
   .cardSubRow { flex-wrap: wrap; justify-content: flex-start; row-gap: var(--sp-4); }
   .cardStatusWord { white-space: nowrap; }
 }
+
+/* Settings → Appearance → Card details (attributes on <html>) */
+:global(html[data-hide-genres]) .cardGenresLine { display: none; }
+:global(html[data-hide-stats]) .cardInfo { display: none; }
+:global(html[data-hide-status-dot]) .cardStatusLed { display: none; }
+:global(html[data-hide-plan-chip]) .planChip { display: none; }
