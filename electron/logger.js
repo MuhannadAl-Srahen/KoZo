@@ -17,6 +17,8 @@ function getLogStream() {
 
   const logFile = path.join(logsDir, `kozo-${date}.log`)
   logStream = fs.createWriteStream(logFile, { flags: 'a' })
+  // Disk full / file locked must never become an uncaught exception in main.
+  logStream.on('error', () => {})
   logDate = date
   pruneOldLogs(logsDir)
   return logStream

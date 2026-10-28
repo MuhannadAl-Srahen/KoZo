@@ -42,7 +42,10 @@ async function downloadFile(url, destPath) {
   })
   if (res.status !== 200) throw new Error(`HTTP ${res.status}`)
 
-  const file = fs.createWriteStream(destPath)
+  // Stream into a temp file and swap it in only when complete, so a stalled or
+  // failed refresh never deletes the banner the DB still points at.
+  const tmpPath = destPath + '.part'
+  const file = fs.createWriteStream(tmpPath)
   return new Promise((resolve, reject) => {
     // axios's timeout disarms once headers arrive — an alive-but-stalled body
     // stream would otherwise pend forever and wedge the sequential fallback
@@ -53,8 +56,14 @@ async function downloadFile(url, destPath) {
     arm()
     res.data.on('data', arm)
     res.data.pipe(file)
-    file.on('finish', () => { clearTimeout(t); file.close(resolve) })
-    const fail = (e) => { clearTimeout(t); file.destroy(); try { fs.unlinkSync(destPath) } catch {} ; reject(e) }
+    file.on('finish', () => {
+      clearTimeout(t)
+      file.close((err) => {
+        if (err) return fail(err)
+        try { fs.renameSync(tmpPath, destPath); resolve() } catch (e) { fail(e) }
+      })
+    })
+    const fail = (e) => { clearTimeout(t); file.destroy(); try { fs.unlinkSync(tmpPath) } catch {} ; reject(e) }
     file.on('error', fail)
     res.data.on('error', fail)
   })
@@ -539,9 +548,14 @@ async function getPlayerAchievements(appId, apiKey, steamId) {
     return { unlocks, error: null }
   } catch (e) {
     const status = e.response?.status
-    // 403 / 401 = Steam rejected the request because the profile is private or
-    // the API key doesn't have access to this player's data.
-    if (status === 403 || status === 401) return { unlocks: [], error: 'private' }
+    // 401, or a 403 HTML page about the key= parameter, means the API key itself
+    // was rejected — telling the user to change privacy settings would be wrong.
+    // Any other 403 is Steam refusing a private profile's data.
+    if (status === 401 || status === 403) {
+      const body = e.response?.data
+      if (status === 401 || (typeof body === 'string' && /key/i.test(body))) return { unlocks: [], error: 'invalid_key' }
+      return { unlocks: [], error: 'private' }
+    }
     // 400 = this app has no achievement stats at all (unreleased / non-achievement
     // game). That's expected, not a real failure — report it cleanly.
     if (status === 400) return { unlocks: [], error: 'no_stats_for_game' }

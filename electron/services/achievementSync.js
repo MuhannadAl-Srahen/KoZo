@@ -69,7 +69,11 @@ function emitNewUnlocks(game, newUnlocks) {
   try { require('../overlayWindow').sendAchievements(payload) } catch {}
   try { require('./notifications').notifyAchievements({ gameName: game.name, achievements: newUnlocks }) } catch {}
   // Unlocks earn XP — check for a level-up right away.
-  try { require('./xpTracker').check({ reason: 'achievement', gameName: game.name, artPath, artUrl }) } catch {}
+  // Mid-session, only advance the level baseline — consuming the gain here
+  // would shrink the session-end "+N XP" summary to just the time since this unlock.
+  let inSession = false
+  try { inSession = require('./processWatcher').isSessionActive() } catch {}
+  try { require('./xpTracker').check({ reason: 'achievement', gameName: game.name, artPath, artUrl, consumeGain: !inSession }) } catch {}
 }
 
 // Last Steam-sync failure per game (privacy-class errors only) so the UI can

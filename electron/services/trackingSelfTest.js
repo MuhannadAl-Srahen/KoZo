@@ -31,7 +31,9 @@ async function runSelfTest() {
     // 1. Synthetic Goldberg crack file in a temp install folder.
     try {
       tempDir = fs.mkdtempSync(path.join(app.getPath('temp'), 'kozo-selftest-'))
-      const emuDir = path.join(tempDir, 'steam_settings')   // matches a real Goldberg candidate
+      // <install>\<appid>\achievements.json — Goldberg local-save layout, a real
+      // crackWatcher candidate. (steam_settings\ holds definitions and is skipped.)
+      const emuDir = path.join(tempDir, '480')
       fs.mkdirSync(emuDir, { recursive: true })
       fs.writeFileSync(
         path.join(emuDir, 'achievements.json'),

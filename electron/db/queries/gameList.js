@@ -1,5 +1,9 @@
 const { getDb } = require('../database')
 
+// Favorites always lead ("Pin to top"), then the custom drag order, then
+// newest-first for rows that were never dragged.
+const ORDER_BY = ' ORDER BY gl.is_favorite DESC, (gl.display_order IS NULL), gl.display_order, gl.added_at DESC'
+
 function listGameListItems(filters = {}) {
   let query = `
     SELECT gl.*, c.name AS category_name, c.emoji AS category_emoji
@@ -31,8 +35,7 @@ function listGameListItems(filters = {}) {
     params.push(filters.search)
   }
 
-  // Custom drag order first (rows without one sort after, favorites leading).
-  query += ' ORDER BY (gl.display_order IS NULL), gl.display_order, gl.is_favorite DESC, gl.added_at DESC'
+  query += ORDER_BY
 
   const total = getDb()
     .prepare(query.replace('SELECT gl.*, c.name AS category_name, c.emoji AS category_emoji', 'SELECT COUNT(*) AS count'))
@@ -99,4 +102,24 @@ function distinctGenres() {
   return [...set].sort()
 }
 
-module.exports = { listGameListItems, getGameListItem, addGameListItem, updateGameListItem, deleteGameListItem, distinctGenres }
+// Persist a drag on one page of a (possibly filtered) view. Writing orders for
+// just that page made them outrank every never-dragged (NULL) row, so a drop on
+// page 2 jumped those items to page 1. Instead the new page order is spliced
+// into the full filtered view, the view's rows are put back into the slots they
+// occupy in the global order, and display_order is rewritten for every row.
+function reorderGameListPage(filters = {}, offset = 0, pageIds = []) {
+  const db = getDb()
+  const all = db.prepare('SELECT gl.id FROM game_list gl' + ORDER_BY).all().map(r => r.id)
+  const view = listGameListItems({ ...filters, limit: -1, offset: 0 }).items.map(r => r.id)
+  const pageSet = new Set(pageIds)
+  const newView = view.filter(id => !pageSet.has(id))
+  newView.splice(Math.max(0, Math.min(offset, newView.length)), 0, ...pageIds.filter(id => view.includes(id)))
+  const viewSet = new Set(view)
+  let k = 0
+  const merged = all.map(id => (viewSet.has(id) ? newView[k++] : id))
+  const stmt = db.prepare('UPDATE game_list SET display_order = ? WHERE id = ?')
+  db.transaction(() => { merged.forEach((id, i) => stmt.run(i, id)) })()
+  return true
+}
+
+module.exports = { reorderGameListPage, listGameListItems, getGameListItem, addGameListItem, updateGameListItem, deleteGameListItem, distinctGenres }

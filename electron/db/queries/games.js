@@ -35,7 +35,11 @@ function addGame(data) {
     INSERT INTO games (steam_app_id, name, exe_name, install_path, banner_url, banner_local_path, source, is_installed, is_cracked)
     VALUES (@steam_app_id, @name, @exe_name, @install_path, @banner_url, @banner_local_path, @source, @is_installed, @is_cracked)
   `)
+  // Named params throw when a key is missing, so default every bound column —
+  // callers only need to pass what they know.
   const result = stmt.run({
+    steam_app_id: null, exe_name: null, install_path: null,
+    banner_url: null, banner_local_path: null, source: null,
     ...data,
     is_installed: flag(data.is_installed, 1),
     is_cracked: flag(data.is_cracked, 0),

@@ -131,7 +131,7 @@ handle('shell:openExternal', (url) => {
   }
   return true
 })
-handle('games:delete', (id) => { gamesQ.deleteGame(id); bk(); return true })
+handle('games:delete', (id) => { gamesQ.deleteGame(id); bk(); broadcast('game:updated', id); return true })
 
 // Persist a full drag-and-drop ordering: display_order = index in the given array.
 handle('games:reorder', (orderedIds) => {
@@ -623,6 +623,12 @@ handle('gameList:update', (id, data) => {
   bk(); broadcast('game:updated', null); return r
 })
 handle('gameList:delete', (id) => { gameListQ.deleteGameListItem(id); bk(); return true })
+handle('gameList:reorderPage', (filters, offset, pageIds) => {
+  if (!Array.isArray(pageIds) || !pageIds.length) return false
+  gameListQ.reorderGameListPage(filters || {}, Number(offset) || 0, pageIds)
+  bk()
+  return true
+})
 
 // ── Custom lists (Spotify-playlist-style game lists) ─────────────────────────
 handle('customLists:list', () => customListsQ.listLists())
@@ -1478,9 +1484,15 @@ async function importBackupFile(filePath) {
   }
 
   const TABLES = ['categories', 'games', 'game_list', 'custom_lists', 'custom_list_games', 'sessions', 'achievements', 'achievement_unlocks', 'settings']
+  // Paths are per-machine (a restore on a new PC must keep the folders just set
+  // up there) and the API key is never exported — keep the local values.
+  const LOCAL_SETTINGS = new Set(['sync_folder', 'auto_backup_dir', 'saves_backup_dir', 'steam_api_key'])
+  const rowsFor = (t) => t === 'settings' && Array.isArray(data[t])
+    ? data[t].filter(r => !LOCAL_SETTINGS.has(r?.key))
+    : data[t]
   const counts = {}
   const doImport = db.transaction(() => {
-    for (const t of TABLES) counts[t] = upsertRows(t, data[t])
+    for (const t of TABLES) counts[t] = upsertRows(t, rowsFor(t))
   })
   // INSERT OR REPLACE DELETEs the conflicting row before re-inserting it, and
   // sessions/achievements are ON DELETE CASCADE from games — so restoring a

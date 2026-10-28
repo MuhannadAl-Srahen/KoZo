@@ -521,7 +521,8 @@ async function enableGoldbergAchievements(gameId) {
   try {
     fs.mkdirSync(target, { recursive: true })
     const f = path.join(target, 'achievements.json')
-    if (exists(f)) { try { fs.copyFileSync(f, f + '.kozo-bak') } catch {} }
+    // Back up the crack's ORIGINAL file once — a re-run must not overwrite it with KoZo's own output.
+    if (exists(f) && !exists(f + '.kozo-bak')) { try { fs.copyFileSync(f, f + '.kozo-bak') } catch {} }
     fs.writeFileSync(f, JSON.stringify(list, null, 2))
     logger.info(`crackWatcher: wrote ${list.length} achievements into ${f} for "${game.name}"`)
     return { ok: true, count: list.length, path: f }

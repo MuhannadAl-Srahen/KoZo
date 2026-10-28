@@ -26,6 +26,8 @@ const fs   = require('fs')
 const path = require('path')
 const logger = require('../logger')
 
+const SECRET_SETTINGS = new Set(['steam_api_key'])
+
 const TABLES = ['games', 'sessions', 'achievements', 'achievement_unlocks', 'game_list', 'categories', 'custom_lists', 'custom_list_games', 'settings']
 
 // 30s (was 8s): a burst of unlocks or a bulk import shouldn't each cost a full
@@ -56,6 +58,9 @@ function buildPayload() {
   for (const t of TABLES) {
     try { payload[t] = db.prepare(`SELECT * FROM ${t}`).all() } catch { payload[t] = [] }
   }
+  // This file usually lives in a cloud-synced folder — never put the Steam Web
+  // API key in it.
+  payload.settings = payload.settings.filter(r => !SECRET_SETTINGS.has(r.key))
   return payload
 }
 
@@ -115,7 +120,9 @@ function flush() {
   try {
     fs.mkdirSync(dir, { recursive: true })
     const file = path.join(dir, 'kozo-autobackup.json')
-    const tmp  = `${file}.tmp`
+    // Own temp name: an async writeNow() may still hold `${file}.tmp` open,
+    // which would make this rename fail with EPERM on Windows.
+    const tmp  = `${file}.flush.tmp`
     fs.writeFileSync(tmp, JSON.stringify(buildPayload(), null, 2), 'utf8')
     fs.renameSync(tmp, file)
     logger.info(`autoBackup: saved ${file} (flush)`)

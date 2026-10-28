@@ -49,7 +49,7 @@ function setupTray(processWatcher) {
   function openAt(hash) {
     show((win) => {
       try {
-        win.webContents.executeJavaScript(`window.location.hash = ${JSON.stringify('#' + hash)}`)
+        win.webContents.executeJavaScript(`window.location.hash = ${JSON.stringify('#' + hash)}`).catch(() => {})
       } catch {}
     })
   }

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, shell, protocol, globalShortcut } = require('electron')
+const { app, BrowserWindow, Menu, shell, protocol, globalShortcut, dialog } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const { setupTray } = require('./tray')
@@ -120,10 +120,19 @@ function createWindow() {
   mainWindow.on('closed', () => { mainWindow = null })
 
   // Open external links in the OS browser, not in the app
+  // (http/https only — same rule as the shell:openExternal IPC).
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url)
     return { action: 'deny' }
   })
+  // Never navigate the window itself away from the app bundle — a remote page
+  // there would get the full preload API.
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    const isApp = app.isPackaged ? url.startsWith('file://') : url.startsWith('http://localhost:5173')
+    if (!isApp) e.preventDefault()
+  })
+  // Windows shutdown / logoff skips before-quit + will-quit entirely.
+  mainWindow.on('session-end', flushOnExit)
 }
 
 // Bring the main window to front, recreating it first if it was unloaded
@@ -192,8 +201,21 @@ app.whenReady().then(() => {
     }
   })
 
-  const { initDatabase } = require('./db/database')
-  initDatabase()
+  // A DB that can't open (locked by AV, permissions) used to reject this
+  // callback silently: no window, no tray, but the single-instance lock held.
+  try {
+    require('./db/database').initDatabase()
+  } catch (e) {
+    try { require('./logger').error('initDatabase failed', { message: e.message }) } catch {}
+    dialog.showErrorBox('KoZo could not start',
+      `The database could not be opened:
+
+${e.message}
+
+Close any program that may be using it and start KoZo again.`)
+    app.exit(1)
+    return
+  }
 
   require('./ipc')
 
@@ -333,16 +355,23 @@ app.whenReady().then(() => {
   })
 })
 
-app.on('will-quit', () => {
-  require('./services/processWatcher').stop()
-  require('./services/crackWatcher').stopWatching()
+// Shared by will-quit and the window's session-end (Windows shutdown/logoff).
+// Each step is isolated so one failure can't skip the flushes or the DB close.
+let _exitFlushed = false
+function flushOnExit() {
+  if (_exitFlushed) return
+  _exitFlushed = true
+  try { require('./services/processWatcher').stop() } catch {}
+  try { require('./services/crackWatcher').stopWatching() } catch {}
   try { require('./services/autoBackup').flush() } catch {}
   // Save snapshots deferred to idle would otherwise die with the process.
   try { require('./services/autoSaveBackup').flushPending() } catch {}
   try { globalShortcut.unregisterAll() } catch {}
   // Last: both flushes above read the DB, so the handle has to outlive them.
   try { require('./db/database').closeDatabase() } catch {}
-})
+}
+
+app.on('will-quit', flushOnExit)
 
 app.on('window-all-closed', () => {
   // The main window is deliberately destroyed while parked in the tray to

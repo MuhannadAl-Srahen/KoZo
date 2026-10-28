@@ -101,12 +101,21 @@ function findSaveLocations(game) {
   const savedG   = path.join(home, 'Saved Games')
   const score    = buildMatcher(game)
 
+  // KoZo's own backup folder (default Documents\KoZo Saves\<Game>) name-matches
+  // the game perfectly — never offer it as the save, or backups copy into themselves.
+  let backupRoot = null
+  try { backupRoot = path.resolve(require('./saveBackup').rootPath()).toLowerCase() } catch {}
+
   const results = []
   const seen = new Set()
   function add(p, source, confidence) {
     if (!p) return
     const key = p.toLowerCase()
     if (seen.has(key)) return
+    if (backupRoot) {
+      const abs = path.resolve(p).toLowerCase()
+      if (abs === backupRoot || abs.startsWith(backupRoot + path.sep)) return
+    }
     try { if (!fs.existsSync(p)) return } catch { return }
     seen.add(key)
     const { files, saveLike } = inspect(p)

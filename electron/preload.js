@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('kozo', {
       add: (data) => ipcRenderer.invoke('gameList:add', data),
       update: (id, data) => ipcRenderer.invoke('gameList:update', id, data),
       delete: (id) => ipcRenderer.invoke('gameList:delete', id),
+      reorderPage: (filters, offset, pageIds) => ipcRenderer.invoke('gameList:reorderPage', filters, offset, pageIds),
     },
     customLists: {
       list: () => ipcRenderer.invoke('customLists:list'),

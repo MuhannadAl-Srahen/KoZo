@@ -53,7 +53,7 @@ function getAchievementSyncMs() {
 // one of these, its periodic poll is parked for the rest of the session; the
 // session-end sync still runs once (that's where a fixed setting is noticed).
 const PERMANENT_SYNC_REASONS = new Set([
-  'private', 'private_profile', 'profile_not_found',
+  'private', 'private_profile', 'profile_not_found', 'invalid_key',
   'no_stats_for_game', 'no_steam_id', 'no_steam_app_id', 'foreign_launcher',
 ])
 const syncParked = new Map()   // gameId → reason
@@ -161,7 +161,7 @@ const HARD_DENY = new Set([
   'code.exe','cursor.exe','node.exe','electron.exe','claude.exe',
   'kozo.exe',
   // Unity / Unreal engine crash handlers and helpers
-  'unityCrashHandler.exe','unityCrashHandler64.exe',
+  'unitycrashhandler.exe','unitycrashhandler64.exe',
   'crashreportclient.exe','crashreporterclient.exe',
   // Anti-cheat services (run alongside games, not the game)
   'easyanticheat.exe','easyanticheat_eos.exe',
@@ -309,8 +309,16 @@ async function getRunningProcesses() {
   // ps-list is pure ESM since v8 — must be loaded via dynamic import() from CJS.
   const mod = await import('ps-list')
   const fn = typeof mod === 'function' ? mod : (mod.default || mod.psList)
-  return await fn()
+  // The poll chain only reschedules after a tick resolves, so a hung helper
+  // (fastlist.exe blocked by AV) would stop tracking for the rest of the run.
+  let timer
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('process list timed out')), PS_LIST_TIMEOUT_MS)
+  })
+  try { return await Promise.race([fn(), timeout]) }
+  finally { clearTimeout(timer) }
 }
+const PS_LIST_TIMEOUT_MS = 15000
 
 // Cross-platform "is this PID still alive" check with no process spawn — signal
 // 0 is the documented way to test existence (works on Windows too, via libuv).
@@ -1013,7 +1021,9 @@ async function resolveOrphanSessions() {
           game_name: orphan.game_name,
           exe_name: orphan.exe_name,
           last_seen_at: now,
-          idle_seconds: gapSec,
+          // Idle already persisted on the row (AFK + any merged-leg exclusion)
+          // stays excluded on top of the unobserved gap.
+          idle_seconds: gapSec + Math.max(0, orphan.idle_seconds || 0),
           pid: procByName.get(exe)?.pid || null,
         })
         midSessionSyncAt.set(orphan.game_id, now)
@@ -1022,7 +1032,8 @@ async function resolveOrphanSessions() {
         logger.info(`Resumed open session for "${orphan.game_name}" — still running after KoZo restart`, { unobservedGapSec: gapSec })
       } else {
         // Not running → cap at the last heartbeat (the game closed while KoZo was off).
-        const dur         = Math.max(0, Math.floor((beatMs - startMs) / 1000))
+        // The heartbeat persists idle_seconds so a crash doesn't re-credit AFK time.
+        const dur         = Math.max(0, Math.floor((beatMs - startMs) / 1000) - Math.max(0, orphan.idle_seconds || 0))
         const endIso      = new Date(beatMs).toISOString()
         db.prepare('UPDATE sessions SET ended_at = ?, duration_seconds = ? WHERE id = ?').run(endIso, dur, orphan.id)
         db.prepare('UPDATE games SET total_playtime_seconds = total_playtime_seconds + ? WHERE id = ?').run(dur, orphan.game_id)
@@ -1040,6 +1051,7 @@ async function resolveOrphanSessions() {
 }
 
 function stop() {
+  tickGen++   // an in-flight tick must not reschedule itself after stop
   if (pollTimer) { clearTimeout(pollTimer); pollTimer = null }
   try { require('./controllerInput').stop() } catch {}
   try { require('./steamStatsWatcher').unwatchAll() } catch {}
@@ -1056,7 +1068,21 @@ function stop() {
   logger.info('processWatcher stopped (open sessions left for resume)')
 }
 
-function pause()  { paused = true  }
+// Pausing ends live sessions now — ticks stop while paused, so an open session
+// would otherwise be credited the whole paused span when it finally ended.
+// Resuming within the merge window reopens the same row with the gap excluded.
+function pause() {
+  paused = true
+  for (const [gameId, session] of [...activeSessions]) {
+    try { endSession(gameId, session) } catch (e) { logger.warn('pause: endSession failed', { message: e.message }) }
+  }
+  detectionBuffer.clear()
+  if (detectingGames.size) {
+    for (const gameId of detectingGames.keys()) sendToRenderer('session:undetected', { gameId })
+    detectingGames.clear()
+  }
+  emitter.emit('change')
+}
 function resume() { paused = false }
 
 function getActiveSessions() { return activeSessions }
