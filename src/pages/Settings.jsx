@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useId } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   IconKey, IconCheck, IconX, IconLoader2, IconClock, IconEye, IconEyeOff, IconLayoutGrid,
   IconUser, IconRefresh, IconExternalLink, IconAlertTriangle,
@@ -7,7 +8,7 @@ import {
   IconSearch, IconPlus, IconMinus, IconFolder, IconTrophy,
   IconDownload, IconUpload, IconDeviceFloppy, IconArchive, IconCloud,
   IconHistory, IconList, IconChartBar, IconBell, IconBolt,
-  IconStar, IconStethoscope, IconLock, IconArrowUp, IconArrowDown, IconPhoto, IconLayoutCards, IconTextSize, IconLayoutSidebar,
+  IconStar, IconStethoscope, IconLock, IconCode, IconChevronRight, IconArrowUp, IconArrowDown, IconPhoto, IconLayoutCards, IconTextSize, IconLayoutSidebar,
 } from '@tabler/icons-react'
 import { useAccentColor } from '../context/AccentColorContext'
 import { useAppearance, DEFAULT_APPEARANCE } from '../context/AppearanceContext'
@@ -75,7 +76,16 @@ async function sha256Hex(text) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
   return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('')
 }
-function RestrictedContent({ showAdult, onChange }) {
+function RestrictedContent() {
+  const [showAdult, setShowAdult] = useState(false)
+  useEffect(() => {
+    window.kozo?.api?.settings?.get?.('show_adult_games').then(r => setShowAdult(r?.ok && r.data === '1'))
+  }, [])
+  async function onChange(v) {
+    setShowAdult(v)
+    await window.kozo?.api?.settings?.set?.('show_adult_games', v ? '1' : '0')
+    window.dispatchEvent(new Event('kozo:adult-changed'))
+  }
   const [unlocked, setUnlocked] = useState(false)
   const [pw, setPw] = useState('')
   const [wrong, setWrong] = useState(false)
@@ -156,7 +166,6 @@ function GeneralTab() {
   const [startMinimized, setStartMinimized] = useState(generalTabCache?.startMinimized ?? false)
   const [startupLoaded, setStartupLoaded] = useState(!!generalTabCache)   // avoids off→on flicker on open
   const [startupMsg, setStartupMsg]   = useState(null)   // { type, text }
-  const [showAdult, setShowAdult]     = useState(generalTabCache?.showAdult ?? false)
 
   useEffect(() => {
     async function load() {
@@ -166,8 +175,6 @@ function GeneralTab() {
       if (res?.ok) {
         c.idlePause   = res.data?.idle_pause_min || '5'
         setIdlePause(c.idlePause)
-        c.showAdult   = res.data?.show_adult_games === '1'
-        setShowAdult(c.showAdult)
       }
       const startup = await window.kozo.api.app?.getStartup?.()
       if (startup?.ok) { c.openAtLogin = startup.data?.openAtLogin ?? false; setOpenAtLogin(c.openAtLogin) }
@@ -256,21 +263,6 @@ function GeneralTab() {
         <Message msg={startupMsg} />
       </section>
 
-      <section className={s.section}>
-        <div className={s.sectionHeader}>
-          <IconEye size={15} stroke={1.6} />
-          <span>Content</span>
-        </div>
-        <RestrictedContent
-          showAdult={showAdult}
-          onChange={async (v) => {
-            setShowAdult(v)
-            generalTabCache = { ...(generalTabCache || {}), showAdult: v }
-            await window.kozo.api.settings.set('show_adult_games', v ? '1' : '0')
-            window.dispatchEvent(new Event('kozo:adult-changed'))
-          }}
-        />
-      </section>
 
       <section className={s.section}>
         <div className={s.sectionHeader}>
@@ -1387,77 +1379,86 @@ const FEATURE_GROUPS = [
   {
     title: 'Tracking',
     items: [
-      { Icon: IconClock,    name: 'Automatic playtime', desc: 'Detects running games and records sessions, no manual timers.' },
-      { Icon: IconHistory,  name: 'Sessions timeline',  desc: 'Every play session grouped by day with durations and unlocks.' },
-      { Icon: IconBolt,     name: 'Idle / AFK pause',   desc: 'Stops counting when you step away so overnight idling doesn’t inflate stats.' },
+      { Icon: IconClock,    name: 'Automatic playtime', go: '/sessions', desc: 'Detects running games and records sessions, no manual timers.' },
+      { Icon: IconHistory,  name: 'Sessions timeline', go: '/sessions',  desc: 'Every play session grouped by day with durations and unlocks.' },
+      { Icon: IconBolt,     name: 'Idle / AFK pause', go: 'tab:general',   desc: 'Stops counting when you step away so overnight idling doesn’t inflate stats.' },
     ],
   },
   {
     title: 'Achievements',
     items: [
-      { Icon: IconBrandSteam, name: 'Steam sync',        desc: 'Imports your unlocks via the Steam Web API, automatically while you play and after each session. No interval to set.' },
-      { Icon: IconTrophy,     name: 'Cracked-game sync', desc: 'Reads Goldberg, CODEX, RUNE, EMPRESS, SKIDROW and more, watched live, so unlocks appear instantly.' },
-      { Icon: IconBell,       name: 'Live game overlay', desc: 'A toast pops over your game the moment you unlock something, Steam-style, in your accent color.' },
-      { Icon: IconDownload,   name: 'Achievement lists for any launcher', desc: "Xbox/Epic/other games auto-match a Steam achievement list on add, then tick off the ones you've earned." },
+      { Icon: IconBrandSteam, name: 'Steam sync', go: '/achievements',        desc: 'Imports your unlocks via the Steam Web API, automatically while you play and after each session. No interval to set.' },
+      { Icon: IconTrophy,     name: 'Cracked-game sync', go: '/achievements', desc: 'Reads Goldberg, CODEX, RUNE, EMPRESS, SKIDROW and more, watched live, so unlocks appear instantly.' },
+      { Icon: IconBell,       name: 'Live game overlay', go: 'overlay:test', desc: 'A toast pops over your game the moment you unlock something, Steam-style, in your accent color.' },
+      { Icon: IconDownload,   name: 'Achievement lists for any launcher', go: '/achievements', desc: "Xbox/Epic/other games auto-match a Steam achievement list on add, then tick off the ones you've earned." },
     ],
   },
   {
     title: 'Library',
     items: [
-      { Icon: IconSearch,         name: 'Scan PC',          desc: 'Finds installed games (Steam, Epic, GOG, Xbox, cracked) on your drives, with the right launcher badge, right from the Library toolbar.' },
-      { Icon: IconDeviceGamepad2, name: 'Add manually',     desc: 'Point KoZo at any .exe, perfect for offline games.' },
-      { Icon: IconStar,           name: 'Favorites',        desc: 'Star a game to pin it to the top of your Library and Game List.' },
-      { Icon: IconList,           name: 'Game List',        desc: 'A backlog / wishlist with statuses, genres, search, and Spotify-style custom lists.' },
-      { Icon: IconEyeOff,         name: 'Status filter & hidden games', desc: 'Filter the Library by Playing/Finished/Dropped/On hold; hidden games tuck into a collapsed section at the bottom (their stats still count).' },
-      { Icon: IconLayoutGrid,     name: 'Drag & drop ordering', desc: 'Pick "Custom order" and drag cards into any arrangement you like, in the Library and the Game List.' },
+      { Icon: IconSearch,         name: 'Scan PC', go: '/?scan=1',          desc: 'Finds installed games (Steam, Epic, GOG, Xbox, cracked) on your drives, with the right launcher badge, right from the Library toolbar.' },
+      { Icon: IconDeviceGamepad2, name: 'Add manually', go: '/?add=1',     desc: 'Point KoZo at any .exe, perfect for offline games.' },
+      { Icon: IconStar,           name: 'Favorites', go: '/',        desc: 'Star a game to pin it to the top of your Library and Game List.' },
+      { Icon: IconList,           name: 'Game List', go: '/game-list',        desc: 'A backlog / wishlist with statuses, genres, search, and Spotify-style custom lists.' },
+      { Icon: IconEyeOff,         name: 'Status filter & hidden games', go: '/', desc: 'Filter the Library by Playing/Finished/Dropped/On hold; hidden games tuck into a collapsed section at the bottom (their stats still count).' },
+      { Icon: IconLayoutGrid,     name: 'Drag & drop ordering', go: '/', desc: 'Pick "Custom order" and drag cards into any arrangement you like, in the Library and the Game List.' },
     ],
   },
   {
     title: 'Saves & Backups',
     items: [
-      { Icon: IconDeviceFloppy, name: 'Save file finder',     desc: 'Locates each game’s real save folder (even tricky publisher paths).' },
-      { Icon: IconArchive,      name: 'Save backup & restore',desc: 'Snapshot and roll back any game’s saves, manually, all at once before a format, or automatically after each session (keeps the last two).' },
-      { Icon: IconCloud,        name: 'Folder sync', desc: 'Sync everything (game saves included) to any folder, cloud-synced, network drive, or USB, and restore on any PC. Fully offline, no account.' },
+      { Icon: IconDeviceFloppy, name: 'Save file finder', go: 'tab:data',     desc: 'Locates each game’s real save folder (even tricky publisher paths).' },
+      { Icon: IconArchive,      name: 'Save backup & restore', go: 'tab:data',desc: 'Snapshot and roll back any game’s saves, manually, all at once before a format, or automatically after each session (keeps the last two).' },
+      { Icon: IconCloud,        name: 'Folder sync', go: 'tab:data', desc: 'Sync everything (game saves included) to any folder, cloud-synced, network drive, or USB, and restore on any PC. Fully offline, no account.' },
     ],
   },
   {
     title: 'Personalize',
     items: [
-      { Icon: IconUser,      name: 'Your profile',  desc: 'A profile page with a cropped avatar & banner, banner themes, a title, and a showcase of your favorite games.' },
-      { Icon: IconBolt,      name: 'XP & levels',   desc: 'Earn XP from playtime, rare achievements, play streaks and finished games, level up through tiers from Rookie to Mythic, shown on your profile.' },
-      { Icon: IconPalette,   name: 'Custom accent', desc: 'Pick any accent (presets or custom hex), it themes the whole app, badges, and the live overlay.' },
+      { Icon: IconUser,      name: 'Your profile', go: '/profile',  desc: 'A profile page with a cropped avatar & banner, banner themes, a title, and a showcase of your favorite games.' },
+      { Icon: IconBolt,      name: 'XP & levels', go: '/profile',   desc: 'Earn XP from playtime, rare achievements, play streaks and finished games, level up through tiers from Rookie to Mythic, shown on your profile.' },
+      { Icon: IconPalette,   name: 'Custom accent', go: 'tab:appearance', desc: 'Pick any accent (presets or custom hex), it themes the whole app, badges, and the live overlay.' },
     ],
   },
   {
     title: 'Insights & App',
     items: [
-      { Icon: IconChartBar,  name: 'Statistics',    desc: 'Playtime trends with an hourly 24h view, daily/monthly charts, and click-a-day (or hour) to focus it.' },
-      { Icon: IconBell,      name: 'In-game status (Alt+K)', desc: 'Press Alt+K while playing to flash your live session time and achievement progress over the game.' },
-      { Icon: IconTrophy,    name: 'Achievement list (Alt+J)', desc: 'Press Alt+J while playing to flash your progress and the rarest achievements you still have left, right over the game.' },
-      { Icon: IconRocket,    name: 'Tray & startup',desc: 'Runs quietly in the system tray and can launch with Windows.' },
+      { Icon: IconChartBar,  name: 'Statistics', go: '/statistics',    desc: 'Playtime trends with an hourly 24h view, daily/monthly charts, and click-a-day (or hour) to focus it.' },
+      { Icon: IconBell,      name: 'In-game status (Alt+K)', go: 'tab:about', desc: 'Press Alt+K while playing to flash your live session time and achievement progress over the game.' },
+      { Icon: IconTrophy,    name: 'Achievement list (Alt+J)', go: 'tab:about', desc: 'Press Alt+J while playing to flash your progress and the rarest achievements you still have left, right over the game.' },
+      { Icon: IconRocket,    name: 'Tray & startup', go: 'tab:general',desc: 'Runs quietly in the system tray and can launch with Windows.' },
     ],
   },
 ]
 
-function FeaturesTab() {
+// Every feature row opens where that feature lives: a page, a Settings tab,
+// or the action itself (Scan PC, the overlay test).
+function FeaturesTab({ setTab }) {
+  const navigate = useNavigate()
+  function open(go) {
+    if (!go) return
+    if (go.startsWith('tab:')) setTab(go.slice(4))
+    else if (go === 'overlay:test') window.kozo?.api?.overlay?.test?.()
+    else navigate(go)
+  }
   return (
     <div className={s.tabContent}>
       <p className={s.sectionDesc}>
-        Everything KoZo can do, grouped by area. Most of it runs automatically once you've added
-        games and connected Steam.
+        Everything KoZo can do, grouped by area. Click a feature to go straight to it.
       </p>
       {FEATURE_GROUPS.map(group => (
         <section key={group.title} className={s.featureGroup}>
           <div className={s.featureGroupTitle}>{group.title}</div>
           <div className={s.featureList}>
             {group.items.map(f => (
-              <div key={f.name} className={s.featureRow}>
+              <button key={f.name} type="button" data-gpnav="" className={`${s.featureRow} ${s.featureRowLink}`} onClick={() => open(f.go)}>
                 <div className={s.featureIcon}><f.Icon size={18} stroke={1.6} /></div>
                 <div className={s.featureRowBody}>
                   <div className={s.featureName}>{f.name}</div>
                   <div className={s.featureDesc}>{f.desc}</div>
                 </div>
-              </div>
+                <IconChevronRight size={16} stroke={1.6} className={s.featureGo} />
+              </button>
             ))}
           </div>
         </section>
@@ -1618,6 +1619,18 @@ function AboutTab() {
           </button>
         </div>
       </section>
+
+      <section className={s.section}>
+        <div className={s.sectionHeader}>
+          <IconCode size={15} stroke={1.6} />
+          <span>Dev</span>
+        </div>
+        <p className={s.sectionDesc}>
+          Developer options for testing KoZo, locked with a password. Adult (18+) titles stay hidden
+          from search and the Steam calendar unless they are switched on here.
+        </p>
+        <RestrictedContent />
+      </section>
     </div>
   )
 }
@@ -1652,7 +1665,7 @@ export default function Settings() {
           ))}
         </nav>
         <div className={s.panel}>
-          {tab === 'features'   && <FeaturesTab />}
+          {tab === 'features'   && <FeaturesTab setTab={setTab} />}
           {tab === 'general'    && <GeneralTab />}
           {tab === 'steam'      && <SteamTab />}
           {tab === 'scan'       && <ScanPCTab />}

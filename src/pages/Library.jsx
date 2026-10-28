@@ -167,6 +167,11 @@ export default function Library() {
       setAddModal(true)
       navigate('/', { replace: true })
     }
+    // ?scan=1: Settings → Features → Scan PC
+    if (params.get('scan') === '1') {
+      navigate('/', { replace: true })
+      runScan()
+    }
   }, [location.search])
 
   // ── Selection mode ──────────────────────────────────────────────────────────

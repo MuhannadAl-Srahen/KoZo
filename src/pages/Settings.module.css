@@ -734,6 +734,16 @@
   transition: var(--t-control);
 }
 .featureRow:hover { border-color: var(--border-accent-soft); background: var(--surface-3); }
+/* Clickable feature rows (button elements) */
+.featureRowLink {
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.featureGo { flex-shrink: 0; align-self: center; color: var(--text-muted); transition: transform 0.15s ease, color 0.15s ease; }
+.featureRowLink:hover .featureGo { color: var(--a); transform: translateX(2px); }
 
 .featureRowBody {
   display: flex;
