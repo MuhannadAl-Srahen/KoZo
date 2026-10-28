@@ -147,6 +147,9 @@ contextBridge.exposeInMainWorld('kozo', {
       setStartMinimized: (enable) => ipcRenderer.invoke('app:setStartMinimized', enable),
       getVersion: () => ipcRenderer.invoke('app:getVersion'),
       checkForUpdates: () => ipcRenderer.invoke('app:checkForUpdates'),
+      updateState: () => ipcRenderer.invoke('app:updateState'),
+      installUpdate: () => ipcRenderer.invoke('app:installUpdate'),
+      whatsNew: () => ipcRenderer.invoke('app:whatsNew'),
     },
   },
 
@@ -185,6 +188,7 @@ contextBridge.exposeInMainWorld('kozo', {
       onXpOverlay: sub('xp:overlay', pass),
       onSessionEndOverlay: sub('sessionEnd:overlay', pass),
       onXpLevelUp: sub('xp:levelup', pass),
+      onAppUpdate: sub('app:update', pass),
       onAccentChanged: sub('accent:changed', pass),
       onUnknownProcessAdd: sub('unknown-process:add', pass),
       removeAll: (channel) => {

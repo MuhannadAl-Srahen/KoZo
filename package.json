@@ -35,7 +35,11 @@
       "icon": "build/icon.png"
     },
     "nsis": {
-      "shortcutName": "KoZo"
+      "shortcutName": "KoZo",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true
     },
     "publish": [
       {

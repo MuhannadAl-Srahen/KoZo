@@ -6,7 +6,7 @@ Local-first Windows game tracker: Electron 41 (main, CommonJS) + React 19 / Vite
 - `npm run dev`: Vite on :5173 + Electron (`concurrently`).
 - `npm run rebuild`: rebuild better-sqlite3 for Electron 41.7.1. Run it after `npm install` or the DB won't load.
 - `npm run build`: `scripts/gen-icon.js`, then `vite build` (into `renderer-dist/`), then electron-builder (into `release/`).
-- ⚠ There are TWO builder configs, `electron-builder.yml` and `package.json` `"build"`, and they disagree (appId `com.kozo.app` vs `com.kozo.gametracker`, icon, nsis options, publish). electron-builder reads the YAML first when it exists. Change both, or settle on one, before any release; changing the appId breaks upgrades for existing installs.
+- The builder config is `package.json` `"build"` (the only one; it sets the NSIS desktop shortcut and the GitHub publish target that electron-updater reads).
 - `node scripts/test-parsers.js`: unit checks for the crack and achievement file parsers.
 - CI: `.github/workflows/release.yml`. Runs on `v*` tags, using bun on windows-latest, and publishes a GitHub release that electron-updater reads.
 

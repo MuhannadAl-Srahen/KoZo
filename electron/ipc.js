@@ -781,6 +781,19 @@ handle('tracking:selfTest', () => require('./services/trackingSelfTest').runSelf
 // ── App version / updates ─────────────────────────────────────────────────────
 handle('app:getVersion', () => require('electron').app.getVersion())
 handle('app:checkForUpdates', () => require('./services/appUpdater').checkForUpdates())
+handle('app:updateState', () => require('./services/appUpdater').getState())
+handle('app:installUpdate', () => require('./services/appUpdater').installUpdate())
+// "What's new" — shown once after the installed version changes. A fresh
+// install just records its version (nothing to compare against).
+handle('app:whatsNew', async () => {
+  const settingsQ = require('./db/queries/settings')
+  const current = require('electron').app.getVersion()
+  const seen = settingsQ.getSetting('last_seen_version')
+  if (seen === current) return null
+  settingsQ.setSetting('last_seen_version', current)
+  if (!seen) return null
+  return (await require('./services/appUpdater').fetchReleaseNotes(current).catch(() => null)) || { version: current, notes: '' }
+})
 
 // Resolve a SteamID64 from a profile URL / custom name / raw ID. Uses the passed
 // key if given (onboarding, before it's saved), else the stored key.

@@ -15,6 +15,7 @@ import Settings from './pages/Settings'
 import UnknownGamePrompt from './components/UnknownGamePrompt'
 import OnboardingModal from './components/OnboardingModal'
 import LevelUpCelebration from './components/LevelUpCelebration'
+import UpdateBanner from './components/UpdateBanner'
 
 // Controller navigation — must live under the router so useNavigate works.
 function GamepadNav() {
@@ -59,6 +60,7 @@ export default function App() {
         <div className="app-layout">
           <Sidebar />
           <div className="app-main">
+            <UpdateBanner />
             <Routes>
               <Route path="/" element={<Library />} />
               <Route path="/game/:id" element={<GameDetail />} />

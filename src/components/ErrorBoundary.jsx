@@ -24,8 +24,8 @@ export default class ErrorBoundary extends React.Component {
     return (
       <div style={{
         minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center',
-        justifyContent: 'center', gap: 'var(--sp-4, 16px)', padding: 'var(--sp-6, 24px)',
-        background: 'var(--bg, #0b0b10)', color: 'var(--text, #e8e8f0)', textAlign: 'center',
+        justifyContent: 'center', gap: 'var(--sp-16, 16px)', padding: 'var(--sp-24, 24px)',
+        background: 'var(--bg, #10101a)', color: 'var(--text-primary, #ececf8)', textAlign: 'center',
       }}>
         <h2 style={{ margin: 0 }}>Something went wrong</h2>
         <p style={{ margin: 0, color: 'var(--text-muted, #9a9ab0)', maxWidth: 560 }}>
