@@ -6,6 +6,28 @@
 .content { composes: content from '../styles/page.module.css'; }
 .inner { composes: contentInner from '../styles/page.module.css'; }
 
+.tabs {
+  display: inline-flex;
+  gap: var(--sp-2);
+  margin-left: var(--sp-12);
+  padding: var(--sp-2);
+  border-radius: var(--r-input);
+  background: var(--neutral-bg);
+}
+.tab {
+  padding: var(--sp-4) var(--sp-12);
+  border: none;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.tab:hover { color: var(--text-primary); }
+.tabActive { background: var(--ad); color: var(--a); }
+
 .count {
   composes: chip chipAccent from '../styles/controls.module.css';
   font-weight: 600;

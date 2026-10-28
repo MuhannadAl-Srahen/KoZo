@@ -80,7 +80,7 @@ function addGameListItem(data) {
   const result = getDb().prepare(`
     INSERT INTO game_list (game_id, steam_app_id, name, banner_url, category_id, status, rating, genres, release_date)
     VALUES (@game_id, @steam_app_id, @name, @banner_url, @category_id, @status, @rating, @genres, @release_date)
-  `).run({ category_id: null, genres: null, release_date: null, ...data })
+  `).run({ game_id: null, steam_app_id: null, banner_url: null, category_id: null, rating: null, genres: null, release_date: null, ...data })
   return getGameListItem(result.lastInsertRowid)
 }
 

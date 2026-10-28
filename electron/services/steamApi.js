@@ -774,7 +774,57 @@ async function runGenreBackfill() {
   }
 }
 
+// ── Popular upcoming releases (the Upcoming → Steam calendar tab) ───────────
+// Two Steam store-search feeds, 50 per page:
+//   soon     — "popular coming soon": the most-followed games out in the next weeks
+//   wishlist — "popular wishlist": the most-wishlisted upcoming games, months out
+// A date-sorted feed is useless here (thousands of tiny games per day). Each
+// page is cached for 6h — the calendar pages through them lazily.
+const COMING_SOON_FEEDS = { soon: 'popularcomingsoon', wishlist: 'popularwishlist' }
+const COMING_SOON_TTL_MS = 6 * 60 * 60 * 1000
+const COMING_SOON_PAGE = 50
+const comingSoonCache = new Map()   // `${feed}:${page}` → { at, items, total }
+
+function decodeEntities(str) {
+  return String(str || '')
+    .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'")
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+}
+
+// One <a class="search_result_row"> per game: appid, title, release text, capsule.
+function parseComingSoonHtml(html) {
+  const items = []
+  for (const chunk of String(html || '').split(/<a\s+href="/).slice(1)) {
+    const appid = Number((chunk.match(/data-ds-appid="(\d+)"/) || [])[1])
+    if (!appid) continue   // bundles/packages carry no single appid
+    const name = decodeEntities((chunk.match(/<span class="title">([\s\S]*?)<\/span>/) || [])[1]).trim()
+    const release = decodeEntities((chunk.match(/search_released[^>]*>([\s\S]*?)<\/div>/) || [])[1]).replace(/\s+/g, ' ').trim()
+    const capsule = (chunk.match(/<img src="([^"]+)"/) || [])[1] || null
+    if (name) items.push({ appid, name, release: release || null, capsule })
+  }
+  return items
+}
+
+async function getComingSoon(feed = 'soon', page = 0) {
+  const filter = COMING_SOON_FEEDS[feed] || COMING_SOON_FEEDS.soon
+  const p = Math.max(0, Math.floor(Number(page) || 0))
+  const key = `${filter}:${p}`
+  const hit = comingSoonCache.get(key)
+  if (hit && Date.now() - hit.at < COMING_SOON_TTL_MS) return { items: hit.items, total: hit.total, page: p, pageSize: COMING_SOON_PAGE }
+  const res = await getAxios().get('https://store.steampowered.com/search/results/', {
+    params: { filter, infinite: 1, start: p * COMING_SOON_PAGE, count: COMING_SOON_PAGE, cc: 'us', l: 'english', category1: 998 },
+    timeout: 15000,
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+  })
+  const items = parseComingSoonHtml(res.data?.results_html)
+  const total = Number(res.data?.total_count) || 0
+  comingSoonCache.set(key, { at: Date.now(), items, total })
+  return { items, total, page: p, pageSize: COMING_SOON_PAGE }
+}
+
 module.exports = {
+  getComingSoon, parseComingSoonHtml,
   testApiKey, searchGames, findAppByName, refreshGameData, refreshBanners, downloadBanner,
   getStoreArt, getStoreDetails, resolveBannerUrl, resolveSteamId, runGenreBackfill, storeRemoteFallback,
   getSchemaForGame, getSchemaKeyless, getGlobalAchievementPercentages, getPlayerAchievements, getPlayerAchievementsXml,

@@ -1,0 +1,136 @@
+.wrap { display: flex; flex-direction: column; gap: var(--sp-12); }
+
+.nav {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-8);
+}
+.monthLabel {
+  min-width: 150px;
+  text-align: center;
+  font-size: var(--fs-md);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.spacer { flex: 1; }
+
+.navBtn, .textBtn, .viewBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  border: 1px solid var(--neutral-border);
+  background: var(--neutral-bg);
+  color: var(--text-secondary);
+  border-radius: var(--r-md);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+.navBtn { padding: var(--sp-4); }
+.textBtn { padding: var(--sp-4) var(--sp-10); }
+.navBtn:hover, .textBtn:hover, .viewBtn:hover { background: var(--neutral-bg-hover); color: var(--text-primary); }
+
+.viewToggle { display: inline-flex; gap: var(--sp-2); }
+.viewBtn { padding: var(--sp-4) var(--sp-6); }
+.viewBtnActive { background: var(--ad); border-color: var(--ab); color: var(--a); }
+
+/* Month grid — 7 columns; scrolls sideways instead of crushing on narrow windows. */
+.gridScroll { overflow-x: auto; }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(120px, 1fr));
+  gap: var(--sp-4);
+  min-width: 860px;
+}
+.weekday {
+  padding: var(--sp-4) var(--sp-6);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+}
+.day {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-height: 110px;
+  padding: var(--sp-6);
+  border-radius: var(--r-card);
+  background: var(--surface-2);
+  border: 1px solid var(--neutral-border);
+}
+.dayOutside { opacity: 0.35; }
+.dayPast { opacity: 0.6; }
+.dayToday { border-color: var(--a); box-shadow: 0 0 0 1px var(--ab); }
+.dayNum { font-size: var(--fs-xs); font-weight: 600; color: var(--text-secondary); }
+.dayToday .dayNum { color: var(--a); }
+
+.chip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  width: 100%;
+  padding: var(--sp-2);
+  padding-right: var(--sp-6);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: var(--surface-3);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--fs-2xs);
+  text-align: left;
+  cursor: pointer;
+}
+.chip:hover { border-color: var(--ab); background: var(--neutral-bg-hover); }
+.chipTracked { border-color: var(--ab); background: var(--ad); }
+.chipArt { width: 46px; height: 17px; object-fit: cover; border-radius: var(--r-xs); flex-shrink: 0; }
+.chipName { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chipMark { flex-shrink: 0; color: var(--a); margin-left: auto; }
+
+.more {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--a);
+  font-family: inherit;
+  font-size: var(--fs-2xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Month-only / TBA strips */
+.strip {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  padding: var(--sp-10);
+  border-radius: var(--r-card);
+  background: var(--surface-2);
+  border: 1px dashed var(--neutral-border);
+}
+.stripLabel {
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+}
+.stripGames, .listGames {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--sp-6);
+}
+
+/* List view */
+.list { display: flex; flex-direction: column; gap: var(--sp-12); }
+.listDay { display: flex; flex-direction: column; gap: var(--sp-6); }
+.listDate { font-size: var(--fs-xs); font-weight: 700; color: var(--text-secondary); }
+.listDateToday { color: var(--a); }
+
+.muted { color: var(--text-muted); font-size: var(--fs-xs); }
+
+.detailArt { width: 100%; aspect-ratio: 460 / 215; object-fit: cover; border-radius: var(--r-card); margin-bottom: var(--sp-10); }
+.detailRelease { font-weight: 600; color: var(--text-primary); margin-bottom: var(--sp-6); }

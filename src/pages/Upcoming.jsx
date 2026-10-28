@@ -3,10 +3,11 @@ import {
   IconCalendar, IconHourglassLow, IconConfetti, IconHelpCircle,
   IconPlayerPlayFilled, IconBookmark, IconBrandSteam,
 } from '@tabler/icons-react'
-import { parseGenres } from '../lib/utils'
+import { parseGenres, parseRelease } from '../lib/utils'
 import Modal, { modalStyles as ms } from '../components/ui/Modal'
 import EmptyState from '../components/ui/EmptyState'
 import { Skeleton, CardSkeletonGrid, PanelSkeleton } from '../components/ui/Skeleton'
+import SteamCalendar from '../components/SteamCalendar'
 import s from './Upcoming.module.css'
 
 // Persist the last working art source per game across tab switches so cards don't
@@ -15,45 +16,6 @@ const wideArtIndexCache = new Map()
 
 // Keep Upcoming data hot between route changes to avoid full visual resets.
 let upcomingCache = null
-
-// Steam's release_date strings vary in precision: "13 Nov, 2025" (exact),
-// "November 2025" (month), "2026" (year only), "TBA"/"Coming soon" (nothing).
-// Anything short of a full date is `vague` and carries TWO instants: `ts` (the
-// start of the named window — a month's 1st, or a mid-year point for year-only)
-// for ordering, and `until` (the first instant past the window's end) as the
-// ONLY thing that may read as released. Reading a vague `ts` as "out" faked
-// "Out now" up to a month — or half a year — early.
-const MONTH_NAMES = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
-// Steam writes both "November 2025" and "Winter 2026"/"Holiday 2026" in this
-// shape. Date.parse quietly resolves the seasonal ones to January 1st, so they
-// must be matched here and downgraded rather than trusted as a real month.
-const WORD_YEAR = /^([A-Za-z]{3,9}),?\s+(\d{4})$/
-
-function yearRelease(y, label) {
-  return { ts: Date.UTC(y, 5, 30), until: Date.UTC(y + 1, 0, 1), vague: true, precision: 'year', label }
-}
-
-function parseRelease(str) {
-  if (!str) return { ts: null }
-  const trimmed = str.trim()
-  const yearOnly = trimmed.match(/^(\d{4})$/)
-  if (yearOnly) return yearRelease(parseInt(yearOnly[1], 10), trimmed)
-  const wordYear = trimmed.match(WORD_YEAR)
-  if (wordYear) {
-    const y  = parseInt(wordYear[2], 10)
-    const mi = MONTH_NAMES.indexOf(wordYear[1].slice(0, 3).toLowerCase())
-    // A season names no month Steam ever defines — it's no more precise than its year.
-    if (mi < 0) return yearRelease(y, trimmed)
-    return {
-      ts: new Date(y, mi, 1).getTime(),
-      until: new Date(y, mi + 1, 1).getTime(),
-      vague: true, precision: 'month', label: trimmed,
-    }
-  }
-  const t = Date.parse(trimmed)
-  if (!Number.isFinite(t)) return { ts: null }
-  return { ts: t, until: t, vague: false, precision: 'day' }
-}
 
 // "How far away" wording. `approx` marks a vague date whose exact day is a guess,
 // so it never reads as a confident "Tomorrow".
@@ -223,6 +185,36 @@ function UpcomingCard({ item, rel, onOpen }) {
 export default function Upcoming() {
   const [items, setItems] = useState(upcomingCache)
   const [detail, setDetail] = useState(null)   // { item, rel } | null
+  const [tab, setTab] = useState(() => localStorage.getItem('kozo:upcoming:tab') || 'mine')
+  // Steam appids already on the Game List (any status) — the calendar marks them tracked.
+  const [trackedAppIds, setTrackedAppIds] = useState(() => new Set())
+
+  async function loadTracked() {
+    const res = await window.kozo?.api?.gameList?.list?.({ limit: 100000, offset: 0 })
+    if (res?.ok) setTrackedAppIds(new Set((res.data?.items || []).map(i => Number(i.steam_app_id)).filter(Boolean)))
+  }
+
+  async function trackGame(g) {
+    const res = await window.kozo?.api?.gameList?.add?.({
+      name: g.name,
+      steam_app_id: g.appid,
+      status: 'upcoming',
+      release_date: g.release || null,
+    })
+    if (res?.ok) { await Promise.all([load(), loadTracked()]) }
+  }
+
+  function switchTab(next) {
+    setTab(next)
+    try { localStorage.setItem('kozo:upcoming:tab', next) } catch {}
+  }
+
+  const tabs = (
+    <div className={s.tabs}>
+      <button className={`${s.tab} ${tab === 'mine' ? s.tabActive : ''}`} onClick={() => switchTab('mine')}>My upcoming</button>
+      <button className={`${s.tab} ${tab === 'steam' ? s.tabActive : ''}`} onClick={() => switchTab('steam')}>Steam calendar</button>
+    </div>
+  )
 
   async function load() {
     const res = await window.kozo?.api?.gameList?.list?.({ status: 'upcoming', limit: 1000, offset: 0 })
@@ -238,12 +230,13 @@ export default function Upcoming() {
 
   useEffect(() => {
     load()
+    loadTracked()
     // Warm the store-details cache (instant popups) and backfill any missing
     // release dates so long-released games can't linger in "No date yet".
     window.kozo?.api?.gameList?.refreshUpcomingInfo?.()
     // Unsubscribe THIS page's own listener only — removeAll() is window-wide
     // and would tear down the always-mounted Sidebar's listeners too.
-    const off = window.kozo?.events?.onGameUpdated?.(load)
+    const off = window.kozo?.events?.onGameUpdated?.(() => { load(); loadTracked() })
     return () => off?.()
   }, [])
 
@@ -296,19 +289,22 @@ export default function Upcoming() {
           <IconCalendar size={16} stroke={1.7} /> Upcoming
         </h1>
         {items.length > 0 && <span className={s.count}>{items.length}</span>}
+        {tabs}
       </div>
 
       <div className={s.content}>
         <div className={s.inner}>
-          {items.length === 0 && (
+          {tab === 'steam' && <SteamCalendar trackedAppIds={trackedAppIds} onTrack={trackGame} />}
+
+          {tab === 'mine' && items.length === 0 && (
             <EmptyState
               Icon={IconHourglassLow}
               title="No upcoming games yet"
-              desc={'Add games to your Game List with the "Upcoming" status and they\'ll line up here with release countdowns.'}
+              desc={'Track games from the Steam calendar tab, or give Game List entries the "Upcoming" status, and they\'ll line up here with release countdowns.'}
             />
           )}
 
-          {sections.map(sec => (
+          {tab === 'mine' && sections.map(sec => (
             <section key={sec.key} className={s.section}>
               <div className={`${s.sectionTitle} ${sec.out ? s.sectionTitleOut : ''}`}>
                 <sec.Icon size={14} stroke={1.7} /> {sec.label}

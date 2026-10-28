@@ -1200,6 +1200,7 @@ handle('steam:signIn', () => require('./services/steamOpenId').signIn())
 
 // Store-page details (description, developers, screenshots) for the Upcoming popup.
 handle('steam:storeDetails', (appId) => require('./services/steamApi').getStoreDetails(appId))
+handle('steam:comingSoon', (feed, page) => require('./services/steamApi').getComingSoon(feed, page))
 
 // Called when the Upcoming tab opens: warms the store-details cache for every
 // upcoming game (so popups open instantly) AND backfills missing release dates

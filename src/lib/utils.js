@@ -42,6 +42,45 @@ export function rarityColor(pct) {
   return 'var(--rarity-common)'
 }
 
+// Steam's release_date strings vary in precision: "13 Nov, 2025" (exact),
+// "November 2025" (month), "2026" (year only), "TBA"/"Coming soon" (nothing).
+// Anything short of a full date is `vague` and carries TWO instants: `ts` (the
+// start of the named window — a month's 1st, or a mid-year point for year-only)
+// for ordering, and `until` (the first instant past the window's end) as the
+// ONLY thing that may read as released. Reading a vague `ts` as "out" faked
+// "Out now" up to a month — or half a year — early.
+const MONTH_NAMES = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+// Steam writes both "November 2025" and "Winter 2026"/"Holiday 2026" in this
+// shape. Date.parse quietly resolves the seasonal ones to January 1st, so they
+// must be matched here and downgraded rather than trusted as a real month.
+const WORD_YEAR = /^([A-Za-z]{3,9}),?\s+(\d{4})$/
+
+function yearRelease(y, label) {
+  return { ts: Date.UTC(y, 5, 30), until: Date.UTC(y + 1, 0, 1), vague: true, precision: 'year', label }
+}
+
+export function parseRelease(str) {
+  if (!str) return { ts: null }
+  const trimmed = str.trim()
+  const yearOnly = trimmed.match(/^(\d{4})$/)
+  if (yearOnly) return yearRelease(parseInt(yearOnly[1], 10), trimmed)
+  const wordYear = trimmed.match(WORD_YEAR)
+  if (wordYear) {
+    const y  = parseInt(wordYear[2], 10)
+    const mi = MONTH_NAMES.indexOf(wordYear[1].slice(0, 3).toLowerCase())
+    // A season names no month Steam ever defines — it's no more precise than its year.
+    if (mi < 0) return yearRelease(y, trimmed)
+    return {
+      ts: new Date(y, mi, 1).getTime(),
+      until: new Date(y, mi + 1, 1).getTime(),
+      vague: true, precision: 'month', label: trimmed,
+    }
+  }
+  const t = Date.parse(trimmed)
+  if (!Number.isFinite(t)) return { ts: null }
+  return { ts: t, until: t, vague: false, precision: 'day' }
+}
+
 // Play-plan month keys ('YYYY-MM') ↔ labels like "Nov 2026".
 export function monthKey(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
