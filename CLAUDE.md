@@ -3,7 +3,7 @@
 Local-first Windows game tracker: Electron 41 (main, CommonJS) + React 19 / Vite 8 (renderer, ESM) + better-sqlite3. Tracks playtime, sessions and achievements (Steam + cracked-game emulators), with a game overlay. Read this first; open only the files a task needs.
 
 ## Commands
-- `npm run dev`: Vite on :5173 + Electron (`concurrently`).
+- `npm run dev`: Vite on :5173 + Electron (`concurrently`). Electron runs through `scripts/dev-electron.js`, which restarts it (clean quit via the `kozo:dev-restart` IPC message) whenever a file in `electron/` changes, so main/preload edits always apply.
 - `npm run rebuild`: rebuild better-sqlite3 for Electron 41.7.1. Run it after `npm install` or the DB won't load.
 - `npm run build`: `scripts/gen-icon.js`, then `vite build` (into `renderer-dist/`), then electron-builder (into `release/`).
 - The builder config is `package.json` `"build"` (the only one; it sets the NSIS desktop shortcut and the GitHub publish target that electron-updater reads).
@@ -101,6 +101,10 @@ src/                 renderer (React)
 
 ## Gotchas
 - Card grids size their columns from `--card-min` (Ctrl + mouse wheel via `lib/useCardZoom.js`, saved per page and view). Keep new grids on the same variable.
+- `GeneratedCover` (name-hued gradient + icon, never text) renders ONLY when a card has no image or it failed to load; never stack it under real art. Dimmed cards use `filter`, not opacity.
+- Demos/playtests have hidden store pages: `steamApi.parentArtAppId` strips the suffix and uses the full game's art (downloadBanner/downloadHero/resolveBannerUrl). `fillMissingArt` (ipc.js) retries coverless games on every launch when idle (Steam, then SteamGridDB by appid or name), throttled 3 days per game via setting `art_missing_tried`.
+- Scan PC: `scanner:scan` runs `pcScanner.scanFolder` per root in a worker (`services/scanWorker.js`, falls back in-process), drops missing and nested roots, name-matches only games not in the library, and broadcasts `scanner:progress`.
+- Library sort `month` groups the grid by month of `last_played_at` (`monthGroups` in Library.jsx); drag-reorder is off in that mode.
 - Non-Steam covers come from SteamGridDB (`services/steamGridDb.js`, key in setting `steamgriddb_key`, never backed up). Auto-applied on add and from Refresh images; Edit → Find cover (`CoverPickerModal`) lets the user pick. With no art at all, `GeneratedCover` draws a name-based poster under every card.
 - Setting `show_adult_games` adds `ignore_preferences` + the age-gate cookie to Steam store search and the calendar feeds (`adultSearchOpts` in steamApi.js).
 - First-run walkthrough = `components/Tour.jsx`: steps spotlight real controls tagged `data-tour="…"` (Library `scan-pc`/`add-game`/`library-stats`, sidebar `nav-*`, Game List `month-filter`, Upcoming `upcoming-tabs`). Renaming or removing a tagged control breaks its step. Store-style game popup = `components/SteamGameModal.jsx` (gallery via `ui/MediaGallery.jsx`).
