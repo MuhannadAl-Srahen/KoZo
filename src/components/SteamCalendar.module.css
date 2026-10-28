@@ -199,6 +199,24 @@
   font-weight: 600;
   color: var(--a);
 }
+.untrackBtn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  padding: var(--sp-4) 0;
+  border: 1px solid var(--ab);
+  border-radius: var(--r-md);
+  background: var(--a);
+  color: var(--accent-ink);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.untrackBtn:hover { background: var(--error-bg); border-color: var(--error-border); color: var(--error); }
+.untrackConfirm, .untrackConfirm:hover { background: var(--error); border-color: var(--error); color: #fff; }
 .iconBtn {
   display: inline-flex;
   padding: var(--sp-6);

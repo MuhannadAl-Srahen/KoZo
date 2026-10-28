@@ -180,13 +180,18 @@ export default function Upcoming() {
   const [items, setItems] = useState(upcomingCache)
   const [detail, setDetail] = useState(null)   // { item, rel } | null
   const [tab, setTab] = useState(() => localStorage.getItem('kozo:upcoming:tab') || 'mine')
-  // Steam appids already on the Game List (any status) — the calendar marks them tracked.
-  const [trackedAppIds, setTrackedAppIds] = useState(() => new Set())
+  // Steam appids already on the Game List: appid → { id, status }. The calendar
+  // marks them tracked and can untrack entries that are still Upcoming.
+  const [trackedAppIds, setTrackedAppIds] = useState(() => new Map())
   const [art, setArt] = useState({})   // steam appid → real store art (steam:appAssets)
 
   async function loadTracked() {
     const res = await window.kozo?.api?.gameList?.list?.({ limit: 100000, offset: 0 })
-    if (res?.ok) setTrackedAppIds(new Set((res.data?.items || []).map(i => Number(i.steam_app_id)).filter(Boolean)))
+    if (res?.ok) {
+      setTrackedAppIds(new Map((res.data?.items || [])
+        .filter(i => i.steam_app_id)
+        .map(i => [Number(i.steam_app_id), { id: i.id, status: i.status }])))
+    }
   }
 
   async function trackGame(g) {
@@ -209,6 +214,13 @@ export default function Upcoming() {
     })
     return () => { alive = false }
   }, [items])
+
+  async function untrackGame(g) {
+    const info = trackedAppIds.get(Number(g.appid))
+    if (!info || info.status !== 'upcoming') return
+    const res = await window.kozo?.api?.gameList?.delete?.(info.id)
+    if (res?.ok) { await Promise.all([load(), loadTracked()]) }
+  }
 
   function switchTab(next) {
     setTab(next)
@@ -301,7 +313,7 @@ export default function Upcoming() {
       <div className={s.content}>
         <div className={s.inner}>
           <ReleasedPanel onChanged={load} />
-          {tab === 'steam' && <SteamCalendar trackedAppIds={trackedAppIds} onTrack={trackGame} />}
+          {tab === 'steam' && <SteamCalendar trackedAppIds={trackedAppIds} onTrack={trackGame} onUntrack={untrackGame} />}
 
           {tab === 'mine' && items.length === 0 && (
             <EmptyState

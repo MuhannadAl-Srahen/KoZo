@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
   IconChevronLeft, IconChevronRight, IconBrandSteam, IconBookmark, IconBookmarkFilled, IconCheck,
-  IconCalendarMonth, IconLayoutGrid, IconLoader2, IconRefresh, IconClock,
+  IconX, IconCalendarMonth, IconLayoutGrid, IconLoader2, IconRefresh, IconClock,
 } from '@tabler/icons-react'
 import Modal, { modalStyles as ms } from './ui/Modal'
 import EmptyState from './ui/EmptyState'
@@ -86,7 +86,39 @@ function Cover({ g, wide = false, className }) {
   )
 }
 
-function PosterCard({ g, tracked, onOpen, onTrack, busy, compact = false }) {
+// Track / Untrack. Untrack only removes entries still marked Upcoming; a game
+// the user moved to another status stays on their list ("On your list").
+function TrackControl({ g, info, busy, onTrack, onUntrack, big = false }) {
+  const [confirm, setConfirm] = useState(false)
+  useEffect(() => {
+    if (!confirm) return
+    const t = setTimeout(() => setConfirm(false), 3000)
+    return () => clearTimeout(t)
+  }, [confirm])
+  if (!info) {
+    return (
+      <button className={big ? ms.btnPrimary : s.trackBtn} onClick={() => onTrack(g)} disabled={busy}>
+        <IconBookmark size={big ? 14 : 12} /> {busy ? 'Adding…' : big ? 'Track release' : 'Track'}
+      </button>
+    )
+  }
+  if (info.status !== 'upcoming') {
+    return <span className={s.trackedTag}><IconCheck size={12} /> On your list</span>
+  }
+  return (
+    <button
+      className={big ? (confirm ? ms.btnDanger : ms.btnCancel) : `${s.untrackBtn} ${confirm ? s.untrackConfirm : ''}`}
+      onClick={() => (confirm ? (setConfirm(false), onUntrack(g)) : setConfirm(true))}
+      disabled={busy}
+      title="Stop tracking this release"
+    >
+      {confirm ? <IconX size={big ? 14 : 12} /> : <IconCheck size={big ? 14 : 12} />}
+      {busy ? 'Removing…' : confirm ? 'Untrack?' : big ? 'Tracked (click to untrack)' : 'Tracked'}
+    </button>
+  )
+}
+
+function PosterCard({ g, tracked, info, onOpen, onTrack, onUntrack, busy, compact = false }) {
   return (
     <div className={`${s.poster} ${tracked ? s.posterTracked : ''} ${compact ? s.posterCompact : ''}`}>
       <button className={s.posterHit} onClick={() => onOpen(g)} title={g.name}>
@@ -101,13 +133,7 @@ function PosterCard({ g, tracked, onOpen, onTrack, busy, compact = false }) {
       </button>
       {!compact && (
         <div className={s.posterActions}>
-          {tracked ? (
-            <span className={s.trackedTag}><IconCheck size={12} /> Tracked</span>
-          ) : (
-            <button className={s.trackBtn} onClick={() => onTrack(g)} disabled={busy}>
-              <IconBookmark size={12} /> {busy ? 'Adding…' : 'Track'}
-            </button>
-          )}
+          <TrackControl g={g} info={info} busy={busy} onTrack={onTrack} onUntrack={onUntrack} />
           <button
             className={s.iconBtn}
             title="Steam page"
@@ -121,7 +147,7 @@ function PosterCard({ g, tracked, onOpen, onTrack, busy, compact = false }) {
   )
 }
 
-export default function SteamCalendar({ trackedAppIds, onTrack }) {
+export default function SteamCalendar({ trackedAppIds, onTrack, onUntrack }) {
   const [games, setGames]     = useState(() => calendarCache?.games || [])
   const [art, setArt]         = useState(() => calendarCache?.art || {})
   const [pages, setPages]     = useState(() => calendarCache?.pages || { soon: 0, wishlist: 0 })
@@ -218,8 +244,15 @@ export default function SteamCalendar({ trackedAppIds, onTrack }) {
     setBusyId(null)
   }
 
+  async function untrack(g) {
+    setBusyId(g.appid)
+    await onUntrack?.(g)
+    setBusyId(null)
+  }
+
   const poster = (g, extra = {}) => (
-    <PosterCard key={g.appid} g={g} tracked={trackedAppIds.has(g.appid)} onOpen={setDetail} onTrack={track} busy={busyId === g.appid} {...extra} />
+    <PosterCard key={g.appid} g={g} tracked={trackedAppIds.has(g.appid)} info={trackedAppIds.get?.(g.appid) || null}
+      onOpen={setDetail} onTrack={track} onUntrack={untrack} busy={busyId === g.appid} {...extra} />
   )
 
   return (
@@ -339,9 +372,10 @@ export default function SteamCalendar({ trackedAppIds, onTrack }) {
       {detail && (
         <DetailModal
           g={detail}
-          tracked={trackedAppIds.has(detail.appid)}
+          info={trackedAppIds.get?.(detail.appid) || null}
           busy={busyId === detail.appid}
           onTrack={() => track(detail)}
+          onUntrack={() => untrack(detail)}
           onClose={() => setDetail(null)}
         />
       )}
@@ -349,7 +383,7 @@ export default function SteamCalendar({ trackedAppIds, onTrack }) {
   )
 }
 
-function DetailModal({ g, tracked, busy, onTrack, onClose }) {
+function DetailModal({ g, info, busy, onTrack, onUntrack, onClose }) {
   return (
     <SteamGameModal
       appId={g.appid}
@@ -359,13 +393,7 @@ function DetailModal({ g, tracked, busy, onTrack, onClose }) {
       art={g.art}
       fallbackArt={[g.capsule]}
       onClose={onClose}
-      actions={tracked ? (
-        <button className={ms.btnCancel} disabled><IconCheck size={14} /> Tracked</button>
-      ) : (
-        <button className={ms.btnPrimary} onClick={onTrack} disabled={busy}>
-          <IconBookmark size={14} /> {busy ? 'Adding…' : 'Track release'}
-        </button>
-      )}
+      actions={<TrackControl g={g} info={info} busy={busy} onTrack={onTrack} onUntrack={onUntrack} big />}
     />
   )
 }
