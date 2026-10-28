@@ -56,9 +56,14 @@
   overflow-x: auto;
   padding: 3px 3px var(--sp-8);
   scroll-snap-type: x proximity;
-  scrollbar-width: thin;
 }
-.strip::-webkit-scrollbar { height: 6px; }
+/* Same scrollbar as the rest of KoZo (global.css). Don't add scrollbar-width
+   or scrollbar-color here: in Chromium either one switches the custom styling
+   off and the plain white Windows scrollbar comes back. */
+.strip::-webkit-scrollbar { height: 5px; }
+.strip::-webkit-scrollbar-track { background: transparent; }
+.strip::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: var(--r-sm); }
+.strip::-webkit-scrollbar-thumb:hover { background: var(--a); }
 .thumb {
   flex: 0 0 auto;
   width: 120px;
@@ -76,22 +81,27 @@
 .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .thumb:hover { opacity: 1; }
 .thumbActive { opacity: 1; border-color: var(--a); }
-/* Steam-style arrows sitting on the ends of the strip */
+/* Arrows at the ends of the strip, in the same style as the viewer arrows */
 .stripArrow {
   position: absolute;
-  top: 3px;
-  bottom: var(--sp-8);
-  width: 30px;
+  top: calc(3px + (120px * 9 / 16) / 2 - 14px);
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: none;
-  color: #fff;
+  border: 1px solid var(--ab);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--surface-1) 88%, transparent);
+  color: var(--text-primary);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
   cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
 }
-.stripArrowLeft { left: 0; background: linear-gradient(90deg, rgba(8, 8, 14, 0.9), transparent); border-radius: var(--r-sm) 0 0 var(--r-sm); }
-.stripArrowRight { right: 0; background: linear-gradient(270deg, rgba(8, 8, 14, 0.9), transparent); border-radius: 0 var(--r-sm) var(--r-sm) 0; }
-.stripArrow:hover { color: var(--a); }
+.stripArrowLeft { left: var(--sp-4); }
+.stripArrowRight { right: var(--sp-4); }
+.stripArrow:hover { background: var(--a); color: var(--accent-ink); border-color: var(--a); }
 
 /* Full-screen viewer */
 .lightbox {
