@@ -77,9 +77,17 @@ function createWindow() {
   })
 
   // Silence noisy CDP warnings that DevTools emits for unimplemented Electron features
+  // Renderer errors otherwise never reach the log file — a crash during render
+  // would only ever show up as an empty window.
   mainWindow.webContents.on('console-message', (event) => {
     const message = event.message ?? ''
     if (message.includes('Autofill.enable') || message.includes('Autofill.setAddresses')) return
+    if (event.level === 'error') {
+      try { require('./logger').error(`renderer: ${message}`, { source: event.sourceId, line: event.lineNumber }) } catch {}
+    }
+  })
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    try { require('./logger').error('renderer process gone', details) } catch {}
   })
 
   // Resolve "start minimized to tray" BEFORE loading so we can also skip opening
