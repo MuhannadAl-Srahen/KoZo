@@ -52,6 +52,17 @@ async function searchGame(name) {
   }))
 }
 
+// Search results with a cover each, for Add Game's "Not on Steam" section.
+// [] without a key, so callers can always ask.
+async function searchWithCovers(name, limit = 6) {
+  if (!getKey()) return []
+  const hits = (await searchGame(name).catch(() => [])).slice(0, limit)
+  return Promise.all(hits.map(async (h) => {
+    const [g] = await grids(h.id).catch(() => [])
+    return { sgdb_id: h.id, name: h.name, year: h.year, cover: g?.url || null, thumb: g?.thumb || null }
+  }))
+}
+
 // Portrait covers (600x900 / 342x482), static images only, best scored first.
 async function grids(sgdbGameId) {
   const data = await call(`/grids/game/${sgdbGameId}`, getKey(), { dimensions: '600x900,342x482,660x930', types: 'static', nsfw: 'false' })
@@ -72,6 +83,8 @@ async function applyArt(gameId, coverUrl, heroUrl) {
     const dest = path.join(dir, `${gameId}.jpg`)
     await steamApi.downloadFile(coverUrl, dest)
     db.prepare('UPDATE games SET banner_local_path = ?, banner_url = NULL, banner_rev = COALESCE(banner_rev, 0) + 1 WHERE id = ?').run(dest, gameId)
+    // Game List cards load remote art only: give the linked list row the cover too.
+    db.prepare('UPDATE game_list SET banner_url = ? WHERE game_id = ?').run(coverUrl, gameId)
   }
   if (heroUrl) {
     const dest = path.join(dir, `${gameId}_hero.jpg`)
@@ -141,4 +154,4 @@ async function autoArtAll() {
   return applied
 }
 
-module.exports = { getKey, testKey, searchGame, grids, heroes, applyArt, autoArt, autoArtAll }
+module.exports = { getKey, testKey, searchGame, searchWithCovers, grids, heroes, applyArt, autoArt, autoArtAll }

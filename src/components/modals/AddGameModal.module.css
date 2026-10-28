@@ -442,3 +442,14 @@
   gap: var(--sp-8);
   justify-content: center;
 }
+
+/* "Not on Steam" results (SteamGridDB): portrait covers */
+.resultsHeader {
+  margin: var(--sp-8) 0 var(--sp-2);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.resultIconPortrait { width: 46px; }

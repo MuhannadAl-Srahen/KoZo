@@ -17,6 +17,8 @@ function artError(e, game) {
   else img.style.display = 'none'
 }
 
+const normName = (n) => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+
 function debounce(fn, ms) {
   let t
   return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms) }
@@ -28,6 +30,9 @@ export default function AddGameToListModal({ onClose, onSaved }) {
   const [searching, setSearching] = useState(false)
   const [selected, setSelected]   = useState(null)
   const [isManual, setIsManual]   = useState(false)
+  // Games that aren't on Steam, found on SteamGridDB (needs the user's key).
+  const [sgdbResults, setSgdbResults] = useState([])
+  const [sgdbPick, setSgdbPick]       = useState(null)
 
   const [name, setName]           = useState('')
   const [status, setStatus]       = useState('want_to_play')
@@ -68,12 +73,18 @@ export default function AddGameToListModal({ onClose, onSaved }) {
   const doSearch = useCallback(
     debounce(async (q) => {
       const seq = ++searchSeq.current
-      if (!q.trim() || q.length < 2) { setResults([]); setSearching(false); return }
+      if (!q.trim() || q.length < 2) { setResults([]); setSgdbResults([]); setSearching(false); return }
       setSearching(true)
-      const res = await window.kozo?.api?.steam?.search(q)
+      const [res, sg] = await Promise.all([
+        window.kozo?.api?.steam?.search(q),
+        window.kozo?.api?.sgdb?.searchGames?.(q).catch(() => null),
+      ])
       if (seq !== searchSeq.current) return
       setSearching(false)
-      setResults(res?.ok ? (res.data || []) : [])
+      const steam = res?.ok ? (res.data || []) : []
+      setResults(steam)
+      const onSteam = new Set(steam.map(g => normName(g.name)))
+      setSgdbResults(sg?.ok ? (sg.data || []).filter(h => !onSteam.has(normName(h.name))) : [])
     }, 400),
     []
   )
@@ -88,12 +99,20 @@ export default function AddGameToListModal({ onClose, onSaved }) {
 
   function pickManual() {
     setSelected(null)
+    setSgdbPick(null)
     setIsManual(true)
     setName(query.trim())
   }
 
+  function pickSgdb(hit) {
+    pickManual()
+    setName(hit.name)
+    setSgdbPick(hit)
+  }
+
   function clearSelection() {
     setSelected(null)
+    setSgdbPick(null)
     setIsManual(false)
     setName('')
     setErrors({})
@@ -115,7 +134,7 @@ export default function AddGameToListModal({ onClose, onSaved }) {
       // The local-banner-picker has been removed at the user's request.
       banner_url: selected?.steam_app_id
         ? `https://cdn.akamai.steamstatic.com/steam/apps/${selected.steam_app_id}/library_600x900_2x.jpg`
-        : null,
+        : (sgdbPick?.cover || null),
       status,
       rating: status === 'finished' && rating !== '' ? Number(rating) : null,
       game_id: null,
@@ -127,6 +146,7 @@ export default function AddGameToListModal({ onClose, onSaved }) {
       if (res.data?.id) setAddedIds(ids => [...ids, res.data.id])
       // Reset to search so the user can add another game without closing
       setSelected(null)
+      setSgdbPick(null)
       setIsManual(false)
       setQuery('')
       setName('')
@@ -184,6 +204,7 @@ export default function AddGameToListModal({ onClose, onSaved }) {
         </div>
       ) : (
         <div className={s.selectedChip}>
+          {sgdbPick?.thumb && <div className={s.selectedThumb}><img src={sgdbPick.thumb} alt="" /></div>}
           {selected && (
             <div className={s.selectedThumb} style={{ background: getBannerBg(selected.steam_app_id) }}>
               <img src={selected.header_image} alt="" onError={e => artError(e, selected)} />
@@ -191,7 +212,7 @@ export default function AddGameToListModal({ onClose, onSaved }) {
           )}
           <span className={s.selectedChipName}>{name || query}</span>
           {selected && <span className={s.selectedChipMeta}>Steam · {selected.steam_app_id}</span>}
-          {isManual && <span className={s.selectedChipMeta}>Manual</span>}
+          {isManual && <span className={s.selectedChipMeta}>{sgdbPick ? 'Not on Steam' : 'Manual'}</span>}
           <button className={s.selectedChipClear} onClick={clearSelection} title="Search again">
             <IconX size={13} stroke={2} />
           </button>
@@ -214,8 +235,27 @@ export default function AddGameToListModal({ onClose, onSaved }) {
             </div>
           ))}
 
-          {results.length === 0 && (
+          {results.length === 0 && sgdbResults.length === 0 && (
             <div className={s.searchHint}>No Steam results found. Add manually below.</div>
+          )}
+
+          {sgdbResults.length > 0 && (
+            <>
+              <div className={s.resultsHeader}>Not on Steam</div>
+              {sgdbResults.map(hit => (
+                <div key={`sgdb-${hit.sgdb_id}`} className={s.resultItem} onClick={() => pickSgdb(hit)}>
+                  <div className={`${s.resultIcon} ${s.resultIconPortrait}`} style={{ background: getBannerBg(hit.sgdb_id) }}>
+                    {hit.thumb
+                      ? <img src={hit.thumb} alt="" onError={e => { e.target.style.display = 'none' }} />
+                      : <IconDeviceGamepad2 size={18} stroke={1.3} style={{ color: 'rgba(255,255,255,0.15)' }} />}
+                  </div>
+                  <div className={s.resultInfo}>
+                    <div className={s.resultName}>{hit.name}</div>
+                    <div className={s.resultMeta}>{hit.year ? `${hit.year} · ` : ''}Cover from SteamGridDB</div>
+                  </div>
+                </div>
+              ))}
+            </>
           )}
 
           <div className={s.manualOption} onClick={pickManual}>

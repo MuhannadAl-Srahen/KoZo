@@ -7,6 +7,9 @@ const ORDER_BY = ' ORDER BY gl.is_favorite DESC, (gl.display_order IS NULL), gl.
 function listGameListItems(filters = {}) {
   let query = `
     SELECT gl.*, c.name AS category_name, c.emoji AS category_emoji
+      -- The linked library game's own cover file: Game List cards fall back to
+      -- it when the row has no remote art (non-Steam games, SteamGridDB covers).
+      , (SELECT g.banner_local_path FROM games g WHERE g.id = gl.game_id) AS game_banner_local_path
     FROM game_list gl
     LEFT JOIN categories c ON c.id = gl.category_id
     WHERE 1=1
@@ -61,6 +64,9 @@ function listGameListItems(filters = {}) {
 function getGameListItem(id) {
   return getDb().prepare(`
     SELECT gl.*, c.name AS category_name, c.emoji AS category_emoji
+      -- The linked library game's own cover file: Game List cards fall back to
+      -- it when the row has no remote art (non-Steam games, SteamGridDB covers).
+      , (SELECT g.banner_local_path FROM games g WHERE g.id = gl.game_id) AS game_banner_local_path
     FROM game_list gl
     LEFT JOIN categories c ON c.id = gl.category_id
     WHERE gl.id = ?

@@ -5,7 +5,7 @@ import {
   IconCheckbox, IconSquare, IconTrash, IconX, IconCheck, IconStar, IconLoader2,
   IconBooks, IconCalendarEvent,
 } from '@tabler/icons-react'
-import { getBannerBg, parseGenres, formatMonthKey } from '../lib/utils'
+import { getBannerBg, parseGenres, formatMonthKey, fileUrl } from '../lib/utils'
 import { LIST_STATUSES, LIST_STATUS_ORDER } from '../lib/cardModel'
 import AddGameToListModal from '../components/modals/AddGameToListModal'
 import AddGamesToCustomListModal from '../components/modals/AddGamesToCustomListModal'
@@ -62,7 +62,7 @@ function bannerOnError(e) {
 function GridCard({ item, onClick, selectionMode, selected, onToggle, onToggleFav, onContextMenu }) {
   const cfg = STATUS_CONFIG[item.status] || { label: item.status, color: 'var(--text-muted)' }
   const bg  = getBannerBg(item.id)
-  const src = withBust(item.banner_url, item.banner_rev)
+  const src = withBust(item.banner_url, item.banner_rev) || fileUrl(item.game_banner_local_path)
   const genres = parseGenres(item)
   const [failed, setFailed] = useState(null)   // src that failed: show the generated cover
 
@@ -132,7 +132,7 @@ function GridCard({ item, onClick, selectionMode, selected, onToggle, onToggleFa
 function ListRow({ item, onClick, selectionMode, selected, onToggle, onToggleFav, onContextMenu }) {
   const cfg = STATUS_CONFIG[item.status] || { label: item.status, color: 'var(--text-muted)' }
   const bg  = getBannerBg(item.id)
-  const src = withBust(item.banner_url, item.banner_rev)
+  const src = withBust(item.banner_url, item.banner_rev) || fileUrl(item.game_banner_local_path)
   const genres = parseGenres(item)
 
   function handleClick() {
@@ -223,7 +223,7 @@ export default function GameList() {
   const [customLists, setCustomLists]   = useState([])
   const [activeListId, setActiveListId] = useState(null)   // null = All
   const [view, setView]         = useState(() => localStorage.getItem('kozo:view:gamelist') || 'big')
-  const zoomStyle = useCardZoom('gamelist', view, { big: 220, grid: 168 })   // Ctrl + mouse wheel card size
+  const zoomStyle = useCardZoom('gamelist', view, { big: 220, grid: 168 }, { min: 140, max: 380 })   // Ctrl + mouse wheel card size
   const [loading, setLoading]   = useState(true)
   const [switching, setSwitching] = useState(false)   // filter change with grid kept on screen
   const itemsRef = useRef([])

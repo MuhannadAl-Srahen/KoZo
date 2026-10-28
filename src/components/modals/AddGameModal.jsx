@@ -44,6 +44,8 @@ function debounce(fn, ms) {
 function artChain(game) {
   return [game.header_image, game.capsule].filter(Boolean)
 }
+const normName = (n) => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+
 function bestArt(game) {
   return artChain(game)[0] || null
 }
@@ -83,6 +85,13 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
   const [exeWarn, setExeWarn]         = useState(false)
   const [dupWarn, setDupWarn]         = useState(false)
   const [showPicker, setShowPicker]   = useState(false)
+  // Games that aren't on Steam, found on SteamGridDB (needs the user's key).
+  const [sgdbResults, setSgdbResults] = useState([])
+  const [sgdbPick, setSgdbPick]       = useState(null)   // { sgdb_id, name, cover, thumb }
+  const [hasSgdbKey, setHasSgdbKey]   = useState(true)
+  useEffect(() => {
+    window.kozo?.api?.settings?.get?.('steamgriddb_key').then(r => setHasSgdbKey(!!(r?.ok && r.data)))
+  }, [])
 
   // Steam search is a network call — a slow earlier response must not
   // overwrite a newer one, so only the latest request's result is applied.
@@ -90,12 +99,19 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
   const doSearch = useCallback(
     debounce(async (q) => {
       const seq = ++searchSeq.current
-      if (!q.trim() || q.length < 2) { setResults([]); setSearching(false); return }
+      if (!q.trim() || q.length < 2) { setResults([]); setSgdbResults([]); setSearching(false); return }
       setSearching(true)
-      const res = await window.kozo?.api?.steam?.search(q)
+      const [res, sg] = await Promise.all([
+        window.kozo?.api?.steam?.search(q),
+        window.kozo?.api?.sgdb?.searchGames?.(q).catch(() => null),
+      ])
       if (seq !== searchSeq.current) return
       setSearching(false)
-      setResults(res?.ok ? (res.data || []) : [])
+      const steam = res?.ok ? (res.data || []) : []
+      setResults(steam)
+      // Only the ones Steam didn't already return.
+      const onSteam = new Set(steam.map(g => normName(g.name)))
+      setSgdbResults(sg?.ok ? (sg.data || []).filter(h => !onSteam.has(normName(h.name))) : [])
     }, 400),
     []
   )
@@ -104,6 +120,7 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
 
   function clearSelection() {
     setSelected(null)
+    setSgdbPick(null)
     setIsManual(false)
     setName('')
     setBannerPath('')
@@ -139,8 +156,17 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
     if (!prefillInstallPath) setInstallPath('')
   }
 
+  // A game that isn't on Steam, picked from SteamGridDB: it's added like a
+  // manual game, and its cover comes along.
+  function pickSgdb(hit) {
+    pickManual()
+    setName(hit.name)
+    setSgdbPick(hit)
+  }
+
   function pickManual() {
     setSelected(null)
+    setSgdbPick(null)
     setIsManual(true)
     setName(query.trim())
     setBannerPath('')
@@ -205,6 +231,8 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
           ? `https://cdn.akamai.steamstatic.com/steam/apps/${selected.steam_app_id}/library_600x900_2x.jpg`
           : null,
         capsule_fallback: selected?.capsule || null,
+        sgdb_id: sgdbPick?.sgdb_id ?? null,
+        sgdb_cover: sgdbPick?.cover ?? null,
         banner_local_path: safeTrim(bannerPath) || null,
         source: selected?.steam_app_id ? 'steam' : source,
         is_installed: 1,
@@ -265,6 +293,9 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
         </div>
       ) : (
         <div className={s.selectedChip}>
+          {sgdbPick?.thumb && (
+            <div className={s.selectedThumb}><img src={sgdbPick.thumb} alt="" /></div>
+          )}
           {selected && (
             <div className={s.selectedThumb} style={{ background: getBannerBg(selected.steam_app_id) }}>
               {bestArt(selected)
@@ -275,7 +306,7 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
           )}
           <span className={s.selectedChipName}>{name || query}</span>
           {selected && <span className={s.selectedChipMeta}>Steam · {selected.steam_app_id}</span>}
-          {isManual && <span className={s.selectedChipMeta}>Manual</span>}
+          {isManual && <span className={s.selectedChipMeta}>{sgdbPick ? 'Not on Steam' : 'Manual'}</span>}
           <button className={s.selectedChipClear} onClick={clearSelection} title="Search again">
             <IconX size={13} stroke={2} />
           </button>
@@ -306,8 +337,32 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
             </div>
           ))}
 
-          {results.length === 0 && (
+          {results.length === 0 && sgdbResults.length === 0 && (
             <div className={s.searchHint}>No Steam results found. Add manually below.</div>
+          )}
+
+          {sgdbResults.length > 0 && (
+            <>
+              <div className={s.resultsHeader}>Not on Steam</div>
+              {sgdbResults.map(hit => (
+                <div key={`sgdb-${hit.sgdb_id}`} className={s.resultItem} onClick={() => pickSgdb(hit)}>
+                  <div className={`${s.resultIcon} ${s.resultIconPortrait}`} style={{ background: getBannerBg(hit.sgdb_id) }}>
+                    {hit.thumb
+                      ? <img src={hit.thumb} alt="" onError={e => { e.target.style.display = 'none' }} />
+                      : <IconDeviceGamepad2 size={18} stroke={1.3} style={{ color: 'rgba(255,255,255,0.15)' }} />}
+                  </div>
+                  <div className={s.resultInfo}>
+                    <div className={s.resultName}>{hit.name}</div>
+                    <div className={s.resultMeta}>{hit.year ? `${hit.year} · ` : ''}Cover from SteamGridDB</div>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+          {!hasSgdbKey && (
+            <div className={s.searchHint}>
+              Not on Steam? Add a free SteamGridDB key in Settings, Steam, to find covers for any game.
+            </div>
           )}
 
           <div className={s.manualOption} onClick={pickManual}>
