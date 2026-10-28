@@ -13,7 +13,7 @@ import Statistics from './pages/Statistics'
 import Profile from './pages/Profile'
 import Settings from './pages/Settings'
 import UnknownGamePrompt from './components/UnknownGamePrompt'
-import OnboardingModal from './components/OnboardingModal'
+import Tour from './components/Tour'
 import LevelUpCelebration from './components/LevelUpCelebration'
 import UpdateBanner from './components/UpdateBanner'
 
@@ -80,7 +80,7 @@ export default function App() {
         <GamepadNav />
         <UnknownGamePrompt />
         <LevelUpCelebration />
-        {showOnboarding && <OnboardingModal onDone={() => setShowOnboarding(false)} />}
+        {showOnboarding && <Tour onDone={() => setShowOnboarding(false)} />}
       </HashRouter>
     </AccentColorProvider>
   )

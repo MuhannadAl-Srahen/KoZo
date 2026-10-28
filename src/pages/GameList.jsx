@@ -523,6 +523,7 @@ export default function GameList() {
                 { value: 'upcoming',     label: 'Upcoming' },
               ]}
             />
+            <span data-tour="month-filter" style={{ display: 'inline-flex' }}>
             <SearchableSelect
               value={monthFilter}
               onChange={handleMonthChange}
@@ -534,6 +535,7 @@ export default function GameList() {
                 { value: 'none', label: 'Not planned' },
               ]}
             />
+            </span>
             {genreOptions.length > 0 && (
               <SearchableSelect
                 value={genreFilter}

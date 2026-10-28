@@ -337,7 +337,7 @@ export default function Library() {
   return (
     <div className={s.page}>
       {/* Stats */}
-      <div className={s.statsBar}>
+      <div className={s.statsBar} data-tour="library-stats">
         <div className={s.statCard}>
           <span className={s.statLabel}>Games</span>
           <span className={s.statValue}>{games.filter(g => !g.is_archived).length}</span>
@@ -408,6 +408,7 @@ export default function Library() {
 
           <button
             className={s.btnSecondary}
+            data-tour="scan-pc"
             title="Scan your PC for installed games to add (folders configured in Settings → Scan PC)"
             disabled={scanning}
             onClick={runScan}
@@ -438,7 +439,7 @@ export default function Library() {
             ))}
           </div>
 
-          <button className={s.btnPrimary} onClick={() => setAddModal(true)}>
+          <button className={s.btnPrimary} data-tour="add-game" onClick={() => setAddModal(true)}>
             <IconPlus size={15} stroke={2} />
             Add Game
           </button>

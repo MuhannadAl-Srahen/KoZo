@@ -1,0 +1,154 @@
+/* The tour layer never blocks the app: only the card takes clicks, so the
+   spotlighted control stays usable ("click Game List to continue"). */
+.root {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  pointer-events: none;
+}
+
+.dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(5, 5, 10, 0.72);
+  pointer-events: auto;
+  animation: fade 0.2s ease;
+}
+
+/* Spotlight: a hole in the dim layer via a huge shadow, with an accent ring. */
+.spot {
+  position: absolute;
+  border-radius: var(--r-input);
+  box-shadow: 0 0 0 9999px rgba(5, 5, 10, 0.72);
+  outline: 2px solid var(--a);
+  outline-offset: 0;
+  transition: left 0.25s ease, top 0.25s ease, width 0.25s ease, height 0.25s ease;
+}
+.spot::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: inherit;
+  border: 2px solid var(--a);
+  opacity: 0;
+  animation: pulse 1.6s ease-out infinite;
+}
+@keyframes pulse {
+  0%   { opacity: 0.7; transform: scale(0.98); }
+  100% { opacity: 0;   transform: scale(1.08); }
+}
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+
+.centerWrap {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-24);
+}
+
+.card {
+  position: absolute;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-10);
+  padding: var(--sp-20);
+  border-radius: var(--r-lg);
+  background:
+    radial-gradient(360px 160px at 10% -20%, var(--ad), transparent 70%),
+    var(--surface-1);
+  border: 1px solid var(--ab);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+  color: var(--text-primary);
+  animation: fade 0.2s ease;
+  transition: left 0.25s ease, top 0.25s ease;
+}
+.cardWide { position: relative; width: min(520px, 100%); }
+
+.close {
+  position: absolute;
+  top: var(--sp-10);
+  right: var(--sp-10);
+  display: inline-flex;
+  padding: var(--sp-4);
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.close:hover { background: var(--neutral-bg-hover); color: var(--text-primary); }
+
+.stepCount { font-size: var(--fs-2xs); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--a); }
+.title { margin: 0; font-size: var(--fs-lg, 18px); font-weight: 700; }
+.body { margin: 0; color: var(--text-secondary); line-height: 1.55; font-size: var(--fs-sm); }
+.hint {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: var(--sp-8) var(--sp-10);
+  border-radius: var(--r-input);
+  background: var(--ad);
+  color: var(--a);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.footer { display: flex; align-items: center; gap: var(--sp-6); margin-top: var(--sp-6); }
+.spacer { flex: 1; }
+.dots { display: flex; gap: 5px; }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--neutral-bg-hover); transition: width 0.2s ease, background 0.2s ease; }
+.dotDone { background: var(--ab); }
+.dotActive { width: 18px; border-radius: var(--r-pill); background: var(--a); }
+
+.primary, .ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-6);
+  padding: var(--sp-6) var(--sp-12);
+  border-radius: var(--r-input);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.primary { border: none; background: var(--a); color: var(--accent-ink); }
+.primary:hover { filter: brightness(1.08); }
+.primary:disabled { opacity: 0.6; cursor: default; }
+.ghost { border: 1px solid var(--neutral-border); background: var(--neutral-bg); color: var(--text-secondary); }
+.ghost:hover { background: var(--neutral-bg-hover); color: var(--text-primary); }
+
+/* Centered steps */
+.hero { display: flex; flex-direction: column; align-items: center; gap: var(--sp-12); text-align: center; }
+.heroTitle { margin: 0; font-size: 22px; font-weight: 800; }
+.features { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-8); width: 100%; }
+.feature {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: var(--sp-12) var(--sp-8);
+  border-radius: var(--r-card);
+  background: var(--surface-2);
+  border: 1px solid var(--neutral-border);
+  color: var(--a);
+  font-size: var(--fs-xs);
+}
+.feature span { color: var(--text-primary); font-weight: 600; }
+.steamIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--ad);
+  color: var(--a);
+}
+.ok { display: inline-flex; align-items: center; gap: var(--sp-6); color: var(--success); font-weight: 600; }
+.err { color: var(--error); font-size: var(--fs-xs); }
+.note { margin: 0; color: var(--text-muted); font-size: var(--fs-xs); line-height: 1.5; }

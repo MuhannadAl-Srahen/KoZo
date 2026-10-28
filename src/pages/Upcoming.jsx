@@ -216,7 +216,7 @@ export default function Upcoming() {
   }
 
   const tabs = (
-    <div className={s.tabs}>
+    <div className={s.tabs} data-tour="upcoming-tabs">
       <button className={`${s.tab} ${tab === 'mine' ? s.tabActive : ''}`} onClick={() => switchTab('mine')}>My upcoming</button>
       <button className={`${s.tab} ${tab === 'steam' ? s.tabActive : ''}`} onClick={() => switchTab('steam')}>Steam calendar</button>
     </div>

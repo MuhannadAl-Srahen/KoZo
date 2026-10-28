@@ -162,6 +162,7 @@ export default function Sidebar() {
             to={path}
             end={path === '/'}
             data-gpnav=""
+            data-tour={`nav-${path === '/' ? 'library' : path.slice(1)}`}
             className={({ isActive }) =>
               `${s.navItem} ${isActive ? s.navItemActive : ''}`
             }
@@ -200,6 +201,7 @@ export default function Sidebar() {
         <NavLink
           to="/profile"
           data-gpnav=""
+          data-tour="nav-profile"
           className={({ isActive }) => `${s.profileChip} ${isActive ? s.profileChipActive : ''}`}
         >
           <span className={s.profileAvatar}>
@@ -228,6 +230,7 @@ export default function Sidebar() {
         <NavLink
           to="/settings"
           data-gpnav=""
+          data-tour="nav-settings"
           className={({ isActive }) => `${s.settingsLink} ${isActive ? s.settingsLinkActive : ''}`}
         >
           <span className={s.navIcon}><IconSettings size={17} stroke={1.6} /></span>
