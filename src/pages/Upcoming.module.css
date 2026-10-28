@@ -146,6 +146,14 @@
   backdrop-filter: blur(6px);
 }
 .cardAction:hover { color: var(--a); border-color: var(--ab); }
+.cardActionConfirm {
+  gap: var(--sp-4);
+  align-items: center;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: var(--status-dropped, #f87171);
+  border-color: color-mix(in srgb, var(--status-dropped, #f87171) 55%, transparent);
+}
 
 .cardInfo {
   display: flex;

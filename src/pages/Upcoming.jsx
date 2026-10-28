@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import {
   IconCalendar, IconHourglassLow, IconConfetti, IconHelpCircle,
-  IconPlayerPlayFilled, IconBookmark, IconBrandSteam,
+  IconPlayerPlayFilled, IconBookmark, IconBrandSteam, IconBookmarkOff,
 } from '@tabler/icons-react'
 import { parseGenres, parseRelease } from '../lib/utils'
 import Modal, { modalStyles as ms } from '../components/ui/Modal'
@@ -92,7 +92,8 @@ function badgeClassFor(rel) {
 }
 
 // ── Detail popup: the shared store-style game modal ───────────────────────────
-function DetailModal({ item, rel, art, onClose, onStatus }) {
+function DetailModal({ item, rel, art, onClose, onStatus, onUntrack }) {
+  const [confirm, setConfirm] = useState(false)
   return (
     <SteamGameModal
       appId={item.steam_app_id}
@@ -104,6 +105,10 @@ function DetailModal({ item, rel, art, onClose, onStatus }) {
       onClose={onClose}
       actions={
         <>
+          <button className={ms.btnCancel} onClick={() => (confirm ? onUntrack() : setConfirm(true))}
+            title="Stop tracking this release">
+            <IconBookmarkOff size={13} stroke={1.8} /> {confirm ? 'Click to confirm' : 'Untrack'}
+          </button>
           <button className={ms.btnCancel} onClick={() => onStatus('want_to_play')}>
             <IconBookmark size={13} stroke={1.8} /> Want to play
           </button>
@@ -126,7 +131,8 @@ function waitProgress(item, rel) {
   return Math.min(1, Math.max(0, (Date.now() - start) / (end - start)))
 }
 
-function UpcomingCard({ item, rel, art, onOpen, onStatus }) {
+function UpcomingCard({ item, rel, art, onOpen, onStatus, onUntrack }) {
+  const [confirm, setConfirm] = useState(false)
   const genres = parseGenres(item).slice(0, 3)
   const progress = waitProgress(item, rel)
   const out = rel?.until != null && rel.until <= Date.now()
@@ -153,6 +159,12 @@ function UpcomingCard({ item, rel, art, onOpen, onStatus }) {
           )}
           <button className={s.cardAction} title="Move to Want to play" onClick={stop(() => onStatus(item, 'want_to_play'))}>
             <IconBookmark size={14} stroke={1.8} />
+          </button>
+          <button className={`${s.cardAction} ${confirm ? s.cardActionConfirm : ''}`}
+            title={confirm ? 'Click again to untrack' : 'Untrack'}
+            onMouseLeave={() => setConfirm(false)}
+            onClick={stop(() => (confirm ? onUntrack(item) : setConfirm(true)))}>
+            <IconBookmarkOff size={14} stroke={1.8} />{confirm && <span>Untrack?</span>}
           </button>
         </div>
       </div>
@@ -220,6 +232,12 @@ export default function Upcoming() {
     if (!info || info.status !== 'upcoming') return
     const res = await window.kozo?.api?.gameList?.delete?.(info.id)
     if (res?.ok) { await Promise.all([load(), loadTracked()]) }
+  }
+
+  // My upcoming: remove a tracked release from the Game List.
+  async function untrackItem(item) {
+    const res = await window.kozo?.api?.gameList?.delete?.(item.id)
+    if (res?.ok) { setDetail(null); await Promise.all([load(), loadTracked()]) }
   }
 
   function switchTab(next) {
@@ -330,7 +348,7 @@ export default function Upcoming() {
               </div>
               <div className={s.grid}>
                 {sec.entries.map(({ item, rel }) => (
-                  <UpcomingCard key={item.id} item={item} rel={rel} art={art[item.steam_app_id]} onOpen={setDetail} onStatus={setStatus} />
+                  <UpcomingCard key={item.id} item={item} rel={rel} art={art[item.steam_app_id]} onOpen={setDetail} onStatus={setStatus} onUntrack={untrackItem} />
                 ))}
               </div>
             </section>
@@ -344,6 +362,7 @@ export default function Upcoming() {
             rel={detail.rel}
             onClose={() => setDetail(null)}
             onStatus={(status) => setStatus(detail.item, status)}
+            onUntrack={() => untrackItem(detail.item)}
           />
         )}
       </div>
