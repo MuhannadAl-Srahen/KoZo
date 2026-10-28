@@ -380,6 +380,17 @@
 
 .cardStatusWord { font-weight: 500; }
 
+/* Play-plan month ("Nov 2026") — set via Plan for month. */
+.planChip {
+  padding: 1px var(--sp-6);
+  border-radius: var(--r-pill);
+  background: var(--ad);
+  border: 1px solid var(--ab);
+  color: var(--a);
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+}
+
 /* Status LED — top-left corner of the cover, matching GameCard's. */
 .cardStatusLed {
   position: absolute;

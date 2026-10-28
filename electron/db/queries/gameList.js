@@ -30,6 +30,14 @@ function listGameListItems(filters = {}) {
     params.push(filters.status)
   }
 
+  // Play-plan month: 'YYYY-MM', or 'none' for games without a plan.
+  if (filters.month === 'none') {
+    query += ' AND gl.planned_month IS NULL'
+  } else if (filters.month) {
+    query += ' AND gl.planned_month = ?'
+    params.push(filters.month)
+  }
+
   if (filters.search) {
     query += " AND gl.name LIKE '%' || ? || '%' COLLATE NOCASE"
     params.push(filters.search)
@@ -77,7 +85,7 @@ function addGameListItem(data) {
 }
 
 function updateGameListItem(id, data) {
-  const allowed = ['game_id', 'steam_app_id', 'name', 'banner_url', 'category_id', 'status', 'rating', 'is_favorite', 'genres', 'display_order', 'release_date']
+  const allowed = ['game_id', 'steam_app_id', 'name', 'banner_url', 'category_id', 'status', 'rating', 'is_favorite', 'genres', 'display_order', 'release_date', 'planned_month']
   const sets = Object.keys(data)
     .filter(k => allowed.includes(k))
     .map(k => `${k} = @${k}`)
@@ -120,6 +128,21 @@ function reorderGameListPage(filters = {}, offset = 0, pageIds = []) {
   const stmt = db.prepare('UPDATE game_list SET display_order = ? WHERE id = ?')
   db.transaction(() => { merged.forEach((id, i) => stmt.run(i, id)) })()
   return true
+}
+
+// Months that have planned games, oldest first, with how many games each.
+function plannedMonths() {
+  return getDb().prepare(`
+    SELECT planned_month AS month, COUNT(*) AS count FROM game_list
+    WHERE planned_month IS NOT NULL GROUP BY planned_month ORDER BY planned_month
+  `).all()
+}
+
+function setPlannedMonth(ids, month) {
+  const value = month && /^\d{4}-\d{2}$/.test(month) ? month : null
+  const stmt = getDb().prepare('UPDATE game_list SET planned_month = ? WHERE id = ?')
+  getDb().transaction(() => { for (const id of ids) stmt.run(value, id) })()
+  return value
 }
 
 // ── Library → Game List sync ─────────────────────────────────────────────────
@@ -168,4 +191,4 @@ function syncLibraryToList() {
   return added
 }
 
-module.exports = { ensureListRowForGame, syncLibraryToList, listStatusForGame, reorderGameListPage, listGameListItems, getGameListItem, addGameListItem, updateGameListItem, deleteGameListItem, distinctGenres }
+module.exports = { plannedMonths, setPlannedMonth, ensureListRowForGame, syncLibraryToList, listStatusForGame, reorderGameListPage, listGameListItems, getGameListItem, addGameListItem, updateGameListItem, deleteGameListItem, distinctGenres }

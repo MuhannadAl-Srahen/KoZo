@@ -683,6 +683,13 @@ handle('gameList:moveToLibrary', async (ids) => {
   bk()
   return moved
 })
+handle('gameList:plannedMonths', () => gameListQ.plannedMonths())
+handle('gameList:planMonth', (ids, month) => {
+  const list = (Array.isArray(ids) ? ids : [ids]).map(Number).filter(Number.isFinite)
+  const value = gameListQ.setPlannedMonth(list, month)
+  bk()
+  return value
+})
 handle('gameList:reorderPage', (filters, offset, pageIds) => {
   if (!Array.isArray(pageIds) || !pageIds.length) return false
   gameListQ.reorderGameListPage(filters || {}, Number(offset) || 0, pageIds)

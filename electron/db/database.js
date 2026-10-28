@@ -123,6 +123,8 @@ function runMigrations() {
     try { db.exec('ALTER TABLE game_list ADD COLUMN banner_rev INTEGER DEFAULT 0') } catch (_) {}
     // Archived = removed from the Library grid with all history kept (replaces delete).
     try { db.exec('ALTER TABLE games ADD COLUMN is_archived INTEGER DEFAULT 0') } catch (_) {}
+    // Game List play plan: the month ('YYYY-MM') the user means to play a game in.
+    try { db.exec('ALTER TABLE game_list ADD COLUMN planned_month TEXT') } catch (_) {}
 
     relaxUnlockedAtNotNull()
     migrateCategoriesToCustomLists()

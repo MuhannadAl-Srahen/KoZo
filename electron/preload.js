@@ -38,6 +38,8 @@ contextBridge.exposeInMainWorld('kozo', {
       delete: (id) => ipcRenderer.invoke('gameList:delete', id),
       reorderPage: (filters, offset, pageIds) => ipcRenderer.invoke('gameList:reorderPage', filters, offset, pageIds),
       moveToLibrary: (ids) => ipcRenderer.invoke('gameList:moveToLibrary', ids),
+      plannedMonths: () => ipcRenderer.invoke('gameList:plannedMonths'),
+      planMonth: (ids, month) => ipcRenderer.invoke('gameList:planMonth', ids, month),
     },
     customLists: {
       list: () => ipcRenderer.invoke('customLists:list'),

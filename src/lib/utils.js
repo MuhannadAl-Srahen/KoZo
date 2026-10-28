@@ -42,6 +42,16 @@ export function rarityColor(pct) {
   return 'var(--rarity-common)'
 }
 
+// Play-plan month keys ('YYYY-MM') ↔ labels like "Nov 2026".
+export function monthKey(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+}
+export function formatMonthKey(key, month = 'short') {
+  const m = /^(\d{4})-(\d{2})$/.exec(key || '')
+  if (!m) return ''
+  return new Date(Number(m[1]), Number(m[2]) - 1, 1).toLocaleDateString(undefined, { month, year: 'numeric' })
+}
+
 export function getBannerBg(id) {
   return BANNER_COLORS[(id || 0) % BANNER_COLORS.length]
 }
