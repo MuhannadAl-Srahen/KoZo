@@ -100,6 +100,7 @@ src/                 renderer (React)
 **Styling:** CSS Modules next to each component. Layout composes from `styles/page.module.css`, controls from `styles/controls.module.css`, surfaces from `styles/surface.module.css`. All tokens live in `styles/variables.css` (`--a` accent, `--status-*`, `--rarity-*`, `--sp-*`, `--r-*`, `--fs-*`, `--z-*`). For accent-derived colours use `color-mix(in srgb, var(--a) N%, transparent)`; never append hex alpha to a `var()`. No UI framework; icons come from `@tabler/icons-react`.
 
 ## Gotchas
+- Card grids size their columns from `--card-min` (Ctrl + mouse wheel via `lib/useCardZoom.js`, saved per page and view). Keep new grids on the same variable.
 - Non-Steam covers come from SteamGridDB (`services/steamGridDb.js`, key in setting `steamgriddb_key`, never backed up). Auto-applied on add and from Refresh images; Edit → Find cover (`CoverPickerModal`) lets the user pick. With no art at all, `GeneratedCover` draws a name-based poster under every card.
 - Setting `show_adult_games` adds `ignore_preferences` + the age-gate cookie to Steam store search and the calendar feeds (`adultSearchOpts` in steamApi.js).
 - First-run walkthrough = `components/Tour.jsx`: steps spotlight real controls tagged `data-tour="…"` (Library `scan-pc`/`add-game`/`library-stats`, sidebar `nav-*`, Game List `month-filter`, Upcoming `upcoming-tabs`). Renaming or removing a tagged control breaks its step. Store-style game popup = `components/SteamGameModal.jsx` (gallery via `ui/MediaGallery.jsx`).

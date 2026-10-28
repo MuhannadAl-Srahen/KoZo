@@ -230,7 +230,7 @@
 .bigGrid {
   display: grid;
   /* 220px floor — must stay identical to Library's .bigGrid. */
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 220px), 1fr));   /* Ctrl+wheel: lib/useCardZoom */
   gap: var(--sp-12);
   contain: layout style;
 }
@@ -238,7 +238,7 @@
 .grid {
   display: grid;
   /* 168px floor — must stay identical to Library's .smallGrid. */
-  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 168px), 1fr));
   gap: var(--sp-10);
   contain: layout style;
 }

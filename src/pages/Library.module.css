@@ -315,7 +315,7 @@
   /* 220px floor (was 200): on the user's 2K monitor 200px packed 7 slim columns
      and long names truncated hard — fewer, larger cards read better and give
      the (now 16px, 2-line-capable) name real room. */
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 220px), 1fr));   /* Ctrl+wheel: lib/useCardZoom */
   gap: var(--sp-12);
   contain: layout style;
 }
@@ -324,7 +324,7 @@
   display: grid;
   /* 168px floor (was 132) — at 132 the covers were postage stamps on a 2K
      monitor; "small" should mean denser, not unreadable. */
-  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 168px), 1fr));
   gap: var(--sp-10);
   contain: layout style;
 }

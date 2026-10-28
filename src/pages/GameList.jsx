@@ -16,6 +16,7 @@ import SearchableSelect from '../components/ui/SearchableSelect'
 import CardContextMenu from '../components/ui/CardContextMenu'
 import EmptyState from '../components/ui/EmptyState'
 import GeneratedCover from '../components/GeneratedCover'
+import useCardZoom from '../lib/useCardZoom'
 import InfoModal from '../components/ui/InfoModal'
 import { CardSkeletonGrid } from '../components/ui/Skeleton'
 import s from './GameList.module.css'
@@ -219,6 +220,7 @@ export default function GameList() {
   const [customLists, setCustomLists]   = useState([])
   const [activeListId, setActiveListId] = useState(null)   // null = All
   const [view, setView]         = useState(() => localStorage.getItem('kozo:view:gamelist') || 'big')
+  const zoomStyle = useCardZoom('gamelist', view, { big: 220, grid: 168 })   // Ctrl + mouse wheel card size
   const [loading, setLoading]   = useState(true)
   const [switching, setSwitching] = useState(false)   // filter change with grid kept on screen
   const itemsRef = useRef([])
@@ -693,7 +695,7 @@ export default function GameList() {
         )}
 
         {!loading && items.length > 0 && (view === 'big' || view === 'grid') && (
-          <div className={view === 'big' ? s.bigGrid : s.grid}>
+          <div className={view === 'big' ? s.bigGrid : s.grid} style={zoomStyle}>
             {items.map(item => {
               const draggable = !selectionMode
               return (

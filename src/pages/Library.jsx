@@ -13,6 +13,7 @@ import SearchableSelect from '../components/ui/SearchableSelect'
 import CardContextMenu from '../components/ui/CardContextMenu'
 import EmptyState from '../components/ui/EmptyState'
 import ReleasedPanel from '../components/ReleasedPanel'
+import useCardZoom from '../lib/useCardZoom'
 import { CardSkeletonGrid } from '../components/ui/Skeleton'
 import s from './Library.module.css'
 
@@ -86,6 +87,7 @@ export default function Library() {
   const [weekSeconds, setWeekSeconds] = useState(weekCache ?? 0)
   const [liveIds, setLiveIds]       = useState(new Set())
   const [view, setView]             = useState(() => localStorage.getItem(VIEW_KEY) || 'big')
+  const zoomStyle = useCardZoom('library', view)   // Ctrl + mouse wheel card size
   const [loading, setLoading]       = useState(!libraryCache)
   const [showAddModal, setAddModal] = useState(false)
   const [prefillExe, setPrefillExe]                 = useState('')
@@ -530,7 +532,7 @@ export default function Library() {
         )}
 
         {!loading && games.length > 0 && (
-          <div className={gridClass}>
+          <div className={gridClass} style={zoomStyle}>
             {gamesWithLive.map(game => {
               const draggable = !selectionMode
               return (
@@ -574,7 +576,7 @@ export default function Library() {
               {sh.label} ({sh.games.length})
             </button>
             {shelfOpen[sh.key] && (
-              <div className={gridClass}>
+              <div className={gridClass} style={zoomStyle}>
                 {sh.games.map(game => (
                   <GameCard
                     key={game.id}
