@@ -26,6 +26,7 @@ const STEPS = [
     title: 'Find your games in one click',
     body: 'Scan PC looks through your drives for Steam, Epic, GOG, Xbox and cracked games, then lets you pick which ones to add.',
     action: { label: 'Scan my PC now', click: true },
+    waitText: 'Scanning your PC. This can take a minute, the results open by themselves.',
   },
   {
     route: '/', target: 'add-game',
@@ -150,32 +151,55 @@ export default function Tour({ onDone }) {
   }, [index, location.pathname])
 
   // "Click it to continue" steps advance when the real control is clicked.
+  // Action steps (Scan PC, Add Game) instead wait for what the click started:
+  // a scan can take a while and then opens its results, so the tour stays on
+  // this step until that work and its dialog are both finished.
+  const [waiting, setWaiting] = useState(false)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { setWaiting(false); setBusy(false) }, [index])
   useEffect(() => {
     if (!step.clickToContinue && !step.action) return
     const el = findTarget(step.target)
     if (!el) return
-    const onClick = () => setTimeout(() => setIndex(i => i + 1), 120)
+    const onClick = step.action
+      ? () => setWaiting(true)
+      : () => setTimeout(() => setIndex(i => i + 1), 120)
     el.addEventListener('click', onClick)
     return () => el.removeEventListener('click', onClick)
   }, [index, rect != null])
 
+  useEffect(() => {
+    if (!waiting) return
+    const started = Date.now()
+    let seen = false
+    const t = setInterval(() => {
+      const el = findTarget(step.target)
+      const isBusy = !!el && (el.disabled || el.getAttribute('aria-busy') === 'true')
+      const dialog = !!document.querySelector('[role="dialog"]')
+      setBusy(isBusy)
+      if (isBusy || dialog) { seen = true; return }
+      if (seen || Date.now() - started > 3000) { clearInterval(t); setIndex(i => i + 1) }
+    }, 200)
+    return () => clearInterval(t)
+  }, [waiting, index])
+
   useLayoutEffect(() => {
     if (cardRef.current) setCardH(cardRef.current.offsetHeight)
-  }, [index, rect])
+  }, [index, rect, waiting, busy])
 
   useEffect(() => {
     const onKey = (e) => {
       if (paused) return   // keys belong to the open dialog
       if (e.key === 'Escape') finish()
-      if (e.key === 'ArrowRight' && !step.clickToContinue) next()
+      if (e.key === 'ArrowRight' && !step.clickToContinue && !waiting) next()
       if (e.key === 'ArrowLeft') back()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   })
 
-  // Run the real control (Scan PC, Add Game). Its click listener above moves
-  // the tour on; the tour hides while that dialog is open and comes back after.
+  // Run the real control (Scan PC, Add Game). Its click listener above puts the
+  // step into waiting; the tour hides while a dialog is open and moves on after.
   function runAction() {
     findTarget(step.target)?.click()
   }
@@ -208,7 +232,6 @@ export default function Tour({ onDone }) {
             {step.id === 'steam' && <SteamConnect />}
             {step.id === 'done' && <Done />}
             <div className={s.footer}>
-              {progress}
               <div className={s.spacer} />
               {index === 0
                 ? <button className={s.ghost} onClick={() => finish()}>Skip</button>
@@ -229,12 +252,17 @@ export default function Tour({ onDone }) {
           {step.clickToContinue && (
             <div className={s.hint}><IconPointer size={14} /> Click the highlighted button to continue</div>
           )}
+          {waiting && busy && (
+            <div className={s.hint}><IconLoader2 size={14} className="spin" /> {step.waitText || 'Working on it…'}</div>
+          )}
+          {progress}
           <div className={s.footer}>
-            {progress}
+            <button className={s.ghost} onClick={back} aria-label="Back"><IconArrowLeft size={14} /></button>
             <div className={s.spacer} />
-            <button className={s.ghost} onClick={back}><IconArrowLeft size={14} /></button>
-            {step.action && <button className={s.ghost} onClick={runAction}>{step.action.label}</button>}
-            {!step.clickToContinue && <button className={s.primary} onClick={next}>Next <IconArrowRight size={14} /></button>}
+            {waiting
+              ? <button className={s.ghost} onClick={next}>Skip step</button>
+              : step.action && <button className={s.ghost} onClick={runAction}>{step.action.label}</button>}
+            {!step.clickToContinue && !waiting && <button className={s.primary} onClick={next}>Next <IconArrowRight size={14} /></button>}
             {step.clickToContinue && <button className={s.ghost} onClick={next}>Skip step</button>}
           </div>
         </div>

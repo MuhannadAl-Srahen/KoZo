@@ -96,7 +96,8 @@
   font-weight: 600;
 }
 
-.footer { display: flex; align-items: center; gap: var(--sp-6); margin-top: var(--sp-6); }
+.footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-6); margin-top: var(--sp-4); }
+.footer > button { white-space: nowrap; flex-shrink: 0; }
 .spacer { flex: 1; }
 .dots { display: flex; gap: 5px; }
 .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--neutral-bg-hover); transition: width 0.2s ease, background 0.2s ease; }
