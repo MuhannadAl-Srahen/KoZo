@@ -147,6 +147,10 @@ contextBridge.exposeInMainWorld('kozo', {
       // The achievement list toast is gone — release its scroll hotkeys.
       achListClosed: () => ipcRenderer.invoke('overlay:achListClosed'),
     },
+    tray: {
+      data: () => ipcRenderer.invoke('tray:data'),
+      action: (name, arg) => ipcRenderer.invoke('tray:action', name, arg),
+    },
     releases: {
       unseen: () => ipcRenderer.invoke('releases:unseen'),
       dismiss: (ids) => ipcRenderer.invoke('releases:dismiss', ids),
@@ -201,6 +205,7 @@ contextBridge.exposeInMainWorld('kozo', {
       onXpLevelUp: sub('xp:levelup', pass),
       onAppUpdate: sub('app:update', pass),
       onReleasesChanged: sub('releases:changed', pass),
+      onTrayRefresh: sub('tray:refresh', pass),
       onAccentChanged: sub('accent:changed', pass),
       onUnknownProcessAdd: sub('unknown-process:add', pass),
       removeAll: (channel) => {

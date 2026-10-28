@@ -130,11 +130,10 @@ function setupTray(processWatcher) {
     } catch { tray.setToolTip('KoZo — Game Tracker') }
   }
 
+  // The right-click menu is the KoZo popup (trayWindow.js); the native menu
+  // is only a fallback if that window can't be created.
   function refreshMenu() {
-    if (tray && !tray.isDestroyed()) {
-      tray.setContextMenu(buildMenu())
-      updateTooltip()
-    }
+    if (tray && !tray.isDestroyed()) updateTooltip()
   }
 
   refreshMenu()
@@ -143,8 +142,14 @@ function setupTray(processWatcher) {
   // `afterShow` parameter and get called as a function.
   tray.on('click',        () => show())
   tray.on('double-click', () => show())
-  // Rebuild right before the menu opens so durations + "today" are current.
-  tray.on('right-click',  refreshMenu)
+  tray.on('right-click', (_e, bounds) => {
+    try {
+      require('./trayWindow').toggle(bounds || tray.getBounds())
+    } catch (e) {
+      logger.warn('tray popup failed — native menu instead', { message: e.message })
+      tray.popUpContextMenu(buildMenu())
+    }
+  })
 
   logger.info('System tray initialized')
   return { refreshMenu }

@@ -1925,3 +1925,111 @@ handle('stats:hourActivity', (hour, includeHidden = false) => {
 // level-ups after sessions/unlocks/finishes). These handlers just delegate.
 handle('stats:xp', () => require('./services/xp').computeXp())
 handle('stats:xpHistory', (limit) => require('./services/xp').xpHistory(limit || 25))
+
+// ── Tray popup (electron/trayWindow.js → src/TrayApp.jsx) ─────────────────────
+// One snapshot of everything the popup shows: profile + level, live sessions,
+// today's playtime, recent games. Called on open and every few seconds while open.
+handle('tray:data', () => {
+  const db = require('./db/database').getDb()
+  const settingsQ = require('./db/queries/settings')
+  const watcher = require('./services/processWatcher')
+  const achievementsQ = require('./db/queries/achievements')
+
+  let xp = null
+  try { xp = require('./services/xp').computeXp() } catch {}
+
+  const live = []
+  let todaySec = 0
+  try {
+    todaySec = db.prepare(`
+      SELECT COALESCE(SUM(duration_seconds), 0) AS s FROM sessions
+      WHERE ended_at IS NOT NULL AND DATE(started_at, 'localtime') = DATE('now', 'localtime')
+    `).get().s || 0
+  } catch {}
+  for (const [gameId, sess] of watcher.getActiveSessions()) {
+    const game = gamesQ.getGame(gameId)
+    let total = 0, unlocked = 0
+    try {
+      const list = achievementsQ.listAchievementsForGame(gameId)
+      total = list.length
+      unlocked = list.filter(a => a.unlock_id != null).length
+    } catch {}
+    live.push({
+      id: gameId,
+      name: sess.game_name || game?.name || 'Game',
+      startedAt: sess.started_at,
+      idleSeconds: sess.idle_seconds || 0,
+      idle: !!sess.idle,
+      cover: game?.banner_local_path || null,
+      coverUrl: game?.banner_url || null,
+      coverRev: game?.banner_rev || 0,
+      achTotal: total,
+      achUnlocked: unlocked,
+    })
+  }
+
+  const liveIds = new Set(live.map(l => l.id))
+  const recent = db.prepare(`
+    SELECT id, name, banner_local_path, banner_url, banner_rev, last_played_at, total_playtime_seconds
+    FROM games
+    WHERE last_played_at IS NOT NULL AND COALESCE(is_archived, 0) = 0 AND COALESCE(is_hidden, 0) = 0
+    ORDER BY last_played_at DESC LIMIT 6
+  `).all().filter(g => !liveIds.has(g.id)).slice(0, 4).map(g => ({
+    id: g.id, name: g.name, cover: g.banner_local_path, coverUrl: g.banner_url, coverRev: g.banner_rev || 0,
+    lastPlayedAt: g.last_played_at, playtime: g.total_playtime_seconds || 0,
+  }))
+
+  return {
+    profile: {
+      name: settingsQ.getSetting('profile_name') || 'Player',
+      avatar: settingsQ.getSetting('profile_avatar_path') || null,
+      level: xp?.level ?? null,
+      tier: xp?.tier || null,
+      progress: xp?.progress ?? 0,
+      toNextLevel: xp?.toNextLevel ?? null,
+    },
+    accent: settingsQ.getSetting('accent_color') || null,
+    paused: watcher.isPaused?.() ?? false,
+    live,
+    todaySec,            // finished sessions only — the popup adds live time as it ticks
+    recent,
+    version: require('electron').app.getVersion(),
+  }
+})
+
+handle('tray:action', async (action, arg) => {
+  const trayWindow = require('./trayWindow')
+  const watcher = require('./services/processWatcher')
+  const main = require('./main')
+  switch (action) {
+    case 'open':
+      trayWindow.hide()
+      main.getOrCreateMainWindow()
+      return true
+    case 'openAt':
+      trayWindow.hide()
+      main.getOrCreateMainWindow((win) => {
+        win.webContents.executeJavaScript(`window.location.hash = ${JSON.stringify('#' + String(arg || '/'))}`).catch(() => {})
+      })
+      return true
+    case 'launch':
+      trayWindow.hide()
+      return doLaunch(Number(arg))
+    case 'pause':
+      watcher.pause()
+      return true
+    case 'resume':
+      watcher.resume()
+      return true
+    case 'quit':
+      trayWindow.hide()
+      require('electron').app.isQuitting = true
+      require('electron').app.quit()
+      return true
+    case 'hide':
+      trayWindow.hide()
+      return true
+    default:
+      throw new Error(`Unknown tray action: ${action}`)
+  }
+})

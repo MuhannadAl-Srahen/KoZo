@@ -104,6 +104,7 @@ src/                 renderer (React)
 - Every library game has a Game List row: `gameListQ.ensureListRowForGame` runs from `addLibraryGame` (ipc.js, shared by `games:add` and `gameList:moveToLibrary`) and the Scan PC add path, plus a one-time startup backfill (setting `migrated_library_to_list`). Rows link by `game_id`, else Steam appid, else name, the same rules as `statusSync`.
 - Games are never deleted from the UI: "Remove from library" sets `games.is_archived = 1` (`games:archive`/`games:unarchive`), so sessions, achievements and XP survive. Library shows finished/dropped, hidden and archived games in collapsible shelves. Launching an archived game un-archives it.
 - The overlay is a separate BrowserWindow running the same bundle (`OverlayApp.jsx`). It queues messages until it calls `overlay:ready`.
+- The tray popup is also a separate window (`electron/trayWindow.js` → `?tray=1` → `src/TrayApp.jsx`): right-click the tray icon. Data comes from `tray:data`, buttons go through `tray:action`. The native menu in `tray.js` is only a fallback.
 - Game List sort is `is_favorite DESC`, then `display_order`, then the default order. Drag-reorder rewrites `display_order` for the whole filtered list.
 - `games:add` only downloads banner art and genres when there's a `steam_app_id`.
 - Settings `steam_api_key` and per-machine paths (`sync_folder`, `auto_backup_dir`, `saves_backup_dir`) are not exported to or restored from backups.

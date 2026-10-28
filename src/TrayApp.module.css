@@ -1,0 +1,192 @@
+/* The window is transparent; this panel is the visible popup. The 8px inset
+   leaves room for the shadow inside the window bounds. */
+.panel {
+  position: fixed;
+  inset: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+  padding: var(--sp-16);
+  border-radius: var(--r-lg);
+  background:
+    radial-gradient(420px 180px at 20% -10%, var(--ad), transparent 70%),
+    var(--surface-1);
+  border: 1px solid var(--neutral-border);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  color: var(--text-primary);
+  overflow: hidden;
+  user-select: none;
+}
+
+/* Header — avatar, name, level + XP bar */
+.head { display: flex; align-items: center; gap: var(--sp-12); }
+.avatar, .avatarEmpty {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 2px solid var(--a);
+  object-fit: cover;
+}
+.avatarEmpty { display: flex; align-items: center; justify-content: center; background: var(--surface-3); }
+.who { flex: 1; min-width: 0; }
+.name { font-weight: 700; font-size: var(--fs-md); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.level { margin-top: 2px; font-size: var(--fs-xs); color: var(--a); font-weight: 600; }
+.xpBar, .achBar {
+  height: 4px;
+  margin-top: var(--sp-4);
+  border-radius: var(--r-pill);
+  background: var(--neutral-bg-hover);
+  overflow: hidden;
+}
+.xpBar span, .achBar span { display: block; height: 100%; border-radius: inherit; background: var(--a); }
+
+.section { display: flex; flex-direction: column; gap: var(--sp-8); }
+.label {
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+/* Status / now playing */
+.idle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-12);
+  border-radius: var(--r-card);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+}
+.now {
+  display: flex;
+  gap: var(--sp-12);
+  padding: var(--sp-8);
+  border: 1px solid var(--ab);
+  border-radius: var(--r-card);
+  background: var(--ad);
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.now:hover { border-color: var(--a); }
+.nowCover { width: 54px; height: 81px; flex-shrink: 0; border-radius: var(--r-md); object-fit: cover; }
+.nowInfo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-4); justify-content: center; }
+.nowName { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nowTime {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+.liveDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--status-playing);
+  box-shadow: 0 0 8px var(--status-playing);
+}
+.away {
+  padding: 0 var(--sp-6);
+  border-radius: var(--r-pill);
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+}
+.nowAch { display: flex; align-items: center; gap: var(--sp-4); font-size: var(--fs-xs); color: var(--text-secondary); }
+.nowAch .achBar { flex: 1; margin: 0 0 0 var(--sp-4); }
+
+.today {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+.today strong { margin-left: auto; color: var(--text-primary); }
+
+/* Recent games — four posters with one-click launch */
+.recent { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-8); }
+.recentItem {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+  min-width: 0;
+}
+.recentCover {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--r-md);
+  object-fit: cover;
+  border: 1px solid var(--neutral-border);
+}
+.recentItem:hover .recentCover { border-color: var(--a); }
+.recentPlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: inline-flex;
+  padding: var(--sp-6);
+  border-radius: 50%;
+  background: var(--a);
+  color: var(--accent-ink);
+  opacity: 0;
+  translate: -50% -80%;
+  transition: opacity 0.15s ease;
+}
+.recentItem:hover .recentPlay { opacity: 1; }
+.recentName {
+  font-size: var(--fs-2xs);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.coverEmpty { display: flex; align-items: center; justify-content: center; background: var(--surface-3); color: var(--text-disabled); }
+
+/* Footer actions */
+.foot { display: flex; gap: var(--sp-6); margin-top: auto; }
+.primary {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-6);
+  padding: var(--sp-8) 0;
+  border: none;
+  border-radius: var(--r-input);
+  background: var(--a);
+  color: var(--accent-ink);
+  font-family: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.primary:hover { filter: brightness(1.08); }
+.iconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  border: 1px solid var(--neutral-border);
+  border-radius: var(--r-input);
+  background: var(--neutral-bg);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.iconBtn:hover { background: var(--neutral-bg-hover); color: var(--text-primary); }
+.quit:hover { background: var(--error-bg); border-color: var(--error-border); color: var(--error); }
