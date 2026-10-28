@@ -1,21 +1,15 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   IconSearch, IconPlus, IconCheck, IconDeviceGamepad2, IconStar, IconX,
 } from '@tabler/icons-react'
 import Modal, { modalStyles as ms } from '../ui/Modal'
+import { getBannerBg } from '../../lib/utils'
+import { LIST_STATUSES, LIST_STATUS_ORDER } from '../../lib/cardModel'
+import { rankResults } from '../../lib/searchRank'
 import s from './AddGameModal.module.css'
 
-const STATUS_OPTIONS = [
-  { value: 'want_to_play', label: 'Want to play' },
-  { value: 'playing',      label: 'Playing' },
-  { value: 'finished',     label: 'Finished' },
-  { value: 'on_hold',      label: 'On hold' },
-  { value: 'dropped',      label: 'Dropped' },
-  { value: 'upcoming',     label: 'Upcoming' },
-]
+const STATUS_OPTIONS = LIST_STATUS_ORDER.map(value => ({ value, label: LIST_STATUSES[value].label }))
 
-const BANNER_BG = ['#1a0f2e','#0f1e3a','#0f2a1e','#2a1a0a','#2a0f0f','#1e1a0a']
-function bannerBg(id) { return BANNER_BG[(id || 0) % BANNER_BG.length] }
 
 // header.jpg → hashed capsule → hide (same approach as Add Game).
 function artError(e, game) {
@@ -35,6 +29,9 @@ export default function AddGameToListModal({ onClose, onSaved }) {
   const [searching, setSearching] = useState(false)
   const [selected, setSelected]   = useState(null)
   const [isManual, setIsManual]   = useState(false)
+  // Games that aren't on Steam, found on SteamGridDB (needs the user's key).
+  const [sgdbResults, setSgdbResults] = useState([])
+  const [sgdbPick, setSgdbPick]       = useState(null)
 
   const [name, setName]           = useState('')
   const [status, setStatus]       = useState('want_to_play')
@@ -69,13 +66,23 @@ export default function AddGameToListModal({ onClose, onSaved }) {
     else onClose()
   }
 
+  // Steam search is a network call — a slow earlier response must not
+  // overwrite a newer one, so only the latest request's result is applied.
+  const searchSeq = useRef(0)
   const doSearch = useCallback(
     debounce(async (q) => {
-      if (!q.trim() || q.length < 2) { setResults([]); setSearching(false); return }
+      const seq = ++searchSeq.current
+      if (!q.trim() || q.length < 2) { setResults([]); setSgdbResults([]); setSearching(false); return }
       setSearching(true)
-      const res = await window.kozo?.api?.steam?.search(q)
+      const [res, sg] = await Promise.all([
+        window.kozo?.api?.steam?.search(q),
+        window.kozo?.api?.sgdb?.searchGames?.(q).catch(() => null),
+      ])
+      if (seq !== searchSeq.current) return
       setSearching(false)
-      setResults(res?.ok ? res.data : [])
+      const steam = res?.ok ? (res.data || []) : []
+      setResults(steam)
+      setSgdbResults(sg?.ok ? (sg.data || []) : [])
     }, 400),
     []
   )
@@ -90,12 +97,20 @@ export default function AddGameToListModal({ onClose, onSaved }) {
 
   function pickManual() {
     setSelected(null)
+    setSgdbPick(null)
     setIsManual(true)
     setName(query.trim())
   }
 
+  function pickSgdb(hit) {
+    pickManual()
+    setName(hit.name)
+    setSgdbPick(hit)
+  }
+
   function clearSelection() {
     setSelected(null)
+    setSgdbPick(null)
     setIsManual(false)
     setName('')
     setErrors({})
@@ -105,7 +120,7 @@ export default function AddGameToListModal({ onClose, onSaved }) {
     const newErrors = {}
     if (!name.trim()) newErrors.name = 'Game name is required'
     if (status === 'finished' && rating !== '' && (isNaN(rating) || Number(rating) < 0 || Number(rating) > 10)) {
-      newErrors.rating = 'Rating must be 0–10'
+      newErrors.rating = 'Rating must be between 0 and 10'
     }
     if (Object.keys(newErrors).length) { setErrors(newErrors); return }
 
@@ -117,7 +132,7 @@ export default function AddGameToListModal({ onClose, onSaved }) {
       // The local-banner-picker has been removed at the user's request.
       banner_url: selected?.steam_app_id
         ? `https://cdn.akamai.steamstatic.com/steam/apps/${selected.steam_app_id}/library_600x900_2x.jpg`
-        : null,
+        : (sgdbPick?.cover || null),
       status,
       rating: status === 'finished' && rating !== '' ? Number(rating) : null,
       game_id: null,
@@ -129,6 +144,7 @@ export default function AddGameToListModal({ onClose, onSaved }) {
       if (res.data?.id) setAddedIds(ids => [...ids, res.data.id])
       // Reset to search so the user can add another game without closing
       setSelected(null)
+      setSgdbPick(null)
       setIsManual(false)
       setQuery('')
       setName('')
@@ -141,6 +157,32 @@ export default function AddGameToListModal({ onClose, onSaved }) {
   }
 
   const showForm = selected || isManual
+
+  // One result row per source; rankResults decides the order.
+  const steamRow = (game) => (
+    <div key={game.steam_app_id} className={s.resultItem} onClick={() => pickGame(game)}>
+      <div className={s.resultIcon} style={{ background: getBannerBg(game.steam_app_id) }}>
+        <img src={game.header_image} alt="" onError={e => artError(e, game)} />
+      </div>
+      <div className={s.resultInfo}>
+        <div className={s.resultName}>{game.name}</div>
+        <div className={s.resultMeta}>Steam · #{game.steam_app_id}</div>
+      </div>
+    </div>
+  )
+  const sgdbRow = (hit) => (
+    <div key={`sgdb-${hit.sgdb_id}`} className={s.resultItem} onClick={() => pickSgdb(hit)}>
+      <div className={`${s.resultIcon} ${s.resultIconPortrait}`} style={{ background: getBannerBg(hit.sgdb_id) }}>
+        {hit.thumb
+          ? <img src={hit.thumb} alt="" onError={e => { e.target.style.display = 'none' }} />
+          : <IconDeviceGamepad2 size={18} stroke={1.3} style={{ color: 'rgba(255,255,255,0.15)' }} />}
+      </div>
+      <div className={s.resultInfo}>
+        <div className={s.resultName}>{hit.name}</div>
+        <div className={s.resultMeta}>{hit.year ? `${hit.year} · ` : ''}Not on Steam, cover from SteamGridDB</div>
+      </div>
+    </div>
+  )
 
   return (
     <Modal
@@ -186,14 +228,15 @@ export default function AddGameToListModal({ onClose, onSaved }) {
         </div>
       ) : (
         <div className={s.selectedChip}>
+          {sgdbPick?.thumb && <div className={s.selectedThumb}><img src={sgdbPick.thumb} alt="" /></div>}
           {selected && (
-            <div className={s.selectedThumb} style={{ background: bannerBg(selected.steam_app_id) }}>
+            <div className={s.selectedThumb} style={{ background: getBannerBg(selected.steam_app_id) }}>
               <img src={selected.header_image} alt="" onError={e => artError(e, selected)} />
             </div>
           )}
           <span className={s.selectedChipName}>{name || query}</span>
           {selected && <span className={s.selectedChipMeta}>Steam · {selected.steam_app_id}</span>}
-          {isManual && <span className={s.selectedChipMeta}>Manual</span>}
+          {isManual && <span className={s.selectedChipMeta}>{sgdbPick ? 'Not on Steam' : 'Manual'}</span>}
           <button className={s.selectedChipClear} onClick={clearSelection} title="Search again">
             <IconX size={13} stroke={2} />
           </button>
@@ -204,19 +247,9 @@ export default function AddGameToListModal({ onClose, onSaved }) {
 
       {!showForm && !searching && query.length >= 2 && (
         <div className={s.resultsList}>
-          {results.map(game => (
-            <div key={game.steam_app_id} className={s.resultItem} onClick={() => pickGame(game)}>
-              <div className={s.resultIcon} style={{ background: bannerBg(game.steam_app_id) }}>
-                <img src={game.header_image} alt="" onError={e => artError(e, game)} />
-              </div>
-              <div className={s.resultInfo}>
-                <div className={s.resultName}>{game.name}</div>
-                <div className={s.resultMeta}>Steam · #{game.steam_app_id}</div>
-              </div>
-            </div>
-          ))}
+          {rankResults(query, results, sgdbResults).map(r => (r.kind === 'steam' ? steamRow(r.game) : sgdbRow(r.hit)))}
 
-          {results.length === 0 && (
+          {results.length === 0 && sgdbResults.length === 0 && (
             <div className={s.searchHint}>No Steam results found. Add manually below.</div>
           )}
 
@@ -229,7 +262,7 @@ export default function AddGameToListModal({ onClose, onSaved }) {
 
       {!showForm && !searching && query.length < 2 && (
         <div className={s.searchHint}>
-          Search any game to add it to your list — backlog, wishlist, playing, or finished.
+          Search any game to add it to your list: backlog, wishlist, playing, or finished.
         </div>
       )}
 
@@ -268,7 +301,7 @@ export default function AddGameToListModal({ onClose, onSaved }) {
             <div className={s.field}>
               <label className={s.label}>
                 <IconStar size={12} stroke={1.6} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />
-                Rating <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(0–10, optional)</span>
+                Rating <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(0 to 10, optional)</span>
               </label>
               <input
                 type="number"

@@ -63,6 +63,9 @@
   flex: 1;
   min-width: 0;
   overflow-y: auto;
+  /* Keep content off the scrollbar: it used to sit right on buttons and status lines. */
+  padding: var(--sp-4) var(--sp-16) var(--sp-4) var(--sp-4);
+  scrollbar-gutter: stable;
   transform: translateZ(0);
 }
 
@@ -731,6 +734,16 @@
   transition: var(--t-control);
 }
 .featureRow:hover { border-color: var(--border-accent-soft); background: var(--surface-3); }
+/* Clickable feature rows (button elements) */
+.featureRowLink {
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.featureGo { flex-shrink: 0; align-self: center; color: var(--text-muted); transition: transform 0.15s ease, color 0.15s ease; }
+.featureRowLink:hover .featureGo { color: var(--a); transform: translateX(2px); }
 
 .featureRowBody {
   display: flex;
@@ -766,3 +779,67 @@
   color: var(--text-muted);
   line-height: var(--lh-base);
 }
+
+/* ── Appearance: segmented choices, sliders, sidebar tab list ──────────── */
+.segList { display: flex; flex-direction: column; gap: var(--sp-10); }
+.segRow { display: flex; align-items: center; gap: var(--sp-12); flex-wrap: wrap; }
+.segLabel { min-width: 96px; font-size: var(--fs-md); color: var(--text-secondary); }
+.seg {
+  display: inline-flex;
+  padding: 3px;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-input);
+  background: var(--surface-2);
+}
+.segBtn {
+  padding: var(--sp-6) var(--sp-12);
+  border: none;
+  border-radius: calc(var(--r-input) - 3px);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.segBtn:hover { color: var(--text-primary); background: var(--surface-3); }
+.segBtnOn, .segBtnOn:hover { background: var(--a); color: var(--accent-ink); }
+
+.slider { flex: 1; max-width: 280px; accent-color: var(--a); }
+.sliderValue { min-width: 44px; font-size: var(--fs-sm); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+.navList {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  overflow: hidden;
+  max-width: 460px;
+}
+.navRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  padding: var(--sp-8) var(--sp-12);
+  color: var(--text-primary);
+  background: var(--surface-2);
+}
+.navRow + .navRow { border-top: 1px solid var(--border-subtle); }
+.navRowHidden { color: var(--text-muted); }
+.navRowLabel { flex: 1; font-size: var(--fs-md); }
+.navRowBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-3);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.navRowBtn:hover:not(:disabled) { color: var(--a); border-color: var(--ab); }
+.navRowBtn:disabled { opacity: 0.35; cursor: default; }

@@ -323,7 +323,11 @@ function detectLoggedInUser() {
   }
 }
 
+// True while this game's local stats files are watched (unlocks arrive instantly).
+function isWatching(gameId) { return watchers.has(gameId) }
+
 module.exports = {
+  isWatching,
   watchGame, unwatchGame, unwatchAll, scanGame, scanGameOnce, scanAllSteamGames,
   getSteamPath, detectLoggedInUser,
 }

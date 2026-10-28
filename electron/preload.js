@@ -1,14 +1,25 @@
-const { contextBridge, ipcRenderer } = require('electron')
+const { contextBridge, ipcRenderer, webFrame } = require('electron')
 
 contextBridge.exposeInMainWorld('kozo', {
+  // Bumped with every preload/IPC change. The renderer compares it to its own
+  // copy (src/components/UpdateBanner.jsx) to spot a main process that is
+  // older than the UI it is showing (a dev session that was never restarted).
+  rev: 7,
+  // Settings → Appearance → UI scale.
+  ui: {
+    setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
+  },
   api: {
     games: {
       list: () => ipcRenderer.invoke('games:list'),
       get: (id) => ipcRenderer.invoke('games:get', id),
       add: (data) => ipcRenderer.invoke('games:add', data),
+      planMonth: (gameIds, month) => ipcRenderer.invoke('games:planMonth', gameIds, month),
       update: (id, data) => ipcRenderer.invoke('games:update', id, data),
       delete: (id) => ipcRenderer.invoke('games:delete', id),
       reorder: (orderedIds) => ipcRenderer.invoke('games:reorder', orderedIds),
+      archive: (ids) => ipcRenderer.invoke('games:archive', ids),
+      unarchive: (ids) => ipcRenderer.invoke('games:unarchive', ids),
       launch: (id) => ipcRenderer.invoke('games:launch', id),
     },
     sessions: {
@@ -34,6 +45,10 @@ contextBridge.exposeInMainWorld('kozo', {
       add: (data) => ipcRenderer.invoke('gameList:add', data),
       update: (id, data) => ipcRenderer.invoke('gameList:update', id, data),
       delete: (id) => ipcRenderer.invoke('gameList:delete', id),
+      reorderPage: (filters, offset, pageIds) => ipcRenderer.invoke('gameList:reorderPage', filters, offset, pageIds),
+      moveToLibrary: (ids) => ipcRenderer.invoke('gameList:moveToLibrary', ids),
+      plannedMonths: () => ipcRenderer.invoke('gameList:plannedMonths'),
+      planMonth: (ids, month) => ipcRenderer.invoke('gameList:planMonth', ids, month),
     },
     customLists: {
       list: () => ipcRenderer.invoke('customLists:list'),
@@ -63,6 +78,8 @@ contextBridge.exposeInMainWorld('kozo', {
       detectUser: () => ipcRenderer.invoke('steam:detectUser'),
       signIn: () => ipcRenderer.invoke('steam:signIn'),
       storeDetails: (appId) => ipcRenderer.invoke('steam:storeDetails', appId),
+      comingSoon: (feed, page) => ipcRenderer.invoke('steam:comingSoon', feed, page),
+      appAssets: (appIds) => ipcRenderer.invoke('steam:appAssets', appIds),
       lastSyncError: (gameId) => ipcRenderer.invoke('steam:lastSyncError', gameId),
       recheckPrivacy: () => ipcRenderer.invoke('steam:recheckPrivacy'),
       getProfile: (overrides) => ipcRenderer.invoke('steam:getProfile', overrides),
@@ -119,6 +136,7 @@ contextBridge.exposeInMainWorld('kozo', {
       pickImageData: () => ipcRenderer.invoke('image:pickData'),
       saveCroppedImage: (payload) => ipcRenderer.invoke('image:saveCropped', payload),
       pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
+      pickWallpaper: () => ipcRenderer.invoke('appearance:pickWallpaper'),
     },
     backup: {
       import: () => ipcRenderer.invoke('backup:import'),
@@ -139,6 +157,23 @@ contextBridge.exposeInMainWorld('kozo', {
       // The achievement list toast is gone — release its scroll hotkeys.
       achListClosed: () => ipcRenderer.invoke('overlay:achListClosed'),
     },
+    sgdb: {
+      test: (key) => ipcRenderer.invoke('sgdb:test', key),
+      setKey: (key) => ipcRenderer.invoke('sgdb:setKey', key),
+      search: (name) => ipcRenderer.invoke('sgdb:search', name),
+      searchGames: (q) => ipcRenderer.invoke('sgdb:searchGames', q),
+      grids: (sgdbId) => ipcRenderer.invoke('sgdb:grids', sgdbId),
+      heroes: (sgdbId) => ipcRenderer.invoke('sgdb:heroes', sgdbId),
+      apply: (gameId, coverUrl, heroUrl) => ipcRenderer.invoke('sgdb:apply', gameId, coverUrl, heroUrl),
+    },
+    tray: {
+      data: () => ipcRenderer.invoke('tray:data'),
+      action: (name, arg) => ipcRenderer.invoke('tray:action', name, arg),
+    },
+    releases: {
+      unseen: () => ipcRenderer.invoke('releases:unseen'),
+      dismiss: (ids) => ipcRenderer.invoke('releases:dismiss', ids),
+    },
     app: {
       getStartup: () => ipcRenderer.invoke('app:getStartup'),
       setStartup: (enable) => ipcRenderer.invoke('app:setStartup', enable),
@@ -146,6 +181,9 @@ contextBridge.exposeInMainWorld('kozo', {
       setStartMinimized: (enable) => ipcRenderer.invoke('app:setStartMinimized', enable),
       getVersion: () => ipcRenderer.invoke('app:getVersion'),
       checkForUpdates: () => ipcRenderer.invoke('app:checkForUpdates'),
+      updateState: () => ipcRenderer.invoke('app:updateState'),
+      installUpdate: () => ipcRenderer.invoke('app:installUpdate'),
+      whatsNew: () => ipcRenderer.invoke('app:whatsNew'),
     },
   },
 
@@ -168,6 +206,7 @@ contextBridge.exposeInMainWorld('kozo', {
       onSessionUndetected: sub('session:undetected', pass),
       onAchievementUnlocked: sub('achievement:unlocked', pass),
       onGameUpdated: sub('game:updated', pass),
+      onScanProgress: sub('scanner:progress', pass),
       onBannerRefreshProgress: sub('banners:refreshProgress', pass),
       // Steam refused (or resumed allowing) a player-unlock read — library-wide,
       // driven by achievementSync.recordSyncError.
@@ -184,6 +223,9 @@ contextBridge.exposeInMainWorld('kozo', {
       onXpOverlay: sub('xp:overlay', pass),
       onSessionEndOverlay: sub('sessionEnd:overlay', pass),
       onXpLevelUp: sub('xp:levelup', pass),
+      onAppUpdate: sub('app:update', pass),
+      onReleasesChanged: sub('releases:changed', pass),
+      onTrayRefresh: sub('tray:refresh', pass),
       onAccentChanged: sub('accent:changed', pass),
       onUnknownProcessAdd: sub('unknown-process:add', pass),
       removeAll: (channel) => {

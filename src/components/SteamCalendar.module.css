@@ -1,0 +1,608 @@
+.wrap { display: flex; flex-direction: column; gap: var(--sp-16); }
+
+/* ── Toolbar ─────────────────────────────────────────────────── */
+.nav {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-8);
+}
+.monthLabel {
+  min-width: 160px;
+  text-align: center;
+  font-size: var(--fs-lg, 18px);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.spacer { flex: 1; }
+
+.navBtn, .textBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  border: 1px solid var(--neutral-border);
+  background: var(--neutral-bg);
+  color: var(--text-secondary);
+  border-radius: var(--r-md);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition: var(--t-control);
+}
+.navBtn { padding: var(--sp-6); }
+.textBtn { padding: var(--sp-6) var(--sp-12); }
+.navBtn:hover, .textBtn:hover { background: var(--neutral-bg-hover); color: var(--text-primary); }
+
+.viewToggle {
+  display: inline-flex;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border-radius: var(--r-input);
+  background: var(--neutral-bg);
+}
+.viewBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: var(--sp-4) var(--sp-12);
+  border: none;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.viewBtn:hover { color: var(--text-primary); }
+.viewBtnActive { background: var(--ad); color: var(--a); }
+
+.muted { color: var(--text-muted); font-size: var(--fs-xs); }
+
+/* ── Days view: a poster wall per release day ────────────────── */
+.daySection { display: flex; flex-direction: column; gap: var(--sp-10); }
+.dayHead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-10);
+  padding: var(--sp-8) 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--neutral-border);
+}
+.dayHeadMain { font-size: var(--fs-md); font-weight: 700; color: var(--text-primary); }
+.dayHeadSub { font-size: var(--fs-xs); color: var(--text-secondary); }
+.dayHeadCount { margin-left: auto; font-size: var(--fs-2xs); color: var(--text-muted); }
+.dayHeadToday .dayHeadMain { color: var(--a); }
+
+.posterGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 150px), 1fr));   /* Ctrl+wheel */
+  gap: var(--sp-12);
+}
+
+/* Poster card */
+.poster {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--r-card);
+  background: var(--surface-2);
+  border: 1px solid var(--neutral-border);
+  overflow: hidden;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+/* Lift by shadow, never translateY (a transformed ancestor traps fixed children). */
+.poster:hover {
+  border-color: var(--ab);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+}
+.posterTracked { border-color: var(--a); box-shadow: 0 0 0 1px var(--ab); }
+
+.posterHit {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  padding: 0;
+  border: none;
+  background: var(--surface-3);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+.posterArt {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 30%;
+}
+.posterShade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(8, 8, 14, 0.92) 0%, rgba(8, 8, 14, 0.35) 34%, transparent 58%);
+  pointer-events: none;
+}
+.posterCountdown, .posterPrice {
+  position: absolute;
+  top: var(--sp-8);
+  padding: 2px var(--sp-8);
+  border-radius: var(--r-pill);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+}
+/* Solid chips, no backdrop blur: a blur per chip on hundreds of posters made
+   scrolling the calendar expensive. */
+.posterCountdown { left: var(--sp-8); background: rgba(10, 10, 18, 0.86); color: var(--text-primary); }
+.posterPrice { right: var(--sp-8); background: color-mix(in srgb, var(--success) 18%, rgba(10, 10, 18, 0.88)); color: var(--success); }
+.posterMark {
+  position: absolute;
+  bottom: var(--sp-8);
+  right: var(--sp-8);
+  display: inline-flex;
+  padding: 3px;
+  border-radius: var(--r-sm);
+  background: var(--a);
+  color: var(--accent-ink);
+}
+.posterName {
+  position: absolute;
+  left: var(--sp-10);
+  right: var(--sp-10);
+  bottom: var(--sp-8);
+  color: #fff;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+}
+.posterTracked .posterName { right: 30px; }
+
+.posterActions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: var(--sp-6) var(--sp-8);
+}
+.trackBtn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  padding: var(--sp-4) 0;
+  border: 1px solid var(--ab);
+  border-radius: var(--r-md);
+  background: var(--ad);
+  color: var(--a);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.trackBtn:hover { background: var(--a); color: var(--accent-ink); }
+.trackBtn:disabled { opacity: 0.6; cursor: default; }
+.trackedTag {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--a);
+}
+.untrackBtn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  padding: var(--sp-4) 0;
+  border: 1px solid var(--ab);
+  border-radius: var(--r-md);
+  background: var(--a);
+  color: var(--accent-ink);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.untrackBtn:hover { background: var(--error-bg); border-color: var(--error-border); color: var(--error); }
+.untrackConfirm, .untrackConfirm:hover { background: var(--error); border-color: var(--error); color: #fff; }
+.iconBtn {
+  display: inline-flex;
+  padding: var(--sp-6);
+  border: 1px solid var(--neutral-border);
+  border-radius: var(--r-md);
+  background: var(--neutral-bg);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.iconBtn:hover { color: var(--text-primary); background: var(--neutral-bg-hover); }
+
+/* No portrait: the wide art is shown whole over a blurred, darkened copy of
+   itself, so titles are never cropped. The span takes the cover's own box. */
+.coverWide { display: block; overflow: hidden; background: var(--surface-3); }
+.coverWideBg, .coverWideFg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.coverWideBg { object-fit: cover; filter: blur(14px) brightness(0.45) saturate(1.2); transform: scale(1.2); }
+.coverWideFg { object-fit: contain; object-position: center 38%; }
+/* Art still loading: a shimmer in the cover's box */
+.coverPending { display: block; }
+.coverEmpty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-disabled);
+}
+
+/* ── Month view: a big grid with art in every release day ────── */
+.gridScroll { overflow-x: auto; }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(130px, 1fr));
+  gap: var(--sp-6);
+  min-width: 920px;
+}
+.weekday {
+  padding: var(--sp-4) var(--sp-6);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+}
+.day {
+  position: relative;
+  min-height: 176px;
+  border-radius: var(--r-card);
+  background: var(--surface-2);
+  border: 1px solid var(--neutral-border);
+  overflow: hidden;
+}
+.dayHasGames { cursor: pointer; }
+.dayHasGames:hover { border-color: var(--ab); }
+.dayOutside { opacity: 0.3; }
+.dayPast { opacity: 0.6; }
+.dayToday { border-color: var(--a); box-shadow: 0 0 0 1px var(--ab); }
+.dayBg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(10px) brightness(0.35) saturate(1.2);
+  transform: scale(1.15);
+}
+.dayInner {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  height: 100%;
+  padding: var(--sp-8);
+}
+.dayNum { font-size: var(--fs-sm); font-weight: 700; color: var(--text-primary); }
+.dayToday .dayNum { color: var(--a); }
+.dayPosters { display: flex; gap: var(--sp-6); }
+.dayPoster {
+  position: relative;
+  width: 50%;
+  max-width: 66px;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border-radius: var(--r-sm);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+}
+.dayFoot { display: flex; align-items: center; gap: var(--sp-6); margin-top: auto; min-width: 0; }
+.dayLead {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.dayMore {
+  flex-shrink: 0;
+  padding: 1px var(--sp-6);
+  border-radius: var(--r-pill);
+  background: var(--a);
+  color: var(--accent-ink);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+}
+
+/* ── TBA shelf button in the top bar ─────────────────────────── */
+.tbaBtn { border: 1px solid var(--neutral-border); border-radius: var(--r-input); padding: var(--sp-6) var(--sp-12); }
+.tbaCount {
+  padding: 0 var(--sp-6);
+  border-radius: var(--r-pill);
+  background: var(--neutral-bg-hover);
+  font-size: var(--fs-2xs);
+}
+.tbaSearch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  width: min(320px, 100%);
+  padding: var(--sp-6) var(--sp-10);
+  border: 1px solid var(--neutral-border);
+  border-radius: var(--r-input);
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+.tbaSearch input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: none;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+}
+
+/* ── Wide store card (Strip, Week) ───────────────────────────── */
+.wideGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 300px), 1fr));   /* Ctrl+wheel */
+  gap: var(--sp-12);
+}
+.wide {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--r-card);
+  background: var(--surface-2);
+  border: 1px solid var(--neutral-border);
+  overflow: hidden;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.wide:hover { border-color: var(--ab); box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35); }
+.wideHit {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 616 / 353;
+  padding: 0;
+  border: none;
+  background: var(--surface-3);
+  cursor: pointer;
+}
+.wideArt { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.wideShade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, rgba(8, 8, 14, 0.45) 0%, transparent 30%);
+  pointer-events: none;
+}
+.wideInfo { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-8) 0 0; }
+.wideName {
+  padding: 0 var(--sp-10);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wideMeta { padding: 0 var(--sp-10); font-size: var(--fs-xs); color: var(--text-muted); }
+
+/* ── Strip view ──────────────────────────────────────────────── */
+.stripWrap { display: flex; align-items: stretch; gap: var(--sp-6); }
+.stripArrow {
+  flex-shrink: 0;
+  width: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--neutral-border);
+  border-radius: var(--r-card);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.stripArrow:hover { color: var(--a); border-color: var(--ab); }
+.strip {
+  flex: 1;
+  display: flex;
+  gap: var(--sp-6);
+  overflow-x: auto;
+  padding: 3px 2px var(--sp-6);
+  scroll-snap-type: x proximity;
+}
+.chip {
+  position: relative;
+  flex: 0 0 auto;
+  width: 68px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: var(--sp-8) var(--sp-4);
+  border: 1px solid var(--neutral-border);
+  border-radius: var(--r-card);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-family: inherit;
+  cursor: pointer;
+  scroll-snap-align: start;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.chip:hover:not(:disabled) { border-color: var(--ab); color: var(--text-primary); }
+.chipWeekday { font-size: var(--fs-2xs); text-transform: uppercase; letter-spacing: 0.04em; }
+.chipDay { font-size: var(--fs-xl); font-weight: 800; line-height: 1.1; color: var(--text-primary); }
+.chipCount {
+  min-height: 16px;
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  color: var(--a);
+}
+.chipMonthTag {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  padding: 0 var(--sp-4);
+  border-radius: 0 var(--r-card) 0 var(--r-sm);
+  background: var(--a);
+  color: var(--accent-ink);
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.chipToday { border-color: var(--ab); }
+.chipToday .chipWeekday { color: var(--a); font-weight: 700; }
+.chipEmpty { opacity: 0.4; cursor: default; }
+.chipSel, .chipSel:hover:not(:disabled) { background: var(--a); border-color: var(--a); color: var(--accent-ink); }
+.chipSel .chipDay, .chipSel .chipCount, .chipSel .chipWeekday { color: var(--accent-ink); }
+.chipMonth { width: 88px; }
+.chipMonth .chipDay { font-size: var(--fs-md); }
+
+/* ── Featured view ───────────────────────────────────────────── */
+.hero {
+  position: relative;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  border: 1px solid var(--neutral-border);
+  background: var(--surface-2);
+}
+.heroHit {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: clamp(220px, 34vw, 400px);
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+.heroArt { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; animation: heroIn 0.4s ease; }
+@keyframes heroIn { from { opacity: 0; } to { opacity: 1; } }
+.heroShade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(8, 8, 14, 0.88) 0%, rgba(8, 8, 14, 0.45) 45%, transparent 75%),
+              linear-gradient(to top, rgba(8, 8, 14, 0.7), transparent 45%);
+}
+.heroText {
+  position: absolute;
+  left: var(--sp-24);
+  bottom: var(--sp-32);
+  max-width: 55%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+.heroKicker {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  color: var(--a);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.heroName { font-size: clamp(22px, 3vw, 36px); font-weight: 800; color: #fff; line-height: 1.1; text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6); }
+.heroMeta { font-size: var(--fs-sm); color: rgba(255, 255, 255, 0.8); }
+.heroActions { position: absolute; right: var(--sp-20); bottom: var(--sp-24); display: flex; }
+.heroArrow {
+  position: absolute;
+  top: 50%;
+  width: 38px;
+  height: 38px;
+  margin-top: -19px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ab);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--surface-1) 85%, transparent);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.heroArrow:hover { background: var(--a); color: var(--accent-ink); border-color: var(--a); }
+.heroArrowLeft { left: var(--sp-10); }
+.heroArrowRight { right: var(--sp-10); }
+.heroDots { position: absolute; left: 50%; bottom: var(--sp-10); transform: translateX(-50%); display: flex; gap: var(--sp-6); }
+.heroDot { width: 8px; height: 8px; padding: 0; border: none; border-radius: var(--r-pill); background: rgba(255, 255, 255, 0.35); cursor: pointer; transition: width 0.2s ease; }
+.heroDotOn { width: 22px; background: var(--a); }
+
+.rowList { display: flex; flex-direction: column; gap: var(--sp-4); }
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-4) var(--sp-8) var(--sp-4) var(--sp-4);
+  border: 1px solid var(--neutral-border);
+  border-radius: var(--r-card);
+  background: var(--surface-2);
+}
+.row:hover { border-color: var(--ab); }
+.rowTracked { border-color: var(--a); }
+.rowHit {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.rowThumb { position: relative; flex-shrink: 0; width: 128px; aspect-ratio: 616 / 353; border-radius: var(--r-md); overflow: hidden; background: var(--surface-3); }
+.rowThumbImg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.rowName { flex: 1; min-width: 0; font-size: var(--fs-md); font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rowPrice { flex-shrink: 0; font-size: var(--fs-xs); color: var(--success); font-weight: 600; }
+.row .trackBtn { flex: 0 0 auto; min-width: 104px; }
+
+/* ── Week view ───────────────────────────────────────────────── */
+.weekRows { display: flex; flex-direction: column; gap: var(--sp-8); }
+.weekRow {
+  display: flex;
+  gap: var(--sp-12);
+  padding: var(--sp-10);
+  border: 1px solid var(--neutral-border);
+  border-radius: var(--r-card);
+  background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+}
+.weekRowToday { border-color: var(--ab); }
+.weekRowPast { opacity: 0.6; }
+.weekDay { flex: 0 0 64px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.weekDayName { font-size: var(--fs-2xs); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
+.weekRowToday .weekDayName { color: var(--a); font-weight: 700; }
+.weekDayNum { font-size: var(--fs-2xl); font-weight: 800; color: var(--text-primary); line-height: 1.1; }
+.weekDayMonth { font-size: var(--fs-2xs); color: var(--text-muted); }
+.weekCards {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: var(--card-min, 300px);   /* Ctrl+wheel */
+  gap: var(--sp-10);
+  overflow-x: auto;
+  padding-bottom: var(--sp-4);
+}
+.weekEmpty { flex: 1; display: flex; align-items: center; color: var(--text-muted); font-size: var(--fs-sm); }

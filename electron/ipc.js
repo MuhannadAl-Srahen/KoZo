@@ -44,9 +44,13 @@ function handle(channel, fn) {
 // ── Games ────────────────────────────────────────────────────────────────────
 handle('games:list', () => gamesQ.listGamesWithStats())
 handle('games:get', (id) => gamesQ.getGame(id))
-handle('games:add', async (data) => {
+// Shared by games:add and gameList:moveToLibrary: insert, fetch Steam art +
+// genres + achievements, and make sure the game is on the Game List too.
+async function addLibraryGame(data) {
   // capsule_fallback is a transport-only hint for banner download — not a column.
-  const { capsule_fallback, ...gameData } = data || {}
+  // sgdb_id / sgdb_cover: the SteamGridDB game the user picked in Add Game's
+  // "Not on Steam" results; its cover is applied as-is instead of a name guess.
+  const { capsule_fallback, sgdb_id, sgdb_cover, ...gameData } = data || {}
   const game = gamesQ.addGame(gameData)
 
   if (game?.steam_app_id) {
@@ -72,23 +76,33 @@ handle('games:add', async (data) => {
       logger.warn(`Banner download failed for game ${game.id}`, { message: e.message })
     }
 
-    // Steam store genres — power auto-grouping on the Game List and genre chips.
-    try {
-      const { getStoreArt } = require('./services/steamApi')
-      const art = await getStoreArt(game.steam_app_id)
-      if (art?.genres?.length) {
-        gamesQ.updateGame(game.id, { genres: JSON.stringify(art.genres) })
-        game.genres = JSON.stringify(art.genres)
-      }
-    } catch (e) {
-      logger.warn(`Genre fetch failed for game add`, { gameId: game.id, message: e.message })
-      // The self-healing backfill will pick this game up shortly.
-      require('./services/steamApi').runGenreBackfill().catch(() => {})
-    }
-
     // Achievements sync in background — doesn't block the add response
     const { fetchAndStoreAchievements } = require('./services/achievementSync')
+    // Hero art and genres used to be awaited here one after another, so the
+    // dialog sat on "Adding…" well after the cover was ready. They now finish
+    // in the background and the card updates when they land.
     setImmediate(async () => {
+      // Wide hero for GameDetail — new titles keep it under a hashed path.
+      try {
+        game.hero_local_path = await require('./services/steamApi').downloadHero(game.steam_app_id, game.id)
+      } catch (e) {
+        logger.warn(`Hero download failed for game ${game.id}`, { message: e.message })
+      }
+
+      // Steam store genres — power auto-grouping on the Game List and genre chips.
+      try {
+        const { getStoreArt } = require('./services/steamApi')
+        const art = await getStoreArt(game.steam_app_id)
+        if (art?.genres?.length) {
+          gamesQ.updateGame(game.id, { genres: JSON.stringify(art.genres) })
+          game.genres = JSON.stringify(art.genres)
+        }
+      } catch (e) {
+        logger.warn(`Genre fetch failed for game add`, { gameId: game.id, message: e.message })
+        // The self-healing backfill will pick this game up shortly.
+        require('./services/steamApi').runGenreBackfill().catch(() => {})
+      }
+      try { broadcast('game:updated', game.id) } catch {}
       await fetchAndStoreAchievements(game.id)
       try {
         broadcast('game:updated', game.id)
@@ -104,13 +118,42 @@ handle('games:add', async (data) => {
     // unlock import the appid path gets.
     const { autoImportSchemaByName, fetchAndStoreAchievements: fetchAndStore } = require('./services/achievementSync')
     setImmediate(async () => {
+      // Not on Steam → cover + hero from SteamGridDB when the user has a key.
+      try {
+        const sgdb = require('./services/steamGridDb')
+        if (sgdb_id && sgdb_cover) {
+          const [hero] = await sgdb.heroes(sgdb_id).catch(() => [])
+          await sgdb.applyArt(game.id, sgdb_cover, hero?.url || null)
+          broadcast('game:updated', game.id)
+        } else if (await sgdb.autoArt(gamesQ.getGame(game.id))) broadcast('game:updated', game.id)
+      } catch {}
       await autoImportSchemaByName(game.id).catch(() => {})
       if (game?.is_cracked) await fetchAndStore(game.id).catch(() => {})
     })
   }
 
+  try { gameListQ.ensureListRowForGame(gamesQ.getGame(game.id) || game) } catch (e) {
+    logger.warn('games:add: Game List sync failed', { message: e.message })
+  }
   bk()
   return game
+}
+handle('games:add', addLibraryGame)
+// Plan library games for a month: the plan lives on each game's Game List row
+// (created if missing), so the Library and Game List month filters agree.
+handle('games:planMonth', (gameIds, month) => {
+  const ids = []
+  for (const id of (gameIds || []).map(Number)) {
+    const g = gamesQ.getGame(id)
+    if (!g) continue
+    gameListQ.ensureListRowForGame(g)
+    const row = require('./db/database').getDb().prepare('SELECT id FROM game_list WHERE game_id = ?').get(id)
+    if (row) ids.push(row.id)
+  }
+  const value = gameListQ.setPlannedMonth(ids, month)
+  bk()
+  broadcast('game:updated', null)
+  return value
 })
 handle('games:update', (id, data) => {
   // Status changes go through statusSync so linked Game List rows stay in step.
@@ -131,7 +174,33 @@ handle('shell:openExternal', (url) => {
   }
   return true
 })
-handle('games:delete', (id) => { gamesQ.deleteGame(id); bk(); return true })
+// Delete for good: the game with its sessions and achievements (both cascade).
+// Its Game List row stays, unlinked. The cover and banner files go too.
+handle('games:delete', (ids) => {
+  const fsx = require('fs')
+  const list = (Array.isArray(ids) ? ids : [ids]).map(Number).filter(Number.isFinite)
+  for (const id of list) {
+    const g = gamesQ.getGame(id)
+    gamesQ.deleteGame(id)
+    for (const f of [g?.banner_local_path, g?.hero_local_path]) {
+      if (f && /[\\/]banners[\\/]/i.test(f)) { try { fsx.unlinkSync(f) } catch {} }
+    }
+    broadcast('game:updated', id)
+  }
+  bk()
+  return list.length
+})
+
+// Archive instead of delete: the game leaves the Library grid but its sessions,
+// achievements and XP stay. Restoring is just flipping the flag back.
+function setArchived(ids, value) {
+  const list = (Array.isArray(ids) ? ids : [ids]).map(Number).filter(Number.isFinite)
+  for (const id of list) { gamesQ.updateGame(id, { is_archived: value }); broadcast('game:updated', id) }
+  bk()
+  return list.length
+}
+handle('games:archive',   (ids) => setArchived(ids, 1))
+handle('games:unarchive', (ids) => setArchived(ids, 0))
 
 // Persist a full drag-and-drop ordering: display_order = index in the given array.
 handle('games:reorder', (orderedIds) => {
@@ -434,12 +503,12 @@ async function doLaunch(id) {
     }
     if (!fs.existsSync(game.install_path)) {
       throw new Error(
-        `Can't find the game's folder anymore: ${game.install_path} — the game may have been moved/uninstalled, ` +
+        `Can't find the game's folder anymore: ${game.install_path}. The game may have been moved or uninstalled, ` +
         'or it lives on a drive that isn\'t connected right now. Edit the game → Browse to re-point it.'
       )
     }
     throw new Error(
-      `Found the folder, but not "${game.exe_name}" inside it: ${game.install_path} — ` +
+      `Found the folder, but not "${game.exe_name}" inside it: ${game.install_path}. ` +
       'the game may have been updated/reinstalled with a different exe. Edit the game → Browse to re-point it.'
     )
   }
@@ -456,12 +525,12 @@ async function doLaunch(id) {
     const pathWasConfigured = !!game.install_path && !!game.exe_name
     const pathIsStale = pathWasConfigured && !fs.existsSync(game.install_path)
     const warning = pathIsStale
-      ? `Sent to Steam. Heads up: KoZo's saved path for this game (${game.install_path}) no longer exists — if nothing launches, the game may need reinstalling, or its files moved to a new location. Try Scan PC, or Edit → Browse to re-point it.`
+      ? `Sent to Steam. Heads up: KoZo's saved path for this game (${game.install_path}) no longer exists. If nothing launches, the game may need reinstalling, or its files moved to a new location. Try Scan PC, or Edit → Browse to re-point it.`
       : undefined
     return { launched: 'steam', via: 'steam://run', warning }
   }
 
-  throw new Error('No way to launch — set the install path and executable (Edit → Browse).')
+  throw new Error('No way to launch. Set the install path and executable (Edit → Browse).')
 }
 
 // ── Crack discovery ──────────────────────────────────────────────────────────
@@ -623,6 +692,62 @@ handle('gameList:update', (id, data) => {
   bk(); broadcast('game:updated', null); return r
 })
 handle('gameList:delete', (id) => { gameListQ.deleteGameListItem(id); bk(); return true })
+// Game List → Library. Each row links to its library game when one exists
+// (archived ones come back), otherwise a new library game is created from the
+// row; Steam games get art/genres/achievements like a normal add. Non-Steam
+// games have no exe yet, so playtime tracking starts once one is set in Edit.
+handle('gameList:moveToLibrary', async (ids) => {
+  const statusSync = require('./services/statusSync')
+  const db = require('./db/database').getDb()
+  const moved = []
+  for (const id of (Array.isArray(ids) ? ids : [ids])) {
+    const row = gameListQ.getGameListItem(id)
+    if (!row) continue
+    let game = db.prepare(`
+      SELECT * FROM games
+      WHERE id = @game_id
+         OR (steam_app_id IS NOT NULL AND steam_app_id = @steam_app_id)
+         OR lower(name) = lower(@name)
+      LIMIT 1
+    `).get({ game_id: row.game_id ?? -1, steam_app_id: row.steam_app_id ?? null, name: row.name })
+    let created = false
+    if (game) {
+      if (game.is_archived) gamesQ.updateGame(game.id, { is_archived: 0 })
+    } else {
+      game = await addLibraryGame({
+        name: row.name,
+        steam_app_id: row.steam_app_id ?? null,
+        exe_name: '',
+        install_path: null,
+        source: row.steam_app_id ? 'steam' : 'manual',
+        is_installed: 0,
+        banner_url: row.banner_url || null,
+      })
+      created = true
+    }
+    if (row.game_id !== game.id) gameListQ.updateGameListItem(row.id, { game_id: game.id })
+    if (statusSync.SHARED_STATUSES.has(row.status) && !game.completion_status) {
+      try { statusSync.setGameStatus(game.id, row.status) } catch {}
+    }
+    broadcast('game:updated', game.id)
+    moved.push({ listId: row.id, gameId: game.id, name: row.name, created, needsExe: !row.steam_app_id && !game.exe_name })
+  }
+  bk()
+  return moved
+})
+handle('gameList:plannedMonths', () => gameListQ.plannedMonths())
+handle('gameList:planMonth', (ids, month) => {
+  const list = (Array.isArray(ids) ? ids : [ids]).map(Number).filter(Number.isFinite)
+  const value = gameListQ.setPlannedMonth(list, month)
+  bk()
+  return value
+})
+handle('gameList:reorderPage', (filters, offset, pageIds) => {
+  if (!Array.isArray(pageIds) || !pageIds.length) return false
+  gameListQ.reorderGameListPage(filters || {}, Number(offset) || 0, pageIds)
+  bk()
+  return true
+})
 
 // ── Custom lists (Spotify-playlist-style game lists) ─────────────────────────
 handle('customLists:list', () => customListsQ.listLists())
@@ -775,6 +900,19 @@ handle('tracking:selfTest', () => require('./services/trackingSelfTest').runSelf
 // ── App version / updates ─────────────────────────────────────────────────────
 handle('app:getVersion', () => require('electron').app.getVersion())
 handle('app:checkForUpdates', () => require('./services/appUpdater').checkForUpdates())
+handle('app:updateState', () => require('./services/appUpdater').getState())
+handle('app:installUpdate', () => require('./services/appUpdater').installUpdate())
+// "What's new" — shown once after the installed version changes. A fresh
+// install just records its version (nothing to compare against).
+handle('app:whatsNew', async () => {
+  const settingsQ = require('./db/queries/settings')
+  const current = require('electron').app.getVersion()
+  const seen = settingsQ.getSetting('last_seen_version')
+  if (seen === current) return null
+  settingsQ.setSetting('last_seen_version', current)
+  if (!seen) return null
+  return (await require('./services/appUpdater').fetchReleaseNotes(current).catch(() => null)) || { version: current, notes: '' }
+})
 
 // Resolve a SteamID64 from a profile URL / custom name / raw ID. Uses the passed
 // key if given (onboarding, before it's saved), else the stored key.
@@ -932,9 +1070,14 @@ handle('scanner:getDefaultPaths', () => {
   return getDefaultScanPaths()
 })
 
+// Name → Steam match, kept for the session so a rescan doesn't look names up again.
+const scanMatchCache = new Map()
+
 handle('scanner:scan', async (paths) => {
-  const { scanFolder } = require('./services/pcScanner')
+  const { scanInWorker } = require('./services/scanWorker')
   const { findAppByName } = require('./services/steamApi')
+  const fsx = require('fs')
+  const pathMod = require('path')
   const db = require('./db/database').getDb()
 
   // Existing library: track both install paths AND steam appids for dedup
@@ -942,11 +1085,25 @@ handle('scanner:scan', async (paths) => {
   const existingPaths = new Set(existingRows.filter(g => g.install_path).map(g => g.install_path.toLowerCase()))
   const existingAppIds = new Set(existingRows.filter(g => g.steam_app_id).map(g => String(g.steam_app_id)))
 
+  // Skip folders that aren't there (an unplugged drive) and folders inside
+  // another selected folder (C:\ already covers C:\...\steamapps\common).
+  const norm = (p) => pathMod.resolve(String(p || '')).replace(/[\\/]+$/, '').toLowerCase()
+  const existing = [...new Set((paths || []).filter(p => { try { return fsx.existsSync(p) } catch { return false } }).map(p => pathMod.resolve(p)))]
+  const roots = existing.filter(p => !existing.some(o => o !== p && norm(p).startsWith(norm(o) + pathMod.sep)))
+
+  // Every folder scans in its own worker, in parallel; the app stays usable.
+  let foldersDone = 0
+  broadcast('scanner:progress', { stage: 'folders', done: 0, total: roots.length })
+  const perRoot = await Promise.all(roots.map(p => scanInWorker(p).then(r => {
+    broadcast('scanner:progress', { stage: 'folders', done: ++foldersDone, total: roots.length })
+    return r
+  })))
+
   const results = []
   const seenPath = new Set()
   const seenAppId = new Set()
-  for (const p of (paths || [])) {
-    for (const g of scanFolder(p)) {
+  for (const list of perRoot) {
+    for (const g of list) {
       const pathKey = g.install_path.toLowerCase()
       if (seenPath.has(pathKey)) continue
       // Dedup duplicate appid within the same scan (e.g. same game in two folders)
@@ -957,16 +1114,24 @@ handle('scanner:scan', async (paths) => {
     }
   }
 
-  // Enrich cracked games (no appid) by matching their name to a Steam title —
-  // gives them real cover art + a clean name, just like Add Game. Done with a
-  // small concurrency pool so a big scan doesn't fire hundreds of requests.
-  const toMatch = results.filter(g => !g.steam_app_id && g.name)
-  let idx = 0
+  // Enrich cracked games (no appid) by matching their name to a Steam title,
+  // which gives them real cover art and a clean name, just like Add Game. Games
+  // already in the library are skipped (nothing to add), and lookups are cached
+  // and capped at 6 s each so one slow request can't stall the scan.
+  const toMatch = results.filter(g => !g.steam_app_id && g.name && !existingPaths.has(g.install_path.toLowerCase()))
+  const timeout = (ms) => new Promise(r => setTimeout(() => r(null), ms))
+  let idx = 0, matched = 0
+  if (toMatch.length) broadcast('scanner:progress', { stage: 'matching', done: 0, total: toMatch.length })
   async function worker() {
     while (idx < toMatch.length) {
       const g = toMatch[idx++]
       try {
-        const match = await findAppByName(g.name)
+        const key = g.name.toLowerCase()
+        let match = scanMatchCache.get(key)
+        if (match === undefined) {
+          match = await Promise.race([findAppByName(g.name).catch(() => null), timeout(6000)])
+          scanMatchCache.set(key, match || null)
+        }
         if (match && !seenAppId.has(String(match.steam_app_id))) {
           seenAppId.add(String(match.steam_app_id))
           g.steam_app_id = match.steam_app_id
@@ -974,9 +1139,10 @@ handle('scanner:scan', async (paths) => {
           g.matched_from_name = true          // (cracked copy keeps is_cracked = 1)
         }
       } catch {}
+      broadcast('scanner:progress', { stage: 'matching', done: ++matched, total: toMatch.length })
     }
   }
-  await Promise.all(Array.from({ length: Math.min(5, toMatch.length) }, worker))
+  await Promise.all(Array.from({ length: Math.min(10, toMatch.length) }, worker))
 
   // Mark which results are already in the library (after appid enrichment).
   for (const g of results) {
@@ -1063,6 +1229,7 @@ handle('scanner:addGames', async (games) => {
         banner_local_path: null,
       })
       added.push(game)
+      try { gameListQ.ensureListRowForGame(game) } catch {}
       if (game.steam_app_id) existingAppIds.add(String(game.steam_app_id))
       if (game.install_path) existingPaths.add(game.install_path.toLowerCase())
 
@@ -1113,39 +1280,18 @@ handle('steam:signIn', () => require('./services/steamOpenId').signIn())
 
 // Store-page details (description, developers, screenshots) for the Upcoming popup.
 handle('steam:storeDetails', (appId) => require('./services/steamApi').getStoreDetails(appId))
+handle('steam:comingSoon', (feed, page) => require('./services/steamApi').getComingSoon(feed, page))
+// appIds → { [appid]: { portrait, hero, header, capsule } } real store art URLs.
+handle('steam:appAssets', async (appIds) => Object.fromEntries(await require('./services/steamApi').getAppAssets(appIds)))
 
 // Called when the Upcoming tab opens: warms the store-details cache for every
 // upcoming game (so popups open instantly) AND backfills missing release dates
 // — fixes released games (e.g. Dead Cells added long ago) sitting in "No date
 // yet" forever. Serialized with a small delay to respect Steam's rate limits.
-let _upcomingRefreshing = false
-handle('gameList:refreshUpcomingInfo', async () => {
-  if (_upcomingRefreshing) return { skipped: true }
-  _upcomingRefreshing = true
-  try {
-    const { getStoreDetails } = require('./services/steamApi')
-    const db = require('./db/database').getDb()
-    const rows = db.prepare("SELECT id, steam_app_id, release_date, genres FROM game_list WHERE status = 'upcoming' AND steam_app_id IS NOT NULL").all()
-    let filled = 0
-    for (const row of rows) {
-      const d = await getStoreDetails(row.steam_app_id)
-      if (d) {
-        if (!row.release_date && d.release_date) {
-          gameListQ.updateGameListItem(row.id, { release_date: d.release_date })
-          filled++
-        }
-        if ((!row.genres || row.genres === '[]') && d.genres?.length) {
-          gameListQ.updateGameListItem(row.id, { genres: JSON.stringify(d.genres) })
-        }
-      }
-      await new Promise(r => setTimeout(r, 250))
-    }
-    if (filled > 0) { bk(); broadcast('game:updated', null) }
-    return { filled, checked: rows.length }
-  } finally {
-    _upcomingRefreshing = false
-  }
-})
+// Delegates to releaseWatch, which also updates CHANGED dates (delays).
+handle('gameList:refreshUpcomingInfo', () => require('./services/releaseWatch').refreshUpcomingDates())
+handle('releases:unseen', () => require('./services/releaseWatch').getUnseen())
+handle('releases:dismiss', (ids) => { require('./services/releaseWatch').dismiss(ids); return true })
 
 // Returns persona name and avatar so the user can confirm the right account is loaded.
 handle('steam:getProfile', async (overrides) => {
@@ -1164,7 +1310,7 @@ handle('steam:getProfile', async (overrides) => {
 // the Settings tab can leave/return mid-run and still show the live counter.
 const bannerRefreshState = { running: false, done: 0, total: 0 }
 handle('banners:refreshStatus', () => ({ ...bannerRefreshState }))
-handle('steam:refreshAllBanners', async () => {
+async function refreshAllBannersJob() {
   if (bannerRefreshState.running) return { alreadyRunning: true }
 
   const { refreshBanners, resolveBannerUrl } = require('./services/steamApi')
@@ -1217,7 +1363,151 @@ handle('steam:refreshAllBanners', async () => {
   bk()
   broadcast('game:updated', null)
   return { upgraded }
+}
+handle('steam:refreshAllBanners', async () => {
+  const r = await refreshAllBannersJob()
+  // Games that aren't on Steam get their covers from SteamGridDB (if keyed).
+  try { if (await require('./services/steamGridDb').autoArtAll()) broadcast('game:updated', null) } catch {}
+  return r
 })
+
+// ── SteamGridDB (covers for non-Steam games) ─────────────────────────────────
+handle('sgdb:test', (key) => require('./services/steamGridDb').testKey(key))
+handle('sgdb:search', (name) => require('./services/steamGridDb').searchGame(name))
+// Settings → Appearance → Background: copy the chosen picture into KoZo's own
+// folder (so moving or deleting the original doesn't break it) and return
+// that path. Earlier wallpapers are removed. null when the dialog is cancelled.
+handle('appearance:pickWallpaper', async () => {
+  const { dialog, app } = require('electron')
+  const fsx = require('fs')
+  const pathMod = require('path')
+  const r = await dialog.showOpenDialog({
+    title: 'Choose a background picture',
+    properties: ['openFile'],
+    filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'] }],
+  })
+  if (r.canceled || !r.filePaths?.[0]) return null
+  const src = r.filePaths[0]
+  const dir = app.getPath('userData')
+  for (const f of fsx.readdirSync(dir)) {
+    if (/^wallpaper-\d+\./.test(f)) { try { fsx.unlinkSync(pathMod.join(dir, f)) } catch {} }
+  }
+  const dest = pathMod.join(dir, `wallpaper-${Date.now()}${pathMod.extname(src).toLowerCase()}`)
+  fsx.copyFileSync(src, dest)
+  return dest
+})
+handle('sgdb:searchGames', (q) => require('./services/steamGridDb').searchWithCovers(q))
+handle('sgdb:grids', (sgdbId) => require('./services/steamGridDb').grids(sgdbId))
+handle('sgdb:heroes', (sgdbId) => require('./services/steamGridDb').heroes(sgdbId))
+handle('sgdb:apply', async (gameId, coverUrl, heroUrl) => {
+  const g = await require('./services/steamGridDb').applyArt(Number(gameId), coverUrl, heroUrl)
+  bk(); broadcast('game:updated', Number(gameId))
+  return g
+})
+// Saving a key: store it, then fill covers for every non-Steam game in the background.
+handle('sgdb:setKey', async (key) => {
+  const settingsQ = require('./db/queries/settings')
+  const clean = String(key || '').trim()
+  if (clean) {
+    const t = await require('./services/steamGridDb').testKey(clean)
+    if (!t.valid) return t
+  }
+  settingsQ.setSetting('steamgriddb_key', clean)
+  if (clean) {
+    require('./services/processWatcher').runWhenIdle('sgdbAutoArt', () => {
+      require('./services/steamGridDb').autoArtAll()
+        .then(n => { if (n) broadcast('game:updated', null) })
+        .catch(() => {})
+    })
+  }
+  return { valid: true }
+})
+
+// One-time art repair: covers/heroes fetched before KoZo knew about Steam's
+// hashed asset paths are wide headers or missing for newer titles. Re-run the
+// image refresh once, when no game is running.
+setTimeout(() => {
+  try {
+    const settingsQ = require('./db/queries/settings')
+    if (settingsQ.getSetting('art_repair_v1') === '1') return
+    require('./services/processWatcher').runWhenIdle('artRepair', async () => {
+      try {
+        await refreshAllBannersJob()
+        settingsQ.setSetting('art_repair_v1', '1')
+        logger.info('art repair: Steam covers and heroes refreshed')
+      } catch (e) { logger.warn('art repair failed', { message: e.message }) }
+    })
+  } catch {}
+}, 30000)
+
+// Every launch, once idle: games that still have no cover (or a Steam game with
+// no hero) get another try. Steam first (demos fall back to their full game),
+// then SteamGridDB when a key is set. A game that still finds nothing is left
+// alone for 3 days (setting art_missing_tried) so this never hammers anything.
+async function fillMissingArt() {
+  const fsx = require('fs')
+  const settingsQ = require('./db/queries/settings')
+  const steamApi = require('./services/steamApi')
+  const sgdb = require('./services/steamGridDb')
+  const has = (p) => { try { return !!p && fsx.existsSync(p) } catch { return false } }
+  let tried = {}
+  try { tried = JSON.parse(settingsQ.getSetting('art_missing_tried') || '{}') } catch {}
+  const now = Date.now()
+  const rows = require('./db/database').getDb().prepare('SELECT * FROM games').all()
+    .filter(g => !has(g.banner_local_path) || (g.steam_app_id && !has(g.hero_local_path)))
+    .filter(g => !tried[g.id] || now - tried[g.id] > 3 * 86400000)
+  let changed = 0
+  for (const g of rows) {
+    if (require('./services/processWatcher').isSessionActive()) break
+    let got = false
+    if (g.steam_app_id) {
+      if (!has(g.banner_local_path)) {
+        try {
+          const p = await steamApi.downloadBanner(g.steam_app_id, g.id)
+          require('./db/database').getDb().prepare('UPDATE games SET banner_local_path = ?, banner_rev = COALESCE(banner_rev, 0) + 1 WHERE id = ?').run(p, g.id)
+          got = true
+        } catch {}
+      }
+      if (!has(g.hero_local_path)) {
+        try { await steamApi.downloadHero(g.steam_app_id, g.id); got = true } catch {}
+      }
+    }
+    const fresh = require('./db/database').getDb().prepare('SELECT * FROM games WHERE id = ?').get(g.id)
+    if (!fresh) continue   // deleted while this pass was running
+    if (!has(fresh.banner_local_path) && await sgdb.autoArt(fresh)) got = true
+    if (got) { changed++; broadcast('game:updated', g.id); delete tried[g.id] }
+    else tried[g.id] = now
+  }
+  settingsQ.setSetting('art_missing_tried', JSON.stringify(tried))
+  if (changed) { bk(); logger.info(`art: filled missing covers for ${changed} game(s)`) }
+}
+// One time: covers downloaded before covers were stored at card size get
+// shrunk too (1200x1800 → 600x900, about 6 MB less image memory per card).
+setTimeout(() => {
+  try {
+    const settingsQ = require('./db/queries/settings')
+    if (settingsQ.getSetting('covers_resized_v1') === '1') return
+    require('./services/processWatcher').runWhenIdle('coversResize', async () => {
+      const fsx = require('fs')
+      const { shrinkCover } = require('./services/steamApi')
+      const rows = require('./db/database').getDb().prepare('SELECT id, banner_local_path FROM games WHERE banner_local_path IS NOT NULL').all()
+      let n = 0
+      for (const g of rows) {
+        if (require('./services/processWatcher').isSessionActive()) return   // try again next launch
+        try { if (fsx.existsSync(g.banner_local_path) && shrinkCover(g.banner_local_path)) n++ } catch {}
+        await new Promise(r => setImmediate(r))
+      }
+      settingsQ.setSetting('covers_resized_v1', '1')
+      if (n) logger.info(`covers: shrank ${n} stored cover(s) to card size`)
+    })
+  } catch {}
+}, 40000)
+
+setTimeout(() => {
+  require('./services/processWatcher').runWhenIdle('fillMissingArt', () => {
+    fillMissingArt().catch(e => logger.warn('art: missing-art pass failed', { message: e.message }))
+  })
+}, 45000)
 
 // ── App system settings (startup, minimize) ───────────────────────────────────
 const TASK_NAME = 'KoZo_AutoStart'
@@ -1318,7 +1608,7 @@ handle('app:setStartup', (enable) => {
       // say so instead of silently claiming success.
       error: stillOn
         ? (stillTask
-            ? 'A Windows scheduled task for KoZo could not be removed — it may need administrator rights.'
+            ? 'A Windows scheduled task for KoZo could not be removed. It may need administrator rights.'
             : `Windows startup entries could not be removed: ${stillRun.join(', ')}`)
         : undefined,
     }
@@ -1443,6 +1733,18 @@ handle('overlay:test', () => {
       .prepare('SELECT name, banner_local_path, banner_url FROM games WHERE banner_local_path IS NOT NULL OR banner_url IS NOT NULL LIMIT 1').get()
     if (g) ow.sendSessionStarted({ gameName: g.name, gameId: 0, artPath: g.banner_local_path || null, artUrl: g.banner_url || null })
   } catch {}
+  // And the "Out Now" toast a tracked release gets, using a Game List game
+  // (upcoming first) so the preview shows real cover art.
+  try {
+    const row = require('./db/database').getDb().prepare(`
+      SELECT id, name, steam_app_id, release_date, banner_url, game_id FROM game_list
+      ORDER BY (status = 'upcoming') DESC, (steam_app_id IS NULL) ASC LIMIT 1`).get()
+    if (row) {
+      setTimeout(() => {
+        require('./services/releaseWatch').sendReleaseToast([{ ...row, release_date: row.release_date || 'today' }]).catch(() => {})
+      }, 1500)
+    }
+  } catch {}
   return true
 })
 
@@ -1478,9 +1780,15 @@ async function importBackupFile(filePath) {
   }
 
   const TABLES = ['categories', 'games', 'game_list', 'custom_lists', 'custom_list_games', 'sessions', 'achievements', 'achievement_unlocks', 'settings']
+  // Paths are per-machine (a restore on a new PC must keep the folders just set
+  // up there) and the API key is never exported — keep the local values.
+  const LOCAL_SETTINGS = new Set(['sync_folder', 'auto_backup_dir', 'saves_backup_dir', 'steam_api_key', 'steamgriddb_key'])
+  const rowsFor = (t) => t === 'settings' && Array.isArray(data[t])
+    ? data[t].filter(r => !LOCAL_SETTINGS.has(r?.key))
+    : data[t]
   const counts = {}
   const doImport = db.transaction(() => {
-    for (const t of TABLES) counts[t] = upsertRows(t, data[t])
+    for (const t of TABLES) counts[t] = upsertRows(t, rowsFor(t))
   })
   // INSERT OR REPLACE DELETEs the conflicting row before re-inserting it, and
   // sessions/achievements are ON DELETE CASCADE from games — so restoring a
@@ -1828,3 +2136,111 @@ handle('stats:hourActivity', (hour, includeHidden = false) => {
 // level-ups after sessions/unlocks/finishes). These handlers just delegate.
 handle('stats:xp', () => require('./services/xp').computeXp())
 handle('stats:xpHistory', (limit) => require('./services/xp').xpHistory(limit || 25))
+
+// ── Tray popup (electron/trayWindow.js → src/TrayApp.jsx) ─────────────────────
+// One snapshot of everything the popup shows: profile + level, live sessions,
+// today's playtime, recent games. Called on open and every few seconds while open.
+handle('tray:data', () => {
+  const db = require('./db/database').getDb()
+  const settingsQ = require('./db/queries/settings')
+  const watcher = require('./services/processWatcher')
+  const achievementsQ = require('./db/queries/achievements')
+
+  let xp = null
+  try { xp = require('./services/xp').computeXp() } catch {}
+
+  const live = []
+  let todaySec = 0
+  try {
+    todaySec = db.prepare(`
+      SELECT COALESCE(SUM(duration_seconds), 0) AS s FROM sessions
+      WHERE ended_at IS NOT NULL AND DATE(started_at, 'localtime') = DATE('now', 'localtime')
+    `).get().s || 0
+  } catch {}
+  for (const [gameId, sess] of watcher.getActiveSessions()) {
+    const game = gamesQ.getGame(gameId)
+    let total = 0, unlocked = 0
+    try {
+      const list = achievementsQ.listAchievementsForGame(gameId)
+      total = list.length
+      unlocked = list.filter(a => a.unlock_id != null).length
+    } catch {}
+    live.push({
+      id: gameId,
+      name: sess.game_name || game?.name || 'Game',
+      startedAt: sess.started_at,
+      idleSeconds: sess.idle_seconds || 0,
+      idle: !!sess.idle,
+      cover: game?.banner_local_path || null,
+      coverUrl: game?.banner_url || null,
+      coverRev: game?.banner_rev || 0,
+      achTotal: total,
+      achUnlocked: unlocked,
+    })
+  }
+
+  const liveIds = new Set(live.map(l => l.id))
+  const recent = db.prepare(`
+    SELECT id, name, banner_local_path, banner_url, banner_rev, last_played_at, total_playtime_seconds
+    FROM games
+    WHERE last_played_at IS NOT NULL AND COALESCE(is_archived, 0) = 0 AND COALESCE(is_hidden, 0) = 0
+    ORDER BY last_played_at DESC LIMIT 6
+  `).all().filter(g => !liveIds.has(g.id)).slice(0, 4).map(g => ({
+    id: g.id, name: g.name, cover: g.banner_local_path, coverUrl: g.banner_url, coverRev: g.banner_rev || 0,
+    lastPlayedAt: g.last_played_at, playtime: g.total_playtime_seconds || 0,
+  }))
+
+  return {
+    profile: {
+      name: settingsQ.getSetting('profile_name') || 'Player',
+      avatar: settingsQ.getSetting('profile_avatar_path') || null,
+      level: xp?.level ?? null,
+      tier: xp?.tier || null,
+      progress: xp?.progress ?? 0,
+      toNextLevel: xp?.toNextLevel ?? null,
+    },
+    accent: settingsQ.getSetting('accent_color') || null,
+    paused: watcher.isPaused?.() ?? false,
+    live,
+    todaySec,            // finished sessions only — the popup adds live time as it ticks
+    recent,
+    version: require('electron').app.getVersion(),
+  }
+})
+
+handle('tray:action', async (action, arg) => {
+  const trayWindow = require('./trayWindow')
+  const watcher = require('./services/processWatcher')
+  const main = require('./main')
+  switch (action) {
+    case 'open':
+      trayWindow.hide()
+      main.getOrCreateMainWindow()
+      return true
+    case 'openAt':
+      trayWindow.hide()
+      main.getOrCreateMainWindow((win) => {
+        win.webContents.executeJavaScript(`window.location.hash = ${JSON.stringify('#' + String(arg || '/'))}`).catch(() => {})
+      })
+      return true
+    case 'launch':
+      trayWindow.hide()
+      return doLaunch(Number(arg))
+    case 'pause':
+      watcher.pause()
+      return true
+    case 'resume':
+      watcher.resume()
+      return true
+    case 'quit':
+      trayWindow.hide()
+      require('electron').app.isQuitting = true
+      require('electron').app.quit()
+      return true
+    case 'hide':
+      trayWindow.hide()
+      return true
+    default:
+      throw new Error(`Unknown tray action: ${action}`)
+  }
+})

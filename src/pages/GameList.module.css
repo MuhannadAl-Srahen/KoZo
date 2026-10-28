@@ -230,7 +230,7 @@
 .bigGrid {
   display: grid;
   /* 220px floor — must stay identical to Library's .bigGrid. */
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 220px), 1fr));   /* Ctrl+wheel: lib/useCardZoom */
   gap: var(--sp-12);
   contain: layout style;
 }
@@ -238,7 +238,7 @@
 .grid {
   display: grid;
   /* 168px floor — must stay identical to Library's .smallGrid. */
-  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 168px), 1fr));
   gap: var(--sp-10);
   contain: layout style;
 }
@@ -322,7 +322,8 @@
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;
+  object-position: center 30%;
   z-index: 1;
 }
 
@@ -379,6 +380,17 @@
 }
 
 .cardStatusWord { font-weight: 500; }
+
+/* Play-plan month ("Nov 2026") — set via Plan for month. */
+.planChip {
+  padding: 1px var(--sp-6);
+  border-radius: var(--r-pill);
+  background: var(--ad);
+  border: 1px solid var(--ab);
+  color: var(--a);
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+}
 
 /* Status LED — top-left corner of the cover, matching GameCard's. */
 .cardStatusLed {
@@ -542,7 +554,8 @@
 .listThumbImg {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;
+  object-position: center 30%;
   position: absolute;
   inset: 0;
   z-index: 1;
@@ -878,3 +891,25 @@
   background: var(--a);
   color: #09090f;
 }
+
+/* Small cards (Ctrl + mouse wheel): two-line names, no genres line, and the
+   status word and month chip wrap onto separate lines instead of colliding. */
+.card { container-type: inline-size; }
+@container (max-width: 190px) {
+  .cardName {
+    font-size: var(--fs-sm);
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .cardGenresLine { display: none; }
+  .cardSubRow { flex-wrap: wrap; justify-content: flex-start; row-gap: var(--sp-4); }
+  .cardStatusWord { white-space: nowrap; }
+}
+
+/* Settings → Appearance → Card details (attributes on <html>) */
+:global(html[data-hide-genres]) .cardGenresLine { display: none; }
+:global(html[data-hide-stats]) .cardInfo { display: none; }
+:global(html[data-hide-status-dot]) .cardStatusLed { display: none; }
+:global(html[data-hide-plan-chip]) .planChip { display: none; }

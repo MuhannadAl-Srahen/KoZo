@@ -1,59 +1,20 @@
 import React, { useState, useEffect } from 'react'
 import {
   IconCalendar, IconHourglassLow, IconConfetti, IconHelpCircle,
-  IconPlayerPlayFilled, IconBookmark, IconBrandSteam,
+  IconPlayerPlayFilled, IconBookmark, IconBrandSteam, IconBookmarkOff,
 } from '@tabler/icons-react'
-import { parseGenres } from '../lib/utils'
+import { parseGenres, parseRelease } from '../lib/utils'
 import Modal, { modalStyles as ms } from '../components/ui/Modal'
 import EmptyState from '../components/ui/EmptyState'
 import { Skeleton, CardSkeletonGrid, PanelSkeleton } from '../components/ui/Skeleton'
+import SteamCalendar from '../components/SteamCalendar'
+import SteamGameModal from '../components/SteamGameModal'
+import ReleasedPanel from '../components/ReleasedPanel'
+import useCardZoom from '../lib/useCardZoom'
 import s from './Upcoming.module.css'
-
-// Persist the last working art source per game across tab switches so cards don't
-// re-run fallback image probing (hero -> header -> portrait) every time.
-const wideArtIndexCache = new Map()
 
 // Keep Upcoming data hot between route changes to avoid full visual resets.
 let upcomingCache = null
-
-// Steam's release_date strings vary in precision: "13 Nov, 2025" (exact),
-// "November 2025" (month), "2026" (year only), "TBA"/"Coming soon" (nothing).
-// Anything short of a full date is `vague` and carries TWO instants: `ts` (the
-// start of the named window — a month's 1st, or a mid-year point for year-only)
-// for ordering, and `until` (the first instant past the window's end) as the
-// ONLY thing that may read as released. Reading a vague `ts` as "out" faked
-// "Out now" up to a month — or half a year — early.
-const MONTH_NAMES = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
-// Steam writes both "November 2025" and "Winter 2026"/"Holiday 2026" in this
-// shape. Date.parse quietly resolves the seasonal ones to January 1st, so they
-// must be matched here and downgraded rather than trusted as a real month.
-const WORD_YEAR = /^([A-Za-z]{3,9}),?\s+(\d{4})$/
-
-function yearRelease(y, label) {
-  return { ts: Date.UTC(y, 5, 30), until: Date.UTC(y + 1, 0, 1), vague: true, precision: 'year', label }
-}
-
-function parseRelease(str) {
-  if (!str) return { ts: null }
-  const trimmed = str.trim()
-  const yearOnly = trimmed.match(/^(\d{4})$/)
-  if (yearOnly) return yearRelease(parseInt(yearOnly[1], 10), trimmed)
-  const wordYear = trimmed.match(WORD_YEAR)
-  if (wordYear) {
-    const y  = parseInt(wordYear[2], 10)
-    const mi = MONTH_NAMES.indexOf(wordYear[1].slice(0, 3).toLowerCase())
-    // A season names no month Steam ever defines — it's no more precise than its year.
-    if (mi < 0) return yearRelease(y, trimmed)
-    return {
-      ts: new Date(y, mi, 1).getTime(),
-      until: new Date(y, mi + 1, 1).getTime(),
-      vague: true, precision: 'month', label: trimmed,
-    }
-  }
-  const t = Date.parse(trimmed)
-  if (!Number.isFinite(t)) return { ts: null }
-  return { ts: t, until: t, vague: false, precision: 'day' }
-}
 
 // "How far away" wording. `approx` marks a vague date whose exact day is a guess,
 // so it never reads as a confident "Tomorrow".
@@ -82,44 +43,39 @@ function countdown(rel) {
   return relativeLabel(rel.ts - now, true)
 }
 
-// The stored banner_url is a PORTRAIT cover — wide cards want Steam's wide art.
-// capsule_616x353 first: it matches the rendered card size and exists for
-// virtually every store page, unreleased ones included. The old order started
-// at library_hero (3840×1240) — every card decoded a wallpaper-sized bitmap,
-// and unreleased games usually 404 on it, so first paint burned a failed
-// request per card before the real art even started. That was the page's lag.
-function wideArtSources(item) {
+// Wide card art. Steam's 616×353 capsule first: it matches the card size, so
+// it decodes fast and sharp. The library hero is a ~3840px wallpaper and made
+// every card lag, so it only appears in the detail gallery.
+function wideArtSources(item, art) {
   const id = item.steam_app_id
   const srcs = []
+  if (art?.capsule) srcs.push(art.capsule)
+  if (art?.header) srcs.push(art.header)
   if (id) {
     srcs.push(`https://cdn.akamai.steamstatic.com/steam/apps/${id}/capsule_616x353.jpg`)
     srcs.push(`https://cdn.akamai.steamstatic.com/steam/apps/${id}/header.jpg`)
   }
   if (item.banner_url) srcs.push(item.banner_url)
-  return srcs
+  return [...new Set(srcs)]
 }
 
-function WideArt({ item, className }) {
-  const cacheKey = item?.id ?? item?.steam_app_id ?? item?.name
-  const [idx, setIdx] = useState(() => wideArtIndexCache.get(cacheKey) ?? 0)
-  const srcs = wideArtSources(item)
-  useEffect(() => {
-    setIdx(wideArtIndexCache.get(cacheKey) ?? 0)
-  }, [cacheKey])
-  if (idx >= srcs.length) return null
+// Walks the source list on error. Keyed by the first source so new art
+// (arriving from steam:appAssets) restarts the ladder instead of sticking.
+function WideArt({ item, art, className }) {
+  const srcs = wideArtSources(item, art)
+  const [idx, setIdx] = useState(0)
+  const [loaded, setLoaded] = useState(false)
+  useEffect(() => { setIdx(0); setLoaded(false) }, [srcs[0]])
+  if (idx >= srcs.length) return <div className={`${className} ${s.artEmpty}`}><IconCalendar size={26} stroke={1.3} /></div>
   return (
     <img
-      className={className}
+      className={`${className} ${loaded ? s.artLoaded : ''}`}
       src={srcs[idx]}
       alt=""
       loading="lazy"
       decoding="async"
-      onLoad={() => wideArtIndexCache.set(cacheKey, idx)}
-      onError={() => setIdx((i) => {
-        const next = i + 1
-        wideArtIndexCache.set(cacheKey, next)
-        return next
-      })}
+      onLoad={() => setLoaded(true)}
+      onError={() => setIdx(i => i + 1)}
     />
   )
 }
@@ -136,93 +92,168 @@ function badgeClassFor(rel) {
   return ''
 }
 
-// ── Detail popup — richer store info, Steam link, quick status ───────────────
-function DetailModal({ item, rel, onClose, onStatus }) {
-  const [details, setDetails] = useState(undefined)   // undefined = loading, null = unavailable
-
-  useEffect(() => {
-    let cancelled = false
-    if (item.steam_app_id) {
-      window.kozo?.api?.steam?.storeDetails?.(item.steam_app_id).then(res => {
-        if (!cancelled) setDetails(res?.ok ? res.data : null)
-      })
-    } else {
-      setDetails(null)
-    }
-    return () => { cancelled = true }
-  }, [item.id])
-
-  const genres = details?.genres?.length ? details.genres : parseGenres(item)
-
+// ── Detail popup: the shared store-style game modal ───────────────────────────
+function DetailModal({ item, rel, art, onClose, onStatus, onUntrack }) {
+  const [confirm, setConfirm] = useState(false)
   return (
-    <Modal title={item.name} icon={<IconCalendar size={17} stroke={1.6} />} width={620} onClose={onClose}>
-      <div className={s.detailHero}>
-        <WideArt item={item} className={s.detailArt} />
-        <span className={s.detailGrad} />
-        <span className={`${s.badge} ${s.detailBadge} ${badgeClassFor(rel)}`}>
-          {countdown(rel)}
-        </span>
-      </div>
-
-      <div className={s.detailMeta}>
-        {item.release_date && <span className={s.detailDate}><IconCalendar size={13} stroke={1.7} /> {item.release_date}</span>}
-        {genres.length > 0 && <span className={s.detailGenres}>{genres.slice(0, 4).join(' · ')}</span>}
-      </div>
-
-      {details === undefined && <PanelSkeleton lines={3} />}
-      {details?.description && <p className={s.detailDesc}>{details.description}</p>}
-      {details?.developers?.length > 0 && (
-        <div className={s.detailDevs}>
-          By <strong>{details.developers.join(', ')}</strong>
-          {details.publishers?.length > 0 && details.publishers.join() !== details.developers.join() && (
-            <> · Published by {details.publishers.join(', ')}</>
-          )}
-        </div>
-      )}
-      {details === null && !item.steam_app_id && (
-        <p className={`${s.detailDesc} ${s.detailDescMuted}`}>No Steam page linked for this game.</p>
-      )}
-
-      <div className={s.detailActions}>
-        {item.steam_app_id && (
-          <button
-            className={ms.btnPrimary}
-            onClick={() => window.kozo?.api?.shell?.openExternal(`https://store.steampowered.com/app/${item.steam_app_id}`)}
-          >
-            <IconBrandSteam size={14} stroke={1.8} /> View on Steam
+    <SteamGameModal
+      appId={item.steam_app_id}
+      name={item.name}
+      release={item.release_date}
+      countdown={countdown(rel)}
+      art={art}
+      fallbackArt={wideArtSources(item, null)}
+      onClose={onClose}
+      actions={
+        <>
+          <button className={ms.btnCancel} onClick={() => (confirm ? onUntrack() : setConfirm(true))}
+            title="Stop tracking this release">
+            <IconBookmarkOff size={13} stroke={1.8} /> {confirm ? 'Click to confirm' : 'Untrack'}
           </button>
-        )}
-        <button className={ms.btnCancel} onClick={() => onStatus('want_to_play')}>
-          <IconBookmark size={13} stroke={1.8} /> Want to play
-        </button>
-        <button className={ms.btnCancel} onClick={() => onStatus('playing')}>
-          <IconPlayerPlayFilled size={12} /> Playing
-        </button>
-      </div>
-    </Modal>
+          <button className={ms.btnCancel} onClick={() => onStatus('want_to_play')}>
+            <IconBookmark size={13} stroke={1.8} /> Want to play
+          </button>
+          <button className={ms.btnPrimary} onClick={() => onStatus('playing')}>
+            <IconPlayerPlayFilled size={12} /> Playing
+          </button>
+        </>
+      }
+    />
   )
 }
 
 // ── Card ──────────────────────────────────────────────────────────────────────
-function UpcomingCard({ item, rel, onOpen }) {
-  const genres = parseGenres(item)
-  const sub = item.release_date || (genres.length ? genres.slice(0, 2).join(' · ') : 'To be announced')
+// How far along the wait is, from when it was added to the list to release.
+function waitProgress(item, rel) {
+  if (!rel || rel.ts == null || rel.vague || !item.added_at) return null
+  const start = new Date(item.added_at).getTime()
+  const end = rel.ts
+  if (!Number.isFinite(start) || end <= start) return null
+  return Math.min(1, Math.max(0, (Date.now() - start) / (end - start)))
+}
+
+function UpcomingCard({ item, rel, art, onOpen, onStatus, onUntrack }) {
+  const [confirm, setConfirm] = useState(false)
+  const genres = parseGenres(item).slice(0, 3)
+  const progress = waitProgress(item, rel)
+  const out = rel?.until != null && rel.until <= Date.now()
+  const open = () => onOpen({ item, rel })
+  const stop = (fn) => (e) => { e.stopPropagation(); fn() }
   return (
-    <button className={s.card} data-gpnav="" onClick={() => onOpen({ item, rel })}>
-      <WideArt item={item} className={s.cardArt} />
-      <span className={s.cardGrad} />
-      <span className={`${s.badge} ${badgeClassFor(rel)}`}>{countdown(rel)}</span>
-      <div className={s.cardBody}>
-        <div className={s.cardName} title={item.name}>{item.name}</div>
-        <div className={s.cardSub} title={sub}>{sub}</div>
+    <div
+      className={`${s.card} ${out ? s.cardOut : ''}`}
+      role="button"
+      tabIndex={0}
+      data-gpnav=""
+      onClick={open}
+      onKeyDown={(e) => { if (e.key === 'Enter') open() }}
+    >
+      <div className={s.cardMedia}>
+        <WideArt item={item} art={art} className={s.cardArt} />
+        <span className={`${s.pill} ${badgeClassFor(rel)}`}>{countdown(rel)}</span>
+        <div className={s.cardActions}>
+          {item.steam_app_id && (
+            <button className={s.cardAction} title="Steam page"
+              onClick={stop(() => window.kozo?.api?.shell?.openExternal(`https://store.steampowered.com/app/${item.steam_app_id}`))}>
+              <IconBrandSteam size={14} stroke={1.8} />
+            </button>
+          )}
+          <button className={s.cardAction} title="Move to Want to play" onClick={stop(() => onStatus(item, 'want_to_play'))}>
+            <IconBookmark size={14} stroke={1.8} />
+          </button>
+          <button className={`${s.cardAction} ${confirm ? s.cardActionConfirm : ''}`}
+            title={confirm ? 'Click again to untrack' : 'Untrack'}
+            onMouseLeave={() => setConfirm(false)}
+            onClick={stop(() => (confirm ? onUntrack(item) : setConfirm(true)))}>
+            <IconBookmarkOff size={14} stroke={1.8} />{confirm && <span>Untrack?</span>}
+          </button>
+        </div>
       </div>
-    </button>
+      <div className={s.cardInfo}>
+        <div className={s.cardName} title={item.name}>{item.name}</div>
+        <div className={s.cardDate}>
+          <IconCalendar size={13} stroke={1.8} />
+          {item.release_date || 'Release date not announced'}
+        </div>
+        {genres.length > 0 && (
+          <div className={s.cardGenres}>{genres.map(g => <span key={g} className={s.cardGenre}>{g}</span>)}</div>
+        )}
+        {progress != null && (
+          <div className={s.cardWait}>
+            <div className={s.cardProgress}><span style={{ width: `${progress * 100}%` }} /></div>
+            <span className={s.cardWaitLabel}>{Math.round(progress * 100)}% of the wait</span>
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 
 export default function Upcoming() {
   const [items, setItems] = useState(upcomingCache)
   const [detail, setDetail] = useState(null)   // { item, rel } | null
+  const [tab, setTab] = useState(() => localStorage.getItem('kozo:upcoming:tab') || 'mine')
+  // Ctrl + mouse wheel card size (the Steam calendar tab has its own).
+  const zoomStyle = useCardZoom('upcoming', tab === 'mine' ? 'grid' : 'off', { grid: 280 })
+  // Steam appids already on the Game List: appid → { id, status }. The calendar
+  // marks them tracked and can untrack entries that are still Upcoming.
+  const [trackedAppIds, setTrackedAppIds] = useState(() => new Map())
+  const [art, setArt] = useState({})   // steam appid → real store art (steam:appAssets)
+
+  async function loadTracked() {
+    const res = await window.kozo?.api?.gameList?.list?.({ limit: 100000, offset: 0 })
+    if (res?.ok) {
+      setTrackedAppIds(new Map((res.data?.items || [])
+        .filter(i => i.steam_app_id)
+        .map(i => [Number(i.steam_app_id), { id: i.id, status: i.status }])))
+    }
+  }
+
+  async function trackGame(g) {
+    const res = await window.kozo?.api?.gameList?.add?.({
+      name: g.name,
+      steam_app_id: g.appid,
+      status: 'upcoming',
+      release_date: g.release || null,
+    })
+    if (res?.ok) { await Promise.all([load(), loadTracked()]) }
+  }
+
+  // Real hero/header art for the cards (newer titles 404 on the classic paths).
+  useEffect(() => {
+    const ids = (items || []).map(i => i.steam_app_id).filter(id => id && !art[id])
+    if (!ids.length) return
+    let alive = true
+    window.kozo?.api?.steam?.appAssets?.(ids).then(res => {
+      if (alive && res?.ok) setArt(prev => ({ ...prev, ...res.data }))
+    })
+    return () => { alive = false }
+  }, [items])
+
+  async function untrackGame(g) {
+    const info = trackedAppIds.get(Number(g.appid))
+    if (!info || info.status !== 'upcoming') return
+    const res = await window.kozo?.api?.gameList?.delete?.(info.id)
+    if (res?.ok) { await Promise.all([load(), loadTracked()]) }
+  }
+
+  // My upcoming: remove a tracked release from the Game List.
+  async function untrackItem(item) {
+    const res = await window.kozo?.api?.gameList?.delete?.(item.id)
+    if (res?.ok) { setDetail(null); await Promise.all([load(), loadTracked()]) }
+  }
+
+  function switchTab(next) {
+    setTab(next)
+    try { localStorage.setItem('kozo:upcoming:tab', next) } catch {}
+  }
+
+  const tabs = (
+    <div className={s.tabs} data-tour="upcoming-tabs">
+      <button className={`${s.tab} ${tab === 'mine' ? s.tabActive : ''}`} onClick={() => switchTab('mine')}>My upcoming</button>
+      <button className={`${s.tab} ${tab === 'steam' ? s.tabActive : ''}`} onClick={() => switchTab('steam')}>Steam calendar</button>
+    </div>
+  )
 
   async function load() {
     const res = await window.kozo?.api?.gameList?.list?.({ status: 'upcoming', limit: 1000, offset: 0 })
@@ -238,12 +269,13 @@ export default function Upcoming() {
 
   useEffect(() => {
     load()
+    loadTracked()
     // Warm the store-details cache (instant popups) and backfill any missing
     // release dates so long-released games can't linger in "No date yet".
     window.kozo?.api?.gameList?.refreshUpcomingInfo?.()
     // Unsubscribe THIS page's own listener only — removeAll() is window-wide
     // and would tear down the always-mounted Sidebar's listeners too.
-    const off = window.kozo?.events?.onGameUpdated?.(load)
+    const off = window.kozo?.events?.onGameUpdated?.(() => { load(); loadTracked() })
     return () => off?.()
   }, [])
 
@@ -285,7 +317,7 @@ export default function Upcoming() {
 
   const sections = [
     { key: 'soon', Icon: IconCalendar, label: 'Coming soon', entries: soon },
-    { key: 'out', Icon: IconConfetti, label: 'Out now — click a game to update its status', entries: released, out: true },
+    { key: 'out', Icon: IconConfetti, label: 'Out now. Click a game to update its status', entries: released, out: true },
     { key: 'tba', Icon: IconHelpCircle, label: 'No date yet', entries: tba },
   ].filter(sec => sec.entries.length > 0)
 
@@ -296,26 +328,30 @@ export default function Upcoming() {
           <IconCalendar size={16} stroke={1.7} /> Upcoming
         </h1>
         {items.length > 0 && <span className={s.count}>{items.length}</span>}
+        {tabs}
       </div>
 
       <div className={s.content}>
-        <div className={s.inner}>
-          {items.length === 0 && (
+        <div className={s.inner} style={zoomStyle}>
+          <ReleasedPanel onChanged={load} />
+          {tab === 'steam' && <SteamCalendar trackedAppIds={trackedAppIds} onTrack={trackGame} onUntrack={untrackGame} />}
+
+          {tab === 'mine' && items.length === 0 && (
             <EmptyState
               Icon={IconHourglassLow}
               title="No upcoming games yet"
-              desc={'Add games to your Game List with the "Upcoming" status and they\'ll line up here with release countdowns.'}
+              desc={'Track games from the Steam calendar tab, or give Game List entries the "Upcoming" status, and they\'ll line up here with release countdowns.'}
             />
           )}
 
-          {sections.map(sec => (
+          {tab === 'mine' && sections.map(sec => (
             <section key={sec.key} className={s.section}>
               <div className={`${s.sectionTitle} ${sec.out ? s.sectionTitleOut : ''}`}>
                 <sec.Icon size={14} stroke={1.7} /> {sec.label}
               </div>
               <div className={s.grid}>
                 {sec.entries.map(({ item, rel }) => (
-                  <UpcomingCard key={item.id} item={item} rel={rel} onOpen={setDetail} />
+                  <UpcomingCard key={item.id} item={item} rel={rel} art={art[item.steam_app_id]} onOpen={setDetail} onStatus={setStatus} onUntrack={untrackItem} />
                 ))}
               </div>
             </section>
@@ -325,9 +361,11 @@ export default function Upcoming() {
         {detail && (
           <DetailModal
             item={detail.item}
+            art={art[detail.item.steam_app_id]}
             rel={detail.rel}
             onClose={() => setDetail(null)}
             onStatus={(status) => setStatus(detail.item, status)}
+            onUntrack={() => untrackItem(detail.item)}
           />
         )}
       </div>

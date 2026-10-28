@@ -95,7 +95,7 @@
 /* Rarest trophies */
 .rareGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 240px), 1fr));   /* Ctrl+wheel */
   gap: var(--sp-8);
   contain: layout style;
 }
@@ -184,7 +184,7 @@
 .modalScroll {
   max-height: 60vh;
   overflow-y: auto;
-  padding-right: var(--sp-4);
+  padding-right: var(--sp-10);
   transform: translateZ(0);
 }
 

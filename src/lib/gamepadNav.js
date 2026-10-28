@@ -22,6 +22,11 @@ let _focused = null            // currently ringed element
 let _heldDir = null            // direction currently held
 let _nextRepeatAt = 0
 let _prevButtons = []          // previous pressed-state per button index
+// Set by the first `gamepadconnected` event, which Chromium fires on a pad's
+// first button press. Until then KoZo never calls navigator.getGamepads():
+// calling it makes Chromium start polling every controller (virtual ones from
+// Steam Input or DS4Windows included) for the rest of the session.
+let _padSeen = false
 
 function connected() {
   try {
@@ -162,8 +167,8 @@ function stopPolling() {
 export function initGamepadNav({ navigate }) {
   _navigate = navigate
 
-  const onConnect = () => { if (document.visibilityState === 'visible') startPolling() }
-  const onDisconnect = () => { if (!connected()) stopPolling() }
+  const onConnect = () => { _padSeen = true; if (document.visibilityState === 'visible') startPolling() }
+  const onDisconnect = () => { if (!connected()) { stopPolling(); _padSeen = false } }
   // Any mouse/keyboard input hides the controller focus ring.
   const onHumanInput = () => clearFocus()
   // The window is very often hidden behind a fullscreen game while a
@@ -171,7 +176,7 @@ export function initGamepadNav({ navigate }) {
   // getGamepads()+DOM poll for navigation nobody can see or use. Pause on
   // hide/blur, resume on show/focus (only if a gamepad is still there).
   const onHidden = () => stopPolling()
-  const onVisible = () => { if (connected()) startPolling() }
+  const onVisible = () => { if (_padSeen && connected()) startPolling() }
   const onVisibilityChange = () => {
     if (document.visibilityState === 'visible') onVisible()
     else onHidden()
@@ -185,7 +190,6 @@ export function initGamepadNav({ navigate }) {
   window.addEventListener('blur', onHidden)
   window.addEventListener('focus', onVisible)
 
-  if (connected() && document.visibilityState === 'visible') startPolling()
 
   return () => {
     stopPolling()

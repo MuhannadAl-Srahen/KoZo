@@ -1,16 +1,13 @@
 import React, { useState, useEffect } from 'react'
 import { IconEdit, IconTrash, IconStar, IconBrandSteam, IconCheck } from '@tabler/icons-react'
 import Modal, { modalStyles as ms } from '../ui/Modal'
+import { LIST_STATUSES, LIST_STATUS_ORDER } from '../../lib/cardModel'
+import MonthPicker from '../ui/MonthPicker'
+import MediaGallery from '../ui/MediaGallery'
+import { formatMonthKey } from '../../lib/utils'
 import s from './AddGameModal.module.css'
 
-const STATUS_OPTIONS = [
-  { value: 'want_to_play', label: 'Want to play' },
-  { value: 'playing',      label: 'Playing' },
-  { value: 'finished',     label: 'Finished' },
-  { value: 'on_hold',      label: 'On hold' },
-  { value: 'dropped',      label: 'Dropped' },
-  { value: 'upcoming',     label: 'Upcoming' },
-]
+const STATUS_OPTIONS = LIST_STATUS_ORDER.map(value => ({ value, label: LIST_STATUSES[value].label }))
 
 export default function EditGameListModal({ item, onClose, onSaved, onDeleted }) {
   const [name, setName]             = useState(item.name)
@@ -20,6 +17,28 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
   const [deleting, setDeleting]     = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [errors, setErrors]         = useState({})
+  const [plannedMonth, setPlannedMonth] = useState(item.planned_month || null)   // play plan 'YYYY-MM'
+  const [pickingMonth, setPickingMonth] = useState(false)
+  // Game media for the header gallery: Steam art + store screenshots.
+  const [media, setMedia] = useState([])
+  useEffect(() => {
+    const appId = item.steam_app_id
+    if (!appId) return
+    let alive = true
+    Promise.all([
+      window.kozo?.api?.steam?.appAssets?.([appId]),
+      window.kozo?.api?.steam?.storeDetails?.(appId),
+    ]).then(([assets, details]) => {
+      if (!alive) return
+      const a = assets?.ok ? assets.data?.[appId] : null
+      const lead = a?.hero || a?.capsule || a?.header
+      setMedia([
+        ...(lead ? [{ thumb: a.capsule || a.header || lead, full: lead }] : []),
+        ...(details?.ok ? (details.data?.media || []) : []),
+      ])
+    })
+    return () => { alive = false }
+  }, [item.steam_app_id])
   const [confirmingClose, setConfirmingClose] = useState(false)
 
   // Custom-list membership (Spotify-playlist style, many-to-many).
@@ -54,6 +73,7 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
     name !== item.name ||
     status !== item.status ||
     rating !== (item.rating != null ? String(item.rating) : '') ||
+    (plannedMonth || null) !== (item.planned_month || null) ||
     memberIds.size !== initialMemberIds.size ||
     [...memberIds].some(id => !initialMemberIds.has(id))
 
@@ -87,6 +107,7 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
       // so a rename or a list toggle would silently cost the milestone.
       ...(status !== item.status ? { status } : {}),
       rating: status === 'finished' && rating !== '' ? Number(rating) : null,
+      planned_month: plannedMonth || null,
     })
     if (!res?.ok) {
       setSaving(false)
@@ -127,7 +148,7 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
       icon={<IconEdit size={17} stroke={1.6} />}
       onClose={onClose}
       onRequestClose={requestClose}
-      width={460}
+      width={media.length ? 640 : 460}
       footer={
         <div style={{ display: 'flex', gap: 8, width: '100%', alignItems: 'center' }}>
           <button
@@ -163,6 +184,12 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
         </div>
       }
     >
+      {media.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <MediaGallery items={media} />
+        </div>
+      )}
+
       <div className={s.field}>
         <label className={`${s.label} ${s.labelRequired}`}>Game name</label>
         <input
@@ -199,11 +226,28 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
         </div>
       </div>
 
+      <div className={s.field}>
+        <label className={s.label}>Play plan</label>
+        <div className={s.pills}>
+          <button className={`${s.pill} ${plannedMonth ? s.pillActive : ''}`} onClick={() => setPickingMonth(v => !v)}>
+            {plannedMonth ? formatMonthKey(plannedMonth, 'long') : 'Not planned'}
+          </button>
+          {plannedMonth && (
+            <button className={s.pill} onClick={() => { setPlannedMonth(null); setPickingMonth(false) }}>Clear</button>
+          )}
+        </div>
+        {pickingMonth && (
+          <div style={{ marginTop: 8 }}>
+            <MonthPicker value={plannedMonth} onChange={(k) => { setPlannedMonth(k); setPickingMonth(false) }} />
+          </div>
+        )}
+      </div>
+
       {status === 'finished' && (
         <div className={s.field}>
           <label className={s.label}>
             <IconStar size={12} stroke={1.6} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />
-            Rating <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(0–10)</span>
+            Rating <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(0 to 10)</span>
           </label>
           <input
             type="number"

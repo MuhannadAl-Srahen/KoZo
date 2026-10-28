@@ -18,7 +18,7 @@ function getBannersDir() {
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
 // Uses axios for automatic gzip decompression and redirect following
 
-async function getJSON(url, params = {}) {
+async function getJSON(url, params = {}, extraHeaders = {}) {
   const axios = getAxios()
   const res = await axios.get(url, {
     params,
@@ -26,9 +26,23 @@ async function getJSON(url, params = {}) {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       'Accept-Encoding': 'gzip, deflate, br',
+      ...extraHeaders,
     },
   })
   return res.data
+}
+
+// Settings → "Show adult (18+) games". Steam's store search silently drops
+// adult-only titles for anonymous requests; ignore_preferences + the age-gate
+// cookie brings them back. Only search and the calendar feeds use this.
+const MATURE_COOKIE = 'wants_mature_content=1; birthtime=631152001; lastagecheckage=1-0-1990; mature_content=1'
+function showAdult() {
+  try { return require('../db/queries/settings').getSetting('show_adult_games') === '1' } catch { return false }
+}
+function adultSearchOpts() {
+  return showAdult()
+    ? { params: { ignore_preferences: 1 }, headers: { Cookie: MATURE_COOKIE } }
+    : { params: {}, headers: {} }
 }
 
 async function downloadFile(url, destPath) {
@@ -42,7 +56,10 @@ async function downloadFile(url, destPath) {
   })
   if (res.status !== 200) throw new Error(`HTTP ${res.status}`)
 
-  const file = fs.createWriteStream(destPath)
+  // Stream into a temp file and swap it in only when complete, so a stalled or
+  // failed refresh never deletes the banner the DB still points at.
+  const tmpPath = destPath + '.part'
+  const file = fs.createWriteStream(tmpPath)
   return new Promise((resolve, reject) => {
     // axios's timeout disarms once headers arrive — an alive-but-stalled body
     // stream would otherwise pend forever and wedge the sequential fallback
@@ -53,8 +70,14 @@ async function downloadFile(url, destPath) {
     arm()
     res.data.on('data', arm)
     res.data.pipe(file)
-    file.on('finish', () => { clearTimeout(t); file.close(resolve) })
-    const fail = (e) => { clearTimeout(t); file.destroy(); try { fs.unlinkSync(destPath) } catch {} ; reject(e) }
+    file.on('finish', () => {
+      clearTimeout(t)
+      file.close((err) => {
+        if (err) return fail(err)
+        try { fs.renameSync(tmpPath, destPath); resolve() } catch (e) { fail(e) }
+      })
+    })
+    const fail = (e) => { clearTimeout(t); file.destroy(); try { fs.unlinkSync(tmpPath) } catch {} ; reject(e) }
     file.on('error', fail)
     res.data.on('error', fail)
   })
@@ -91,7 +114,9 @@ async function testApiKey(key) {
 async function searchGames(query) {
   if (!query || query.trim().length < 2) return []
   try {
+    const adult = adultSearchOpts()
     const data = await getJSON('https://store.steampowered.com/search/results/', {
+      ...adult.params,
       term: query.trim(),
       json: 1,
       count: 20,
@@ -100,7 +125,7 @@ async function searchGames(query) {
       // would list "Blood and Wine", "...Soundtrack", "Temerian Armor Set"). The
       // user adds playable games, not their add-ons, so filter those out at source.
       category1: 998,
-    })
+    }, adult.headers)
     const items = data?.items ?? []
     return items
       .map(item => {
@@ -282,6 +307,16 @@ async function getSchemaKeyless(appId) {
 // Richer store info for the Upcoming detail popup — description, developers,
 // screenshots etc. Cached 1h per appid; the Upcoming tab prefetches on load so
 // opening a popup is instant.
+// Every in-memory cache here is capped: re-setting a key moves it to the end,
+// and past the cap the oldest entries go (Maps keep insertion order). Browsing
+// the Steam calendar for a long session used to grow these without limit.
+const CACHE_MAX = 500
+function capSet(map, key, value, max = CACHE_MAX) {
+  map.delete(key)
+  map.set(key, value)
+  while (map.size > max) map.delete(map.keys().next().value)
+}
+
 const _detailsCache = new Map()
 async function getStoreDetails(appId) {
   const hit = _detailsCache.get(appId)
@@ -301,12 +336,19 @@ async function getStoreDetails(appId) {
         coming_soon: !!d.release_date?.coming_soon,
         header_image: d.header_image || null,
         screenshots: (d.screenshots || []).slice(0, 4).map(sc => sc.path_thumbnail).filter(Boolean),
+        // Gallery: thumbnails for the strip, full size for the viewer / lightbox.
+        media: (d.screenshots || [])
+          .map(sc => ({ thumb: sc.path_thumbnail, full: sc.path_full || sc.path_thumbnail }))
+          .filter(m => m.thumb),
+        price: d.is_free ? 'Free to play' : (d.price_overview?.final_formatted || null),
+        categories: (d.categories || []).map(c => c.description).filter(Boolean).slice(0, 6),
+        website: d.website || null,
       }
     }
   } catch (e) {
     logger.warn(`getStoreDetails failed for ${appId}`, { message: e.message })
   }
-  _detailsCache.set(appId, { at: Date.now(), result })
+  capSet(_detailsCache, appId, { at: Date.now(), result })
   return result
 }
 
@@ -345,32 +387,173 @@ async function getStoreArt(appId, _retried = false) {
   }
 }
 
+// ── Real store art (hashed asset paths) ─────────────────────────────────────
+// Newer titles keep their portrait cover and library hero under HASHED paths
+// (store_item_assets/steam/apps/<id>/<hash>/library_capsule_2x.jpg), so the
+// classic steam/apps/<id>/library_600x900_2x.jpg 404s and cards fell back to a
+// letterboxed wide header (or no hero at all). IStoreBrowseService/GetItems is
+// public, keyless, batches many appids, and returns the exact filenames.
+const ASSET_BASE = 'https://shared.akamai.steamstatic.com/store_item_assets/'
+const ASSET_TTL_MS = 24 * 60 * 60 * 1000
+const assetCache = new Map()   // appid → { at, assets }
+
+function assetUrl(a, ...keys) {
+  if (!a?.asset_url_format) return null
+  for (const k of keys) {
+    if (a[k]) return ASSET_BASE + a.asset_url_format.replace('${FILENAME}', a[k])
+  }
+  return null
+}
+
+// appIds → Map(appid → { portrait, hero, header, capsule } absolute URLs, any may be null).
+async function getAppAssets(appIds) {
+  const ids = [...new Set((appIds || []).map(Number).filter(n => Number.isFinite(n) && n > 0))]
+  const out = new Map()
+  const missing = []
+  for (const id of ids) {
+    const hit = assetCache.get(id)
+    if (hit && Date.now() - hit.at < ASSET_TTL_MS) out.set(id, hit.assets)
+    else missing.push(id)
+  }
+  const batches = []
+  for (let i = 0; i < missing.length; i += 50) batches.push(missing.slice(i, i + 50))
+  // Batches run in parallel — the calendar asks for a few hundred at once.
+  await Promise.all(batches.map(async (batch) => {
+    try {
+      const input = {
+        ids: batch.map(appid => ({ appid })),
+        context: { language: 'english', country_code: 'US' },
+        data_request: { include_assets: true },
+      }
+      const data = await getJSON('https://api.steampowered.com/IStoreBrowseService/GetItems/v1/', { input_json: JSON.stringify(input) })
+      for (const item of data?.response?.store_items || []) {
+        const a = item.assets
+        const assets = {
+          portrait: assetUrl(a, 'library_capsule_2x', 'library_capsule'),
+          hero:     assetUrl(a, 'library_hero_2x', 'library_hero'),
+          header:   assetUrl(a, 'header_2x', 'header'),
+          capsule:  assetUrl(a, 'main_capsule_2x', 'main_capsule'),
+        }
+        capSet(assetCache, item.appid, { at: Date.now(), assets }, 2000)
+        out.set(item.appid, assets)
+      }
+    } catch (e) {
+      logger.warn('getAppAssets failed', { message: e.message, count: batch.length })
+    }
+  }))
+  return out
+}
+
+async function assetsFor(appId) {
+  return (await getAppAssets([appId])).get(Number(appId)) || null
+}
+
+// Demos, playtests and prologues usually have hidden store pages, so Steam
+// serves no art for their own appid (Valor Mortis Demo → nothing). Their full
+// game does: "Valor Mortis Demo" → "Valor Mortis" → its appid. null when the
+// name doesn't look like a demo or no full game matches.
+const DEMO_SUFFIX_RE = /[\s:\-\u2013\u2014]*\b(demo|playtest|prologue|beta|open beta|closed beta|test server|trial)\b\s*$/i
+const parentCache = new Map()
+async function parentArtAppId(appId, name) {
+  const key = Number(appId)
+  if (parentCache.has(key)) return parentCache.get(key)
+  let n = name
+  if (!n) {
+    try { n = require('../db/database').getDb().prepare('SELECT name FROM games WHERE steam_app_id = ?').get(String(appId))?.name } catch {}
+  }
+  const base = String(n || '').replace(DEMO_SUFFIX_RE, '').trim()
+  let parent = null
+  if (base && base.length >= 2 && base !== String(n).trim()) {
+    try {
+      const m = await findAppByName(base)
+      if (m && Number(m.steam_app_id) !== key) parent = Number(m.steam_app_id)
+    } catch {}
+  }
+  capSet(parentCache, key, parent)
+  return parent
+}
+
+// Library hero (wide art on GameDetail): classic path first, then the hashed one.
+async function downloadHero(appId, gameId, _viaParent = false) {
+  const heroPath = path.join(getBannersDir(), `${gameId}_hero.jpg`)
+  const urls = [`https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_hero.jpg`]
+  const a = await assetsFor(appId).catch(() => null)
+  if (a?.hero) urls.push(a.hero)
+  for (const url of urls) {
+    try {
+      await downloadFile(url, heroPath)
+      require('../db/database').getDb().prepare('UPDATE games SET hero_local_path = ? WHERE id = ?').run(heroPath, gameId)
+      return heroPath
+    } catch { /* next */ }
+  }
+  if (!_viaParent) {
+    const parent = await parentArtAppId(appId)
+    if (parent) return downloadHero(parent, gameId, true)
+  }
+  throw new Error(`No hero art for appId ${appId}`)
+}
+
 // Returns the best WORKING remote cover URL for a 2:3 card without downloading:
 // the true portrait when it exists, else the real (hashed) header, else the
 // 231px capsule. Used for remote-only surfaces like the Game List.
-async function resolveBannerUrl(appId) {
+async function resolveBannerUrl(appId, _viaParent = false) {
+  if (!_viaParent) {
+    // A hidden demo page has no art of its own: use the full game's.
+    const a0 = await assetsFor(appId).catch(() => null)
+    if (!a0?.portrait && !a0?.header) {
+      const parent = await parentArtAppId(appId)
+      if (parent) return resolveBannerUrl(parent, true)
+    }
+  }
   const portrait = `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_600x900_2x.jpg`
   try {
     const r = await getAxios().head(portrait, { timeout: 8000 })
     if (r.status === 200) return portrait
   } catch { /* no portrait — resolve real art below */ }
+  const a = await assetsFor(appId).catch(() => null)
+  if (a?.portrait) return a.portrait
   const art = await getStoreArt(appId)
   return art?.header_image || art?.capsule_image || portrait
 }
 
-async function downloadBanner(appId, gameId, extraUrls = []) {
+// Library covers are shown at roughly 170 to 380 px wide, but Steam's portrait
+// is 1200x1800: about 8.6 MB of decoded image memory per card. Stored covers
+// are scaled down to 600 px wide (about 2.2 MB decoded), which is still sharp
+// at the largest card size. Best effort: on any failure the file stays as is.
+const COVER_MAX_W = 600
+function shrinkCover(file) {
+  try {
+    const { nativeImage } = require('electron')
+    const img = nativeImage.createFromPath(file)
+    if (img.isEmpty()) return false
+    const { width } = img.getSize()
+    if (width <= COVER_MAX_W) return false
+    const small = img.resize({ width: COVER_MAX_W, quality: 'best' })
+    fs.writeFileSync(file, small.toJPEG(88))
+    return true
+  } catch { return false }
+}
+
+async function downloadBanner(appId, gameId, extraUrls = [], _viaParent = false) {
   const destPath = path.join(getBannersDir(), `${gameId}.jpg`)
   // Try the appid-path images first — fast, and they exist for the vast majority
   // of released games (true 600×900 portrait is best for the 2:3 library card).
+  // A real portrait always beats a wide header: when the classic portrait path
+  // 404s (newer titles), the hashed portrait from GetItems comes next.
+  const a = await assetsFor(appId).catch(() => null)
+  // The hashed portrait (one cached GetItems call) goes first: on newer titles
+  // the classic paths 404 one after another before it is ever reached.
   const urls = [
+    a?.portrait,
     `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_600x900_2x.jpg`,
     `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_600x900.jpg`,
     `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/header.jpg`,
     `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/capsule_616x353.jpg`,
-  ]
+  ].filter(Boolean)
   for (const url of urls) {
     try {
       await downloadFile(url, destPath)
+      shrinkCover(destPath)
       logger.info(`Banner downloaded for ${appId} from ${url}`)
       return destPath
     } catch { /* try next */ }
@@ -385,9 +568,14 @@ async function downloadBanner(appId, gameId, extraUrls = []) {
   for (const url of hashed) {
     try {
       await downloadFile(url, destPath)
+      shrinkCover(destPath)
       logger.info(`Banner downloaded for ${appId} from ${url}`)
       return destPath
     } catch { /* try next */ }
+  }
+  if (!_viaParent) {
+    const parent = await parentArtAppId(appId)
+    if (parent) return downloadBanner(parent, gameId, [], true)
   }
   throw new Error(`No banner found for appId ${appId}`)
 }
@@ -455,12 +643,7 @@ async function refreshGameData(gameId) {
 
   // Hero banner (wide landscape, used in GameDetail)
   try {
-    const heroPath = path.join(getBannersDir(), `${gameId}_hero.jpg`)
-    await downloadFile(
-      `https://cdn.akamai.steamstatic.com/steam/apps/${game.steam_app_id}/library_hero.jpg`,
-      heroPath
-    )
-    getDb().prepare('UPDATE games SET hero_local_path = ? WHERE id = ?').run(heroPath, gameId)
+    await downloadHero(game.steam_app_id, gameId)
     logger.info(`Hero banner downloaded for game ${gameId}`)
   } catch (e) {
     logger.warn(`Hero banner download failed for game ${gameId}`, { message: e.message })
@@ -498,12 +681,7 @@ async function refreshBanners(gameId) {
 
   // Hero banner (game detail page wide banner)
   try {
-    const heroPath = path.join(getBannersDir(), `${gameId}_hero.jpg`)
-    await downloadFile(
-      `https://cdn.akamai.steamstatic.com/steam/apps/${game.steam_app_id}/library_hero.jpg`,
-      heroPath
-    )
-    getDb().prepare('UPDATE games SET hero_local_path = ? WHERE id = ?').run(heroPath, gameId)
+    await downloadHero(game.steam_app_id, gameId)
   } catch (e) {
     logger.warn(`Hero banner failed for game ${gameId}`, { message: e.message })
   }
@@ -539,9 +717,14 @@ async function getPlayerAchievements(appId, apiKey, steamId) {
     return { unlocks, error: null }
   } catch (e) {
     const status = e.response?.status
-    // 403 / 401 = Steam rejected the request because the profile is private or
-    // the API key doesn't have access to this player's data.
-    if (status === 403 || status === 401) return { unlocks: [], error: 'private' }
+    // 401, or a 403 HTML page about the key= parameter, means the API key itself
+    // was rejected — telling the user to change privacy settings would be wrong.
+    // Any other 403 is Steam refusing a private profile's data.
+    if (status === 401 || status === 403) {
+      const body = e.response?.data
+      if (status === 401 || (typeof body === 'string' && /key/i.test(body))) return { unlocks: [], error: 'invalid_key' }
+      return { unlocks: [], error: 'private' }
+    }
     // 400 = this app has no achievement stats at all (unreleased / non-achievement
     // game). That's expected, not a real failure — report it cleanly.
     if (status === 400) return { unlocks: [], error: 'no_stats_for_game' }
@@ -690,7 +873,7 @@ async function getPlayerAchievementsXml(appId, steamId) {
     logger.warn(`getPlayerAchievementsXml failed for ${appId}`, { message: e.message })
     result = { error: e.message || 'network_error' }
   }
-  _xmlCache.set(key, { at: Date.now(), result })
+  capSet(_xmlCache, key, { at: Date.now(), result }, 200)
   return result
 }
 
@@ -760,8 +943,64 @@ async function runGenreBackfill() {
   }
 }
 
+// ── Popular upcoming releases (the Upcoming → Steam calendar tab) ───────────
+// Two Steam store-search feeds, 50 per page:
+//   soon     — "popular coming soon": the most-followed games out in the next weeks
+//   wishlist — "popular wishlist": the most-wishlisted upcoming games, months out
+// A date-sorted feed is useless here (thousands of tiny games per day). Each
+// page is cached for 6h — the calendar pages through them lazily.
+const COMING_SOON_FEEDS = { soon: 'popularcomingsoon', wishlist: 'popularwishlist' }
+const COMING_SOON_TTL_MS = 6 * 60 * 60 * 1000
+const COMING_SOON_PAGE = 50
+const comingSoonCache = new Map()   // `${feed}:${page}` → { at, items, total }
+
+function decodeEntities(str) {
+  return String(str || '')
+    .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'")
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+}
+
+// One <a class="search_result_row"> per game: appid, title, release text, capsule.
+function parseComingSoonHtml(html) {
+  const items = []
+  for (const chunk of String(html || '').split(/<a\s+href="/).slice(1)) {
+    const appid = Number((chunk.match(/data-ds-appid="(\d+)"/) || [])[1])
+    if (!appid) continue   // bundles/packages carry no single appid
+    const name = decodeEntities((chunk.match(/<span class="title">([\s\S]*?)<\/span>/) || [])[1]).trim()
+    const release = decodeEntities((chunk.match(/search_released[^>]*>([\s\S]*?)<\/div>/) || [])[1]).replace(/\s+/g, ' ').trim()
+    const capsule = (chunk.match(/<img src="([^"]+)"/) || [])[1] || null
+    const price = decodeEntities((chunk.match(/discount_final_price[^>]*>([^<]*)</) || [])[1]).trim() || null
+    const prepurchase = /prepurchase_tag/.test(chunk)
+    if (name) items.push({ appid, name, release: release || null, capsule, price, prepurchase })
+  }
+  return items
+}
+
+async function getComingSoon(feed = 'soon', page = 0) {
+  const filter = COMING_SOON_FEEDS[feed] || COMING_SOON_FEEDS.soon
+  const p = Math.max(0, Math.floor(Number(page) || 0))
+  const adult = adultSearchOpts()
+  const key = `${filter}:${p}:${showAdult() ? 'adult' : 'safe'}`
+  const hit = comingSoonCache.get(key)
+  if (hit && Date.now() - hit.at < COMING_SOON_TTL_MS) return { items: hit.items, total: hit.total, page: p, pageSize: COMING_SOON_PAGE }
+  const res = await getAxios().get('https://store.steampowered.com/search/results/', {
+    params: { ...adult.params, filter, infinite: 1, start: p * COMING_SOON_PAGE, count: COMING_SOON_PAGE, cc: 'us', l: 'english', category1: 998 },
+    timeout: 15000,
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', ...adult.headers },
+  })
+  const items = parseComingSoonHtml(res.data?.results_html)
+  const total = Number(res.data?.total_count) || 0
+  capSet(comingSoonCache, key, { at: Date.now(), items, total }, 100)
+  return { items, total, page: p, pageSize: COMING_SOON_PAGE }
+}
+
 module.exports = {
-  testApiKey, searchGames, findAppByName, refreshGameData, refreshBanners, downloadBanner,
+  shrinkCover,
+  getBannersDir, downloadFile,
+  getAppAssets, downloadHero,
+  getComingSoon, parseComingSoonHtml,
+  testApiKey, searchGames, findAppByName, parentArtAppId, refreshGameData, refreshBanners, downloadBanner,
   getStoreArt, getStoreDetails, resolveBannerUrl, resolveSteamId, runGenreBackfill, storeRemoteFallback,
   getSchemaForGame, getSchemaKeyless, getGlobalAchievementPercentages, getPlayerAchievements, getPlayerAchievementsXml,
   getPlayerSummary, getOwnedGames,

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, shell, protocol, globalShortcut } = require('electron')
+const { app, BrowserWindow, Menu, shell, protocol, globalShortcut, dialog } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const { setupTray } = require('./tray')
@@ -77,9 +77,17 @@ function createWindow() {
   })
 
   // Silence noisy CDP warnings that DevTools emits for unimplemented Electron features
+  // Renderer errors otherwise never reach the log file — a crash during render
+  // would only ever show up as an empty window.
   mainWindow.webContents.on('console-message', (event) => {
     const message = event.message ?? ''
     if (message.includes('Autofill.enable') || message.includes('Autofill.setAddresses')) return
+    if (event.level === 'error') {
+      try { require('./logger').error(`renderer: ${message}`, { source: event.sourceId, line: event.lineNumber }) } catch {}
+    }
+  })
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    try { require('./logger').error('renderer process gone', details) } catch {}
   })
 
   // Resolve "start minimized to tray" BEFORE loading so we can also skip opening
@@ -114,16 +122,30 @@ function createWindow() {
     }
   })
   mainWindow.on('hide', () => { if (!app.isQuitting) armDestroyTimer() })
-  mainWindow.on('show', clearDestroyTimer)
+  mainWindow.on('show', () => {
+    clearDestroyTimer()
+    // Cheap DB-only pass, so a release that passed while KoZo sat in the tray
+    // shows up the moment the window opens.
+    try { require('./services/releaseWatch').check() } catch {}
+  })
   // destroy() (the unload-in-tray path below) skips 'close' but still fires
   // 'closed' — clear the module ref so getOrCreateMainWindow knows to recreate.
   mainWindow.on('closed', () => { mainWindow = null })
 
   // Open external links in the OS browser, not in the app
+  // (http/https only — same rule as the shell:openExternal IPC).
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url)
     return { action: 'deny' }
   })
+  // Never navigate the window itself away from the app bundle — a remote page
+  // there would get the full preload API.
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    const isApp = app.isPackaged ? url.startsWith('file://') : url.startsWith('http://localhost:5173')
+    if (!isApp) e.preventDefault()
+  })
+  // Windows shutdown / logoff skips before-quit + will-quit entirely.
+  mainWindow.on('session-end', flushOnExit)
 }
 
 // Bring the main window to front, recreating it first if it was unloaded
@@ -192,8 +214,60 @@ app.whenReady().then(() => {
     }
   })
 
-  const { initDatabase } = require('./db/database')
-  initDatabase()
+  // A DB that can't open (locked by AV, permissions) used to reject this
+  // callback silently: no window, no tray, but the single-instance lock held.
+  try {
+    require('./db/database').initDatabase()
+  } catch (e) {
+    try { require('./logger').error('initDatabase failed', { message: e.message }) } catch {}
+    dialog.showErrorBox('KoZo could not start',
+      `The database could not be opened:
+
+${e.message}
+
+Close any program that may be using it and start KoZo again.`)
+    app.exit(1)
+    return
+  }
+
+  // One-time: put every existing library game on the Game List (new adds are
+  // synced as they happen — see addLibraryGame in ipc.js).
+  try {
+    const settingsQ = require('./db/queries/settings')
+    if (settingsQ.getSetting('migrated_library_to_list') !== '1') {
+      const n = require('./db/queries/gameList').syncLibraryToList()
+      settingsQ.setSetting('migrated_library_to_list', '1')
+      if (n) require('./logger').info(`Library → Game List: added ${n} game(s)`)
+    }
+  } catch (e) {
+    try { require('./logger').warn('Library → Game List sync failed', { message: e.message }) } catch {}
+  }
+
+  // One-time: remove games a buggy Scan PC imported from temp/installer folders
+  // ("Setup", hash-named folders under C:\Temp\…). Only rows with no playtime
+  // and no sessions are touched; their Game List copies go with them.
+  try {
+    const settingsQ = require('./db/queries/settings')
+    if (settingsQ.getSetting('purged_junk_scan_games') !== '1') {
+      const { isJunkFolder } = require('./services/pcScanner')
+      const db = require('./db/database').getDb()
+      const junk = db.prepare(`
+        SELECT g.id, g.name, g.install_path FROM games g
+        WHERE COALESCE(g.total_playtime_seconds, 0) = 0
+          AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.game_id = g.id)
+      `).all().filter(g => g.install_path && isJunkFolder(g.install_path))
+      db.transaction(() => {
+        for (const g of junk) {
+          db.prepare('DELETE FROM game_list WHERE game_id = ?').run(g.id)
+          db.prepare('DELETE FROM games WHERE id = ?').run(g.id)
+        }
+      })()
+      settingsQ.setSetting('purged_junk_scan_games', '1')
+      if (junk.length) require('./logger').info(`Removed ${junk.length} non-game scan import(s)`, { games: junk.map(g => g.name) })
+    }
+  } catch (e) {
+    try { require('./logger').warn('junk scan cleanup failed', { message: e.message }) } catch {}
+  }
 
   require('./ipc')
 
@@ -333,16 +407,23 @@ app.whenReady().then(() => {
   })
 })
 
-app.on('will-quit', () => {
-  require('./services/processWatcher').stop()
-  require('./services/crackWatcher').stopWatching()
+// Shared by will-quit and the window's session-end (Windows shutdown/logoff).
+// Each step is isolated so one failure can't skip the flushes or the DB close.
+let _exitFlushed = false
+function flushOnExit() {
+  if (_exitFlushed) return
+  _exitFlushed = true
+  try { require('./services/processWatcher').stop() } catch {}
+  try { require('./services/crackWatcher').stopWatching() } catch {}
   try { require('./services/autoBackup').flush() } catch {}
   // Save snapshots deferred to idle would otherwise die with the process.
   try { require('./services/autoSaveBackup').flushPending() } catch {}
   try { globalShortcut.unregisterAll() } catch {}
   // Last: both flushes above read the DB, so the handle has to outlive them.
   try { require('./db/database').closeDatabase() } catch {}
-})
+}
+
+app.on('will-quit', flushOnExit)
 
 app.on('window-all-closed', () => {
   // The main window is deliberately destroyed while parked in the tray to
@@ -355,6 +436,14 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   app.isQuitting = true
 })
+
+// `npm run dev` (scripts/dev-electron.js) asks for a clean quit when a file in
+// electron/ changes, then starts a fresh process, so main-process edits apply.
+if (!app.isPackaged && typeof process.send === 'function') {
+  process.on('message', (m) => {
+    if (m === 'kozo:dev-restart') { app.isQuitting = true; app.quit() }
+  })
+}
 
 app.on('activate', () => { getOrCreateMainWindow() })
 

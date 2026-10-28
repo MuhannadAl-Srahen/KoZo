@@ -6,14 +6,11 @@ import {
 import Modal, { modalStyles as ms } from '../ui/Modal'
 import RunningProcessPicker from '../ui/RunningProcessPicker'
 import ImageCropModal from './ImageCropModal'
-import { FOREIGN_LAUNCHERS, fileUrl } from '../../lib/utils'
+import CoverPickerModal from './CoverPickerModal'
+import { FOREIGN_LAUNCHERS, KNOWN_SYSTEM_EXES, fileUrl } from '../../lib/utils'
 import cs from '../../styles/controls.module.css'
 import s from './AddGameModal.module.css'
 
-const KNOWN_SYSTEM_EXES = new Set([
-  'explorer.exe', 'svchost.exe', 'winlogon.exe', 'csrss.exe',
-  'lsass.exe', 'services.exe', 'system', 'taskmgr.exe',
-])
 
 export default function EditGameModal({ game, onClose, onSaved }) {
   const [name, setName]               = useState(game.name || '')
@@ -35,6 +32,7 @@ export default function EditGameModal({ game, onClose, onSaved }) {
   // the placeholder forever, with no way to fix it from the UI.
   const [coverPath, setCoverPath]     = useState(game.banner_local_path || '')
   const [cropSrc, setCropSrc]         = useState(null)
+  const [findCover, setFindCover]     = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
 
   function onExeChange(val) {
@@ -183,7 +181,7 @@ export default function EditGameModal({ game, onClose, onSaved }) {
 
         {errors.exeName
           ? <div className={s.errorText}>{errors.exeName}</div>
-          : <div className={s.inputHint}>Click "Browse" to locate the game's .exe on disk — most reliable. Or "Pick running" if it's already open.</div>
+          : <div className={s.inputHint}>Click "Browse" to locate the game's .exe on disk (most reliable). Or "Pick running" if it's already open.</div>
         }
         {exeWarn && (
           <div className={s.warning}>
@@ -216,7 +214,7 @@ export default function EditGameModal({ game, onClose, onSaved }) {
         aria-expanded={showAdvanced}
       >
         {showAdvanced ? <IconChevronDown size={13} stroke={1.8} /> : <IconChevronRight size={13} stroke={1.8} />}
-        Advanced — status, launcher, copy type
+        Advanced: status, launcher, copy type
       </button>
 
       {showAdvanced && <>
@@ -272,7 +270,7 @@ export default function EditGameModal({ game, onClose, onSaved }) {
           ))}
         </div>
         <div className={s.inputHint}>
-          Which store/launcher this game is from — shown as a badge on the cover. A cracked
+          Which store/launcher this game is from, shown as a badge on the cover. A cracked
           copy keeps its own "Cracked" badge regardless of this. KoZo can only sync
           achievements for Steam and cracked games.
         </div>
@@ -293,7 +291,7 @@ export default function EditGameModal({ game, onClose, onSaved }) {
           />
           {errors.steamAppId
             ? <div className={s.errorText}>{errors.steamAppId}</div>
-            : <div className={s.inputHint}>Steam's numeric game ID — used to pull achievements + cover art. Found in the store page URL (store.steampowered.com/app/<b>1627720</b>/).</div>}
+            : <div className={s.inputHint}>Steam's numeric game ID, used to pull achievements + cover art. Found in the store page URL (store.steampowered.com/app/<b>1627720</b>/).</div>}
         </div>
       )}
 
@@ -343,7 +341,7 @@ export default function EditGameModal({ game, onClose, onSaved }) {
           </button>
         </div>
         <div className={s.inputHint}>
-          Turn this on if Play doesn't seem to do anything — some copies (especially
+          Turn this on if Play doesn't seem to do anything. Some copies (especially
           repacks installed under Program Files) need admin rights to launch at all.
         </div>
       </div>
@@ -377,15 +375,18 @@ export default function EditGameModal({ game, onClose, onSaved }) {
           >
             {coverPath ? 'Change cover' : 'Choose image'}
           </button>
+          <button type="button" className={s.fileBtn} onClick={() => setFindCover(true)}>
+            Find cover
+          </button>
           {coverPath
             ? <button type="button" className={s.fileBtn} onClick={() => setCoverPath('')}>Remove</button>
             : <span className={s.fileHint}>No file chosen</span>
           }
         </div>
         <div className={s.inputHint}>
-          Steam supplies art automatically, but only for games that are on Steam. Set your
-          own here for anything it can't find — League of Legends, launcher exclusives,
-          emulated titles.
+          Steam supplies art for games on Steam. For anything else (League of Legends,
+          launcher exclusives, emulated titles) use Find cover to pick one from SteamGridDB,
+          or choose your own image.
         </div>
       </div>
 
@@ -395,6 +396,14 @@ export default function EditGameModal({ game, onClose, onSaved }) {
     {/* Sibling, not a child — same as AddGameModal. Modal portals to body, so
         a crop modal declared inside another modal's subtree still escapes it,
         but keeping them siblings matches the pattern used everywhere else. */}
+    {findCover && (
+      <CoverPickerModal
+        game={game}
+        onClose={() => setFindCover(false)}
+        onApplied={(g) => { if (g?.banner_local_path) setCoverPath(g.banner_local_path); setFindCover(false) }}
+      />
+    )}
+
     {cropSrc && (
       <ImageCropModal
         src={cropSrc}

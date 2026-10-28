@@ -226,3 +226,32 @@
   --press-scale-card: 0.985;   /* cards — the press effect CLAUDE.md section 3 documents */
   --disabled-opacity: 0.45;
 }
+
+/* ── Settings → Appearance ─────────────────────────────────────────────
+   Set on <html> by context/AppearanceContext.jsx. */
+:root[data-density="compact"] {
+  --gutter:     14px;
+  --toolbar-py: 8px;
+  --content-pt: 6px;
+  --content-pb: 14px;
+  --sp-12: 9px;
+  --sp-16: 12px;
+  --sp-20: 15px;
+  --sp-24: 18px;
+  --sp-32: 24px;
+}
+:root[data-corners="sharp"] {
+  --r-sm:    2px;
+  --r-md:    3px;
+  --r-input: 4px;
+  --r-card:  4px;
+  --r-lg:    6px;
+  --r-pill:  6px;
+}
+:root[data-corners="round"] {
+  --r-sm:    6px;
+  --r-md:    9px;
+  --r-input: 12px;
+  --r-card:  16px;
+  --r-lg:    20px;
+}

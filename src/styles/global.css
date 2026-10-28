@@ -30,6 +30,8 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: var(--r-sm); }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 
 /* ── Resets ──────────────────────────────────────────────────────────── */
 button {
@@ -68,6 +70,14 @@ input, textarea, select {
 .hasRing:focus-within {
   outline: var(--focus-w) solid var(--focus-color);
   outline-offset: var(--focus-offset);
+}
+/* Text fields draw their ring on the inside edge. An outside ring got cut off
+   wherever the field sits against the edge of a scrolling panel. */
+.hasRing:focus-within,
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline-offset: calc(var(--focus-w) * -1);
 }
 .hasRing :focus-visible { outline: none; }
 
@@ -138,6 +148,22 @@ ul, ol { list-style: none; }
     var(--bg);
 }
 
+/* Settings → Appearance → Background. The picture sits behind every page
+   inside .app-main (its own stacking context); cards and panels stay solid. */
+.app-main { position: relative; isolation: isolate; }
+html[data-wallpaper] .app-main {
+  background: radial-gradient(1100px 420px at 16% -8%, var(--ad), transparent 62%);
+}
+.app-wallpaper { position: absolute; inset: 0; z-index: -1; overflow: hidden; background: var(--bg); }
+.app-wallpaper-img {
+  position: absolute;
+  inset: -40px;               /* room for the blur so edges don't fade in */
+  transform: translateZ(0);   /* own layer: the blur is drawn once, not on every page repaint */
+  background-size: cover;
+  background-position: center;
+}
+.app-wallpaper-dim { position: absolute; inset: 0; background: var(--bg); }
+
 /* ── Reduced motion ──────────────────────────────────────────────────── */
 /* !important is load-bearing, not stylistic: a dozen spinners are inline
    `style={{ animation: … }}`, and only an important declaration outranks an
@@ -158,4 +184,11 @@ ul, ol { list-style: none; }
   }
   /* Skip the confetti nodes outright rather than snapping them. */
   .confetti { display: none !important; }
+}
+
+/* KoZo is hidden or behind another window: stop every animation (see App.jsx). */
+html[data-inactive] *,
+html[data-inactive] *::before,
+html[data-inactive] *::after {
+  animation-play-state: paused !important;
 }

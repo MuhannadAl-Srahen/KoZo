@@ -3,7 +3,8 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import {
   IconPlus, IconLayoutGrid, IconList, IconLayoutColumns,
   IconDeviceGamepad2, IconScan, IconLoader2, IconCheckbox, IconSquare,
-  IconTrash, IconX, IconCheck, IconSearch, IconEyeOff, IconChevronRight, IconChevronDown,
+  IconX, IconCheck, IconSearch, IconEyeOff, IconChevronRight, IconChevronDown,
+  IconArchive, IconFlag, IconCalendarEvent, IconTrash,
 } from '@tabler/icons-react'
 import GameCard, { formatPlaytime, STATUS_META } from '../components/GameCard'
 import AddGameModal from '../components/modals/AddGameModal'
@@ -11,6 +12,10 @@ import ScanResultModal from '../components/modals/ScanResultModal'
 import SearchableSelect from '../components/ui/SearchableSelect'
 import CardContextMenu from '../components/ui/CardContextMenu'
 import EmptyState from '../components/ui/EmptyState'
+import ReleasedPanel from '../components/ReleasedPanel'
+import PlanMonthModal from '../components/modals/PlanMonthModal'
+import { formatMonthKey } from '../lib/utils'
+import useCardZoom from '../lib/useCardZoom'
 import { CardSkeletonGrid } from '../components/ui/Skeleton'
 import s from './Library.module.css'
 
@@ -84,11 +89,13 @@ export default function Library() {
   const [weekSeconds, setWeekSeconds] = useState(weekCache ?? 0)
   const [liveIds, setLiveIds]       = useState(new Set())
   const [view, setView]             = useState(() => localStorage.getItem(VIEW_KEY) || 'big')
+  const zoomStyle = useCardZoom('library', view, undefined, { min: 140, max: 380 })   // Ctrl + mouse wheel card size
   const [loading, setLoading]       = useState(!libraryCache)
   const [showAddModal, setAddModal] = useState(false)
   const [prefillExe, setPrefillExe]                 = useState('')
   const [prefillInstallPath, setPrefillInstallPath] = useState('')
   const [scanning, setScanning]     = useState(false)
+  const [scanProgress, setScanProgress] = useState(null)   // { stage, done, total }
   const [scanModal, setScanModal]   = useState(null)  // null | scan results[]
 
   const [search, setSearch]         = useState('')
@@ -96,8 +103,22 @@ export default function Library() {
     const saved = localStorage.getItem('kozo:sort:library')
     return SORT_VALUES.has(saved) ? saved : 'last_played'
   })
-  const [hiddenExpanded, setHiddenExpanded] = useState(() => localStorage.getItem('kozo:show-hidden') === '1')
+  // Collapsible shelves under the grid: finished/dropped, hidden, archived.
+  const [shelfOpen, setShelfOpen] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('kozo:library-shelves') || 'null') || { hidden: localStorage.getItem('kozo:show-hidden') === '1' } }
+    catch { return {} }
+  })
+  function toggleShelf(key) {
+    setShelfOpen(prev => {
+      const next = { ...prev, [key]: !prev[key] }
+      try { localStorage.setItem('kozo:library-shelves', JSON.stringify(next)) } catch {}
+      return next
+    })
+  }
   const [statusFilter, setStatusFilter] = useState(() => localStorage.getItem('kozo:status:library') || '')
+  // Play plan month, same filter as the Game List: 'YYYY-MM' | 'none' | ''
+  const [monthFilter, setMonthFilter] = useState(() => localStorage.getItem('kozo:month:library') || '')
+  const [planIds, setPlanIds] = useState(null)   // game ids for the Plan-for-month modal
   const [ctxMenu, setCtxMenu]       = useState(null)  // null | { x, y, game }
   const [dragOverId, setDragOverId] = useState(null)  // drop-target highlight (custom sort)
   const dragIdRef = React.useRef(null)
@@ -146,6 +167,11 @@ export default function Library() {
       setAddModal(true)
       navigate('/', { replace: true })
     }
+    // ?scan=1: Settings → Features → Scan PC
+    if (params.get('scan') === '1') {
+      navigate('/', { replace: true })
+      runScan()
+    }
   }, [location.search])
 
   // ── Selection mode ──────────────────────────────────────────────────────────
@@ -193,12 +219,14 @@ export default function Library() {
     setSelectedIds(new Set())
   }
 
-  async function handleBulkDelete() {
+  // "Remove" archives: the games leave the Library but keep playtime,
+  // sessions and achievements (restore any time from the Archived shelf).
+  // Remove the selected games: keep their history (archive) or delete it too.
+  async function handleBulkDelete(withHistory = false) {
     if (!confirmDelete) { setConfirmDelete(true); return }
     setBulkDeleting(true)
-    for (const id of selectedIds) {
-      await window.kozo?.api?.games?.delete(id)
-    }
+    if (withHistory) await window.kozo?.api?.games?.delete([...selectedIds])
+    else await window.kozo?.api?.games?.archive([...selectedIds])
     await loadGames()
     loadWeekPlaytime({ invalidate: true })
     setBulkDeleting(false)
@@ -255,6 +283,8 @@ export default function Library() {
   const runScan = useCallback(async () => {
     if (!window.kozo?.api || scanning) return
     setScanning(true)
+    setScanProgress(null)
+    const off = window.kozo.events?.onScanProgress?.(setScanProgress)
     try {
       let paths = []
       const saved = await window.kozo.api.settings.get('scan_paths')
@@ -268,6 +298,7 @@ export default function Library() {
       const res = await window.kozo.api.scanner?.scan?.(paths)
       if (res?.ok) setScanModal(res.data || [])
     } finally {
+      off?.()
       setScanning(false)
     }
   }, [scanning])
@@ -295,29 +326,83 @@ export default function Library() {
   // Shared search/status predicate for both the main grid and the hidden section.
   const matchesFilters = g => {
     if (statusFilter && g.completion_status !== statusFilter) return false
+    if (monthFilter === 'none' ? !!g.planned_month : monthFilter && g.planned_month !== monthFilter) return false
     if (search.trim()) {
       const q = search.trim().toLowerCase()
       if (!g.name.toLowerCase().includes(q) && !(g.exe_name || '').toLowerCase().includes(q)) return false
     }
     return true
   }
-  const filtered = allGamesWithLive.filter(g => !g.is_hidden && matchesFilters(g))
+  // Finished/dropped games move to their own shelf so the grid shows what you
+  // still play — unless you filter for that status explicitly.
+  const isDone = g => !statusFilter && !monthFilter && (g.completion_status === 'finished' || g.completion_status === 'dropped')
+  const filtered = allGamesWithLive.filter(g => !g.is_hidden && !g.is_archived && !isDone(g) && matchesFilters(g))
   const gamesWithLive = sortGames(filtered, sortBy)
   const allSelected = gamesWithLive.length > 0 && selectedIds.size === gamesWithLive.length
-  // Hidden games live in their own collapsed section at the bottom of the grid.
-  const hiddenGames = sortGames(allGamesWithLive.filter(g => g.is_hidden && matchesFilters(g)), sortBy)
+  const shelves = [
+    { key: 'done', label: 'Finished & dropped', Icon: IconFlag,
+      games: sortGames(allGamesWithLive.filter(g => !g.is_hidden && !g.is_archived && isDone(g) && matchesFilters(g)), sortBy) },
+    { key: 'hidden', label: 'Hidden', Icon: IconEyeOff,
+      games: sortGames(allGamesWithLive.filter(g => g.is_hidden && !g.is_archived && matchesFilters(g)), sortBy) },
+    { key: 'archived', label: 'Archived', Icon: IconArchive,
+      hint: 'Removed from the Library. Playtime, sessions and achievements are kept.',
+      games: sortGames(allGamesWithLive.filter(g => g.is_archived && matchesFilters(g)), sortBy) },
+  ]
   // Header stats include hidden games — hiding only affects grid visibility,
   // not playtime/achievement totals.
   const stats = computeStats(games)
+  const monthOptions = (() => {
+    const counts = new Map()
+    for (const g of games) if (g.planned_month && !g.is_archived) counts.set(g.planned_month, (counts.get(g.planned_month) || 0) + 1)
+    return [...counts.entries()].sort(([a], [b]) => a.localeCompare(b))
+  })()
+
+  async function savePlan(month) {
+    await window.kozo?.api?.games?.planMonth?.(planIds, month)
+    setPlanIds(null)
+    loadGames({ silent: true })
+  }
   const gridClass = view === 'big' ? s.bigGrid : view === 'small' ? s.smallGrid : s.listGrid
+
+  // One grid card with drag-to-reorder.
+  function renderCard(game) {
+    const draggable = !selectionMode
+    return (
+      <div
+        key={game.id}
+        data-gpnav=""
+        className={dragOverId === game.id ? s.cardDragOver : undefined}
+        draggable={draggable || undefined}
+        onDragStart={draggable ? (e) => {
+          dragIdRef.current = game.id
+          e.dataTransfer.setData('text/plain', String(game.id))
+          e.dataTransfer.effectAllowed = 'move'
+        } : undefined}
+        onDragOver={draggable ? (e) => { e.preventDefault(); setDragOverId(game.id) } : undefined}
+        onDragLeave={draggable ? () => setDragOverId(prev => prev === game.id ? null : prev) : undefined}
+        onDrop={draggable ? (e) => { e.preventDefault(); handleCardDrop(game.id) } : undefined}
+        onDragEnd={draggable ? () => { dragIdRef.current = null; setDragOverId(null) } : undefined}
+      >
+        <GameCard
+          game={game}
+          view={view}
+          selectionMode={selectionMode}
+          selected={selectedIds.has(game.id)}
+          onToggle={toggleGame}
+          onFavorite={handleFavorite}
+          onContextMenu={(e, g) => setCtxMenu({ x: e.clientX, y: e.clientY, game: g })}
+        />
+      </div>
+    )
+  }
 
   return (
     <div className={s.page}>
       {/* Stats */}
-      <div className={s.statsBar}>
+      <div className={s.statsBar} data-tour="library-stats">
         <div className={s.statCard}>
           <span className={s.statLabel}>Games</span>
-          <span className={s.statValue}>{games.length}</span>
+          <span className={s.statValue}>{games.filter(g => !g.is_archived).length}</span>
         </div>
         <div className={s.statCard}>
           <span className={s.statLabel}>Playtime</span>
@@ -383,16 +468,37 @@ export default function Library() {
             width={140}
           />
 
+          {/* Play plan month, same as the Game List filter */}
+          <SearchableSelect
+            value={monthFilter}
+            onChange={v => {
+              const next = v || ''
+              setMonthFilter(next)
+              localStorage.setItem('kozo:month:library', next)
+            }}
+            options={[
+              ...monthOptions.map(([m, n]) => ({ value: m, label: `${formatMonthKey(m)} (${n})` })),
+              { value: 'none', label: 'Not planned' },
+            ]}
+            placeholder="Any month"
+            searchable={false}
+            width={150}
+          />
+
           <button
             className={s.btnSecondary}
+            data-tour="scan-pc"
             title="Scan your PC for installed games to add (folders configured in Settings → Scan PC)"
             disabled={scanning}
+            aria-busy={scanning || undefined}
             onClick={runScan}
           >
             {scanning
               ? <IconLoader2 size={15} stroke={1.6} style={{ animation: 'spin 1s linear infinite' }} />
               : <IconScan size={15} stroke={1.6} />}
-            {scanning ? 'Scanning…' : 'Scan PC'}
+            {!scanning ? 'Scan PC'
+              : scanProgress?.stage === 'matching' ? `Matching ${scanProgress.done}/${scanProgress.total}`
+              : 'Scanning…'}
           </button>
 
           {games.length > 0 && (
@@ -415,7 +521,7 @@ export default function Library() {
             ))}
           </div>
 
-          <button className={s.btnPrimary} onClick={() => setAddModal(true)}>
+          <button className={s.btnPrimary} data-tour="add-game" onClick={() => setAddModal(true)}>
             <IconPlus size={15} stroke={2} />
             Add Game
           </button>
@@ -445,22 +551,33 @@ export default function Library() {
             }
           </span>
 
+          {selectedIds.size > 0 && !confirmDelete && (
+            <button className={s.btnSecondary} onClick={() => setPlanIds([...selectedIds])}>
+              <IconCalendarEvent size={14} stroke={1.6} />
+              Plan for month
+            </button>
+          )}
+
           {selectedIds.size > 0 && (
             confirmDelete ? (
               <div className={s.confirmRow}>
                 <span className={s.confirmText}>
-                  Remove {selectedIds.size} game{selectedIds.size !== 1 ? 's' : ''}? This deletes all sessions and achievements.
+                  Remove {selectedIds.size} game{selectedIds.size !== 1 ? 's' : ''}?
                 </span>
-                <button className={s.btnSecondary} onClick={() => setConfirmDelete(false)}>
+                <button className={s.btnSecondary} onClick={() => setConfirmDelete(false)} disabled={bulkDeleting}>
                   Cancel
                 </button>
-                <button className={s.btnDanger} onClick={handleBulkDelete} disabled={bulkDeleting}>
+                <button className={s.btnSecondary} onClick={() => handleBulkDelete(false)} disabled={bulkDeleting}>
+                  <IconArchive size={14} stroke={1.6} />
+                  Keep history
+                </button>
+                <button className={s.btnDanger} onClick={() => handleBulkDelete(true)} disabled={bulkDeleting}>
                   <IconTrash size={14} stroke={1.6} />
-                  {bulkDeleting ? 'Removing…' : 'Confirm'}
+                  {bulkDeleting ? 'Removing…' : 'Delete with history'}
                 </button>
               </div>
             ) : (
-              <button className={s.btnDanger} onClick={handleBulkDelete}>
+              <button className={s.btnDanger} onClick={() => handleBulkDelete()}>
                 <IconTrash size={14} stroke={1.6} />
                 Remove {selectedIds.size}
               </button>
@@ -471,6 +588,7 @@ export default function Library() {
 
       {/* Game grid */}
       <div className={s.content}>
+        <ReleasedPanel onChanged={() => loadGames({ silent: true })} />
         {/* Three distinct states. The old version could show two messages at
             once (empty search AND empty library), and showed NOTHING at all
             when a status filter matched nothing — a blank page with no
@@ -505,59 +623,24 @@ export default function Library() {
         )}
 
         {!loading && games.length > 0 && (
-          <div className={gridClass}>
-            {gamesWithLive.map(game => {
-              const draggable = !selectionMode
-              return (
-                <div
-                  key={game.id}
-                  data-gpnav=""
-                  className={dragOverId === game.id ? s.cardDragOver : undefined}
-                  draggable={draggable || undefined}
-                  onDragStart={draggable ? (e) => {
-                    dragIdRef.current = game.id
-                    e.dataTransfer.setData('text/plain', String(game.id))
-                    e.dataTransfer.effectAllowed = 'move'
-                  } : undefined}
-                  onDragOver={draggable ? (e) => { e.preventDefault(); setDragOverId(game.id) } : undefined}
-                  onDragLeave={draggable ? () => setDragOverId(prev => prev === game.id ? null : prev) : undefined}
-                  onDrop={draggable ? (e) => { e.preventDefault(); handleCardDrop(game.id) } : undefined}
-                  onDragEnd={draggable ? () => { dragIdRef.current = null; setDragOverId(null) } : undefined}
-                >
-                  <GameCard
-                    game={game}
-                    view={view}
-                    selectionMode={selectionMode}
-                    selected={selectedIds.has(game.id)}
-                    onToggle={toggleGame}
-                    onFavorite={handleFavorite}
-                    onContextMenu={(e, g) => setCtxMenu({ x: e.clientX, y: e.clientY, game: g })}
-                  />
-                </div>
-              )
-            })}
+          <div className={gridClass} style={zoomStyle}>
+            {gamesWithLive.map(renderCard)}
           </div>
         )}
 
-        {/* Hidden games — collapsed section at the bottom instead of mixing
-            into the grid; expand to manage/unhide (right-click still works) */}
-        {!loading && hiddenGames.length > 0 && !selectionMode && (
-          <>
-            <button
-              className={s.hiddenHeader}
-              onClick={() => {
-                const next = !hiddenExpanded
-                setHiddenExpanded(next)
-                localStorage.setItem('kozo:show-hidden', next ? '1' : '0')
-              }}
-            >
-              {hiddenExpanded ? <IconChevronDown size={14} stroke={1.8} /> : <IconChevronRight size={14} stroke={1.8} />}
-              <IconEyeOff size={13} stroke={1.6} />
-              Hidden ({hiddenGames.length})
+
+        {/* Shelves — collapsed sections at the bottom instead of mixing into
+            the grid; expand to manage them (right-click still works) */}
+        {!loading && !selectionMode && shelves.filter(sh => sh.games.length > 0).map(sh => (
+          <React.Fragment key={sh.key}>
+            <button className={s.hiddenHeader} onClick={() => toggleShelf(sh.key)} title={sh.hint}>
+              {shelfOpen[sh.key] ? <IconChevronDown size={14} stroke={1.8} /> : <IconChevronRight size={14} stroke={1.8} />}
+              <sh.Icon size={13} stroke={1.6} />
+              {sh.label} ({sh.games.length})
             </button>
-            {hiddenExpanded && (
-              <div className={gridClass}>
-                {hiddenGames.map(game => (
+            {shelfOpen[sh.key] && (
+              <div className={gridClass} style={zoomStyle}>
+                {sh.games.map(game => (
                   <GameCard
                     key={game.id}
                     game={game}
@@ -569,8 +652,8 @@ export default function Library() {
                 ))}
               </div>
             )}
-          </>
-        )}
+          </React.Fragment>
+        ))}
       </div>
 
       {showAddModal && (
@@ -608,14 +691,36 @@ export default function Library() {
             window.kozo?.api?.games?.update(game.id, { is_hidden: next })
           }}
           onToggleFavorite={handleFavorite}
-          onDelete={async (game) => {
-            await window.kozo?.api?.games?.delete(game.id)
+          onDelete={ctxMenu.game.is_archived ? undefined : async (game) => {
+            setGames(prev => { const u = prev.map(g => g.id === game.id ? { ...g, is_archived: 1 } : g); libraryCache = u; return u })
+            await window.kozo?.api?.games?.archive([game.id])
+            loadGames({ silent: true })
+          }}
+          onRestore={ctxMenu.game.is_archived ? async (game) => {
+            setGames(prev => { const u = prev.map(g => g.id === game.id ? { ...g, is_archived: 0 } : g); libraryCache = u; return u })
+            await window.kozo?.api?.games?.unarchive([game.id])
+            loadGames({ silent: true })
+          } : undefined}
+          deleteIsArchive
+          deleteLabel="Remove from library"
+          onDeleteForever={async (game) => {
             setGames(prev => { const u = prev.filter(g => g.id !== game.id); libraryCache = u; return u })
-            loadGames()
+            await window.kozo?.api?.games?.delete(game.id)
+            loadGames({ silent: true })
             loadWeekPlaytime({ invalidate: true })
           }}
-          deleteLabel="Remove from library"
-          deleteHint="Sessions and achievements for this game will be deleted."
+          extraItems={[
+            { label: 'Plan for month…', Icon: IconCalendarEvent, onClick: (g) => setPlanIds([g.id]) },
+          ]}
+        />
+      )}
+
+      {planIds && (
+        <PlanMonthModal
+          count={planIds.length}
+          current={planIds.length === 1 ? games.find(g => g.id === planIds[0])?.planned_month : null}
+          onClose={() => setPlanIds(null)}
+          onSave={savePlan}
         />
       )}
     </div>

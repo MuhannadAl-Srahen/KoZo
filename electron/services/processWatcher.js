@@ -30,7 +30,12 @@ const GAME_ROW_TTL_MS      = 60 * 1000
 // 30s) cuts the worst-case in-app lag by ~20s; the GET is cheap (one request) and
 // well under Steam's rate limits even with several games running.
 const ACHIEVEMENT_SYNC_MS = 10 * 1000
-function getAchievementSyncMs() {
+// When the Steam app's local stats file for the game is being watched, unlocks
+// already arrive instantly from disk, so the Web API is only a slow backstop
+// (360 requests an hour per game was pure waste in that case).
+const ACHIEVEMENT_SYNC_LOCAL_MS = 60 * 1000
+function getAchievementSyncMs(gameId) {
+  try { if (require('./steamStatsWatcher').isWatching(gameId)) return ACHIEVEMENT_SYNC_LOCAL_MS } catch {}
   return ACHIEVEMENT_SYNC_MS
 }
 
@@ -53,7 +58,7 @@ function getAchievementSyncMs() {
 // one of these, its periodic poll is parked for the rest of the session; the
 // session-end sync still runs once (that's where a fixed setting is noticed).
 const PERMANENT_SYNC_REASONS = new Set([
-  'private', 'private_profile', 'profile_not_found',
+  'private', 'private_profile', 'profile_not_found', 'invalid_key',
   'no_stats_for_game', 'no_steam_id', 'no_steam_app_id', 'foreign_launcher',
 ])
 const syncParked = new Map()   // gameId → reason
@@ -161,7 +166,7 @@ const HARD_DENY = new Set([
   'code.exe','cursor.exe','node.exe','electron.exe','claude.exe',
   'kozo.exe',
   // Unity / Unreal engine crash handlers and helpers
-  'unityCrashHandler.exe','unityCrashHandler64.exe',
+  'unitycrashhandler.exe','unitycrashhandler64.exe',
   'crashreportclient.exe','crashreporterclient.exe',
   // Anti-cheat services (run alongside games, not the game)
   'easyanticheat.exe','easyanticheat_eos.exe',
@@ -309,8 +314,16 @@ async function getRunningProcesses() {
   // ps-list is pure ESM since v8 — must be loaded via dynamic import() from CJS.
   const mod = await import('ps-list')
   const fn = typeof mod === 'function' ? mod : (mod.default || mod.psList)
-  return await fn()
+  // The poll chain only reschedules after a tick resolves, so a hung helper
+  // (fastlist.exe blocked by AV) would stop tracking for the rest of the run.
+  let timer
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('process list timed out')), PS_LIST_TIMEOUT_MS)
+  })
+  try { return await Promise.race([fn(), timeout]) }
+  finally { clearTimeout(timer) }
 }
+const PS_LIST_TIMEOUT_MS = 15000
 
 // Cross-platform "is this PID still alive" check with no process spawn — signal
 // 0 is the documented way to test existence (works on Windows too, via libuv).
@@ -393,7 +406,7 @@ function heartbeatSession(game, session, gapMs, now) {
   // watch + safety-net timer already cover it without duplicating the
   // sync-fs-I/O pass on this hot cadence).
   const lastSync = midSessionSyncAt.get(game.id) || 0
-  if (now - lastSync >= getAchievementSyncMs()) {
+  if (now - lastSync >= getAchievementSyncMs(game.id)) {
     midSessionSyncAt.set(game.id, now)
     runAchievementSync(game.id, game.name, { skipCrackScan: true })
   }
@@ -439,9 +452,11 @@ function syncControllerProbe() {
       // Seed the probe with the keyboard/mouse idle time — see start()'s note.
       ci.start({ idleMs: sysIdleSec * 1000 })
     }
-  } else if (sysIdleSec < 2) {
-    ci.stop()   // real kb/mouse input is back; the gamepad adds nothing
   }
+  // Once started, the probe stays for the rest of the session. Killing it on
+  // every return of keyboard/mouse input meant a fresh powershell.exe plus a
+  // C# compile (csc.exe, 1-2s of CPU) after every cutscene or pause, mid-game.
+  // It costs next to nothing while running (one check every 2s).
 }
 
 // Cheap heartbeat for ticks between full scans (see FULL_SCAN_EVERY_TICKS):
@@ -603,6 +618,10 @@ async function tick() {
         } catch {}
         // Auto-mark 'playing' (only from no-status/on-hold — never un-finishes).
         try { require('./statusSync').onSessionStarted(game.id) } catch {}
+        // Playing an archived game brings it back to the Library.
+        if (game.is_archived === 1) {
+          try { gamesQ.updateGame(game.id, { is_archived: 0 }); sendToRenderer('game:updated', game.id) } catch {}
+        }
         emitter.emit('change')
 
         // Sync achievements right away so anything unlocked before/at launch shows
@@ -872,6 +891,13 @@ function endSession(gameId, session, forcedEndAt) {
 // live (precise playtime/AFK) or a launch is being confirmed; idle KoZo relaxes
 // — detection latency is bounded by the sensitivity window (default 15s) anyway.
 const POLL_IDLE_MS = 20000
+// After 10 quiet minutes (no session, no launch being confirmed) the idle scan
+// relaxes further. Each scan spawns fastlist.exe, ~4,300 times a day at 20s.
+// A launch is still caught well inside a minute; the next session, detection
+// or nudge() (window shown) brings the fast cadence straight back.
+const POLL_DEEP_IDLE_MS = 45000
+const DEEP_IDLE_AFTER_MS = 10 * 60 * 1000
+let lastActivityAt = Date.now()
 
 // While a session is already active, only 1 tick in this many does the real
 // ps-list scan (spawns fastlist.exe) — the rest use lightTick()'s free PID
@@ -908,7 +934,10 @@ function scheduleNextTick() {
   // Fast cadence while a session is live OR a launch is mid-confirmation
   // (detectingGames non-empty) — a just-launched game still gets checked at
   // 5s so its session starts on time even though full idle scans back off.
-  const delay = (activeSessions.size > 0 || detectingGames.size > 0) ? POLL_MS : POLL_IDLE_MS
+  const busy = activeSessions.size > 0 || detectingGames.size > 0
+  if (busy) lastActivityAt = Date.now()
+  const delay = busy ? POLL_MS
+    : (Date.now() - lastActivityAt > DEEP_IDLE_AFTER_MS ? POLL_DEEP_IDLE_MS : POLL_IDLE_MS)
   const gen = ++tickGen
   clearTimeout(pollTimer)
   pollTimer = setTimeout(async () => {
@@ -938,6 +967,7 @@ function scheduleNextTick() {
 // Without it a launch from inside KoZo can wait out the whole 20s idle poll
 // before "Now Playing" lights up, which reads as the app not noticing.
 function nudge() {
+  lastActivityAt = Date.now()   // back to the normal idle cadence
   if (!pollTimer || paused) return
   const gen = ++tickGen   // supersede whatever is pending OR in flight
   clearTimeout(pollTimer)
@@ -1013,7 +1043,9 @@ async function resolveOrphanSessions() {
           game_name: orphan.game_name,
           exe_name: orphan.exe_name,
           last_seen_at: now,
-          idle_seconds: gapSec,
+          // Idle already persisted on the row (AFK + any merged-leg exclusion)
+          // stays excluded on top of the unobserved gap.
+          idle_seconds: gapSec + Math.max(0, orphan.idle_seconds || 0),
           pid: procByName.get(exe)?.pid || null,
         })
         midSessionSyncAt.set(orphan.game_id, now)
@@ -1022,7 +1054,8 @@ async function resolveOrphanSessions() {
         logger.info(`Resumed open session for "${orphan.game_name}" — still running after KoZo restart`, { unobservedGapSec: gapSec })
       } else {
         // Not running → cap at the last heartbeat (the game closed while KoZo was off).
-        const dur         = Math.max(0, Math.floor((beatMs - startMs) / 1000))
+        // The heartbeat persists idle_seconds so a crash doesn't re-credit AFK time.
+        const dur         = Math.max(0, Math.floor((beatMs - startMs) / 1000) - Math.max(0, orphan.idle_seconds || 0))
         const endIso      = new Date(beatMs).toISOString()
         db.prepare('UPDATE sessions SET ended_at = ?, duration_seconds = ? WHERE id = ?').run(endIso, dur, orphan.id)
         db.prepare('UPDATE games SET total_playtime_seconds = total_playtime_seconds + ? WHERE id = ?').run(dur, orphan.game_id)
@@ -1040,6 +1073,7 @@ async function resolveOrphanSessions() {
 }
 
 function stop() {
+  tickGen++   // an in-flight tick must not reschedule itself after stop
   if (pollTimer) { clearTimeout(pollTimer); pollTimer = null }
   try { require('./controllerInput').stop() } catch {}
   try { require('./steamStatsWatcher').unwatchAll() } catch {}
@@ -1056,7 +1090,21 @@ function stop() {
   logger.info('processWatcher stopped (open sessions left for resume)')
 }
 
-function pause()  { paused = true  }
+// Pausing ends live sessions now — ticks stop while paused, so an open session
+// would otherwise be credited the whole paused span when it finally ended.
+// Resuming within the merge window reopens the same row with the gap excluded.
+function pause() {
+  paused = true
+  for (const [gameId, session] of [...activeSessions]) {
+    try { endSession(gameId, session) } catch (e) { logger.warn('pause: endSession failed', { message: e.message }) }
+  }
+  detectionBuffer.clear()
+  if (detectingGames.size) {
+    for (const gameId of detectingGames.keys()) sendToRenderer('session:undetected', { gameId })
+    detectingGames.clear()
+  }
+  emitter.emit('change')
+}
 function resume() { paused = false }
 
 function getActiveSessions() { return activeSessions }

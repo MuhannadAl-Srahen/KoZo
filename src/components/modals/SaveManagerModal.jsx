@@ -70,7 +70,7 @@ export default function SaveManagerModal({ game, onClose }) {
 
   return (
     <Modal
-      title={`Save Files — ${game.name}`}
+      title={`Save Files: ${game.name}`}
       icon={<IconDeviceFloppy size={17} stroke={1.6} />}
       onClose={onClose}
       width={640}

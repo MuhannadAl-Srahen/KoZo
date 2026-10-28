@@ -512,7 +512,7 @@
   max-height: 320px;
   overflow-y: auto;
   transform: translateZ(0);
-  padding: 2px;
+  padding: 2px var(--sp-10) 2px 2px;
   contain: layout style;
 }
 .pickCard {
@@ -916,7 +916,7 @@
 .modalScroll {
   max-height: 60vh;
   overflow-y: auto;
-  padding-right: var(--sp-4);
+  padding-right: var(--sp-10);
   transform: translateZ(0);
 }
 

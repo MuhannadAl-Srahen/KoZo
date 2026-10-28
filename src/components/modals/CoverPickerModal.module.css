@@ -1,0 +1,95 @@
+.searchRow { display: flex; gap: var(--sp-8); margin-bottom: var(--sp-12); }
+.searchBox {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: 0 var(--sp-10);
+  border-radius: var(--r-input);
+  background: var(--surface-3);
+  border: 1px solid var(--neutral-border);
+  color: var(--text-muted);
+}
+.searchBox input {
+  flex: 1;
+  padding: var(--sp-8) 0;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  outline: none;
+}
+
+.error {
+  margin-bottom: var(--sp-12);
+  padding: var(--sp-8) var(--sp-12);
+  border-radius: var(--r-input);
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-border);
+  color: var(--warning);
+  font-size: var(--fs-sm);
+}
+.muted { display: flex; align-items: center; gap: var(--sp-6); color: var(--text-muted); font-size: var(--fs-sm); margin: var(--sp-8) 0; }
+
+.matches { display: flex; flex-wrap: wrap; gap: var(--sp-6); margin-bottom: var(--sp-12); }
+.match {
+  padding: var(--sp-4) var(--sp-12);
+  border: 1px solid var(--neutral-border);
+  border-radius: var(--r-pill);
+  background: var(--neutral-bg);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+.match:hover { color: var(--text-primary); }
+.matchActive { background: var(--ad); border-color: var(--ab); color: var(--a); }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: var(--sp-10);
+  max-height: 52vh;
+  overflow-y: auto;
+  padding-right: var(--sp-10);
+}
+.cover {
+  position: relative;
+  aspect-ratio: 2 / 3;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: var(--r-card);
+  overflow: hidden;
+  background: var(--surface-3);
+  cursor: pointer;
+}
+.cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cover:hover { border-color: var(--a); }
+.use {
+  position: absolute;
+  left: 50%;
+  bottom: var(--sp-8);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 2px var(--sp-10);
+  border-radius: var(--r-pill);
+  background: var(--a);
+  color: var(--accent-ink);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  opacity: 0;
+  translate: -50% 0;
+  transition: opacity 0.15s ease;
+}
+.cover:hover .use { opacity: 1; }
+.applying {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 8, 14, 0.6);
+  color: #fff;
+}

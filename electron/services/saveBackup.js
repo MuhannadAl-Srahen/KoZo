@@ -267,7 +267,7 @@ function restoreBackup(gameName, backupId, targetOverride) {
       safety = backupSave(gameName, target, 'before-restore').id
     } catch (e) {
       logger.warn(`saveBackup: before-restore snapshot failed for "${gameName}"`, { message: e.message })
-      throw new Error(`Could not snapshot the current save before restoring (${e.message}) — restore cancelled so nothing was overwritten`)
+      throw new Error(`Could not snapshot the current save before restoring (${e.message}). Restore cancelled so nothing was overwritten`)
     }
   }
 
@@ -377,21 +377,30 @@ function autoBackupGame(gameName, sourcePath) {
   fs.writeFileSync(path.join(stage, 'meta.json'), JSON.stringify(meta, null, 2), 'utf8')
 
   // Rotate: current latest becomes the "previous session" slot.
+  // The old auto-prev is only parked (renamed) until the rotation succeeds, so
+  // a failed rename — common on Windows when OneDrive/AV holds a handle — puts
+  // it back and keeps both existing snapshots instead of deleting them.
   if (fs.existsSync(dest)) {
+    const parked = path.join(dir, AUTO_TMP_ID + '-old')
+    try { fs.rmSync(parked, { recursive: true, force: true }) } catch {}
+    let movedPrev = false
     try {
-      fs.rmSync(prevDest, { recursive: true, force: true })
+      if (fs.existsSync(prevDest)) { fs.renameSync(prevDest, parked); movedPrev = true }
       fs.renameSync(dest, prevDest)
-      const prevMetaPath = path.join(prevDest, 'meta.json')
-      try {
-        const prevMeta = JSON.parse(fs.readFileSync(prevMetaPath, 'utf8'))
-        prevMeta.id = AUTO_PREV_ID
-        prevMeta.label = 'auto (previous)'
-        fs.writeFileSync(prevMetaPath, JSON.stringify(prevMeta, null, 2), 'utf8')
-      } catch {}
     } catch (e) {
-      logger.warn(`saveBackup: auto rotation failed for "${gameName}"`, { message: e.message })
-      fs.rmSync(dest, { recursive: true, force: true })
+      if (movedPrev && !fs.existsSync(prevDest)) { try { fs.renameSync(parked, prevDest) } catch {} }
+      try { fs.rmSync(stage, { recursive: true, force: true }) } catch {}
+      logger.warn(`saveBackup: auto rotation failed for "${gameName}" — existing snapshots left intact`, { message: e.message })
+      return { skipped: 'rotate-failed' }
     }
+    try { fs.rmSync(parked, { recursive: true, force: true }) } catch {}
+    const prevMetaPath = path.join(prevDest, 'meta.json')
+    try {
+      const prevMeta = JSON.parse(fs.readFileSync(prevMetaPath, 'utf8'))
+      prevMeta.id = AUTO_PREV_ID
+      prevMeta.label = 'auto (previous)'
+      fs.writeFileSync(prevMetaPath, JSON.stringify(prevMeta, null, 2), 'utf8')
+    } catch {}
   }
 
   // Swap the staged copy in. Same directory, so this is an atomic rename.

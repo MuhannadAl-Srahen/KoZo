@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   IconSearch, IconPlus, IconCheck, IconAlertTriangle,
   IconDeviceGamepad2, IconCrosshair, IconFolderOpen, IconX,
@@ -8,13 +8,11 @@ import RunningProcessPicker from '../ui/RunningProcessPicker'
 import ImageCropModal from './ImageCropModal'
 import {
   detectLauncherFromPath, deriveGameNameFromPath, exeLooksUnrelated, isHelperExe,
+  KNOWN_SYSTEM_EXES, getBannerBg,
 } from '../../lib/utils'
+import { rankResults } from '../../lib/searchRank'
 import s from './AddGameModal.module.css'
 
-const KNOWN_SYSTEM_EXES = new Set([
-  'explorer.exe', 'svchost.exe', 'winlogon.exe', 'csrss.exe',
-  'lsass.exe', 'services.exe', 'system', 'taskmgr.exe',
-])
 
 // Detect official vs cracked from install path. Known store paths = official.
 const OFFICIAL_PATH_HINTS = [
@@ -41,8 +39,6 @@ function debounce(fn, ms) {
   return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms) }
 }
 
-const BANNER_BG = ['#1a0f2e','#0f1e3a','#0f2a1e','#2a1a0a','#2a0f0f','#1e1a0a']
-function bannerBg(id) { return BANNER_BG[(id || 0) % BANNER_BG.length] }
 
 // Sharp appid header.jpg first; if it 404s (new/unreleased title) fall back to
 // the hashed capsule from search, then to the icon.
@@ -88,14 +84,32 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
   const [exeWarn, setExeWarn]         = useState(false)
   const [dupWarn, setDupWarn]         = useState(false)
   const [showPicker, setShowPicker]   = useState(false)
+  // Games that aren't on Steam, found on SteamGridDB (needs the user's key).
+  const [sgdbResults, setSgdbResults] = useState([])
+  const [sgdbPick, setSgdbPick]       = useState(null)   // { sgdb_id, name, cover, thumb }
+  const [hasSgdbKey, setHasSgdbKey]   = useState(true)
+  useEffect(() => {
+    window.kozo?.api?.settings?.get?.('steamgriddb_key').then(r => setHasSgdbKey(!!(r?.ok && r.data)))
+  }, [])
 
+  // Steam search is a network call — a slow earlier response must not
+  // overwrite a newer one, so only the latest request's result is applied.
+  const searchSeq = useRef(0)
   const doSearch = useCallback(
     debounce(async (q) => {
-      if (!q.trim() || q.length < 2) { setResults([]); setSearching(false); return }
+      const seq = ++searchSeq.current
+      if (!q.trim() || q.length < 2) { setResults([]); setSgdbResults([]); setSearching(false); return }
       setSearching(true)
-      const res = await window.kozo?.api?.steam?.search(q)
+      const [res, sg] = await Promise.all([
+        window.kozo?.api?.steam?.search(q),
+        window.kozo?.api?.sgdb?.searchGames?.(q).catch(() => null),
+      ])
+      if (seq !== searchSeq.current) return
       setSearching(false)
-      setResults(res?.ok ? res.data : [])
+      const steam = res?.ok ? (res.data || []) : []
+      setResults(steam)
+      // Only the ones Steam didn't already return.
+      setSgdbResults(sg?.ok ? (sg.data || []) : [])
     }, 400),
     []
   )
@@ -104,6 +118,7 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
 
   function clearSelection() {
     setSelected(null)
+    setSgdbPick(null)
     setIsManual(false)
     setName('')
     setBannerPath('')
@@ -139,8 +154,17 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
     if (!prefillInstallPath) setInstallPath('')
   }
 
+  // A game that isn't on Steam, picked from SteamGridDB: it's added like a
+  // manual game, and its cover comes along.
+  function pickSgdb(hit) {
+    pickManual()
+    setName(hit.name)
+    setSgdbPick(hit)
+  }
+
   function pickManual() {
     setSelected(null)
+    setSgdbPick(null)
     setIsManual(true)
     setName(query.trim())
     setBannerPath('')
@@ -201,10 +225,14 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
         // Library cards are portrait (2:3) → store the portrait cover. games:add
         // downloads a hi-res local copy; `capsule_fallback` lets it grab the
         // hashed capsule for new titles that have no portrait yet.
+        // A SteamGridDB pick shows its remote cover right away; the local copy
+        // is downloaded in the background.
         banner_url: selected?.steam_app_id
           ? `https://cdn.akamai.steamstatic.com/steam/apps/${selected.steam_app_id}/library_600x900_2x.jpg`
-          : null,
+          : (sgdbPick?.cover || null),
         capsule_fallback: selected?.capsule || null,
+        sgdb_id: sgdbPick?.sgdb_id ?? null,
+        sgdb_cover: sgdbPick?.cover ?? null,
         banner_local_path: safeTrim(bannerPath) || null,
         source: selected?.steam_app_id ? 'steam' : source,
         is_installed: 1,
@@ -225,9 +253,43 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
   }
 
   const showForm = selected || isManual
-  const canSave  = name.trim() && exeName.trim()
+  // Mirrors handleSave: a Steam game launches via steam://, so its exe is optional.
+  const canSave  = name.trim() && (exeName.trim() || selected?.steam_app_id)
   // Only show results list when there's a query and no selection yet
   const showResults = !showForm && query.length >= 2
+
+  // One result row per source; rankResults decides the order.
+  const steamRow = (game) => (
+    <div
+      key={game.steam_app_id}
+      className={s.resultItem}
+      onClick={() => pickGame(game)}
+    >
+      <div className={s.resultIcon} style={{ background: getBannerBg(game.steam_app_id) }}>
+        {bestArt(game)
+          ? <img src={bestArt(game)} alt="" onError={e => bannerError(e, game)} />
+          : <IconDeviceGamepad2 size={18} stroke={1.3} style={{ color: 'rgba(255,255,255,0.15)' }} />
+        }
+      </div>
+      <div className={s.resultInfo}>
+        <div className={s.resultName}>{game.name}</div>
+        <div className={s.resultMeta}>Steam · App {game.steam_app_id}</div>
+      </div>
+    </div>
+  )
+  const sgdbRow = (hit) => (
+    <div key={`sgdb-${hit.sgdb_id}`} className={s.resultItem} onClick={() => pickSgdb(hit)}>
+      <div className={`${s.resultIcon} ${s.resultIconPortrait}`} style={{ background: getBannerBg(hit.sgdb_id) }}>
+        {hit.thumb
+          ? <img src={hit.thumb} alt="" onError={e => { e.target.style.display = 'none' }} />
+          : <IconDeviceGamepad2 size={18} stroke={1.3} style={{ color: 'rgba(255,255,255,0.15)' }} />}
+      </div>
+      <div className={s.resultInfo}>
+        <div className={s.resultName}>{hit.name}</div>
+        <div className={s.resultMeta}>{hit.year ? `${hit.year} · ` : ''}Not on Steam, cover from SteamGridDB</div>
+      </div>
+    </div>
+  )
 
   return (
    <>
@@ -264,8 +326,11 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
         </div>
       ) : (
         <div className={s.selectedChip}>
+          {sgdbPick?.thumb && (
+            <div className={s.selectedThumb}><img src={sgdbPick.thumb} alt="" /></div>
+          )}
           {selected && (
-            <div className={s.selectedThumb} style={{ background: bannerBg(selected.steam_app_id) }}>
+            <div className={s.selectedThumb} style={{ background: getBannerBg(selected.steam_app_id) }}>
               {bestArt(selected)
                 ? <img src={bestArt(selected)} alt="" onError={e => bannerError(e, selected)} />
                 : <IconDeviceGamepad2 size={14} stroke={1.4} style={{ color: 'rgba(255,255,255,0.3)' }} />
@@ -274,7 +339,7 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
           )}
           <span className={s.selectedChipName}>{name || query}</span>
           {selected && <span className={s.selectedChipMeta}>Steam · {selected.steam_app_id}</span>}
-          {isManual && <span className={s.selectedChipMeta}>Manual</span>}
+          {isManual && <span className={s.selectedChipMeta}>{sgdbPick ? 'Not on Steam' : 'Manual'}</span>}
           <button className={s.selectedChipClear} onClick={clearSelection} title="Search again">
             <IconX size={13} stroke={2} />
           </button>
@@ -286,27 +351,15 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
 
       {showResults && !searching && (
         <div className={s.resultsList}>
-          {results.map(game => (
-            <div
-              key={game.steam_app_id}
-              className={s.resultItem}
-              onClick={() => pickGame(game)}
-            >
-              <div className={s.resultIcon} style={{ background: bannerBg(game.steam_app_id) }}>
-                {bestArt(game)
-                  ? <img src={bestArt(game)} alt="" onError={e => bannerError(e, game)} />
-                  : <IconDeviceGamepad2 size={18} stroke={1.3} style={{ color: 'rgba(255,255,255,0.15)' }} />
-                }
-              </div>
-              <div className={s.resultInfo}>
-                <div className={s.resultName}>{game.name}</div>
-                <div className={s.resultMeta}>Steam · App {game.steam_app_id}</div>
-              </div>
-            </div>
-          ))}
+          {rankResults(query, results, sgdbResults).map(r => (r.kind === 'steam' ? steamRow(r.game) : sgdbRow(r.hit)))}
 
-          {results.length === 0 && (
+          {results.length === 0 && sgdbResults.length === 0 && (
             <div className={s.searchHint}>No Steam results found. Add manually below.</div>
+          )}
+          {!hasSgdbKey && (
+            <div className={s.searchHint}>
+              Not on Steam? Add a free SteamGridDB key in Settings, Steam, to find covers for any game.
+            </div>
           )}
 
           <div className={s.manualOption} onClick={pickManual}>
@@ -404,7 +457,7 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
               ? <div className={s.errorText}>{errors.exeName}</div>
               : <div className={s.inputHint}>
                   {!exeName.trim() && selected?.steam_app_id
-                    ? 'Optional for Steam games — Play works without it, but KoZo can only track playtime once it knows the executable.'
+                    ? 'Optional for Steam games. Play works without it, but KoZo can only track playtime once it knows the executable.'
                     : 'Click "Browse" to find the .exe on disk, or "Pick running" if the game is already open.'}
                 </div>
             }
@@ -426,7 +479,7 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
               <div className={s.warning}>
                 <IconAlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
                 "{exeName.trim()}" doesn't look like it belongs to "{name.trim()}". Every
-                minute that executable runs will be credited to this game — double-check
+                minute that executable runs will be credited to this game, so double-check
                 it's the right one.
               </div>
             )}
@@ -505,7 +558,7 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
               </div>
               <div className={s.inputHint}>
                 Shown as a badge on the cover. KoZo only syncs achievements for Steam and
-                cracked games — other launchers track playtime &amp; sessions only.
+                cracked games. Other launchers track playtime &amp; sessions only.
               </div>
             </div>
           )}

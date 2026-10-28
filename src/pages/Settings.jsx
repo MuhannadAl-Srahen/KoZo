@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useId } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   IconKey, IconCheck, IconX, IconLoader2, IconClock, IconEye, IconEyeOff, IconLayoutGrid,
   IconUser, IconRefresh, IconExternalLink, IconAlertTriangle,
@@ -7,9 +8,12 @@ import {
   IconSearch, IconPlus, IconMinus, IconFolder, IconTrophy,
   IconDownload, IconUpload, IconDeviceFloppy, IconArchive, IconCloud,
   IconHistory, IconList, IconChartBar, IconBell, IconBolt,
-  IconStar, IconStethoscope,
+  IconStar, IconStethoscope, IconLock, IconCode, IconChevronRight, IconArrowUp, IconArrowDown, IconPhoto, IconLayoutCards, IconTextSize, IconLayoutSidebar,
 } from '@tabler/icons-react'
 import { useAccentColor } from '../context/AccentColorContext'
+import { useAppearance, DEFAULT_APPEARANCE } from '../context/AppearanceContext'
+import { NAV_ITEMS } from '../components/Sidebar'
+import SearchableSelect from '../components/ui/SearchableSelect'
 import HoneycombLogo from '../components/HoneycombLogo'
 import ScanResultModal from '../components/modals/ScanResultModal'
 import SaveManagerModal from '../components/modals/SaveManagerModal'
@@ -64,6 +68,64 @@ function Message({ msg }) {
 // <label> that contained no labelable control — so assistive tech read an
 // unlabelled button of unknown state, and the label element did nothing at all.
 // The row is genuinely clickable now (it always looked like it was).
+// Adult (18+) games stay behind a password so only the owner can turn them on.
+// Only the SHA-256 of the password lives here. Turning the option OFF never
+// asks; while it is on the toggle shows directly so it can be switched off.
+const RESTRICTED_HASH = '76eb6786bd76e44f0652bdfbbb35c5c847b3c822d932c05811fd18ccad0e641a'
+async function sha256Hex(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('')
+}
+function RestrictedContent() {
+  const [showAdult, setShowAdult] = useState(false)
+  useEffect(() => {
+    window.kozo?.api?.settings?.get?.('show_adult_games').then(r => setShowAdult(r?.ok && r.data === '1'))
+  }, [])
+  async function onChange(v) {
+    setShowAdult(v)
+    await window.kozo?.api?.settings?.set?.('show_adult_games', v ? '1' : '0')
+    window.dispatchEvent(new Event('kozo:adult-changed'))
+  }
+  const [unlocked, setUnlocked] = useState(false)
+  const [pw, setPw] = useState('')
+  const [wrong, setWrong] = useState(false)
+  async function unlock() {
+    if ((await sha256Hex(pw)) === RESTRICTED_HASH) { setUnlocked(true); setPw(''); setWrong(false) }
+    else setWrong(true)
+  }
+  if (unlocked || showAdult) {
+    return (
+      <div className={s.toggleList}>
+        <ToggleRow
+          label="Show adult (18+) games"
+          desc="Include adult only titles in game search and the Steam calendar. Steam hides them unless this is on."
+          checked={showAdult}
+          onChange={onChange}
+        />
+      </div>
+    )
+  }
+  return (
+    <>
+      <p className={s.sectionDesc}>
+        <IconLock size={13} stroke={1.8} style={{ verticalAlign: '-2px', marginRight: 4 }} />
+        Restricted content is locked. Enter the password to change it.
+      </p>
+      <div className={s.keyRow}>
+        <div className={`${s.keyInputWrap} hasRing`}>
+          <input type="password" className={s.keyInput} placeholder="Password" value={pw}
+            aria-label="Password for restricted content"
+            onChange={e => { setPw(e.target.value); setWrong(false) }}
+            onKeyDown={e => { if (e.key === 'Enter' && pw) unlock() }}
+            autoComplete="off" spellCheck={false} />
+        </div>
+        <button type="button" className={s.testBtn} onClick={unlock} disabled={!pw}>Unlock</button>
+      </div>
+      {wrong && <StatusLine type="error">Wrong password.</StatusLine>}
+    </>
+  )
+}
+
 function ToggleRow({ label, desc, checked, onChange, busy = false }) {
   const labelId = useId()
   const toggle = () => { if (!busy) onChange(!checked) }
@@ -163,7 +225,7 @@ function GeneralTab() {
       if (generalTabCache) generalTabCache.openAtLogin = false
       setStartupMsg({ type: 'error', text: 'Could not register startup: ' + (r.error || 'unknown error') })
     } else if (r.method === 'task_scheduler') {
-      setStartupMsg({ type: 'success', text: 'Registered via Task Scheduler — works even when KoZo runs as administrator.' })
+      setStartupMsg({ type: 'success', text: 'Registered via Task Scheduler. Works even when KoZo runs as administrator.' })
     } else if (r.method === 'registry') {
       setStartupMsg({ type: 'success', text: 'Registered in Windows startup registry.' })
     }
@@ -200,6 +262,7 @@ function GeneralTab() {
         </div>
         <Message msg={startupMsg} />
       </section>
+
 
       <section className={s.section}>
         <div className={s.sectionHeader}>
@@ -399,7 +462,7 @@ function SteamTab() {
     } else {
       setDetectMsg({
         type: 'error',
-        text: d?.error === 'timeout' ? 'Sign-in timed out — try again.' : 'Steam sign-in failed — try again.',
+        text: d?.error === 'timeout' ? 'Sign-in timed out. Try again.' : 'Steam sign-in failed. Try again.',
       })
     }
   }
@@ -413,7 +476,7 @@ function SteamTab() {
           <span>Steam Web API Key</span>
         </div>
         <p className={s.sectionDesc}>
-          <strong className={s.strong}>Optional</strong> — KoZo syncs achievements
+          <strong className={s.strong}>Optional</strong>, KoZo syncs achievements
           without a key as long as your Steam profile's Game details are public. A key adds support for
           private profiles and owned-games data. Get yours at{' '}
           <button
@@ -454,13 +517,13 @@ function SteamTab() {
           <span>Your Steam Profile</span>
         </div>
         <p className={s.sectionDesc}>
-          Connects <strong className={s.strong}>automatically</strong> — KoZo reads
+          Connects <strong className={s.strong}>automatically</strong>, KoZo reads
           your logged-in account from the Steam app on this PC. Use "Sign in with Steam" for a
           different account or when Steam isn't installed here. Nothing to type.
         </p>
         {steamUserId && (
           <StatusLine type="success">
-            Connected{steamPersona ? <> as <strong>{steamPersona}</strong></> : <> — {steamUserId}</>}
+            Connected{steamPersona ? <> as <strong>{steamPersona}</strong></> : <> ({steamUserId})</>}
           </StatusLine>
         )}
         {privacyError && (
@@ -472,7 +535,7 @@ function SteamTab() {
                 : <>
                     Steam wouldn't return unlocks for any game KoZo tried, which usually means your
                     profile's <strong>Game details</strong> are private. KoZo still reads unlocks
-                    straight from the Steam app on this PC, so achievements keep working — this only
+                    straight from the Steam app on this PC, so achievements keep working, this only
                     costs you Steam's real unlock dates. If you've already set Game details to Public,
                     hit Re-check.
                   </>}
@@ -482,7 +545,7 @@ function SteamTab() {
                   Open Steam privacy settings
                 </button>
                 {/* Steam caches privacy changes for a moment, and KoZo only
-                    re-tests on launch — so give it a way to confirm now. */}
+                    re-tests on launch, so give it a way to confirm now. */}
                 <button type="button" className={s.testBtn} disabled={privacyChecking}
                   onClick={async () => {
                     setPrivacyChecking(true)
@@ -501,12 +564,12 @@ function SteamTab() {
         )}
         <div className={s.keyRow}>
           <button type="button" className={s.testBtn}
-            title="Read your logged-in account from the local Steam install — no typing needed"
+            title="Read your logged-in account from the local Steam install, no typing needed"
             onClick={detectFromPc}>
             Detect from this PC
           </button>
           <button type="button" className={s.testBtn}
-            title="Sign in with Steam in your browser — for a different account or when Steam isn't installed here"
+            title="Sign in with Steam in your browser, for a different account or when Steam isn't installed here"
             disabled={signingIn}
             onClick={signInWithSteam}>
             <IconBrandSteam size={13} stroke={1.8} />
@@ -559,7 +622,86 @@ function SteamTab() {
         </div>
         <Message msg={bannerMsg} />
       </section>
+
+      <SteamGridDbSection />
     </div>
+  )
+}
+
+// SteamGridDB key: covers + wide banners for games that aren't on Steam.
+const SGDB_KEY_URL = 'https://www.steamgriddb.com/profile/preferences/api'
+function SteamGridDbSection() {
+  const [key, setKey]     = useState('')
+  const [saved, setSaved] = useState('')
+  const [show, setShow]   = useState(false)
+  const [state, setState] = useState('idle')   // idle | saving | ok | error
+  const [msg, setMsg]     = useState('')
+
+  useEffect(() => {
+    window.kozo?.api?.settings?.get?.('steamgriddb_key').then(res => {
+      if (res?.ok && res.data) {
+        setKey(res.data); setSaved(res.data)
+        setState('ok'); setMsg('Key saved. Covers for games without one are filled in automatically.')
+      }
+    })
+  }, [])
+
+  async function save() {
+    // A main process older than this screen has no SteamGridDB support yet:
+    // store the key anyway, the covers come after the restart.
+    if (!window.kozo?.api?.sgdb?.setKey) {
+      const r = await window.kozo?.api?.settings?.set?.('steamgriddb_key', key.trim())
+      if (r?.ok) { setSaved(key.trim()); setState('ok'); setMsg('Saved. Restart KoZo to fetch the covers.') }
+      else { setState('error'); setMsg('Could not save the key.') }
+      return
+    }
+    setState('saving')
+    const res = await window.kozo.api.sgdb.setKey(key).catch(e => ({ ok: false, error: e?.message }))
+    const d = res?.ok ? res.data : null
+    if (d?.valid) {
+      setSaved(key.trim())
+      setState('ok')
+      setMsg(key.trim() ? 'Saved. Covers for your non-Steam games are being fetched in the background.' : 'Key removed.')
+    } else {
+      setState('error')
+      setMsg(d?.message || res?.error || 'Could not check the key.')
+    }
+  }
+
+  return (
+    <section className={s.section}>
+      <div className={s.sectionHeader}>
+        <IconPalette size={15} stroke={1.6} />
+        <span>Covers for non-Steam games</span>
+      </div>
+      <p className={s.sectionDesc}>
+        Games that aren't on Steam (League of Legends, Xbox or Epic exclusives) get their covers from{' '}
+        <strong className={s.strong}>SteamGridDB</strong>. Paste your free API key and KoZo fills them in
+        automatically. You can also pick a different cover from Edit, Find cover.{' '}
+        <button type="button" className={s.linkBtn} onClick={() => window.kozo?.api?.shell?.openExternal?.(SGDB_KEY_URL)}>
+          Get a free key
+        </button>
+      </p>
+      <div className={s.keyRow}>
+        <div className={`${s.keyInputWrap} hasRing`}>
+          <input type={show ? 'text' : 'password'} className={s.keyInput}
+            placeholder="SteamGridDB API key" value={key}
+            aria-label="SteamGridDB API key"
+            onChange={e => { setKey(e.target.value); setState('idle') }}
+            spellCheck={false} autoComplete="off" />
+          <button type="button" className={s.keyToggle} onClick={() => setShow(v => !v)}
+            aria-label={show ? 'Hide key' : 'Show key'}>
+            {show ? <IconEyeOff size={14} stroke={1.6} /> : <IconEye size={14} stroke={1.6} />}
+          </button>
+        </div>
+        <button type="button" className={s.testBtn} onClick={save} disabled={state === 'saving' || (!key.trim() && !saved)}>
+          {state === 'saving' ? <IconLoader2 size={13} stroke={1.8} className="spin" /> : (key.trim() && key.trim() === saved ? 'Check' : 'Save')}
+        </button>
+      </div>
+      {(state === 'ok' || state === 'error') && (
+        <StatusLine type={state === 'ok' ? 'success' : 'error'}>{msg}</StatusLine>
+      )}
+    </section>
   )
 }
 
@@ -768,6 +910,181 @@ function ScanPCTab() {
   )
 }
 
+// Segmented choice row (UI scale, spacing, corners, background mode).
+function Segmented({ value, options, onChange, label }) {
+  return (
+    <div className={s.segRow}>
+      <span className={s.segLabel}>{label}</span>
+      <div className={s.seg} role="radiogroup" aria-label={label}>
+        {options.map(o => (
+          <button key={String(o.value)} type="button" role="radio" aria-checked={value === o.value}
+            className={`${s.segBtn} ${value === o.value ? s.segBtnOn : ''}`} onClick={() => onChange(o.value)}>
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function SliderRow({ label, value, min, max, unit, onChange }) {
+  return (
+    <label className={s.segRow}>
+      <span className={s.segLabel}>{label}</span>
+      <input type="range" className={s.slider} min={min} max={max} value={value}
+        onChange={e => onChange(Number(e.target.value))} />
+      <span className={s.sliderValue}>{value}{unit}</span>
+    </label>
+  )
+}
+
+const START_PAGES = [
+  ...NAV_ITEMS.map(n => ({ value: n.path, label: n.label })),
+  { value: '/profile', label: 'Profile' },
+]
+
+// Settings → Appearance: size and density, card details, sidebar and start
+// page, background picture. Every change applies at once (AppearanceContext).
+function AppearanceCustomize() {
+  const { prefs, setPrefs } = useAppearance()
+  const [games, setGames] = useState([])
+  useEffect(() => {
+    window.kozo?.api?.games?.list?.().then(r => {
+      if (r?.ok) setGames((r.data || []).filter(g => g.hero_local_path || g.banner_local_path))
+    })
+  }, [])
+  const setCard = (k, v) => setPrefs(p => ({ ...p, cards: { ...p.cards, [k]: v } }))
+  const setBg = (patch) => setPrefs(p => ({ ...p, bg: { ...p.bg, ...patch } }))
+  function moveNav(i, d) {
+    setPrefs(p => {
+      const nav = [...p.nav]
+      const j = i + d
+      if (j < 0 || j >= nav.length) return p
+      ;[nav[i], nav[j]] = [nav[j], nav[i]]
+      return { ...p, nav }
+    })
+  }
+  const toggleNav = (path) => setPrefs(p => ({ ...p, nav: p.nav.map(n => (n.path === path ? { ...n, hidden: !n.hidden } : n)) }))
+  async function chooseImage() {
+    const r = await window.kozo?.api?.dialog?.pickWallpaper?.()
+    if (r?.ok && r.data) setBg({ mode: 'image', image: r.data })
+  }
+
+  return (
+    <>
+      <section className={s.section}>
+        <div className={s.sectionHeader}>
+          <IconTextSize size={15} stroke={1.6} />
+          <span>Size and density</span>
+        </div>
+        <div className={s.segList}>
+          <Segmented label="UI scale" value={prefs.scale} onChange={v => setPrefs({ scale: v })}
+            options={[{ value: 0.9, label: '90%' }, { value: 1, label: '100%' }, { value: 1.1, label: '110%' }, { value: 1.25, label: '125%' }]} />
+          <Segmented label="Spacing" value={prefs.density} onChange={v => setPrefs({ density: v })}
+            options={[{ value: 'comfortable', label: 'Comfortable' }, { value: 'compact', label: 'Compact' }]} />
+          <Segmented label="Corners" value={prefs.corners} onChange={v => setPrefs({ corners: v })}
+            options={[{ value: 'sharp', label: 'Sharp' }, { value: 'default', label: 'Default' }, { value: 'round', label: 'Round' }]} />
+        </div>
+      </section>
+
+      <section className={s.section}>
+        <div className={s.sectionHeader}>
+          <IconLayoutCards size={15} stroke={1.6} />
+          <span>Card details</span>
+        </div>
+        <p className={s.sectionDesc}>Choose what game cards show in the Library and the Game List.</p>
+        <div className={s.toggleList}>
+          <ToggleRow label="Genres" desc="The genre line under the game name." checked={prefs.cards.genres} onChange={v => setCard('genres', v)} />
+          <ToggleRow label="Stats row" desc="Achievements, last played and playtime in the Library; the status in the Game List." checked={prefs.cards.stats} onChange={v => setCard('stats', v)} />
+          <ToggleRow label="Achievement progress bar" desc="The thin bar above the stats in the Library." checked={prefs.cards.progress} onChange={v => setCard('progress', v)} />
+          <ToggleRow label="Status dot" desc="The colored dot in the corner of the cover." checked={prefs.cards.statusDot} onChange={v => setCard('statusDot', v)} />
+          <ToggleRow label="Play plan month" desc="The month chip on games you planned to play." checked={prefs.cards.planChip} onChange={v => setCard('planChip', v)} />
+        </div>
+      </section>
+
+      <section className={s.section}>
+        <div className={s.sectionHeader}>
+          <IconLayoutSidebar size={15} stroke={1.6} />
+          <span>Sidebar and start page</span>
+        </div>
+        <p className={s.sectionDesc}>Reorder the sidebar tabs or hide the ones you don't use. Library always stays.</p>
+        <div className={s.navList}>
+          {prefs.nav.map((n, i) => {
+            const item = NAV_ITEMS.find(x => x.path === n.path)
+            if (!item) return null
+            return (
+              <div key={n.path} className={`${s.navRow} ${n.hidden ? s.navRowHidden : ''}`}>
+                <item.Icon size={16} stroke={1.6} />
+                <span className={s.navRowLabel}>{item.label}</span>
+                <button type="button" className={s.navRowBtn} onClick={() => moveNav(i, -1)} disabled={i === 0}
+                  aria-label={`Move ${item.label} up`}><IconArrowUp size={14} /></button>
+                <button type="button" className={s.navRowBtn} onClick={() => moveNav(i, 1)} disabled={i === prefs.nav.length - 1}
+                  aria-label={`Move ${item.label} down`}><IconArrowDown size={14} /></button>
+                <button type="button" className={s.navRowBtn} onClick={() => toggleNav(n.path)} disabled={n.path === '/'}
+                  aria-label={n.hidden ? `Show ${item.label}` : `Hide ${item.label}`} title={n.hidden ? 'Show' : 'Hide'}>
+                  {n.hidden ? <IconEyeOff size={14} /> : <IconEye size={14} />}
+                </button>
+              </div>
+            )
+          })}
+        </div>
+        <div className={s.segRow}>
+          <span className={s.segLabel}>Start page</span>
+          <SearchableSelect value={prefs.startPage} onChange={v => setPrefs({ startPage: v || '/' })}
+            options={START_PAGES} searchable={false} width={200} placeholder="Library" />
+        </div>
+      </section>
+
+      <section className={s.section}>
+        <div className={s.sectionHeader}>
+          <IconPhoto size={15} stroke={1.6} />
+          <span>Background</span>
+        </div>
+        <p className={s.sectionDesc}>Put a picture behind every page. Cards and panels stay solid so text is easy to read.</p>
+        <div className={s.segList}>
+          <Segmented label="Picture" value={prefs.bg.mode} onChange={v => setBg({ mode: v })}
+            options={[{ value: 'off', label: 'Off' }, { value: 'image', label: 'My image' }, { value: 'game', label: "A game's art" }]} />
+          {prefs.bg.mode === 'image' && (
+            <div className={s.segRow}>
+              <span className={s.segLabel}>Image</span>
+              <button type="button" className={s.testBtn} onClick={chooseImage}>
+                <IconPhoto size={14} stroke={1.7} /> {prefs.bg.image ? 'Change picture' : 'Choose picture'}
+              </button>
+            </div>
+          )}
+          {prefs.bg.mode === 'game' && (
+            <div className={s.segRow}>
+              <span className={s.segLabel}>Game</span>
+              <SearchableSelect
+                value={prefs.bg.gameId}
+                onChange={v => {
+                  const g = games.find(x => String(x.id) === String(v))
+                  setBg({ gameId: v || null, gameArt: g ? (g.hero_local_path || g.banner_local_path) : null })
+                }}
+                options={games.map(g => ({ value: g.id, label: g.name }))}
+                placeholder="Pick a game"
+                width={260}
+              />
+            </div>
+          )}
+          {prefs.bg.mode !== 'off' && (
+            <>
+              <SliderRow label="Blur" value={prefs.bg.blur} min={0} max={30} unit="px" onChange={v => setBg({ blur: v })} />
+              <SliderRow label="Darkness" value={prefs.bg.dim} min={40} max={95} unit="%" onChange={v => setBg({ dim: v })} />
+            </>
+          )}
+        </div>
+      </section>
+
+      <div>
+        <button type="button" className={s.testBtn} onClick={() => setPrefs(DEFAULT_APPEARANCE)}>
+          <IconRefresh size={14} stroke={1.7} /> Reset appearance
+        </button>
+      </div>
+    </>
+  )
+}
+
 // ── Tab: Appearance ──────────────────────────────────────────────────────────
 function AppearanceTab() {
   const { accent, setAccent, presets, bgTint, setBgTint } = useAccentColor()
@@ -786,7 +1103,7 @@ function AppearanceTab() {
           <span>Accent Color</span>
         </div>
         <p className={s.sectionDesc}>
-          Controls the highlight color used across the entire app — buttons, active states, and badges.
+          Controls the highlight color used across the entire app: buttons, active states, and badges.
         </p>
         <div className={s.swatchGrid}>
           {presets.map(p => (
@@ -819,12 +1136,14 @@ function AppearanceTab() {
         <div className={s.toggleList}>
           <ToggleRow
             label="Match background to accent"
-            desc="Tints the app's dark background and cards with your accent color's hue — a themed dark look instead of the stock blue-violet."
+            desc="Tints the app's dark background and cards with your accent color's hue, a themed dark look instead of the stock blue-violet."
             checked={bgTint}
             onChange={setBgTint}
           />
         </div>
       </section>
+
+      <AppearanceCustomize />
     </div>
   )
 }
@@ -934,10 +1253,10 @@ function DataTab({ onManageSaves }) {
       <section className={s.section}>
         <div className={s.sectionHeader}>
           <IconCloud size={15} stroke={1.6} />
-          <span>Sync &amp; Backup — your data on any PC</span>
+          <span>Sync &amp; Backup: your data on any PC</span>
         </div>
         <p className={s.sectionDesc}>
-          No account needed — sync KoZo to <strong className={s.strong}>any folder</strong>:
+          No account needed, sync KoZo to <strong className={s.strong}>any folder</strong>:
           a cloud-synced folder (OneDrive/Drive/Dropbox), a network drive, or a USB stick. It keeps your
           library, playtime, achievements, lists AND game-save backups mirrored there. On a new PC:
           install KoZo, choose the same folder, hit Restore.
@@ -965,13 +1284,13 @@ function DataTab({ onManageSaves }) {
         {sync?.configured && (
           <p className={s.sectionDescQuiet}>
             Syncing to <strong className={s.savePath} title={sync.folder}>{sync.folder}</strong>
-            {sync.lastBackupAt ? <> — last backup {new Date(sync.lastBackupAt).toLocaleString()}</> : ' — first backup will be written shortly'}
+            {sync.lastBackupAt ? <>. Last backup {new Date(sync.lastBackupAt).toLocaleString()}</> : '. The first backup will be written shortly'}
           </p>
         )}
 
         {importState === 'done' && importResult && (
           <StatusLine type="success">
-            Restored — {importResult.games} games, {importResult.sessions} sessions,
+            Restored {importResult.games} games, {importResult.sessions} sessions,
             {' '}{importResult.gameList} list items
           </StatusLine>
         )}
@@ -987,14 +1306,14 @@ function DataTab({ onManageSaves }) {
           </div>
           <p className={s.sectionDesc}>
             Each game's save files back up into the same folder
-            {backupsDir && <> (<code className={s.savePath} title={backupsDir}>{backupsDir}</code>)</>} — great for
+            {backupsDir && <> (<code className={s.savePath} title={backupsDir}>{backupsDir}</code>)</>}, great for
             cracked/offline games with no cloud saves.
           </p>
 
           <div className={s.toggleList}>
             <ToggleRow
               label="Auto-back up saves after each session"
-              desc="After you finish playing, snapshots that game's saves automatically — keeps the last two sessions (older ones are overwritten so backups never balloon in size)."
+              desc="After you finish playing, snapshots that game's saves automatically, keeps the last two sessions (older ones are overwritten so backups never balloon in size)."
               checked={autoSaveEnabled}
               onChange={toggleAutoSave}
             />
@@ -1011,7 +1330,7 @@ function DataTab({ onManageSaves }) {
               {allState === 'done' && allResult && (
                 <StatusLine type={(allResult.noSaves || allResult.failed) ? 'warning' : 'success'}>
                   {allResult.backedUp} backed up
-                  {allResult.noSaves ? ` — ${allResult.noSaves} had no detectable save folder (open that game's Save Files to back up manually)` : ''}
+                  {allResult.noSaves ? `. ${allResult.noSaves} had no detectable save folder (open that game's Save Files to back up manually)` : ''}
                   {allResult.failed ? `, ${allResult.failed} failed` : ''}
                 </StatusLine>
               )}
@@ -1048,7 +1367,7 @@ function DataTab({ onManageSaves }) {
         </div>
 
         <p className={s.sectionDescQuiet}>
-          Restoring merges data in (matching entries are updated) — it never deletes anything or touches game saves.
+          Restoring merges data in (matching entries are updated), it never deletes anything or touches game saves.
         </p>
       </section>
     </div>
@@ -1060,77 +1379,86 @@ const FEATURE_GROUPS = [
   {
     title: 'Tracking',
     items: [
-      { Icon: IconClock,    name: 'Automatic playtime', desc: 'Detects running games and records sessions — no manual timers.' },
-      { Icon: IconHistory,  name: 'Sessions timeline',  desc: 'Every play session grouped by day with durations and unlocks.' },
-      { Icon: IconBolt,     name: 'Idle / AFK pause',   desc: 'Stops counting when you step away so overnight idling doesn’t inflate stats.' },
+      { Icon: IconClock,    name: 'Automatic playtime', go: '/sessions', desc: 'Detects running games and records sessions, no manual timers.' },
+      { Icon: IconHistory,  name: 'Sessions timeline', go: '/sessions',  desc: 'Every play session grouped by day with durations and unlocks.' },
+      { Icon: IconBolt,     name: 'Idle / AFK pause', go: 'tab:general',   desc: 'Stops counting when you step away so overnight idling doesn’t inflate stats.' },
     ],
   },
   {
     title: 'Achievements',
     items: [
-      { Icon: IconBrandSteam, name: 'Steam sync',        desc: 'Imports your unlocks via the Steam Web API — automatically while you play and after each session. No interval to set.' },
-      { Icon: IconTrophy,     name: 'Cracked-game sync', desc: 'Reads Goldberg, CODEX, RUNE, EMPRESS, SKIDROW and more — watched live, so unlocks appear instantly.' },
-      { Icon: IconBell,       name: 'Live game overlay', desc: 'A toast pops over your game the moment you unlock something — Steam-style, in your accent color.' },
-      { Icon: IconDownload,   name: 'Achievement lists for any launcher', desc: "Xbox/Epic/other games auto-match a Steam achievement list on add — then tick off the ones you've earned." },
+      { Icon: IconBrandSteam, name: 'Steam sync', go: '/achievements',        desc: 'Imports your unlocks via the Steam Web API, automatically while you play and after each session. No interval to set.' },
+      { Icon: IconTrophy,     name: 'Cracked-game sync', go: '/achievements', desc: 'Reads Goldberg, CODEX, RUNE, EMPRESS, SKIDROW and more, watched live, so unlocks appear instantly.' },
+      { Icon: IconBell,       name: 'Live game overlay', go: 'overlay:test', desc: 'A toast pops over your game the moment you unlock something, Steam-style, in your accent color.' },
+      { Icon: IconDownload,   name: 'Achievement lists for any launcher', go: '/achievements', desc: "Xbox/Epic/other games auto-match a Steam achievement list on add, then tick off the ones you've earned." },
     ],
   },
   {
     title: 'Library',
     items: [
-      { Icon: IconSearch,         name: 'Scan PC',          desc: 'Finds installed games (Steam, Epic, GOG, Xbox, cracked) on your drives, with the right launcher badge — right from the Library toolbar.' },
-      { Icon: IconDeviceGamepad2, name: 'Add manually',     desc: 'Point KoZo at any .exe — perfect for offline games.' },
-      { Icon: IconStar,           name: 'Favorites',        desc: 'Star a game to pin it to the top of your Library and Game List.' },
-      { Icon: IconList,           name: 'Game List',        desc: 'A backlog / wishlist with statuses, genres, search, and Spotify-style custom lists.' },
-      { Icon: IconEyeOff,         name: 'Status filter & hidden games', desc: 'Filter the Library by Playing/Finished/Dropped/On hold; hidden games tuck into a collapsed section at the bottom (their stats still count).' },
-      { Icon: IconLayoutGrid,     name: 'Drag & drop ordering', desc: 'Pick "Custom order" and drag cards into any arrangement you like — in the Library and the Game List.' },
+      { Icon: IconSearch,         name: 'Scan PC', go: '/?scan=1',          desc: 'Finds installed games (Steam, Epic, GOG, Xbox, cracked) on your drives, with the right launcher badge, right from the Library toolbar.' },
+      { Icon: IconDeviceGamepad2, name: 'Add manually', go: '/?add=1',     desc: 'Point KoZo at any .exe, perfect for offline games.' },
+      { Icon: IconStar,           name: 'Favorites', go: '/',        desc: 'Star a game to pin it to the top of your Library and Game List.' },
+      { Icon: IconList,           name: 'Game List', go: '/game-list',        desc: 'A backlog / wishlist with statuses, genres, search, and Spotify-style custom lists.' },
+      { Icon: IconEyeOff,         name: 'Status filter & hidden games', go: '/', desc: 'Filter the Library by Playing/Finished/Dropped/On hold; hidden games tuck into a collapsed section at the bottom (their stats still count).' },
+      { Icon: IconLayoutGrid,     name: 'Drag & drop ordering', go: '/', desc: 'Pick "Custom order" and drag cards into any arrangement you like, in the Library and the Game List.' },
     ],
   },
   {
     title: 'Saves & Backups',
     items: [
-      { Icon: IconDeviceFloppy, name: 'Save file finder',     desc: 'Locates each game’s real save folder (even tricky publisher paths).' },
-      { Icon: IconArchive,      name: 'Save backup & restore',desc: 'Snapshot and roll back any game’s saves — manually, all at once before a format, or automatically after each session (keeps the last two).' },
-      { Icon: IconCloud,        name: 'Folder sync', desc: 'Sync everything (game saves included) to any folder — cloud-synced, network drive, or USB — and restore on any PC. Fully offline, no account.' },
+      { Icon: IconDeviceFloppy, name: 'Save file finder', go: 'tab:data',     desc: 'Locates each game’s real save folder (even tricky publisher paths).' },
+      { Icon: IconArchive,      name: 'Save backup & restore', go: 'tab:data',desc: 'Snapshot and roll back any game’s saves, manually, all at once before a format, or automatically after each session (keeps the last two).' },
+      { Icon: IconCloud,        name: 'Folder sync', go: 'tab:data', desc: 'Sync everything (game saves included) to any folder, cloud-synced, network drive, or USB, and restore on any PC. Fully offline, no account.' },
     ],
   },
   {
     title: 'Personalize',
     items: [
-      { Icon: IconUser,      name: 'Your profile',  desc: 'A profile page with a cropped avatar & banner, banner themes, a title, and a showcase of your favorite games.' },
-      { Icon: IconBolt,      name: 'XP & levels',   desc: 'Earn XP from playtime, rare achievements, play streaks and finished games — level up through tiers from Rookie to Mythic, shown on your profile.' },
-      { Icon: IconPalette,   name: 'Custom accent', desc: 'Pick any accent (presets or custom hex) — it themes the whole app, badges, and the live overlay.' },
+      { Icon: IconUser,      name: 'Your profile', go: '/profile',  desc: 'A profile page with a cropped avatar & banner, banner themes, a title, and a showcase of your favorite games.' },
+      { Icon: IconBolt,      name: 'XP & levels', go: '/profile',   desc: 'Earn XP from playtime, rare achievements, play streaks and finished games, level up through tiers from Rookie to Mythic, shown on your profile.' },
+      { Icon: IconPalette,   name: 'Custom accent', go: 'tab:appearance', desc: 'Pick any accent (presets or custom hex), it themes the whole app, badges, and the live overlay.' },
     ],
   },
   {
     title: 'Insights & App',
     items: [
-      { Icon: IconChartBar,  name: 'Statistics',    desc: 'Playtime trends with an hourly 24h view, daily/monthly charts, and click-a-day (or hour) to focus it.' },
-      { Icon: IconBell,      name: 'In-game status (Alt+K)', desc: 'Press Alt+K while playing to flash your live session time and achievement progress over the game.' },
-      { Icon: IconTrophy,    name: 'Achievement list (Alt+J)', desc: 'Press Alt+J while playing to flash your progress and the rarest achievements you still have left, right over the game.' },
-      { Icon: IconRocket,    name: 'Tray & startup',desc: 'Runs quietly in the system tray and can launch with Windows.' },
+      { Icon: IconChartBar,  name: 'Statistics', go: '/statistics',    desc: 'Playtime trends with an hourly 24h view, daily/monthly charts, and click-a-day (or hour) to focus it.' },
+      { Icon: IconBell,      name: 'In-game status (Alt+K)', go: 'tab:about', desc: 'Press Alt+K while playing to flash your live session time and achievement progress over the game.' },
+      { Icon: IconTrophy,    name: 'Achievement list (Alt+J)', go: 'tab:about', desc: 'Press Alt+J while playing to flash your progress and the rarest achievements you still have left, right over the game.' },
+      { Icon: IconRocket,    name: 'Tray & startup', go: 'tab:general',desc: 'Runs quietly in the system tray and can launch with Windows.' },
     ],
   },
 ]
 
-function FeaturesTab() {
+// Every feature row opens where that feature lives: a page, a Settings tab,
+// or the action itself (Scan PC, the overlay test).
+function FeaturesTab({ setTab }) {
+  const navigate = useNavigate()
+  function open(go) {
+    if (!go) return
+    if (go.startsWith('tab:')) setTab(go.slice(4))
+    else if (go === 'overlay:test') window.kozo?.api?.overlay?.test?.()
+    else navigate(go)
+  }
   return (
     <div className={s.tabContent}>
       <p className={s.sectionDesc}>
-        Everything KoZo can do, grouped by area. Most of it runs automatically once you've added
-        games and connected Steam.
+        Everything KoZo can do, grouped by area. Click a feature to go straight to it.
       </p>
       {FEATURE_GROUPS.map(group => (
         <section key={group.title} className={s.featureGroup}>
           <div className={s.featureGroupTitle}>{group.title}</div>
           <div className={s.featureList}>
             {group.items.map(f => (
-              <div key={f.name} className={s.featureRow}>
+              <button key={f.name} type="button" data-gpnav="" className={`${s.featureRow} ${s.featureRowLink}`} onClick={() => open(f.go)}>
                 <div className={s.featureIcon}><f.Icon size={18} stroke={1.6} /></div>
                 <div className={s.featureRowBody}>
                   <div className={s.featureName}>{f.name}</div>
                   <div className={s.featureDesc}>{f.desc}</div>
                 </div>
-              </div>
+                <IconChevronRight size={16} stroke={1.6} className={s.featureGo} />
+              </button>
             ))}
           </div>
         </section>
@@ -1174,15 +1502,15 @@ function AboutTab() {
   function updateLine(r) {
     if (r.error) {
       return ['error', r.error === 'timed_out'
-        ? "Couldn't reach the update server — check your connection."
+        ? "Couldn't reach the update server. Check your connection."
         : r.error]
     }
     if (r.notConfigured) return ['info', 'Update source not configured yet (set build.publish in package.json).']
-    if (r.noReleases) return ['info', `No releases published on ${r.repo} yet — build the app and publish a GitHub release to enable updates.`]
+    if (r.noReleases) return ['info', `No releases published on ${r.repo} yet. Build the app and publish a GitHub release to enable updates.`]
     if (r.updateAvailable) {
-      return ['success', `Update ${r.latest} available (you have ${r.current})${r.dev || r.manualOnly ? '' : ' — downloading in the background.'}`]
+      return ['success', `Update ${r.latest} available (you have ${r.current})${r.dev || r.manualOnly ? '' : '. Downloading in the background.'}`]
     }
-    return ['success', `You're up to date${r.latest ? ` — ${r.latest} is the latest release` : ''}${r.dev ? ' (dev build, checked against GitHub)' : ''}.`]
+    return ['success', `You're up to date${r.latest ? `. ${r.latest} is the latest release` : ''}${r.dev ? ' (dev build, checked against GitHub)' : ''}.`]
   }
 
   return (
@@ -1195,7 +1523,7 @@ function AboutTab() {
             <div className={s.aboutVersion}>Version {version || '…'}</div>
             <div className={s.aboutDesc}>
               A local-first game tracker for Windows. Track playtime, sessions, and
-              achievements — even for cracked and offline games.
+              achievements, even for cracked and offline games.
             </div>
           </div>
         </div>
@@ -1232,8 +1560,8 @@ function AboutTab() {
           {[
             ['Platform',            'Windows (Electron 41)'],
             ['Runtime',             'React 19 + SQLite'],
-            ['Data storage',        'Local — nothing leaves your PC'],
-            ['Steam integration',   'Steam Web API — optional; public profiles sync keyless'],
+            ['Data storage',        'Local, nothing leaves your PC'],
+            ['Steam integration',   'Steam Web API (optional). Public profiles sync without a key'],
             ['Crack support',       'Goldberg, CODEX, EMPRESS, ALI213, SSE, CreamAPI, SKIDROW, Reloaded, online-fix'],
           ].map(([k, v]) => (
             <div key={k} className={s.aboutDetailRow}>
@@ -1250,7 +1578,7 @@ function AboutTab() {
         <p className={s.sectionDesc}>
           Verify the achievement pipeline end to end: KoZo plants a synthetic crack file,
           runs the real scanner on it, records the unlock in the database, and fires the
-          real in-game overlay toast — then cleans everything up.
+          real in-game overlay toast, then cleans everything up.
         </p>
         <div className={s.keyRow}>
           <button type="button" className={s.testBtn} onClick={runTrackingTest} disabled={testing}>
@@ -1266,13 +1594,13 @@ function AboutTab() {
           <div className={s.statusStack}>
             {(testResult.steps || []).map((st, i) => (
               <StatusLine key={i} type={st.ok ? 'success' : 'error'}>
-                {st.name}{st.detail ? <span className={s.statusDetail}> — {st.detail}</span> : null}
+                {st.name}{st.detail ? <span className={s.statusDetail}>: {st.detail}</span> : null}
               </StatusLine>
             ))}
             <StatusLine type={testResult.ok ? 'success' : 'error'} className={s.statusSummary}>
               {testResult.ok
                 ? 'Achievement tracking is working on this PC.'
-                : 'Something failed — see the steps above.'}
+                : 'Something failed. See the steps above.'}
             </StatusLine>
           </div>
         )}
@@ -1290,6 +1618,17 @@ function AboutTab() {
             <IconRocket size={13} stroke={1.8} /> Show the walkthrough
           </button>
         </div>
+      </section>
+
+      <section className={s.section}>
+        <div className={s.sectionHeader}>
+          <IconCode size={15} stroke={1.6} />
+          <span>Dev</span>
+        </div>
+        <p className={s.sectionDesc}>
+          Developer options for testing KoZo, locked with a password.
+        </p>
+        <RestrictedContent />
       </section>
     </div>
   )
@@ -1325,7 +1664,7 @@ export default function Settings() {
           ))}
         </nav>
         <div className={s.panel}>
-          {tab === 'features'   && <FeaturesTab />}
+          {tab === 'features'   && <FeaturesTab setTab={setTab} />}
           {tab === 'general'    && <GeneralTab />}
           {tab === 'steam'      && <SteamTab />}
           {tab === 'scan'       && <ScanPCTab />}

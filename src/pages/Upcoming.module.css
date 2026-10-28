@@ -6,6 +6,28 @@
 .content { composes: content from '../styles/page.module.css'; }
 .inner { composes: contentInner from '../styles/page.module.css'; }
 
+.tabs {
+  display: inline-flex;
+  gap: var(--sp-2);
+  margin-left: var(--sp-12);
+  padding: var(--sp-2);
+  border-radius: var(--r-input);
+  background: var(--neutral-bg);
+}
+.tab {
+  padding: var(--sp-4) var(--sp-12);
+  border: none;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.tab:hover { color: var(--text-primary); }
+.tabActive { background: var(--ad); color: var(--a); }
+
 .count {
   composes: chip chipAccent from '../styles/controls.module.css';
   font-weight: 600;
@@ -30,154 +52,146 @@
    window widens, so no breakpoint is involved at any size. */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 280px), 1fr));   /* Ctrl+wheel */
   gap: var(--sp-12);
   contain: layout style;
 }
 
+/* Card: art on top, details underneath (nothing sits on top of the title). */
 .card {
-  position: relative;
-  aspect-ratio: 16 / 7;
-  padding: 0;
+  display: flex;
+  flex-direction: column;
   border-radius: var(--r-card);
   border: 1px solid var(--border);
   background: var(--surface-2);
   overflow: hidden;
   cursor: pointer;
-  font-family: inherit;
   text-align: left;
   transition: var(--t-border), box-shadow var(--dur-base) var(--ease);
   content-visibility: auto;
-  contain-intrinsic-size: auto 320px auto 140px;
+  contain-intrinsic-size: auto 300px;
 }
-/* Lift by shadow, never translateY — a transformed ancestor becomes the
-   containing block for any position:fixed descendant (CLAUDE.md section 3).
-   Hover sharpens the edge toward the accent and steps elevation up one. */
-.card:hover {
+/* Lift by shadow, never translateY (a transformed ancestor traps fixed children). */
+.card:hover,
+.card:focus-visible {
   border-color: var(--border-accent-soft);
   box-shadow: var(--elev-2), var(--glow-1);
+  outline: none;
 }
+.cardOut { border-color: var(--success-border-strong); }
 
+.cardMedia {
+  position: relative;
+  aspect-ratio: 616 / 353;
+  background: var(--surface-3);
+  overflow: hidden;
+}
 .cardArt {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  object-position: center 30%;
-  z-index: var(--z-base);
-  transition: transform var(--dur-slow) var(--ease);
+  opacity: 0;
+  transition: opacity 0.25s ease, transform var(--dur-slow) var(--ease);
 }
+.artLoaded { opacity: 1; }
 .card:hover .cardArt { transform: scale(1.04); }
-
-.cardGrad {
-  position: absolute;
-  inset: 0;
-  z-index: var(--z-raised);
-  background: linear-gradient(0deg, var(--scrim-strong) 0%, var(--scrim-soft) 45%, transparent 100%);
+.artEmpty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 1;
+  color: var(--text-disabled);
 }
 
-.badge {
-  composes: chip from '../styles/controls.module.css';
+/* Countdown pill, top-left over the art */
+.pill {
   position: absolute;
-  top: 9px;
-  right: 9px;
-  z-index: var(--z-card);
+  top: var(--sp-10);
+  left: var(--sp-10);
   padding: 3px var(--sp-10);
-  font-weight: 700;
+  border-radius: var(--r-pill);
   background: var(--scrim-chip);
+  border: 1px solid var(--ab);
   color: var(--a);
-  border-color: var(--ab);
+  font-size: var(--fs-xs);
+  font-weight: 700;
 }
 .badgeSoon { color: var(--warning); border-color: var(--warning-border-strong); }
 .badgeOut  { color: var(--success); border-color: var(--success-border-strong); }
-.badgeTba  { color: var(--text-muted);      border-color: var(--border); }
+.badgeTba  { color: var(--text-muted); border-color: var(--border); }
 
-.cardBody {
-  position: absolute;
-  left: 0; right: 0; bottom: 0;
-  z-index: var(--z-card);
-  padding: var(--sp-12) var(--sp-12) var(--sp-12) var(--sp-16);
-}
-.cardName {
-  font-size: var(--fs-lg);
-  font-weight: 700;
-  color: var(--on-art);
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.cardSub {
-  margin-top: var(--sp-2);
-  font-size: var(--fs-xs);
-  color: var(--on-art-dim);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-
-/* ── Detail popup ────────────────────────────────────────────── */
-.detailHero {
-  position: relative;
-  aspect-ratio: 16 / 6;
-  margin: -4px 0 var(--sp-12);
-  border-radius: var(--r-input);
-  overflow: hidden;
-  background: var(--surface-3);
-}
-.detailArt {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: center 30%;
-}
-.detailGrad {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(0deg, var(--scrim) 0%, transparent 60%);
-}
-
-.detailBadge {
+/* Hover actions, top-right over the art */
+.cardActions {
   position: absolute;
   top: var(--sp-10);
   right: var(--sp-10);
-}
-
-.detailMeta {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--sp-12);
-  margin-bottom: var(--sp-10);
+  gap: var(--sp-6);
+  opacity: 0;
+  transition: opacity var(--dur-base) var(--ease);
 }
-.detailDate {
+.card:hover .cardActions,
+.card:focus-visible .cardActions { opacity: 1; }
+.cardAction {
   display: inline-flex;
+  padding: var(--sp-6);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--scrim-chip);
+  color: var(--on-art);
+  cursor: pointer;
+}
+.cardAction:hover { color: var(--a); border-color: var(--ab); }
+.cardActionConfirm {
+  gap: var(--sp-4);
   align-items: center;
-  gap: 5px;
-  font-size: var(--fs-md);
+  font-size: var(--fs-2xs);
   font-weight: 600;
-  color: var(--a);
+  color: var(--status-dropped, #f87171);
+  border-color: color-mix(in srgb, var(--status-dropped, #f87171) 55%, transparent);
 }
-.detailGenres { font-size: var(--fs-sm); color: var(--text-muted); }
 
-.detailDesc {
+.cardInfo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  padding: var(--sp-12) var(--sp-12) var(--sp-12);
+}
+.cardName {
   font-size: var(--fs-md);
-  line-height: var(--lh-loose);
-  color: var(--text-secondary);
-  margin: 0 0 var(--sp-10);
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.detailDescMuted { color: var(--text-muted); }
-.detailDevs { font-size: var(--fs-sm); color: var(--text-muted); margin-bottom: var(--sp-4); }
-.detailDevs strong { color: var(--text-secondary); }
-
-.detailActions {
+.cardDate {
   display: flex;
   align-items: center;
-  gap: var(--sp-8);
-  flex-wrap: wrap;
-  margin-top: var(--sp-12);
-  padding-top: var(--sp-12);
-  border-top: 1px solid var(--border-subtle);
+  gap: var(--sp-6);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
 }
+.cardGenres { display: flex; flex-wrap: wrap; gap: var(--sp-4); }
+.cardGenre {
+  padding: 1px var(--sp-8);
+  border-radius: var(--r-pill);
+  background: var(--neutral-bg);
+  color: var(--text-secondary);
+  font-size: var(--fs-2xs);
+}
+.cardWait { display: flex; align-items: center; gap: var(--sp-8); margin-top: var(--sp-2); }
+.cardProgress {
+  flex: 1;
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: var(--neutral-bg-hover);
+  overflow: hidden;
+}
+.cardProgress span { display: block; height: 100%; border-radius: inherit; background: var(--a); }
+.cardWaitLabel { font-size: var(--fs-2xs); color: var(--text-muted); white-space: nowrap; }
 
 /* Ghost heading above the first-load card grid. */
 .ghostTitle { margin-bottom: var(--sp-10); }

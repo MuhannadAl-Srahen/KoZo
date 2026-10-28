@@ -11,6 +11,7 @@ import {
 } from '@tabler/icons-react'
 import HoneycombLogo from './HoneycombLogo'
 import { fileUrl } from '../lib/utils'
+import { useAppearance } from '../context/AppearanceContext'
 import s from './Sidebar.module.css'
 
 function initials(name) {
@@ -19,7 +20,7 @@ function initials(name) {
   return (parts[0][0] + (parts[1]?.[0] || '')).toUpperCase()
 }
 
-const NAV_ITEMS = [
+export const NAV_ITEMS = [
   { path: '/',              label: 'Library',      Icon: IconLayoutGrid },
   { path: '/game-list',     label: 'Game List',    Icon: IconList },
   { path: '/achievements',  label: 'Achievements', Icon: IconTrophy },
@@ -39,9 +40,23 @@ function formatSessionTime(startedAt, idleSeconds = 0) {
 }
 
 export default function Sidebar() {
+  // Tab order and hidden tabs come from Settings → Appearance.
+  const { prefs } = useAppearance()
+  const navItems = prefs.nav
+    .filter(n => !n.hidden)
+    .map(n => NAV_ITEMS.find(i => i.path === n.path))
+    .filter(Boolean)
   const [activeSession, setActiveSession] = useState(null)
   const [sessionTick, setSessionTick] = useState(0)
   const [profile, setProfile] = useState({ name: 'Player', avatar: '' })
+  // Tracked games released but not yet acknowledged → badge on "Upcoming".
+  const [newReleases, setNewReleases] = useState(0)
+  useEffect(() => {
+    let alive = true
+    window.kozo?.api?.releases?.unseen?.().then(res => { if (alive && res?.ok) setNewReleases((res.data || []).length) })
+    const off = window.kozo?.events?.onReleasesChanged?.((list) => setNewReleases((list || []).length))
+    return () => { alive = false; off?.() }
+  }, [])
   const [xp, setXp] = useState(null)
   const location = useLocation()
 
@@ -148,12 +163,13 @@ export default function Sidebar() {
 
       {/* Navigation */}
       <nav className={s.nav}>
-        {NAV_ITEMS.map(({ path, label, Icon }) => (
+        {navItems.map(({ path, label, Icon }) => (
           <NavLink
             key={path}
             to={path}
             end={path === '/'}
             data-gpnav=""
+            data-tour={`nav-${path === '/' ? 'library' : path.slice(1)}`}
             className={({ isActive }) =>
               `${s.navItem} ${isActive ? s.navItemActive : ''}`
             }
@@ -162,6 +178,9 @@ export default function Sidebar() {
               <Icon size={17} stroke={1.6} />
             </span>
             {label}
+            {path === '/upcoming' && newReleases > 0 && (
+              <span className={s.navBadge} title={`${newReleases} tracked game${newReleases !== 1 ? 's' : ''} just released`}>{newReleases}</span>
+            )}
           </NavLink>
         ))}
       </nav>
@@ -180,7 +199,7 @@ export default function Sidebar() {
                 {formatSessionTime(activeSession.started_at, activeSession.idle_seconds)}
               </span>
               {activeSession.idle && (
-                <span className={s.nowPlayingAfk} title="AFK — not counting">AFK — not counting</span>
+                <span className={s.nowPlayingAfk} title="AFK, not counting time">AFK, paused</span>
               )}
             </div>
           </div>
@@ -189,6 +208,7 @@ export default function Sidebar() {
         <NavLink
           to="/profile"
           data-gpnav=""
+          data-tour="nav-profile"
           className={({ isActive }) => `${s.profileChip} ${isActive ? s.profileChipActive : ''}`}
         >
           <span className={s.profileAvatar}>
@@ -217,6 +237,7 @@ export default function Sidebar() {
         <NavLink
           to="/settings"
           data-gpnav=""
+          data-tour="nav-settings"
           className={({ isActive }) => `${s.settingsLink} ${isActive ? s.settingsLinkActive : ''}`}
         >
           <span className={s.navIcon}><IconSettings size={17} stroke={1.6} /></span>

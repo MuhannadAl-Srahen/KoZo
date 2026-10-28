@@ -27,6 +27,9 @@ export const LIST_STATUSES = {
   upcoming:     { label: 'Upcoming',     color: 'var(--status-upcoming)',  Icon: IconCalendar },
 }
 
+// Menu / picker order for the Game List statuses.
+export const LIST_STATUS_ORDER = ['want_to_play', 'playing', 'finished', 'on_hold', 'dropped', 'upcoming']
+
 // Backwards-compatible alias — GameCard used to export STATUS_META.
 export const STATUS_META = LIBRARY_STATUSES
 
@@ -54,19 +57,4 @@ export function accentOf(game, statuses = LIBRARY_STATUSES) {
   const st = statuses[game?.completion_status] || statuses[game?.status]
   if (st) return { tone: 'status', color: st.color, label: st.label }
   return null
-}
-
-// Everything the card needs to render, derived once.
-export function cardModel(game, { statuses = LIBRARY_STATUSES, showInstallState = true } = {}) {
-  const source = sourceOf(game)
-  const accent = accentOf(showInstallState ? game : { ...game, is_installed: 1 }, statuses)
-  return {
-    source,
-    accent,
-    // Dimming says "you cannot play this right now". Hidden games are dimmed for
-    // a different reason, so they carry their own quieter treatment.
-    unavailable: showInstallState && game?.is_installed === 0,
-    hidden: game?.is_hidden === 1,
-    favorite: game?.is_favorite === 1,
-  }
 }

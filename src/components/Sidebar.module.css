@@ -61,6 +61,20 @@
   transform: translateZ(0);
 }
 
+/* New-release count on the Upcoming item (releaseWatch unseen list). */
+.navBadge {
+  margin-left: auto;
+  min-width: 18px;
+  padding: 0 var(--sp-6);
+  border-radius: var(--r-pill);
+  background: var(--success);
+  color: var(--accent-ink);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+
 .navItem {
   display: flex;
   align-items: center;

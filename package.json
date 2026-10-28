@@ -1,7 +1,7 @@
 {
   "name": "kozo",
   "productName": "KoZo",
-  "version": "1.3.2",
+  "version": "1.4.0",
   "description": "KoZo — Desktop Game Tracker for Windows",
   "author": "Muhannad Al-Srahen",
   "repository": {
@@ -10,7 +10,7 @@
   },
   "main": "electron/main.js",
   "scripts": {
-    "dev": "concurrently -k -n VITE,ELECTRON -c cyan,magenta \"vite\" \"wait-on tcp:5173 && electron .\"",
+    "dev": "concurrently -k -n VITE,ELECTRON -c cyan,magenta \"vite\" \"wait-on tcp:5173 && node scripts/dev-electron.js\"",
     "geticon": "node scripts/gen-icon.js",
     "build": "node scripts/gen-icon.js && vite build && electron-builder",
     "rebuild": "cd node_modules/better-sqlite3 && npx prebuild-install --runtime electron --target 41.7.1 --arch x64 --tag-prefix v",
@@ -35,7 +35,11 @@
       "icon": "build/icon.png"
     },
     "nsis": {
-      "shortcutName": "KoZo"
+      "shortcutName": "KoZo",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true
     },
     "publish": [
       {

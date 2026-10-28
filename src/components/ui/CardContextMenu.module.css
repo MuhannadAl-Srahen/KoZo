@@ -16,7 +16,11 @@
   border: 1px solid var(--border-accent-soft);
   border-radius: var(--r-card);
   box-shadow: var(--elev-2);
+  /* Never taller than the window: scroll inside instead of running off it. */
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
 }
+.choice { display: flex; flex-direction: column; }
 
 .header {
   padding: var(--sp-6) 9px var(--sp-4);

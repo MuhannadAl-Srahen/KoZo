@@ -14,7 +14,7 @@ function sessionTimeRange(startedAt, durationSeconds) {
   const start = new Date(startedAt)
   const end   = new Date(start.getTime() + (durationSeconds || 0) * 1000)
   const fmt   = d => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  return `${fmt(start)} – ${fmt(end)}`
+  return `${fmt(start)} to ${fmt(end)}`
 }
 
 function dayLabel(dateStr) {
@@ -237,7 +237,7 @@ export default function Sessions() {
                       {/* Duration */}
                       <div className={s.sessionDur} title="Session length">
                         <IconClock size={12} stroke={1.5} />
-                        {formatPlaytime(session.duration_seconds) || '—'}
+                        {formatPlaytime(session.duration_seconds)}
                       </div>
 
                       {/* Achievements */}
@@ -246,7 +246,7 @@ export default function Sessions() {
                         title={`${session.achievements_unlocked || 0} achievement${session.achievements_unlocked === 1 ? '' : 's'} unlocked`}
                       >
                         <IconTrophy size={12} stroke={1.5} />
-                        {session.achievements_unlocked > 0 ? session.achievements_unlocked : '—'}
+                        {session.achievements_unlocked > 0 ? session.achievements_unlocked : 0}
                       </div>
                     </div>
                   ))}

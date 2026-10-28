@@ -1,8 +1,9 @@
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import { IconTrophy, IconCheck, IconClock, IconPlayerPlayFilled, IconStar, IconEyeOff } from '@tabler/icons-react'
-import { getBannerBg, getBannerIcon, formatPlaytime, formatDate, fileUrl, parseGenres } from '../lib/utils'
+import { getBannerBg, getBannerIcon, formatPlaytime, formatDate, fileUrl, parseGenres, formatMonthKey } from '../lib/utils'
 import { LIBRARY_STATUSES, sourceOf, accentOf } from '../lib/cardModel'
+import GeneratedCover from './GeneratedCover'
 import InfoModal from './ui/InfoModal'
 import s from './GameCard.module.css'
 
@@ -32,6 +33,7 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
   const accent   = accentOf(game)
   const genres   = parseGenres(game)
   const [launchError, setLaunchError] = React.useState(null)
+  const [imgFailed, setImgFailed] = React.useState(null)   // src that failed to load
   const [launchWarning, setLaunchWarning] = React.useState(null)
 
   function handleClick() {
@@ -49,16 +51,15 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
     <div
       className={`${s.card} ${variant === 'small' ? s.cardSmall : ''} ${(!game.is_installed || game.is_hidden) && !selectionMode ? s.cardDimmed : ''} ${game._isLive && !selectionMode ? s.cardLive : ''} ${selected ? s.cardSelected : ''}`}
       onClick={handleClick}
+      data-gpclick=""
       onContextMenu={onContextMenu ? (e) => { e.preventDefault(); onContextMenu(e, game) } : undefined}
     >
       <div className={s.banner} style={{ background: bg }}>
-        {/* Icon is the base layer; a blurred fill + the contained cover overlay
-            it. If the image fails to load the icon shows again. */}
-        <Icon size={iconSize} className={s.bannerIcon} stroke={1.1} style={{ zIndex: 0 }} />
         {(() => {
           const localSrc = game.banner_local_path ? fileUrl(game.banner_local_path, game.banner_rev) : null
-          const src = localSrc || game.banner_url
-          if (!src) return null
+          const imgSrc = localSrc || game.banner_url
+          // No art, or every source failed: a generated cover instead of a blank tile.
+          if (!imgSrc || imgFailed === imgSrc) return <GeneratedCover name={game.name} Icon={src?.Icon || Icon} />
           // A local banner file can go missing (e.g. after a backup restore that
           // only round-trips DB rows, not the banners folder) — fall back to the
           // remote cover instead of just going blank.
@@ -69,18 +70,9 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
               img.src = game.banner_url
               return
             }
-            img.style.display = 'none'
-            if (img.className.includes(s.bannerImg)) {
-              const b = img.previousElementSibling
-              if (b) b.style.display = 'none'
-            }
+            setImgFailed(imgSrc)
           }
-          return (
-            <>
-              <img src={src} className={s.bannerBlur} alt="" aria-hidden="true" loading="lazy" decoding="async" onError={handleError} />
-              <img src={src} className={s.bannerImg} alt="" loading="lazy" decoding="async" onError={handleError} />
-            </>
-          )
+          return <img src={imgSrc} className={s.bannerImg} alt="" loading="lazy" decoding="async" onError={handleError} />
         })()}
 
         {/* Status LED — top-left corner of the cover, on a dark ring plate so it
@@ -103,7 +95,7 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
         <div className={s.artInfo}>
           <div className={s.artTitleRow}>
             {/* title attr: the name can still truncate on narrow cards */}
-            <div className={s.bannerTitle} title={src ? `${game.name} — ${src.label}` : game.name}>
+            <div className={s.bannerTitle} title={src ? `${game.name} (${src.label})` : game.name}>
               {game.name}
             </div>
             {!selectionMode && (
@@ -120,6 +112,9 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
           </div>
           {genres.length > 0 && (
             <div className={s.bannerGenres}>{genres.slice(0, 2).join(' · ')}</div>
+          )}
+          {game.planned_month && (
+            <span className={s.planChip} title="Planned to play this month">{formatMonthKey(game.planned_month)}</span>
           )}
         </div>
 
@@ -162,10 +157,10 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
         <div className={s.meta}>
           <span className={`${s.trophies} ${!game._total ? s.metaEmpty : ''}`}>
             <IconTrophy size={12} stroke={1.5} />
-            {game._total ? `${game._unlocked ?? 0}/${game._total}` : '—'}
+            {game._total ? `${game._unlocked ?? 0}/${game._total}` : '0/0'}
           </span>
           <span className={s.lastPlayed} title={game.last_played_at ? 'Last played' : 'Never played'}>
-            {formatDate(game.last_played_at) || '—'}
+            {formatDate(game.last_played_at) || 'Never'}
           </span>
           <span className={`${s.playtime} ${!game.total_playtime_seconds ? s.metaEmpty : ''}`}>
             <IconClock size={12} stroke={1.6} />
@@ -228,6 +223,7 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite, onConte
     <div
       className={`${s.listCard} ${(!game.is_installed || game.is_hidden) && !selectionMode ? s.cardDimmed : ''} ${game._isLive && !selectionMode ? s.listCardLive : ''} ${selected ? s.listCardSelected : ''}`}
       onClick={handleClick}
+      data-gpclick=""
       onContextMenu={onContextMenu ? (e) => { e.preventDefault(); onContextMenu(e, game) } : undefined}
     >
       {/* Portrait thumbnail — blurred fill + contain cover, selection overlay */}
@@ -245,17 +241,8 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite, onConte
               return
             }
             img.style.display = 'none'
-            if (img.className.includes(s.listThumbImg)) {
-              const b = img.previousElementSibling
-              if (b?.tagName === 'IMG') b.style.display = 'none'
-            }
           }
-          return (
-            <>
-              <img src={src} className={s.listThumbBlur} alt="" aria-hidden="true" loading="lazy" decoding="async" onError={handleError} />
-              <img src={src} className={s.listThumbImg} alt="" loading="lazy" decoding="async" onError={handleError} />
-            </>
-          )
+          return <img src={src} className={s.listThumbImg} alt="" loading="lazy" decoding="async" onError={handleError} />
         })()}
         {game._isLive && !selectionMode && <div className={s.listLiveBar} />}
         {selectionMode && (
@@ -331,11 +318,11 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite, onConte
       <div className={s.listStats}>
         <span className={`${s.listStatItem} ${game.total_playtime_seconds ? '' : s.listStatItemDim} ${game._isLive && !selectionMode && game.total_playtime_seconds ? s.listStatLive : ''}`}>
           <IconClock size={11} stroke={1.5} />
-          {formatPlaytime(game.total_playtime_seconds) || '—'}
+          {formatPlaytime(game.total_playtime_seconds)}
         </span>
         <span className={s.listStatItem}>
           <IconTrophy size={11} stroke={1.5} />
-          {unlocked}/{total || '—'}
+          {unlocked}/{total || 0}
         </span>
         <span className={s.listDate}>{formatDate(game.last_played_at)}</span>
       </div>

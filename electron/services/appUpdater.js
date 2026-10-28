@@ -9,6 +9,29 @@ const logger = require('../logger')
 
 let _wired = false
 
+// Last known update state, pushed to every window as `app:update` and readable
+// on demand (app:updateState) so a window opened later still shows the banner.
+let _state = { state: 'idle' }
+function setState(patch) {
+  _state = { ..._state, ...patch }
+  try {
+    const { BrowserWindow } = require('electron')
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed()) w.webContents.send('app:update', _state)
+    }
+  } catch {}
+}
+function getState() { return _state }
+
+// GitHub release notes arrive as HTML (or an array of per-version notes).
+function notesText(notes) {
+  const raw = Array.isArray(notes) ? notes.map(n => n?.note || '').join('\n\n') : (notes || '')
+  return String(raw)
+    .replace(/<\/(p|li|h\d)>/gi, '\n').replace(/<br\s*\/?>/gi, '\n').replace(/<li>/gi, '• ')
+    .replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/\n{3,}/g, '\n\n').trim()
+}
+
 function getAutoUpdater() {
   const { autoUpdater } = require('electron-updater')
   if (!_wired) {
@@ -16,7 +39,18 @@ function getAutoUpdater() {
     autoUpdater.autoDownload = true
     autoUpdater.autoInstallOnAppQuit = true
     autoUpdater.on('error', (e) => logger.warn('appUpdater:', { message: e?.message }))
+    autoUpdater.on('update-available', (info) => {
+      setState({ state: 'downloading', version: info?.version || null, notes: notesText(info?.releaseNotes), percent: 0 })
+    })
+    let lastPct = -1
+    autoUpdater.on('download-progress', (p) => {
+      const percent = Math.floor(p?.percent || 0)
+      if (percent === lastPct) return
+      lastPct = percent
+      setState({ state: 'downloading', percent })
+    })
     autoUpdater.on('update-downloaded', async (info) => {
+      setState({ state: 'ready', version: info?.version || _state.version, notes: notesText(info?.releaseNotes) || _state.notes, percent: 100 })
       try {
         const { dialog } = require('electron')
         const r = await dialog.showMessageBox({
@@ -146,4 +180,25 @@ async function checkForUpdates() {
   }
 }
 
-module.exports = { setupAutoUpdate, checkForUpdates, fetchLatestRelease, isNewer }
+function installUpdate() {
+  if (_state.state !== 'ready') return false
+  getAutoUpdater().quitAndInstall()
+  return true
+}
+
+// Notes for one released version — the "What's new" card after an update.
+async function fetchReleaseNotes(version) {
+  const pkg = require('../../package.json')
+  const pub = Array.isArray(pkg.build?.publish) ? pkg.build.publish[0] : pkg.build?.publish
+  if (!pub?.owner || !pub?.repo) return null
+  const axios = require('axios')
+  const r = await axios.get(`https://api.github.com/repos/${pub.owner}/${pub.repo}/releases/tags/v${version}`, {
+    timeout: 10_000,
+    headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'KoZo' },
+    validateStatus: () => true,
+  })
+  if (r.status !== 200) return null
+  return { version, notes: String(r.data?.body || '').trim(), url: r.data?.html_url || null }
+}
+
+module.exports = { setupAutoUpdate, checkForUpdates, fetchLatestRelease, isNewer, getState, installUpdate, fetchReleaseNotes }

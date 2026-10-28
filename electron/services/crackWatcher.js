@@ -521,7 +521,8 @@ async function enableGoldbergAchievements(gameId) {
   try {
     fs.mkdirSync(target, { recursive: true })
     const f = path.join(target, 'achievements.json')
-    if (exists(f)) { try { fs.copyFileSync(f, f + '.kozo-bak') } catch {} }
+    // Back up the crack's ORIGINAL file once — a re-run must not overwrite it with KoZo's own output.
+    if (exists(f) && !exists(f + '.kozo-bak')) { try { fs.copyFileSync(f, f + '.kozo-bak') } catch {} }
     fs.writeFileSync(f, JSON.stringify(list, null, 2))
     logger.info(`crackWatcher: wrote ${list.length} achievements into ${f} for "${game.name}"`)
     return { ok: true, count: list.length, path: f }
@@ -955,17 +956,31 @@ async function diagnoseGame(gameId) {
   const schemaNames = achievementsQ.listAchievementsForGame(gameId)
     .map(a => a.steam_api_name).filter(Boolean)
 
+  // A file that holds only a header and no achievement entries — e.g. RUNE's
+  // "[SteamAchievements] Count=1" with nothing under it — is a crack that
+  // rewrites the file without ever saving an unlock, not a format KoZo can't read.
+  const holdsNoEntries = (text) => {
+    const t = String(text || '').trim()
+    if (!t || t === '{}' || t === '[]') return true
+    if (/^[{[]/.test(t)) return false
+    const lines = t.split(/\r?\n/).map(l => l.trim()).filter(l => l && !/^[;#]/.test(l))
+    return lines.every(l => /^\[(steam)?achievements\]$/i.test(l) || /^count\s*=/i.test(l))
+  }
+
   const examine = (c) => {
     if (!exists(c.path)) return null
     let parsedUnlockCount = 0
+    let empty = false
     let stat = null
     try { stat = fs.statSync(c.path) } catch {}
     if (c.parse === 'sse') {
       const buf = safeReadBuf(c.path)
       if (buf) parsedUnlockCount = parseSseBinary(buf, schemaNames).length
+      empty = !buf || buf.length < 8
     } else {
       const text = safeRead(c.path)
       if (text) parsedUnlockCount = c.parse(text).length
+      empty = holdsNoEntries(text)
     }
     return {
       path: c.path,
@@ -974,6 +989,7 @@ async function diagnoseGame(gameId) {
       parsedUnlockCount,
       mtime: stat ? stat.mtime.toISOString() : null,
       neverModified: stat ? Math.abs(stat.mtimeMs - stat.birthtimeMs) < 2000 : false,
+      empty,
     }
   }
 
@@ -1031,7 +1047,7 @@ async function diagnoseGame(gameId) {
     // that our parser doesn't understand this emulator's format yet, not that
     // the crack never persists anything.
     const contentCandidates = candidates.filter(c => c.parsedUnlockCount === 0)
-    const allUntouched = contentCandidates.length > 0 && contentCandidates.every(c => c.neverModified)
+    const allUntouched = contentCandidates.length > 0 && contentCandidates.every(c => c.neverModified || c.empty)
     verdict = allUntouched ? 'emu-not-persisting' : 'unreadable-format'
   }
 
@@ -1057,6 +1073,9 @@ async function scanAllCrackedGames() {
     const r = await scanGameForCrackAchievements(g.id, { catchUp: true })
     perGame.push({ gameId: g.id, name: g.name, added: r.added, sources: r.hits.map(h => h.source) })
     totalAdded += r.added
+    // Each game's folder walk is synchronous: let the main process breathe
+    // (IPC, windows) between games instead of blocking for the whole library.
+    await new Promise(resolve => setImmediate(resolve))
   }
   return { totalAdded, perGame, gamesScanned: games.length }
 }

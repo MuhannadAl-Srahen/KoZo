@@ -1,26 +1,14 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { IconTrophy, IconDiamond, IconTargetArrow, IconHistory } from '@tabler/icons-react'
-import { fileUrl, formatDate, rarityLabel } from '../lib/utils'
+import { fileUrl, formatDate, rarityLabel, rarityColor, timeAgo } from '../lib/utils'
 import Modal from '../components/ui/Modal'
 import EmptyState from '../components/ui/EmptyState'
 import { Skeleton, RowSkeleton } from '../components/ui/Skeleton'
+import useCardZoom from '../lib/useCardZoom'
 import s from './AchievementsHub.module.css'
 
 // Compact "when": "2h ago" / "Jun 12"
-function timeAgo(iso) {
-  if (!iso) return ''
-  const then = new Date(iso).getTime()
-  if (!Number.isFinite(then)) return ''
-  const diffMin = Math.floor((Date.now() - then) / 60000)
-  if (diffMin < 60) return `${Math.max(1, diffMin)}m ago`
-  const diffH = Math.floor(diffMin / 60)
-  if (diffH < 24) return `${diffH}h ago`
-  const diffD = Math.floor(diffH / 24)
-  if (diffD < 7) return `${diffD}d ago`
-  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-}
-
 // React keys for the hub lists. `achievements:hub` selects no unique column
 // (no a.id, no au.id, no steam_api_name) and display_name is only unique per
 // (game_id, steam_api_name), so key on the fullest composite the payload
@@ -35,18 +23,6 @@ function keyed(rows) {
     seen.set(base, n)
     return { a, key: n > 1 ? `${base}#${n}` : base }
   })
-}
-
-// Rarity token for a global-unlock %. Same bands as utils.rarityLabel; the
-// colors are the fixed --rarity-* semantics from variables.css (deliberately
-// NOT accent-derived — rarity keeps its meaning across accent themes).
-function rarityToken(pct) {
-  if (pct == null)  return 'var(--rarity-common)'
-  if (pct < 5)      return 'var(--rarity-ultra)'
-  if (pct < 15)     return 'var(--rarity-very)'
-  if (pct < 30)     return 'var(--rarity-rare)'
-  if (pct < 50)     return 'var(--rarity-uncommon)'
-  return 'var(--rarity-common)'
 }
 
 function AchIcon({ url, size = 40 }) {
@@ -68,6 +44,7 @@ function AchIcon({ url, size = 40 }) {
 }
 
 export default function AchievementsHub() {
+  const zoomStyle = useCardZoom('achievements', 'grid', { grid: 240 })   // Ctrl + mouse wheel tile size
   const navigate = useNavigate()
   const [data, setData] = useState(null)
   const [feedModal, setFeedModal] = useState(false)
@@ -149,7 +126,7 @@ export default function AchievementsHub() {
             </div>
             <div className={s.statCard}>
               <span className={s.statLabel}>Rarest trophy</span>
-              <span className={s.statValue}>{rarestPct != null ? `${Number(rarestPct).toFixed(1)}%` : '—'}</span>
+              <span className={s.statValue}>{rarestPct != null ? `${Number(rarestPct).toFixed(1)}%` : 'None'}</span>
             </div>
           </div>
 
@@ -157,7 +134,7 @@ export default function AchievementsHub() {
             <EmptyState
               Icon={IconTrophy}
               title="No achievements yet"
-              desc="Add Steam or cracked games and start unlocking — every unlock lands here automatically."
+              desc="Add Steam or cracked games and start unlocking. Every unlock lands here automatically."
             />
           )}
 
@@ -190,10 +167,10 @@ export default function AchievementsHub() {
           {rarest.length > 0 && (
             <section className={s.section}>
               <div className={s.sectionTitle}><IconDiamond size={14} stroke={1.7} /> Your rarest trophies</div>
-              <div className={s.rareGrid}>
+              <div className={s.rareGrid} style={zoomStyle}>
                 {rarestKeyed.map(({ a, key }) => (
                   <button key={key} className={s.rareCard} data-gpnav=""
-                    style={{ '--rc': rarityToken(a.global_unlock_percent) }}
+                    style={{ '--rc': rarityColor(a.global_unlock_percent) || 'var(--rarity-common)' }}
                     onClick={() => navigate(`/game/${a.game_id}`)} title={a.description || a.display_name}>
                     <AchIcon url={a.icon_url} size={44} />
                     <span className={s.rareInfo}>

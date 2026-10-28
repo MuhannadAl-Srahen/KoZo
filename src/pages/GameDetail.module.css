@@ -326,9 +326,11 @@
 
 .menuConfirmBtns {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--sp-8);
   justify-content: flex-end;
 }
+.menuConfirmBtns > button { white-space: nowrap; }
 
 .menuCancelBtn {
   composes: btn btnSm btnSecondary from '../styles/controls.module.css';

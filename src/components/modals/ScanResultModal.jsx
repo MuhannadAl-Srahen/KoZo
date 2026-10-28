@@ -110,7 +110,7 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
 
   return (
     <Modal
-      title={`${title || 'Scan Results'} — ${results.length} games, ${newCount} new`}
+      title={`${title || 'Scan Results'}: ${results.length} games, ${newCount} new`}
       icon={<IconDeviceGamepad2 size={17} stroke={1.6} />}
       onClose={onClose}
       width={780}

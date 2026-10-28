@@ -3,26 +3,26 @@ import {
   IconPlus, IconLayoutGrid, IconList, IconLayoutColumns,
   IconDeviceGamepad2, IconPencil, IconSearch,
   IconCheckbox, IconSquare, IconTrash, IconX, IconCheck, IconStar, IconLoader2,
+  IconBooks, IconCalendarEvent,
 } from '@tabler/icons-react'
-import { getBannerBg, parseGenres } from '../lib/utils'
+import { getBannerBg, parseGenres, formatMonthKey, fileUrl } from '../lib/utils'
+import { LIST_STATUSES, LIST_STATUS_ORDER } from '../lib/cardModel'
 import AddGameToListModal from '../components/modals/AddGameToListModal'
 import AddGamesToCustomListModal from '../components/modals/AddGamesToCustomListModal'
 import CreateEditListModal from '../components/modals/CreateEditListModal'
 import EditGameListModal from '../components/modals/EditGameListModal'
+import PlanMonthModal from '../components/modals/PlanMonthModal'
 import SearchableSelect from '../components/ui/SearchableSelect'
 import CardContextMenu from '../components/ui/CardContextMenu'
 import EmptyState from '../components/ui/EmptyState'
+import GeneratedCover from '../components/GeneratedCover'
+import useCardZoom from '../lib/useCardZoom'
+import InfoModal from '../components/ui/InfoModal'
 import { CardSkeletonGrid } from '../components/ui/Skeleton'
 import s from './GameList.module.css'
 
-const STATUS_CONFIG = {
-  want_to_play: { label: 'Want to play', color: 'var(--a)' },
-  playing:      { label: 'Playing',      color: 'var(--status-playing)' },
-  finished:     { label: 'Finished',     color: 'var(--status-finished)' },
-  on_hold:      { label: 'On hold',      color: 'var(--status-onhold)' },
-  dropped:      { label: 'Dropped',      color: 'var(--status-dropped)' },
-  upcoming:     { label: 'Upcoming',     color: 'var(--status-upcoming)' },
-}
+// Game List statuses in menu order (label + color from lib/cardModel).
+const STATUS_CONFIG = Object.fromEntries(LIST_STATUS_ORDER.map(k => [k, { label: LIST_STATUSES[k].label, color: LIST_STATUSES[k].color }]))
 
 const PAGE_SIZE = 20
 
@@ -62,8 +62,9 @@ function bannerOnError(e) {
 function GridCard({ item, onClick, selectionMode, selected, onToggle, onToggleFav, onContextMenu }) {
   const cfg = STATUS_CONFIG[item.status] || { label: item.status, color: 'var(--text-muted)' }
   const bg  = getBannerBg(item.id)
-  const src = withBust(item.banner_url, item.banner_rev)
+  const src = withBust(item.banner_url, item.banner_rev) || fileUrl(item.game_banner_local_path)
   const genres = parseGenres(item)
+  const [failed, setFailed] = useState(null)   // src that failed: show the generated cover
 
   function handleClick() {
     if (selectionMode) { onToggle?.(item.id) } else { onClick(item) }
@@ -73,16 +74,14 @@ function GridCard({ item, onClick, selectionMode, selected, onToggle, onToggleFa
     <div
       className={`${s.card} ${selected ? s.cardSelected : ''}`}
       onClick={handleClick}
+      data-gpclick=""
       onContextMenu={selectionMode ? undefined : (e) => { e.preventDefault(); onContextMenu?.(e, item) }}
     >
       <div className={s.cardBanner} style={{ background: bg }}>
-        {src
-          ? <>
-              <img src={src} alt="" aria-hidden="true" className={s.cardBannerBlur} loading="lazy" decoding="async" onError={bannerOnError} />
-              <img src={src} alt="" className={s.cardBannerImg} loading="lazy" decoding="async" onError={bannerOnError} />
-            </>
-          : <IconDeviceGamepad2 size={28} stroke={1.1} style={{ color: 'rgba(255,255,255,0.12)' }} />
-        }
+        {src && failed !== src
+          ? <img src={src} alt="" className={s.cardBannerImg} loading="lazy" decoding="async"
+              onError={(e) => { if (e.target.src.includes('_2x')) e.target.src = e.target.src.replace('_2x', ''); else setFailed(src) }} />
+          : <GeneratedCover name={item.name} />}
         {selectionMode && (
           <div className={`${s.cardCheckbox} ${selected ? s.cardCheckboxOn : ''}`}>
             {selected && <IconCheck size={12} stroke={3} />}
@@ -121,6 +120,9 @@ function GridCard({ item, onClick, selectionMode, selected, onToggle, onToggleFa
           {item.rating != null && item.status === 'finished' && (
             <span className={s.cardRating}>★ {Number(item.rating).toFixed(1)}</span>
           )}
+          {item.planned_month && (
+            <span className={s.planChip} title="Planned to play this month">{formatMonthKey(item.planned_month)}</span>
+          )}
         </div>
       </div>
     </div>
@@ -130,7 +132,7 @@ function GridCard({ item, onClick, selectionMode, selected, onToggle, onToggleFa
 function ListRow({ item, onClick, selectionMode, selected, onToggle, onToggleFav, onContextMenu }) {
   const cfg = STATUS_CONFIG[item.status] || { label: item.status, color: 'var(--text-muted)' }
   const bg  = getBannerBg(item.id)
-  const src = withBust(item.banner_url, item.banner_rev)
+  const src = withBust(item.banner_url, item.banner_rev) || fileUrl(item.game_banner_local_path)
   const genres = parseGenres(item)
 
   function handleClick() {
@@ -141,17 +143,13 @@ function ListRow({ item, onClick, selectionMode, selected, onToggle, onToggleFav
     <div
       className={`${s.listRow} ${selected ? s.listRowSelected : ''}`}
       onClick={handleClick}
+      data-gpnav=""
       onContextMenu={selectionMode ? undefined : (e) => { e.preventDefault(); onContextMenu?.(e, item) }}
     >
       {/* Portrait thumbnail with blurred fill */}
       <div className={s.listThumb} style={{ background: bg }}>
         <IconDeviceGamepad2 size={20} stroke={1.1} style={{ color: 'rgba(255,255,255,0.12)', position: 'relative', zIndex: 0 }} />
-        {src && (
-          <>
-            <img src={src} alt="" aria-hidden="true" className={s.listThumbBlur} onError={bannerOnError} />
-            <img src={src} alt="" className={s.listThumbImg} onError={bannerOnError} />
-          </>
-        )}
+        {src && <img src={src} alt="" className={s.listThumbImg} loading="lazy" decoding="async" onError={bannerOnError} />}
         {selectionMode && (
           <div className={s.listThumbCheck}>
             <div className={`${s.listCheckbox} ${selected ? s.listCheckboxOn : ''}`}>
@@ -185,9 +183,12 @@ function ListRow({ item, onClick, selectionMode, selected, onToggle, onToggleFav
           {item.rating != null && item.status === 'finished' && (
             <span className={s.listRating}>★ {Number(item.rating).toFixed(1)}</span>
           )}
+          {item.planned_month && (
+            <span className={s.planChip} title="Planned to play this month">{formatMonthKey(item.planned_month)}</span>
+          )}
           <div
             className={s.listStatusBadge}
-            style={{ color: cfg.color, borderColor: cfg.color + '55', background: cfg.color + '18' }}
+            style={{ color: cfg.color, borderColor: `color-mix(in srgb, ${cfg.color} 33%, transparent)`, background: `color-mix(in srgb, ${cfg.color} 9%, transparent)` }}
           >
             {cfg.label}
           </div>
@@ -209,11 +210,15 @@ export default function GameList() {
   const [page, setPage]         = useState(1)
   const [statusFilter, setStatusFilter] = useState('')
   const [genreFilter, setGenreFilter]   = useState('')
+  const [monthFilter, setMonthFilter]   = useState('')     // play plan: 'YYYY-MM' | 'none' | ''
+  const [monthOptions, setMonthOptions] = useState([])     // [{ month, count }]
+  const [planIds, setPlanIds]           = useState(null)   // ids for the Plan-for-month modal
   const [searchText, setSearchText]     = useState('')
   const [genreOptions, setGenreOptions] = useState([])
   const [customLists, setCustomLists]   = useState([])
   const [activeListId, setActiveListId] = useState(null)   // null = All
   const [view, setView]         = useState(() => localStorage.getItem('kozo:view:gamelist') || 'big')
+  const zoomStyle = useCardZoom('gamelist', view, { big: 220, grid: 168 }, { min: 140, max: 380 })   // Ctrl + mouse wheel card size
   const [loading, setLoading]   = useState(true)
   const [switching, setSwitching] = useState(false)   // filter change with grid kept on screen
   const itemsRef = useRef([])
@@ -227,9 +232,9 @@ export default function GameList() {
   const [dragOverId, setDragOverId] = useState(null) // drop-target highlight
   const dragIdRef = useRef(null)
 
-  // Drag-reorder within the current page/filter view. Persists sequential
-  // display_order values offset by the page, so pages stay in sequence; rows
-  // never dragged (display_order NULL) always sort after ordered ones.
+  // Drag-reorder within the current page/filter view. The main process splices
+  // this page's new order into the whole list (gameList:reorderPage), so a drop
+  // on page 2 stays on page 2 and favorites keep leading.
   async function handleCardDrop(targetId) {
     const dragId = dragIdRef.current
     dragIdRef.current = null
@@ -242,12 +247,14 @@ export default function GameList() {
     const [moved] = pageItems.splice(from, 1)
     pageItems.splice(to, 0, moved)
     setItems(pageItems)
-    const base = (page - 1) * PAGE_SIZE
-    for (let i = 0; i < pageItems.length; i++) {
-      if (pageItems[i].display_order !== base + i) {
-        await window.kozo?.api?.gameList?.update?.(pageItems[i].id, { display_order: base + i })
-      }
-    }
+    const filters = {}
+    if (statusFilter) filters.status = statusFilter
+    if (genreFilter)  filters.genre = genreFilter
+    if (monthFilter)  filters.month = monthFilter
+    if (activeListId) filters.listId = activeListId
+    if (searchText?.trim()) filters.search = searchText.trim()
+    await window.kozo?.api?.gameList?.reorderPage?.(filters, (page - 1) * PAGE_SIZE, pageItems.map(i => i.id))
+    pageCache.clear()
     loadItems(page, { silent: true })
   }
 
@@ -256,6 +263,8 @@ export default function GameList() {
   const [selectedIds, setSelectedIds]     = useState(new Set())
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting]           = useState(false)
+  const [moving, setMoving]               = useState(false)
+  const [moveResult, setMoveResult]       = useState(null)   // InfoModal payload after Move to Library
 
   function enterSelection() { setSelectionMode(true); setSelectedIds(new Set()); setConfirmDelete(false) }
   function exitSelection()  { setSelectionMode(false); setSelectedIds(new Set()); setConfirmDelete(false) }
@@ -279,6 +288,31 @@ export default function GameList() {
     setItems(prev => prev.map(i => i.id === item.id ? { ...i, is_favorite: next } : i))
     await window.kozo?.api?.gameList?.update?.(item.id, { is_favorite: next })
     loadItems(page, { silent: true })
+  }
+
+  // Game List → Library for the given list rows (bulk or one card).
+  async function moveToLibrary(ids) {
+    if (!ids.length) return
+    setMoving(true)
+    const res = await window.kozo?.api?.gameList?.moveToLibrary?.(ids)
+    setMoving(false)
+    if (!res?.ok) {
+      setMoveResult({ variant: 'error', title: 'Could not move to Library', message: res?.error || 'Unknown error' })
+      return
+    }
+    const moved = res.data || []
+    const needsExe = moved.filter(m => m.needsExe).map(m => m.name)
+    setMoveResult({
+      variant: 'success',
+      title: `${moved.length} game${moved.length !== 1 ? 's' : ''} in your Library`,
+      message: moved.map(m => m.name).join(', '),
+      lines: needsExe.length
+        ? [`Set the .exe in Library → Edit to track playtime for: ${needsExe.join(', ')}`]
+        : [],
+    })
+    pageCache.clear()
+    loadItems(page, { silent: true })
+    if (selectionMode) exitSelection()
   }
 
   async function handleBulkDelete() {
@@ -308,6 +342,9 @@ export default function GameList() {
   const loadGenres = useCallback(async () => {
     const res = await window.kozo?.api?.genres?.distinct()
     if (res?.ok) setGenreOptions(res.data ?? [])
+    // Planned months change with the same mutations, so refresh them together.
+    const months = await window.kozo?.api?.gameList?.plannedMonths?.()
+    if (months?.ok) setMonthOptions(months.data ?? [])
   }, [])
 
   // One cheap unfiltered row just for its `total`. Refreshed alongside the
@@ -317,9 +354,9 @@ export default function GameList() {
     if (res?.ok) setAllTotal(res.data?.total ?? 0)
   }, [])
 
-  const loadItems = useCallback(async (pg = 1, { silent = false, status = statusFilter, genre = genreFilter, listId = activeListId, search = searchText } = {}) => {
+  const loadItems = useCallback(async (pg = 1, { silent = false, status = statusFilter, genre = genreFilter, month = monthFilter, listId = activeListId, search = searchText } = {}) => {
     if (!window.kozo?.api) return
-    const cacheKey = JSON.stringify([pg, status, genre, listId, (search || '').trim()])
+    const cacheKey = JSON.stringify([pg, status, genre, month, listId, (search || '').trim()])
     // A silent reload is always a post-mutation reconcile (favorite toggled,
     // status changed, item dropped). Serving the cache there re-applied the
     // PRE-mutation rows on top of the optimistic update, so the star visibly
@@ -340,6 +377,7 @@ export default function GameList() {
     const filters = { limit: PAGE_SIZE, offset: (pg - 1) * PAGE_SIZE }
     if (status) filters.status = status
     if (genre)  filters.genre = genre
+    if (month)  filters.month = month
     if (listId) filters.listId = listId
     if (search?.trim()) filters.search = search.trim()
     const res = await window.kozo.api.gameList.list(filters)
@@ -352,13 +390,13 @@ export default function GameList() {
     }
     setLoading(false)
     setSwitching(false)
-  }, [statusFilter, genreFilter, activeListId, searchText])
+  }, [statusFilter, genreFilter, monthFilter, activeListId, searchText])
 
   useEffect(() => {
     loadLists()
     loadGenres()
     loadAllTotal()
-    loadItems(1, { status: '', genre: '', listId: null })
+    loadItems(1, { status: '', genre: '', month: '', listId: null })
   }, [])
 
   // Debounced server-side search — skips the initial mount (loadItems above).
@@ -381,6 +419,21 @@ export default function GameList() {
     loadItems(1, { genre: v })
   }
 
+  function handleMonthChange(v) {
+    setMonthFilter(v)
+    setPage(1)
+    loadItems(1, { month: v })
+  }
+
+  async function savePlan(month) {
+    await window.kozo?.api?.gameList?.planMonth?.(planIds, month)
+    setPlanIds(null)
+    pageCache.clear()
+    loadGenres()
+    loadItems(page, { silent: true })
+    if (selectionMode) exitSelection()
+  }
+
   function handleListChange(listId) {
     setActiveListId(listId)
     setPage(1)
@@ -396,6 +449,19 @@ export default function GameList() {
     setShowAdd(false)
     setEditItem(null)
     loadItems(page)
+    loadLists()
+    loadGenres()
+    loadAllTotal()
+  }
+
+  // Removing the last card on a later page would refetch an empty page and show
+  // "No games here yet" — step back a page instead.
+  async function afterDelete() {
+    setEditItem(null)
+    const target = items.length <= 1 && page > 1 ? page - 1 : page
+    if (target !== page) setPage(target)
+    pageCache.clear()
+    await loadItems(target)
     loadLists()
     loadGenres()
     loadAllTotal()
@@ -453,6 +519,19 @@ export default function GameList() {
                 { value: 'upcoming',     label: 'Upcoming' },
               ]}
             />
+            <span data-tour="month-filter" style={{ display: 'inline-flex' }}>
+            <SearchableSelect
+              value={monthFilter}
+              onChange={handleMonthChange}
+              searchable={false}
+              placeholder="Any month"
+              width={150}
+              options={[
+                ...monthOptions.map(m => ({ value: m.month, label: `${formatMonthKey(m.month)} (${m.count})` })),
+                { value: 'none', label: 'Not planned' },
+              ]}
+            />
+            </span>
             {genreOptions.length > 0 && (
               <SearchableSelect
                 value={genreFilter}
@@ -507,6 +586,20 @@ export default function GameList() {
           <span className={s.selectionCount}>
             {selectedIds.size === 0 ? 'Tap items to select' : `${selectedIds.size} selected`}
           </span>
+
+          {selectedIds.size > 0 && !confirmDelete && (
+            <button className={s.btnSecondary} onClick={() => setPlanIds([...selectedIds])}>
+              <IconCalendarEvent size={14} stroke={1.6} />
+              Plan for month
+            </button>
+          )}
+
+          {selectedIds.size > 0 && !confirmDelete && (
+            <button className={s.btnSecondary} onClick={() => moveToLibrary([...selectedIds])} disabled={moving}>
+              <IconBooks size={14} stroke={1.6} />
+              {moving ? 'Moving…' : `Move ${selectedIds.size} to Library`}
+            </button>
+          )}
 
           {selectedIds.size > 0 && (
             confirmDelete ? (
@@ -600,7 +693,7 @@ export default function GameList() {
         )}
 
         {!loading && items.length > 0 && (view === 'big' || view === 'grid') && (
-          <div className={view === 'big' ? s.bigGrid : s.grid}>
+          <div className={view === 'big' ? s.bigGrid : s.grid} style={zoomStyle}>
             {items.map(item => {
               const draggable = !selectionMode
               return (
@@ -685,12 +778,25 @@ export default function GameList() {
         />
       )}
 
+      {planIds && (
+        <PlanMonthModal
+          count={planIds.length}
+          current={planIds.length === 1 ? items.find(i => i.id === planIds[0])?.planned_month : null}
+          onClose={() => setPlanIds(null)}
+          onSave={savePlan}
+        />
+      )}
+
+      {moveResult && (
+        <InfoModal {...moveResult} onClose={() => setMoveResult(null)} />
+      )}
+
       {editItem && !selectionMode && (
         <EditGameListModal
           item={editItem}
           onClose={() => setEditItem(null)}
           onSaved={afterSave}
-          onDeleted={afterSave}
+          onDeleted={afterDelete}
         />
       )}
 
@@ -741,11 +847,12 @@ export default function GameList() {
           onEdit={setEditItem}
           onDelete={async (item) => {
             await window.kozo?.api?.gameList?.delete(item.id)
-            await loadItems(page)
-            loadLists()
-            loadGenres()
-            loadAllTotal()
+            await afterDelete()
           }}
+          extraItems={[
+            { label: 'Plan for month…', Icon: IconCalendarEvent, onClick: (it) => setPlanIds([it.id]) },
+            { label: 'Move to Library', Icon: IconBooks, onClick: (it) => moveToLibrary([it.id]) },
+          ]}
           deleteLabel="Remove from list"
           deleteHint="Removes this entry from your Game List. Library data is not affected."
         />

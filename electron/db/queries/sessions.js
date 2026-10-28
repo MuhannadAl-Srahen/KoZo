@@ -84,9 +84,11 @@ function resumeOrStartSession(gameId) {
     const startMs = new Date(orphan.started_at).getTime()
     const game = db.prepare('SELECT last_played_at FROM games WHERE id = ?').get(gameId)
     const beatMs = Math.max(startMs, game?.last_played_at ? new Date(game.last_played_at).getTime() : startMs)
-    if (Date.now() - beatMs <= MERGE_WINDOW_SEC * 1000) return orphan
+    // Carry the idle already persisted on the row (heartbeat) so it stays excluded.
+    const storedIdle = Math.max(0, orphan.idle_seconds || 0)
+    if (Date.now() - beatMs <= MERGE_WINDOW_SEC * 1000) return { ...orphan, prev_excluded: storedIdle }
 
-    const dur = Math.max(0, Math.floor((beatMs - startMs) / 1000))
+    const dur = Math.max(0, Math.floor((beatMs - startMs) / 1000) - storedIdle)
     db.prepare('UPDATE sessions SET ended_at = ?, duration_seconds = ? WHERE id = ?')
       .run(new Date(beatMs).toISOString(), dur, orphan.id)
     if (dur >= 3) {

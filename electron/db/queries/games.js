@@ -9,7 +9,10 @@ function listGamesWithStats() {
     SELECT
       g.*,
       COUNT(DISTINCT a.id)              AS _total,
-      COUNT(DISTINCT au.achievement_id) AS _unlocked
+      COUNT(DISTINCT au.achievement_id) AS _unlocked,
+      -- Play plan month lives on the linked Game List row (Library month filter).
+      (SELECT gl.planned_month FROM game_list gl WHERE gl.game_id = g.id
+        ORDER BY gl.planned_month IS NULL LIMIT 1) AS planned_month
     FROM games g
     LEFT JOIN achievements a            ON a.game_id = g.id
     LEFT JOIN achievement_unlocks au    ON au.achievement_id = a.id
@@ -24,7 +27,7 @@ function getGame(id) {
 
 // SQLite has no boolean type and better-sqlite3 refuses to bind one, so every
 // flag column is normalised to 0/1 before it reaches a statement.
-const FLAG_COLUMNS = ['is_installed', 'is_cracked', 'is_favorite', 'is_hidden', 'run_as_admin']
+const FLAG_COLUMNS = ['is_installed', 'is_cracked', 'is_favorite', 'is_hidden', 'run_as_admin', 'is_archived']
 function flag(value, fallback = 0) {
   if (value === undefined || value === null) return fallback
   return (value === 0 || value === false || value === '0') ? 0 : 1
@@ -35,7 +38,11 @@ function addGame(data) {
     INSERT INTO games (steam_app_id, name, exe_name, install_path, banner_url, banner_local_path, source, is_installed, is_cracked)
     VALUES (@steam_app_id, @name, @exe_name, @install_path, @banner_url, @banner_local_path, @source, @is_installed, @is_cracked)
   `)
+  // Named params throw when a key is missing, so default every bound column —
+  // callers only need to pass what they know.
   const result = stmt.run({
+    steam_app_id: null, exe_name: null, install_path: null,
+    banner_url: null, banner_local_path: null, source: null,
     ...data,
     is_installed: flag(data.is_installed, 1),
     is_cracked: flag(data.is_cracked, 0),
@@ -44,7 +51,7 @@ function addGame(data) {
 }
 
 function updateGame(id, data) {
-  const allowed = ['name', 'exe_name', 'install_path', 'banner_url', 'banner_local_path', 'source', 'steam_app_id', 'is_installed', 'is_cracked', 'is_favorite', 'is_hidden', 'completion_status', 'completion_status_at', 'manual_appid', 'crack_dir', 'total_playtime_seconds', 'first_played_at', 'last_played_at', 'genres', 'display_order', 'notes', 'run_as_admin']
+  const allowed = ['name', 'exe_name', 'install_path', 'banner_url', 'banner_local_path', 'source', 'steam_app_id', 'is_installed', 'is_cracked', 'is_favorite', 'is_hidden', 'completion_status', 'completion_status_at', 'manual_appid', 'crack_dir', 'total_playtime_seconds', 'first_played_at', 'last_played_at', 'genres', 'display_order', 'notes', 'run_as_admin', 'is_archived']
   const keys = Object.keys(data).filter(k => allowed.includes(k))
   const sets = keys.map(k => `${k} = @${k}`).join(', ')
 

@@ -185,6 +185,24 @@ function lookupAcfAppId(gamePath) {
   return null
 }
 
+// Folders that are never a game no matter what exes they hold: temp and
+// download-cache trees (e.g. C:\Temp\TxGameDownload\Component\UI\<hash>, a
+// launcher's downloader UI), hash/GUID-named folders, and installer folders
+// named "Setup"/"Installer"/"Redist". These used to be imported as cracked games.
+const JUNK_PATH_RE = /[\\/](temp|tmp|\$windows\.~bt|\$windows\.~ws|txgamedownload|downloadcache|download_cache|webcache|squirreltemp)[\\/]/i
+const JUNK_NAME_RE = new RegExp([
+  '^[0-9a-f]{16,}$',                                              // content hashes
+  '^\{?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}?$', // GUIDs
+  '^(setup|install|installer|installers|redist|redistributables|_commonredist|' +
+    'update|updates|updater|patch|patcher|temp|tmp|cache|component|components|ui|' +
+    'downloads?|crashreport(s|er)?|prerequisites|support|tools?)$',
+].join('|'), 'i')
+
+function isJunkFolder(fullPath) {
+  const name = path.basename(fullPath || '')
+  return JUNK_NAME_RE.test(name) || JUNK_PATH_RE.test(String(fullPath || '') + path.sep)
+}
+
 // Turn a messy repack folder name into a clean game title, e.g.
 // "Forza Horizon 5 [FitGirl Repack]" → "Forza Horizon 5",
 // "Far.Far.West.v644-RUNE" → "Far Far West".
@@ -355,6 +373,7 @@ function isLikelyGame(gamePath, lenient) {
 function buildEntry(gamePath, lenient) {
   const folderLower = path.basename(gamePath).toLowerCase()
   if (isDriveRoot(gamePath) || CONTAINER_NAMES.has(folderLower)) return null
+  if (isJunkFolder(gamePath)) return null
 
   // Search deep so nested launchers (Project\Binaries\Win64\…) are found.
   const exes = collectExes(gamePath, 4)
@@ -426,6 +445,9 @@ function scanFolder(folderPath) {
   const walk = (dir, depth) => {
     if (depth > MAX_SCAN_DEPTH) return
     const base = path.basename(dir).toLowerCase()
+    // Temp/download-cache trees hold no games — don't even descend (unless the
+    // user pointed the scan straight at this folder).
+    if (depth > 0 && JUNK_PATH_RE.test(dir + path.sep)) return
 
     // 1) Pure library / drive folder → recurse, never import it.
     if (isDriveRoot(dir) || CONTAINER_NAMES.has(base)) { descend(dir, depth); return }
@@ -477,4 +499,4 @@ function getDefaultScanPaths() {
   return [...new Set(found)]
 }
 
-module.exports = { scanFolder, getDefaultScanPaths, pickBestExe, isGameExe, isHelperExe }
+module.exports = { scanFolder, getDefaultScanPaths, pickBestExe, isGameExe, isHelperExe, isJunkFolder }
