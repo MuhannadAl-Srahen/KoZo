@@ -1626,8 +1626,7 @@ function AboutTab() {
           <span>Dev</span>
         </div>
         <p className={s.sectionDesc}>
-          Developer options for testing KoZo, locked with a password. Adult (18+) titles stay hidden
-          from search and the Steam calendar unless they are switched on here.
+          Developer options for testing KoZo, locked with a password.
         </p>
         <RestrictedContent />
       </section>
