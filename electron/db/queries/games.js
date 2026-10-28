@@ -9,7 +9,10 @@ function listGamesWithStats() {
     SELECT
       g.*,
       COUNT(DISTINCT a.id)              AS _total,
-      COUNT(DISTINCT au.achievement_id) AS _unlocked
+      COUNT(DISTINCT au.achievement_id) AS _unlocked,
+      -- Play plan month lives on the linked Game List row (Library month filter).
+      (SELECT gl.planned_month FROM game_list gl WHERE gl.game_id = g.id
+        ORDER BY gl.planned_month IS NULL LIMIT 1) AS planned_month
     FROM games g
     LEFT JOIN achievements a            ON a.game_id = g.id
     LEFT JOIN achievement_unlocks au    ON au.achievement_id = a.id

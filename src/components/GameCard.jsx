@@ -1,7 +1,7 @@
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import { IconTrophy, IconCheck, IconClock, IconPlayerPlayFilled, IconStar, IconEyeOff } from '@tabler/icons-react'
-import { getBannerBg, getBannerIcon, formatPlaytime, formatDate, fileUrl, parseGenres } from '../lib/utils'
+import { getBannerBg, getBannerIcon, formatPlaytime, formatDate, fileUrl, parseGenres, formatMonthKey } from '../lib/utils'
 import { LIBRARY_STATUSES, sourceOf, accentOf } from '../lib/cardModel'
 import GeneratedCover from './GeneratedCover'
 import InfoModal from './ui/InfoModal'
@@ -112,6 +112,9 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
           </div>
           {genres.length > 0 && (
             <div className={s.bannerGenres}>{genres.slice(0, 2).join(' · ')}</div>
+          )}
+          {game.planned_month && (
+            <span className={s.planChip} title="Planned to play this month">{formatMonthKey(game.planned_month)}</span>
           )}
         </div>
 

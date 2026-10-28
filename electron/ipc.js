@@ -48,7 +48,9 @@ handle('games:get', (id) => gamesQ.getGame(id))
 // genres + achievements, and make sure the game is on the Game List too.
 async function addLibraryGame(data) {
   // capsule_fallback is a transport-only hint for banner download — not a column.
-  const { capsule_fallback, ...gameData } = data || {}
+  // sgdb_id / sgdb_cover: the SteamGridDB game the user picked in Add Game's
+  // "Not on Steam" results; its cover is applied as-is instead of a name guess.
+  const { capsule_fallback, sgdb_id, sgdb_cover, ...gameData } = data || {}
   const game = gamesQ.addGame(gameData)
 
   if (game?.steam_app_id) {
@@ -115,7 +117,12 @@ async function addLibraryGame(data) {
     setImmediate(async () => {
       // Not on Steam → cover + hero from SteamGridDB when the user has a key.
       try {
-        if (await require('./services/steamGridDb').autoArt(gamesQ.getGame(game.id))) broadcast('game:updated', game.id)
+        const sgdb = require('./services/steamGridDb')
+        if (sgdb_id && sgdb_cover) {
+          const [hero] = await sgdb.heroes(sgdb_id).catch(() => [])
+          await sgdb.applyArt(game.id, sgdb_cover, hero?.url || null)
+          broadcast('game:updated', game.id)
+        } else if (await sgdb.autoArt(gamesQ.getGame(game.id))) broadcast('game:updated', game.id)
       } catch {}
       await autoImportSchemaByName(game.id).catch(() => {})
       if (game?.is_cracked) await fetchAndStore(game.id).catch(() => {})
@@ -129,6 +136,22 @@ async function addLibraryGame(data) {
   return game
 }
 handle('games:add', addLibraryGame)
+// Plan library games for a month: the plan lives on each game's Game List row
+// (created if missing), so the Library and Game List month filters agree.
+handle('games:planMonth', (gameIds, month) => {
+  const ids = []
+  for (const id of (gameIds || []).map(Number)) {
+    const g = gamesQ.getGame(id)
+    if (!g) continue
+    gameListQ.ensureListRowForGame(g)
+    const row = require('./db/database').getDb().prepare('SELECT id FROM game_list WHERE game_id = ?').get(id)
+    if (row) ids.push(row.id)
+  }
+  const value = gameListQ.setPlannedMonth(ids, month)
+  bk()
+  broadcast('game:updated', null)
+  return value
+})
 handle('games:update', (id, data) => {
   // Status changes go through statusSync so linked Game List rows stay in step.
   const { completion_status, ...rest } = data || {}
@@ -1333,6 +1356,7 @@ handle('steam:refreshAllBanners', async () => {
 // ── SteamGridDB (covers for non-Steam games) ─────────────────────────────────
 handle('sgdb:test', (key) => require('./services/steamGridDb').testKey(key))
 handle('sgdb:search', (name) => require('./services/steamGridDb').searchGame(name))
+handle('sgdb:searchGames', (q) => require('./services/steamGridDb').searchWithCovers(q))
 handle('sgdb:grids', (sgdbId) => require('./services/steamGridDb').grids(sgdbId))
 handle('sgdb:heroes', (sgdbId) => require('./services/steamGridDb').heroes(sgdbId))
 handle('sgdb:apply', async (gameId, coverUrl, heroUrl) => {

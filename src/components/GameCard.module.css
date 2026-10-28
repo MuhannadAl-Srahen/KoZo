@@ -660,3 +660,33 @@
   border-color: var(--a);
   box-shadow: var(--glow-1);
 }
+
+/* Small cards (Ctrl + mouse wheel can shrink them a lot): names get two lines
+   instead of being cut short, and the footer drops the date so trophies and
+   playtime still fit. The card is the size container. */
+.card { container-type: inline-size; }
+@container (max-width: 190px) {
+  .bannerTitle {
+    font-size: var(--fs-sm);
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .bannerGenres { display: none; }
+  .lastPlayed { display: none; }
+  .meta { grid-template-columns: 1fr auto; gap: var(--sp-4); }
+}
+
+/* Play plan month ("Nov 2026"), same chip as the Game List cards */
+.planChip {
+  align-self: flex-start;
+  margin-top: 3px;
+  padding: 1px var(--sp-6);
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--a) 22%, rgba(8, 8, 14, 0.6));
+  border: 1px solid var(--ab);
+  color: var(--on-art);
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+}

@@ -4,7 +4,7 @@ import {
   IconPlus, IconLayoutGrid, IconList, IconLayoutColumns,
   IconDeviceGamepad2, IconScan, IconLoader2, IconCheckbox, IconSquare,
   IconX, IconCheck, IconSearch, IconEyeOff, IconChevronRight, IconChevronDown,
-  IconArchive, IconFlag,
+  IconArchive, IconFlag, IconCalendarEvent,
 } from '@tabler/icons-react'
 import GameCard, { formatPlaytime, STATUS_META } from '../components/GameCard'
 import AddGameModal from '../components/modals/AddGameModal'
@@ -13,6 +13,8 @@ import SearchableSelect from '../components/ui/SearchableSelect'
 import CardContextMenu from '../components/ui/CardContextMenu'
 import EmptyState from '../components/ui/EmptyState'
 import ReleasedPanel from '../components/ReleasedPanel'
+import PlanMonthModal from '../components/modals/PlanMonthModal'
+import { formatMonthKey } from '../lib/utils'
 import useCardZoom from '../lib/useCardZoom'
 import { CardSkeletonGrid } from '../components/ui/Skeleton'
 import s from './Library.module.css'
@@ -25,35 +27,12 @@ const VIEW_OPTIONS = [
 
 const SORT_OPTIONS = [
   { value: 'last_played', label: 'Last played'  },
-  { value: 'month',       label: 'Month played' },
   { value: 'last_added',  label: 'Last added'   },
   { value: 'most_played', label: 'Most played'  },
   { value: 'achievements',label: 'Achievements' },
   { value: 'custom',      label: 'Custom order' },
 ]
 const SORT_VALUES = new Set(SORT_OPTIONS.map(o => o.value))
-
-// "Month played" sort: the grid splits into one section per month of
-// last_played_at (local time), newest first; never-played games come last.
-function monthGroups(games) {
-  const groups = new Map()
-  const sorted = [...games].sort((a, b) =>
-    (b.last_played_at ? new Date(b.last_played_at) : 0) - (a.last_played_at ? new Date(a.last_played_at) : 0)
-    || a.name.localeCompare(b.name))
-  for (const g of sorted) {
-    const d = g.last_played_at ? new Date(g.last_played_at) : null
-    const key = d && !isNaN(d) ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` : 'never'
-    if (!groups.has(key)) {
-      groups.set(key, {
-        key,
-        label: key === 'never' ? 'Not played yet' : d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
-        games: [],
-      })
-    }
-    groups.get(key).games.push(g)
-  }
-  return [...groups.values()]
-}
 
 function sortGames(games, sortBy) {
   // Custom order: exactly the user's drag order — no favorite pinning, no
@@ -110,7 +89,7 @@ export default function Library() {
   const [weekSeconds, setWeekSeconds] = useState(weekCache ?? 0)
   const [liveIds, setLiveIds]       = useState(new Set())
   const [view, setView]             = useState(() => localStorage.getItem(VIEW_KEY) || 'big')
-  const zoomStyle = useCardZoom('library', view)   // Ctrl + mouse wheel card size
+  const zoomStyle = useCardZoom('library', view, undefined, { min: 140, max: 380 })   // Ctrl + mouse wheel card size
   const [loading, setLoading]       = useState(!libraryCache)
   const [showAddModal, setAddModal] = useState(false)
   const [prefillExe, setPrefillExe]                 = useState('')
@@ -137,6 +116,9 @@ export default function Library() {
     })
   }
   const [statusFilter, setStatusFilter] = useState(() => localStorage.getItem('kozo:status:library') || '')
+  // Play plan month, same filter as the Game List: 'YYYY-MM' | 'none' | ''
+  const [monthFilter, setMonthFilter] = useState(() => localStorage.getItem('kozo:month:library') || '')
+  const [planIds, setPlanIds] = useState(null)   // game ids for the Plan-for-month modal
   const [ctxMenu, setCtxMenu]       = useState(null)  // null | { x, y, game }
   const [dragOverId, setDragOverId] = useState(null)  // drop-target highlight (custom sort)
   const dragIdRef = React.useRef(null)
@@ -337,6 +319,7 @@ export default function Library() {
   // Shared search/status predicate for both the main grid and the hidden section.
   const matchesFilters = g => {
     if (statusFilter && g.completion_status !== statusFilter) return false
+    if (monthFilter === 'none' ? !!g.planned_month : monthFilter && g.planned_month !== monthFilter) return false
     if (search.trim()) {
       const q = search.trim().toLowerCase()
       if (!g.name.toLowerCase().includes(q) && !(g.exe_name || '').toLowerCase().includes(q)) return false
@@ -345,7 +328,7 @@ export default function Library() {
   }
   // Finished/dropped games move to their own shelf so the grid shows what you
   // still play — unless you filter for that status explicitly.
-  const isDone = g => !statusFilter && (g.completion_status === 'finished' || g.completion_status === 'dropped')
+  const isDone = g => !statusFilter && !monthFilter && (g.completion_status === 'finished' || g.completion_status === 'dropped')
   const filtered = allGamesWithLive.filter(g => !g.is_hidden && !g.is_archived && !isDone(g) && matchesFilters(g))
   const gamesWithLive = sortGames(filtered, sortBy)
   const allSelected = gamesWithLive.length > 0 && selectedIds.size === gamesWithLive.length
@@ -361,11 +344,22 @@ export default function Library() {
   // Header stats include hidden games — hiding only affects grid visibility,
   // not playtime/achievement totals.
   const stats = computeStats(games)
+  const monthOptions = (() => {
+    const counts = new Map()
+    for (const g of games) if (g.planned_month && !g.is_archived) counts.set(g.planned_month, (counts.get(g.planned_month) || 0) + 1)
+    return [...counts.entries()].sort(([a], [b]) => a.localeCompare(b))
+  })()
+
+  async function savePlan(month) {
+    await window.kozo?.api?.games?.planMonth?.(planIds, month)
+    setPlanIds(null)
+    loadGames({ silent: true })
+  }
   const gridClass = view === 'big' ? s.bigGrid : view === 'small' ? s.smallGrid : s.listGrid
 
-  // One grid card with drag-to-reorder (any sort but Month played).
+  // One grid card with drag-to-reorder.
   function renderCard(game) {
-    const draggable = !selectionMode && sortBy !== 'month'
+    const draggable = !selectionMode
     return (
       <div
         key={game.id}
@@ -467,6 +461,23 @@ export default function Library() {
             width={140}
           />
 
+          {/* Play plan month, same as the Game List filter */}
+          <SearchableSelect
+            value={monthFilter}
+            onChange={v => {
+              const next = v || ''
+              setMonthFilter(next)
+              localStorage.setItem('kozo:month:library', next)
+            }}
+            options={[
+              ...monthOptions.map(([m, n]) => ({ value: m, label: `${formatMonthKey(m)} (${n})` })),
+              { value: 'none', label: 'Not planned' },
+            ]}
+            placeholder="Any month"
+            searchable={false}
+            width={150}
+          />
+
           <button
             className={s.btnSecondary}
             data-tour="scan-pc"
@@ -533,6 +544,13 @@ export default function Library() {
             }
           </span>
 
+          {selectedIds.size > 0 && !confirmDelete && (
+            <button className={s.btnSecondary} onClick={() => setPlanIds([...selectedIds])}>
+              <IconCalendarEvent size={14} stroke={1.6} />
+              Plan for month
+            </button>
+          )}
+
           {selectedIds.size > 0 && (
             confirmDelete ? (
               <div className={s.confirmRow}>
@@ -593,23 +611,12 @@ export default function Library() {
           />
         )}
 
-        {!loading && games.length > 0 && sortBy !== 'month' && (
+        {!loading && games.length > 0 && (
           <div className={gridClass} style={zoomStyle}>
             {gamesWithLive.map(renderCard)}
           </div>
         )}
 
-        {!loading && games.length > 0 && sortBy === 'month' && monthGroups(gamesWithLive).map(grp => (
-          <section key={grp.key} className={s.monthSection}>
-            <div className={s.monthHeader}>
-              <span className={s.monthLabel}>{grp.label}</span>
-              <span className={s.monthCount}>{grp.games.length} {grp.games.length === 1 ? 'game' : 'games'}</span>
-            </div>
-            <div className={gridClass} style={zoomStyle}>
-              {grp.games.map(renderCard)}
-            </div>
-          </section>
-        ))}
 
         {/* Shelves — collapsed sections at the bottom instead of mixing into
             the grid; expand to manage them (right-click still works) */}
@@ -687,6 +694,18 @@ export default function Library() {
           deleteLabel="Remove from library"
           deleteConfirmLabel="Confirm (history is kept)"
           deleteHint="Moves it to Archived. Playtime, sessions and achievements are kept."
+          extraItems={[
+            { label: 'Plan for month…', Icon: IconCalendarEvent, onClick: (g) => setPlanIds([g.id]) },
+          ]}
+        />
+      )}
+
+      {planIds && (
+        <PlanMonthModal
+          count={planIds.length}
+          current={planIds.length === 1 ? games.find(g => g.id === planIds[0])?.planned_month : null}
+          onClose={() => setPlanIds(null)}
+          onSave={savePlan}
         />
       )}
     </div>

@@ -1,11 +1,16 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('kozo', {
+  // Bumped with every preload/IPC change. The renderer compares it to its own
+  // copy (src/components/UpdateBanner.jsx) to spot a main process that is
+  // older than the UI it is showing (a dev session that was never restarted).
+  rev: 6,
   api: {
     games: {
       list: () => ipcRenderer.invoke('games:list'),
       get: (id) => ipcRenderer.invoke('games:get', id),
       add: (data) => ipcRenderer.invoke('games:add', data),
+      planMonth: (gameIds, month) => ipcRenderer.invoke('games:planMonth', gameIds, month),
       update: (id, data) => ipcRenderer.invoke('games:update', id, data),
       delete: (id) => ipcRenderer.invoke('games:delete', id),
       reorder: (orderedIds) => ipcRenderer.invoke('games:reorder', orderedIds),
@@ -151,6 +156,7 @@ contextBridge.exposeInMainWorld('kozo', {
       test: (key) => ipcRenderer.invoke('sgdb:test', key),
       setKey: (key) => ipcRenderer.invoke('sgdb:setKey', key),
       search: (name) => ipcRenderer.invoke('sgdb:search', name),
+      searchGames: (q) => ipcRenderer.invoke('sgdb:searchGames', q),
       grids: (sgdbId) => ipcRenderer.invoke('sgdb:grids', sgdbId),
       heroes: (sgdbId) => ipcRenderer.invoke('sgdb:heroes', sgdbId),
       apply: (gameId, coverUrl, heroUrl) => ipcRenderer.invoke('sgdb:apply', gameId, coverUrl, heroUrl),

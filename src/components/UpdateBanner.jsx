@@ -7,7 +7,13 @@ import s from './UpdateBanner.module.css'
 //   • a slim bar while a newer release downloads, then "Restart to update";
 //   • a one-time "What's new" card the first launch after an update installed.
 // State comes from electron/services/appUpdater.js (app:update / app:updateState).
+// Must match `rev` in electron/preload.js.
+const PRELOAD_REV = 6
+
 export default function UpdateBanner() {
+  // The UI reloaded with new code but the main process is still the old one.
+  const stale = window.kozo && window.kozo.rev !== PRELOAD_REV
+  const [staleHidden, setStaleHidden] = useState(false)
   const [update, setUpdate]       = useState(null)
   const [dismissed, setDismissed] = useState(false)
   const [whatsNew, setWhatsNew]   = useState(null)
@@ -26,6 +32,15 @@ export default function UpdateBanner() {
 
   return (
     <>
+      {stale && !staleHidden && (
+        <div className={s.bar} role="status">
+          <IconRefresh size={15} stroke={2} />
+          <span className={s.text}>KoZo was updated. Quit it from the tray icon and open it again to finish.</span>
+          <button className={s.close} onClick={() => setStaleHidden(true)} aria-label="Hide">
+            <IconX size={14} />
+          </button>
+        </div>
+      )}
       {visible && (
         <div className={s.bar} role="status">
           {update.state === 'ready'

@@ -599,13 +599,20 @@ function SteamGridDbSection() {
 
   useEffect(() => {
     window.kozo?.api?.settings?.get?.('steamgriddb_key').then(res => {
-      if (res?.ok && res.data) { setKey(res.data); setSaved(res.data) }
+      if (res?.ok && res.data) {
+        setKey(res.data); setSaved(res.data)
+        setState('ok'); setMsg('Key saved. Covers for games without one are filled in automatically.')
+      }
     })
   }, [])
 
   async function save() {
+    // A main process older than this screen has no SteamGridDB support yet:
+    // store the key anyway, the covers come after the restart.
     if (!window.kozo?.api?.sgdb?.setKey) {
-      setState('error'); setMsg('Restart KoZo to finish updating, then save the key again.')
+      const r = await window.kozo?.api?.settings?.set?.('steamgriddb_key', key.trim())
+      if (r?.ok) { setSaved(key.trim()); setState('ok'); setMsg('Saved. Restart KoZo to fetch the covers.') }
+      else { setState('error'); setMsg('Could not save the key.') }
       return
     }
     setState('saving')
@@ -647,8 +654,8 @@ function SteamGridDbSection() {
             {show ? <IconEyeOff size={14} stroke={1.6} /> : <IconEye size={14} stroke={1.6} />}
           </button>
         </div>
-        <button type="button" className={s.testBtn} onClick={save} disabled={state === 'saving' || key.trim() === saved}>
-          {state === 'saving' ? <IconLoader2 size={13} stroke={1.8} className="spin" /> : 'Save'}
+        <button type="button" className={s.testBtn} onClick={save} disabled={state === 'saving' || (!key.trim() && !saved)}>
+          {state === 'saving' ? <IconLoader2 size={13} stroke={1.8} className="spin" /> : (key.trim() && key.trim() === saved ? 'Check' : 'Save')}
         </button>
       </div>
       {(state === 'ok' || state === 'error') && (
