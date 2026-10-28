@@ -104,7 +104,7 @@ function DailyChart({ data, period, selectedDay, onSelectDay }) {
             const isNow   = m.key === curKey
             return (
               <div key={m.key} className={`${s.chartCol} ${s.chartColStatic}`}
-                title={`${MONTHS[m.monthIdx]} ${m.year} — ${m.seconds ? formatPlaytime(m.seconds) : 'No activity'}`}>
+                title={`${MONTHS[m.monthIdx]} ${m.year}: ${m.seconds ? formatPlaytime(m.seconds) : 'No activity'}`}>
                 <div className={s.chartBarArea}>
                   <div className={[s.chartBar, hasData ? '' : s.chartBarEmpty, isNow ? s.chartBarToday : ''].join(' ')}
                     style={{ height: hasData ? `${pct}%` : undefined }} />
@@ -147,7 +147,7 @@ function DailyChart({ data, period, selectedDay, onSelectDay }) {
               key={d.day}
               className={s.chartCol}
               aria-pressed={isSel}
-              title={`${prettyDay(d.day)} — ${d.seconds ? formatPlaytime(d.seconds) : 'No activity'}`}
+              title={`${prettyDay(d.day)}: ${d.seconds ? formatPlaytime(d.seconds) : 'No activity'}`}
               onClick={() => onSelectDay(isSel ? null : d.day)}
             >
               <div className={s.chartBarArea}>
@@ -205,7 +205,7 @@ function HourlyChart({ data, selectedHour, onSelectHour }) {
               key={h.hour}
               className={s.chartCol}
               aria-pressed={isSel}
-              title={`${fmtHour(h.hour)} — ${h.seconds ? formatPlaytime(h.seconds) : 'No activity'}`}
+              title={`${fmtHour(h.hour)}: ${h.seconds ? formatPlaytime(h.seconds) : 'No activity'}`}
               onClick={() => onSelectHour(isSel ? null : h.hour)}
             >
               <div className={s.chartBarArea}>
@@ -353,11 +353,11 @@ export default function Statistics() {
   const gamesCount  = stats?.gamesPlayedCount?.count ?? 0
 
   const HIGHLIGHTS = [
-    { Icon: IconClock,          label: 'Playtime',     value: formatPlaytime(playtime) || '—',              color: 'var(--a)' },
+    { Icon: IconClock,          label: 'Playtime',     value: formatPlaytime(playtime),              color: 'var(--a)' },
     { Icon: IconHistory,        label: 'Sessions',     value: sessions,                                     color: 'var(--info)' },
     { Icon: IconTrophy,         label: 'Unlocked',     value: achUnlocked,                                  color: 'var(--warning)' },
     { Icon: IconDeviceGamepad2, label: 'Games played', value: gamesCount,                                   color: 'var(--success)' },
-    { Icon: IconFlame,          label: 'Avg session',  value: avgSession ? formatPlaytime(avgSession) : '—', color: 'var(--status-onhold)' },
+    { Icon: IconFlame,          label: 'Avg session',  value: avgSession ? formatPlaytime(avgSession) : '0m', color: 'var(--status-onhold)' },
   ]
 
   // When a day is selected (daily views only) the three lower panels re-scope to
@@ -370,7 +370,7 @@ export default function Statistics() {
   const scopeLoadingNow = scoped && ((dayScoped ? dayLoading : hourLoading) || !detail)
   const scopeSuffix  = dayScoped
     ? ` · ${prettyShort(selectedDay)}`
-    : hourScoped ? ` · ${fmtHour(selectedHour)}–${fmtHour((selectedHour + 1) % 24)}` : ''
+    : hourScoped ? ` · ${fmtHour(selectedHour)} to ${fmtHour((selectedHour + 1) % 24)}` : ''
   const topGames  = scoped ? (detail?.games || [])        : (stats?.topGames || [])
   const recentAch = scoped ? (detail?.achievements || []) : (stats?.recentAchievements || [])
   const longest   = scoped ? (detail?.sessions || [])     : (stats?.longestSessions || [])
@@ -445,7 +445,7 @@ export default function Statistics() {
                 )}
                 {period === '1d' && selectedHour != null && (
                   <button type="button" className={s.dayPill} onClick={() => setSelectedHour(null)}>
-                    {fmtHour(selectedHour)}–{fmtHour((selectedHour + 1) % 24)} · {hourSeconds(stats?.hourlyActivity, selectedHour) ? formatPlaytime(hourSeconds(stats?.hourlyActivity, selectedHour)) : 'No activity'}
+                    {fmtHour(selectedHour)} to {fmtHour((selectedHour + 1) % 24)} · {hourSeconds(stats?.hourlyActivity, selectedHour) ? formatPlaytime(hourSeconds(stats?.hourlyActivity, selectedHour)) : 'No activity'}
                     <IconX size={12} stroke={2.2} />
                   </button>
                 )}

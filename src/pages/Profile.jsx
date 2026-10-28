@@ -53,7 +53,7 @@ function initials(name) {
   return (p[0][0] + (p[1]?.[0] || '')).toUpperCase()
 }
 function memberSince(iso) {
-  if (!iso) return '—'
+  if (!iso) return 'Never'
   return new Date(iso).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
 }
 function parseIds(raw) {
@@ -341,17 +341,17 @@ export default function Profile() {
   const sessions = stats?.sessionCount?.count ?? 0
   const unlocked = stats?.achievementCounts?.unlocked ?? 0
   const longest = stats?.longestSessions?.[0]?.duration_seconds ?? 0
-  const mostPlayed = stats?.topGames?.[0]?.name || '—'
+  const mostPlayed = stats?.topGames?.[0]?.name || 'None yet'
 
   const avatarSrc = avatar ? fileUrl(avatar, imgBust || undefined) : null
   const showcaseGames = showcase.map(id => games.find(g => String(g.id) === id)).filter(Boolean)
 
   const STAT_CARDS = [
-    { Icon: IconClock, label: 'Total playtime', value: formatPlaytime(playSec) || '—', color: TINT_PLAY },
+    { Icon: IconClock, label: 'Total playtime', value: formatPlaytime(playSec), color: TINT_PLAY },
     { Icon: IconDeviceGamepad2, label: 'Games', value: games.length, color: TINT_GAMES },
     { Icon: IconTrophy, label: 'Achievements', value: unlocked, color: TINT_ACH },
     { Icon: IconHistory, label: 'Sessions', value: sessions, color: TINT_SESS },
-    { Icon: IconFlame, label: 'Longest session', value: longest ? formatPlaytime(longest) : '—', color: TINT_FIRE },
+    { Icon: IconFlame, label: 'Longest session', value: longest ? formatPlaytime(longest) : 'None yet', color: TINT_FIRE },
     { Icon: IconStar, label: 'Most played', value: mostPlayed, color: TINT_PLAY },
   ]
 
@@ -654,7 +654,7 @@ export default function Profile() {
                   {topGenres.map(([gName, sec], i) => (
                     <span key={gName} className={`${s.genreTag} ${i === 0 ? s.genreTagTop : ''}`}>
                       {gName}
-                      <span className={s.genreTagTime}>{formatPlaytime(sec) || '—'}</span>
+                      <span className={s.genreTagTime}>{formatPlaytime(sec)}</span>
                     </span>
                   ))}
                 </div>
@@ -665,7 +665,7 @@ export default function Profile() {
             <div className={s.section}>
               <div className={s.sectionTitle}>
                 Showcase
-                {editing && <span className={s.sectionHint}> — pick up to {MAX_SHOWCASE} ({showcase.length}/{MAX_SHOWCASE})</span>}
+                {editing && <span className={s.sectionHint}> · pick up to {MAX_SHOWCASE} ({showcase.length}/{MAX_SHOWCASE})</span>}
               </div>
 
               {!editing && (
@@ -685,7 +685,7 @@ export default function Profile() {
                             {i === 0 && <div className={s.favTag}><IconStar size={10} stroke={2} /> Favorite</div>}
                           </div>
                           <div className={s.shelfName} title={g.name}>{g.name}</div>
-                          <div className={s.shelfMeta}>{formatPlaytime(g.total_playtime_seconds) || '—'}</div>
+                          <div className={s.shelfMeta}>{formatPlaytime(g.total_playtime_seconds)}</div>
                         </div>
                       )
                     })}
@@ -730,7 +730,7 @@ export default function Profile() {
                     size="sm"
                     Icon={IconDeviceGamepad2}
                     title="Nothing to show off yet"
-                    desc="Add games to your library first — they'll appear here as showcase picks."
+                    desc="Add games to your library first. They'll appear here as showcase picks."
                   />
               )}
             </div>
@@ -750,7 +750,7 @@ export default function Profile() {
                   </button>
                 ))}
               </div>
-              <div className={s.accentHint}>Custom hex + more in Settings → Appearance. The accent flows through the whole app — toasts, overlay, badges, everything.</div>
+              <div className={s.accentHint}>Custom hex + more in Settings → Appearance. The accent flows through the whole app: toasts, overlay, badges, everything.</div>
             </div>
           </div>
         </div>

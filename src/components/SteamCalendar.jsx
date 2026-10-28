@@ -258,7 +258,7 @@ export default function SteamCalendar({ trackedAppIds, onTrack }) {
             )
           })}
           {!loading && games.length > 0 && monthDays.length === 0 && (
-            <div className={s.muted}>No dated releases in {formatMonthKey(mKey, 'long')} among the loaded games{canLoadMore ? ' — try Load more games.' : '.'}</div>
+            <div className={s.muted}>No dated releases in {formatMonthKey(mKey, 'long')} among the loaded games{canLoadMore ? '. Try Load more games.' : '.'}</div>
           )}
         </>
       ) : (
@@ -388,7 +388,7 @@ function DetailModal({ g, tracked, busy, onTrack, onClose }) {
           {details.screenshots.map(src => <img key={src} src={src} alt="" loading="lazy" />)}
         </div>
       )}
-      {!tracked && <div className={s.muted} style={{ marginTop: 10 }}>Tracking adds it to your Game List as Upcoming — KoZo tells you when it's out.</div>}
+      {!tracked && <div className={s.muted} style={{ marginTop: 10 }}>Tracking adds it to your Game List as Upcoming, and KoZo tells you when it's out.</div>}
     </Modal>
   )
 }

@@ -95,7 +95,7 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
         <div className={s.artInfo}>
           <div className={s.artTitleRow}>
             {/* title attr: the name can still truncate on narrow cards */}
-            <div className={s.bannerTitle} title={src ? `${game.name} — ${src.label}` : game.name}>
+            <div className={s.bannerTitle} title={src ? `${game.name} (${src.label})` : game.name}>
               {game.name}
             </div>
             {!selectionMode && (
@@ -154,10 +154,10 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
         <div className={s.meta}>
           <span className={`${s.trophies} ${!game._total ? s.metaEmpty : ''}`}>
             <IconTrophy size={12} stroke={1.5} />
-            {game._total ? `${game._unlocked ?? 0}/${game._total}` : '—'}
+            {game._total ? `${game._unlocked ?? 0}/${game._total}` : '0/0'}
           </span>
           <span className={s.lastPlayed} title={game.last_played_at ? 'Last played' : 'Never played'}>
-            {formatDate(game.last_played_at) || '—'}
+            {formatDate(game.last_played_at) || 'Never'}
           </span>
           <span className={`${s.playtime} ${!game.total_playtime_seconds ? s.metaEmpty : ''}`}>
             <IconClock size={12} stroke={1.6} />
@@ -315,11 +315,11 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite, onConte
       <div className={s.listStats}>
         <span className={`${s.listStatItem} ${game.total_playtime_seconds ? '' : s.listStatItemDim} ${game._isLive && !selectionMode && game.total_playtime_seconds ? s.listStatLive : ''}`}>
           <IconClock size={11} stroke={1.5} />
-          {formatPlaytime(game.total_playtime_seconds) || '—'}
+          {formatPlaytime(game.total_playtime_seconds)}
         </span>
         <span className={s.listStatItem}>
           <IconTrophy size={11} stroke={1.5} />
-          {unlocked}/{total || '—'}
+          {unlocked}/{total || 0}
         </span>
         <span className={s.listDate}>{formatDate(game.last_played_at)}</span>
       </div>

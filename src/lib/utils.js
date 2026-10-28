@@ -113,7 +113,7 @@ export function getBannerIcon(name = '') {
 }
 
 export function formatPlaytime(seconds) {
-  if (!seconds) return '—'
+  if (!seconds) return '0m'
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
   if (h === 0) return `${m}m`
@@ -122,7 +122,7 @@ export function formatPlaytime(seconds) {
 }
 
 export function formatDate(ts) {
-  if (!ts) return '—'
+  if (!ts) return 'Never'
   const d   = new Date(ts)
   const now = new Date()
   // Calendar days, not elapsed 24h blocks. Dividing the millisecond gap by
@@ -151,7 +151,7 @@ export function localDayKey(d = new Date()) {
 }
 
 export function formatDateTime(ts) {
-  if (!ts) return '—'
+  if (!ts) return 'Never'
   const d = new Date(ts)
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
     ' · ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })

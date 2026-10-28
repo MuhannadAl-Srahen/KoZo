@@ -103,7 +103,7 @@ export default function AddGameToListModal({ onClose, onSaved }) {
     const newErrors = {}
     if (!name.trim()) newErrors.name = 'Game name is required'
     if (status === 'finished' && rating !== '' && (isNaN(rating) || Number(rating) < 0 || Number(rating) > 10)) {
-      newErrors.rating = 'Rating must be 0–10'
+      newErrors.rating = 'Rating must be between 0 and 10'
     }
     if (Object.keys(newErrors).length) { setErrors(newErrors); return }
 
@@ -227,7 +227,7 @@ export default function AddGameToListModal({ onClose, onSaved }) {
 
       {!showForm && !searching && query.length < 2 && (
         <div className={s.searchHint}>
-          Search any game to add it to your list — backlog, wishlist, playing, or finished.
+          Search any game to add it to your list: backlog, wishlist, playing, or finished.
         </div>
       )}
 
@@ -266,7 +266,7 @@ export default function AddGameToListModal({ onClose, onSaved }) {
             <div className={s.field}>
               <label className={s.label}>
                 <IconStar size={12} stroke={1.6} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />
-                Rating <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(0–10, optional)</span>
+                Rating <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(0 to 10, optional)</span>
               </label>
               <input
                 type="number"

@@ -62,7 +62,7 @@ function WeekChart({ sessions }) {
             <div
               className={s.chartBarFill}
               style={{ height: `${Math.max((d.seconds / maxSec) * 52, d.seconds > 0 ? 4 : 2)}px` }}
-              title={`${d.label} — ${formatPlaytime(d.seconds)}`}
+              title={`${d.label}: ${formatPlaytime(d.seconds)}`}
             />
             <div className={s.chartBarLabel}>{d.label}</div>
           </div>
@@ -233,7 +233,7 @@ export default function GameDetail() {
         // `load`, which then wrote A's data over B's page.
         if (Number(idRef.current) !== myId) return
         load()   // reflect anything the sync found
-      } catch { /* silent — manual sync in the menu surfaces errors */ }
+      } catch { /* silent, manual sync in the menu surfaces errors */ }
     })()
   }, [loading, game?.id])
 
@@ -372,7 +372,7 @@ export default function GameDetail() {
     await load()
     if (status === 'finished' && game.completion_status !== 'finished') {
       setInfo({ variant: 'success', title: 'Marked as finished',
-        message: `Nice — ${game.name} counts toward your XP now. Find it on your Profile.` })
+        message: `Nice! ${game.name} counts toward your XP now. Find it on your Profile.` })
     }
   }
 
@@ -414,7 +414,7 @@ export default function GameDetail() {
       setInfo({
         variant: 'warning',
         title: `Couldn't read your Steam unlocks for "${game.name}"`,
-        message: 'Steam returned "Profile is not public" — your unlock list is hidden.',
+        message: 'Steam returned "Profile is not public", so your unlock list is hidden.',
         children: <PrivacyHelp openSteamPrivacy={() => window.kozo?.api?.shell?.openExternal(STEAM_PRIVACY_URL)} />,
       })
       return
@@ -441,7 +441,7 @@ export default function GameDetail() {
     if (d.achievementCount)   lines.push(`${d.achievementCount} achievements in schema`)
     if (d.playerUnlocksAdded) lines.push(`${d.playerUnlocksAdded} new Steam unlock${d.playerUnlocksAdded === 1 ? '' : 's'} imported`)
     if (d.crackUnlocksAdded)  lines.push(`${d.crackUnlocksAdded} new crack unlock${d.crackUnlocksAdded === 1 ? '' : 's'} imported`)
-    if (d.schemaSkipped)      lines.push('Schema unavailable from Steam — crack file scan still ran.')
+    if (d.schemaSkipped)      lines.push('Schema unavailable from Steam. The crack file scan still ran.')
     if (diag && !diag.error) {
       lines.push(`Unlocks Steam reports for you: ${diag.steam_unlocks ?? 0}`)
       lines.push(`Stored in KoZo: ${diag.local_unlocked ?? 0} / ${diag.local_total ?? 0}`)
@@ -452,19 +452,19 @@ export default function GameDetail() {
         lines.push('This game has no Steam achievements at all.')
       } else if (diag.error === 'invalid_key') {
         variant = 'error'
-        lines.push('Steam rejected your Web API key — check it in Settings → Steam.')
+        lines.push('Steam rejected your Web API key. Check it in Settings → Steam.')
       } else if (diag.error) {
         variant = 'error'
         lines.push(`Steam error: ${diag.error}`)
       } else if (diag.steam_unlocks > diag.local_unlocked) {
-        lines.push('Steam still reports more unlocks than KoZo stored — its recent-unlock cache can lag a minute or two; check again shortly.')
+        lines.push('Steam still reports more unlocks than KoZo stored. Its recent-unlock cache can lag a minute or two; check again shortly.')
       } else {
         if (variant === 'info') variant = 'success'
         lines.push('KoZo is up to date with Steam.')
       }
     }
     if (lines.length === 0) lines.push('Everything is already up to date.')
-    setInfo({ variant, title: `Achievement check — "${game.name}"`, lines })
+    setInfo({ variant, title: `Achievement check: "${game.name}"`, lines })
   }
 
   // "Check achievements" — scan crack files, then explain in plain language what
@@ -496,7 +496,7 @@ export default function GameDetail() {
     }
     if (diag.crackDir)      lines.push(`Save folder KoZo watches: ${diag.crackDir}`)
     for (const c of (diag.candidates || [])) {
-      lines.push(`${c.source}: ${c.path} — ${c.parsedUnlockCount} unlock${c.parsedUnlockCount === 1 ? '' : 's'} readable`)
+      lines.push(`${c.source}: ${c.path}: ${c.parsedUnlockCount} unlock${c.parsedUnlockCount === 1 ? '' : 's'} readable`)
     }
 
     if (scan.added > 0) {
@@ -512,7 +512,7 @@ export default function GameDetail() {
       case 'ok':
         setInfo({
           variant: 'info',
-          title: 'Achievement files found — already up to date',
+          title: 'Achievement files found, already up to date',
           lines,
         })
         break
@@ -522,7 +522,7 @@ export default function GameDetail() {
         setInfo({
           variant: 'warning',
           title: 'Your crack never saves achievements to disk',
-          message: `${emu} created its achievements file but has never written a single unlock to it — even though the game shows popups. KoZo can't read what the crack doesn't save. You can mark achievements manually (click any achievement below → "Mark as Unlocked"), or replace the emulator with Goldberg/GSE, which does save unlocks.`,
+          message: `${emu} created its achievements file but has never written a single unlock to it, even though the game shows popups. KoZo can't read what the crack doesn't save. You can mark achievements manually (click any achievement below → "Mark as Unlocked"), or replace the emulator with Goldberg/GSE, which does save unlocks.`,
           lines,
         })
         break
@@ -533,7 +533,7 @@ export default function GameDetail() {
         setInfo({
           variant: 'warning',
           title: 'KoZo can\'t read this crack\'s achievement file yet',
-          message: `${emu} IS saving to its achievements file — it's been modified since it was created — but in a layout KoZo's parser doesn't recognize. This isn't "never saves to disk"; it's a format gap on KoZo's end. You can mark achievements manually below for now while this gets sorted out.`,
+          message: `${emu} IS saving to its achievements file, it's been modified since it was created, but in a layout KoZo's parser doesn't recognize. This isn't "never saves to disk"; it's a format gap on KoZo's end. You can mark achievements manually below for now while this gets sorted out.`,
           lines,
         })
         break
@@ -543,7 +543,7 @@ export default function GameDetail() {
         const suggested = diag.configAppIds?.[0]
         setInfo({
           variant: 'warning',
-          title: 'AppID mismatch — KoZo may be watching the wrong folder',
+          title: 'AppID mismatch: KoZo may be watching the wrong folder',
           message: `The game's own config says AppID ${diag.configAppIds.join(', ')}, but KoZo is using ${diag.storedAppId ?? 'none'}. Emulator save folders are named after the config AppID.`,
           lines,
           actions: suggested ? [
@@ -574,7 +574,7 @@ export default function GameDetail() {
         // falling into "no files found" here would be actively misleading.
         setInfo({
           variant: 'warning',
-          title: 'Unlocks found — but no achievement list to match them against',
+          title: 'Unlocks found, but no achievement list to match them against',
           message: 'Your crack is saving unlocks, but KoZo couldn\'t fetch this game\'s achievement list from Steam yet. Check the AppID (Edit game), or add a Steam API key in Settings → Steam, then run this check again.',
           lines,
         })
@@ -586,7 +586,7 @@ export default function GameDetail() {
         setInfo({
           variant: 'warning',
           title: 'This crack has achievements disabled',
-          message: 'The Goldberg emulator in this crack ships without an achievements list (steam_settings\\achievements.json is missing), so the game never tracks or saves ANY unlock — no matter how long you play. KoZo can write the list into the crack so tracking starts working. Unlocks from earlier sessions can\'t be recovered (the emulator never recorded them) — mark those manually below.',
+          message: 'The Goldberg emulator in this crack ships without an achievements list (steam_settings\\achievements.json is missing), so the game never tracks or saves ANY unlock, no matter how long you play. KoZo can write the list into the crack so tracking starts working. Unlocks from earlier sessions can\'t be recovered (the emulator never recorded them), mark those manually below.',
           lines,
           actions: [
             {
@@ -599,7 +599,7 @@ export default function GameDetail() {
                   setInfo({
                     variant: 'success',
                     title: `Achievement tracking enabled (${r.data.count} achievements)`,
-                    message: 'Restart the game — from the next launch the crack will save every unlock, and KoZo will show it instantly.',
+                    message: 'Restart the game. From the next launch the crack will save every unlock, and KoZo will show it instantly.',
                   })
                 } else {
                   const reason = r?.data?.reason
@@ -623,7 +623,7 @@ export default function GameDetail() {
         setInfo({
           variant: 'warning',
           title: 'This is the Games for Windows LIVE version',
-          message: 'KoZo found xlive.dll in the install folder — this build predates Steam achievements entirely (its achievements lived in the long-dead GFWL service), so NO tool can read unlocks from it. To get automatic tracking you\'d need the Complete Edition build with a Steam emulator. The achievement list is loaded, but there is no automatic unlock source for this build — mark achievements manually by clicking one below.',
+          message: 'KoZo found xlive.dll in the install folder, this build predates Steam achievements entirely (its achievements lived in the long-dead GFWL service), so NO tool can read unlocks from it. To get automatic tracking you\'d need the Complete Edition build with a Steam emulator. The achievement list is loaded, but there is no automatic unlock source for this build, mark achievements manually by clicking one below.',
           lines,
         })
         break
@@ -632,7 +632,7 @@ export default function GameDetail() {
         setInfo({
           variant: 'warning',
           title: 'No Steam emulator found in this crack',
-          message: 'KoZo checked the install folder (configs AND dlls) and found no Steam emulator at all — so this crack doesn\'t produce unlock files anywhere (some, like this one, use their own launcher\'s stats system instead of Steam). The achievement list is loaded, but there is no automatic unlock source for this build — mark achievements manually by clicking one below. If the game DOES show achievement popups in-game, play a bit and run this check again — the deep scan will catch any file the crack writes under this game\'s AppID.',
+          message: 'KoZo checked the install folder (configs AND dlls) and found no Steam emulator at all, so this crack doesn\'t produce unlock files anywhere (some, like this one, use their own launcher\'s stats system instead of Steam). The achievement list is loaded, but there is no automatic unlock source for this build, mark achievements manually by clicking one below. If the game DOES show achievement popups in-game, play a bit and run this check again, the deep scan will catch any file the crack writes under this game\'s AppID.',
           lines,
         })
         break
@@ -642,8 +642,8 @@ export default function GameDetail() {
           variant: 'warning',
           title: 'No crack achievement files found yet',
           message: diag.installPath
-            ? 'Most emulators create their achievements file only after your first unlock in-game. KoZo also deep-scanned every save folder on this PC for this game\'s AppID and found nothing yet. Play a bit, unlock something, then check again. If the game shows popups but nothing ever appears here, the crack may not save unlocks at all — you can always mark achievements manually (click one below).'
-            : 'No install path set. Edit the game → Browse to the .exe — the install path is needed to detect the crack\'s emulator and its save files.',
+            ? 'Most emulators create their achievements file only after your first unlock in-game. KoZo also deep-scanned every save folder on this PC for this game\'s AppID and found nothing yet. Play a bit, unlock something, then check again. If the game shows popups but nothing ever appears here, the crack may not save unlocks at all, you can always mark achievements manually (click one below).'
+            : 'No install path set. Edit the game → Browse to the .exe. The install path is needed to detect the crack\'s emulator and its save files.',
           lines,
         })
     }
@@ -668,7 +668,7 @@ export default function GameDetail() {
     if (!res?.ok) {
       setInfo({
         variant: 'error', title: 'Could not open folder',
-        message: res?.error || `Windows couldn't open "${game.install_path}" — the folder may have been moved or deleted.`,
+        message: res?.error || `Windows couldn't open "${game.install_path}" . The folder may have been moved or deleted.`,
       })
     }
   }
@@ -696,7 +696,7 @@ export default function GameDetail() {
             <EmptyState
               Icon={IconDeviceGamepad2}
               title="Game not found"
-              desc="This game is no longer in your library — it may have been removed."
+              desc="This game is no longer in your library, it may have been removed."
               action={{ label: 'Back to Library', Icon: IconChevronLeft, onClick: () => navigate('/') }}
             />
           </div>
@@ -762,7 +762,7 @@ export default function GameDetail() {
             <div className={s.statusWrap} ref={statusMenuRef}>
               <button
                 onClick={() => setStatusMenuOpen(v => !v)}
-                title={status ? `Status: ${status.label} — click to change` : 'Set a status for this game (finishing earns XP)'}
+                title={status ? `Status: ${status.label}. Click to change` : 'Set a status for this game (finishing earns XP)'}
                 className={`${s.statusBtn} ${
                   game.completion_status === 'finished' ? s.statusBtnFinished : status ? s.statusBtnSet : ''
                 }`}
@@ -894,7 +894,7 @@ export default function GameDetail() {
                 ) : (
                   <div className={s.menuConfirm}>
                     <div className={s.menuConfirmText}>
-                      Remove "{game.name}" from the Library? Playtime, sessions and achievements are kept — restore it any time from Archived.
+                      Remove "{game.name}" from the Library? Playtime, sessions and achievements are kept. Restore it any time from Archived.
                     </div>
                     <div className={s.menuConfirmBtns}>
                       <button className={s.menuCancelBtn} onClick={() => setConfirmDelete(false)}>Cancel</button>
@@ -1004,8 +1004,8 @@ export default function GameDetail() {
                   <IconAlertTriangle size={15} stroke={1.8} className={s.privacyIcon} />
                   <div>
                     {syncPrivacyError === 'profile_not_found'
-                      ? 'Your Steam profile could not be read — check the Steam ID in Settings → Steam.'
-                      : 'Steam won\'t return unlocks for this game over the web — usually because it isn\'t owned on your Steam account (Steam reports that as "profile is not public" either way), or because your profile\'s Game details are private. KoZo still reads unlocks from the Steam app on this PC, so this only costs you Steam\'s unlock dates.'}
+                      ? 'Your Steam profile could not be read. Check the Steam ID in Settings → Steam.'
+                      : 'Steam won\'t return unlocks for this game over the web, usually because it isn\'t owned on your Steam account (Steam reports that as "profile is not public" either way), or because your profile\'s Game details are private. KoZo still reads unlocks from the Steam app on this PC, so this only costs you Steam\'s unlock dates.'}
                   </div>
                 </div>
               )}
@@ -1027,7 +1027,7 @@ export default function GameDetail() {
                   <EmptyState
                     Icon={IconTrophy}
                     title="No achievements imported"
-                    desc={`${launcherLabel(game.source)} unlocks can't be read automatically — but KoZo can pull the achievement list from Steam so you can tick off the ones you've earned.`}
+                    desc={`${launcherLabel(game.source)} unlocks can't be read automatically, but KoZo can pull the achievement list from Steam so you can tick off the ones you've earned.`}
                     action={{
                       label: importing ? 'Importing…' : 'Import achievements from Steam',
                       Icon: IconDownload,

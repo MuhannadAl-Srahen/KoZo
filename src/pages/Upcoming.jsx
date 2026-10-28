@@ -353,7 +353,7 @@ export default function Upcoming() {
 
   const sections = [
     { key: 'soon', Icon: IconCalendar, label: 'Coming soon', entries: soon },
-    { key: 'out', Icon: IconConfetti, label: 'Out now — click a game to update its status', entries: released, out: true },
+    { key: 'out', Icon: IconConfetti, label: 'Out now. Click a game to update its status', entries: released, out: true },
     { key: 'tba', Icon: IconHelpCircle, label: 'No date yet', entries: tba },
   ].filter(sec => sec.entries.length > 0)
 

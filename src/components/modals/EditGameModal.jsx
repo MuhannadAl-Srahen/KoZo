@@ -179,7 +179,7 @@ export default function EditGameModal({ game, onClose, onSaved }) {
 
         {errors.exeName
           ? <div className={s.errorText}>{errors.exeName}</div>
-          : <div className={s.inputHint}>Click "Browse" to locate the game's .exe on disk — most reliable. Or "Pick running" if it's already open.</div>
+          : <div className={s.inputHint}>Click "Browse" to locate the game's .exe on disk (most reliable). Or "Pick running" if it's already open.</div>
         }
         {exeWarn && (
           <div className={s.warning}>
@@ -212,7 +212,7 @@ export default function EditGameModal({ game, onClose, onSaved }) {
         aria-expanded={showAdvanced}
       >
         {showAdvanced ? <IconChevronDown size={13} stroke={1.8} /> : <IconChevronRight size={13} stroke={1.8} />}
-        Advanced — status, launcher, copy type
+        Advanced: status, launcher, copy type
       </button>
 
       {showAdvanced && <>
@@ -268,7 +268,7 @@ export default function EditGameModal({ game, onClose, onSaved }) {
           ))}
         </div>
         <div className={s.inputHint}>
-          Which store/launcher this game is from — shown as a badge on the cover. A cracked
+          Which store/launcher this game is from, shown as a badge on the cover. A cracked
           copy keeps its own "Cracked" badge regardless of this. KoZo can only sync
           achievements for Steam and cracked games.
         </div>
@@ -289,7 +289,7 @@ export default function EditGameModal({ game, onClose, onSaved }) {
           />
           {errors.steamAppId
             ? <div className={s.errorText}>{errors.steamAppId}</div>
-            : <div className={s.inputHint}>Steam's numeric game ID — used to pull achievements + cover art. Found in the store page URL (store.steampowered.com/app/<b>1627720</b>/).</div>}
+            : <div className={s.inputHint}>Steam's numeric game ID, used to pull achievements + cover art. Found in the store page URL (store.steampowered.com/app/<b>1627720</b>/).</div>}
         </div>
       )}
 
@@ -339,7 +339,7 @@ export default function EditGameModal({ game, onClose, onSaved }) {
           </button>
         </div>
         <div className={s.inputHint}>
-          Turn this on if Play doesn't seem to do anything — some copies (especially
+          Turn this on if Play doesn't seem to do anything. Some copies (especially
           repacks installed under Program Files) need admin rights to launch at all.
         </div>
       </div>
@@ -380,7 +380,7 @@ export default function EditGameModal({ game, onClose, onSaved }) {
         </div>
         <div className={s.inputHint}>
           Steam supplies art automatically, but only for games that are on Steam. Set your
-          own here for anything it can't find — League of Legends, launcher exclusives,
+          own here for anything it can't find: League of Legends, launcher exclusives,
           emulated titles.
         </div>
       </div>

@@ -124,7 +124,7 @@ export default function AchievementsHub() {
             </div>
             <div className={s.statCard}>
               <span className={s.statLabel}>Rarest trophy</span>
-              <span className={s.statValue}>{rarestPct != null ? `${Number(rarestPct).toFixed(1)}%` : '—'}</span>
+              <span className={s.statValue}>{rarestPct != null ? `${Number(rarestPct).toFixed(1)}%` : 'None'}</span>
             </div>
           </div>
 
@@ -132,7 +132,7 @@ export default function AchievementsHub() {
             <EmptyState
               Icon={IconTrophy}
               title="No achievements yet"
-              desc="Add Steam or cracked games and start unlocking — every unlock lands here automatically."
+              desc="Add Steam or cracked games and start unlocking. Every unlock lands here automatically."
             />
           )}
 

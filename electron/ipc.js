@@ -458,12 +458,12 @@ async function doLaunch(id) {
     }
     if (!fs.existsSync(game.install_path)) {
       throw new Error(
-        `Can't find the game's folder anymore: ${game.install_path} — the game may have been moved/uninstalled, ` +
+        `Can't find the game's folder anymore: ${game.install_path}. The game may have been moved or uninstalled, ` +
         'or it lives on a drive that isn\'t connected right now. Edit the game → Browse to re-point it.'
       )
     }
     throw new Error(
-      `Found the folder, but not "${game.exe_name}" inside it: ${game.install_path} — ` +
+      `Found the folder, but not "${game.exe_name}" inside it: ${game.install_path}. ` +
       'the game may have been updated/reinstalled with a different exe. Edit the game → Browse to re-point it.'
     )
   }
@@ -480,12 +480,12 @@ async function doLaunch(id) {
     const pathWasConfigured = !!game.install_path && !!game.exe_name
     const pathIsStale = pathWasConfigured && !fs.existsSync(game.install_path)
     const warning = pathIsStale
-      ? `Sent to Steam. Heads up: KoZo's saved path for this game (${game.install_path}) no longer exists — if nothing launches, the game may need reinstalling, or its files moved to a new location. Try Scan PC, or Edit → Browse to re-point it.`
+      ? `Sent to Steam. Heads up: KoZo's saved path for this game (${game.install_path}) no longer exists. If nothing launches, the game may need reinstalling, or its files moved to a new location. Try Scan PC, or Edit → Browse to re-point it.`
       : undefined
     return { launched: 'steam', via: 'steam://run', warning }
   }
 
-  throw new Error('No way to launch — set the install path and executable (Edit → Browse).')
+  throw new Error('No way to launch. Set the install path and executable (Edit → Browse).')
 }
 
 // ── Crack discovery ──────────────────────────────────────────────────────────
@@ -1409,7 +1409,7 @@ handle('app:setStartup', (enable) => {
       // say so instead of silently claiming success.
       error: stillOn
         ? (stillTask
-            ? 'A Windows scheduled task for KoZo could not be removed — it may need administrator rights.'
+            ? 'A Windows scheduled task for KoZo could not be removed. It may need administrator rights.'
             : `Windows startup entries could not be removed: ${stillRun.join(', ')}`)
         : undefined,
     }

@@ -191,7 +191,7 @@ export default function Sidebar() {
                 {formatSessionTime(activeSession.started_at, activeSession.idle_seconds)}
               </span>
               {activeSession.idle && (
-                <span className={s.nowPlayingAfk} title="AFK — not counting">AFK — not counting</span>
+                <span className={s.nowPlayingAfk} title="AFK, not counting time">AFK, paused</span>
               )}
             </div>
           </div>

@@ -123,11 +123,11 @@ function setupTray(processWatcher) {
       const paused   = processWatcher.isPaused?.() ?? false
       if (sessions.size > 0) {
         const first = sessions.values().next().value
-        tray.setToolTip(`KoZo — playing ${first?.game_name || 'a game'}`)
+        tray.setToolTip(`KoZo: playing ${first?.game_name || 'a game'}`)
       } else {
-        tray.setToolTip(paused ? 'KoZo — tracking paused' : 'KoZo — Game Tracker')
+        tray.setToolTip(paused ? 'KoZo: tracking paused' : 'KoZo Game Tracker')
       }
-    } catch { tray.setToolTip('KoZo — Game Tracker') }
+    } catch { tray.setToolTip('KoZo Game Tracker') }
   }
 
   // The right-click menu is the KoZo popup (trayWindow.js); the native menu

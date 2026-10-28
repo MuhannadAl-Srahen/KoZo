@@ -267,7 +267,7 @@ function restoreBackup(gameName, backupId, targetOverride) {
       safety = backupSave(gameName, target, 'before-restore').id
     } catch (e) {
       logger.warn(`saveBackup: before-restore snapshot failed for "${gameName}"`, { message: e.message })
-      throw new Error(`Could not snapshot the current save before restoring (${e.message}) — restore cancelled so nothing was overwritten`)
+      throw new Error(`Could not snapshot the current save before restoring (${e.message}). Restore cancelled so nothing was overwritten`)
     }
   }
 

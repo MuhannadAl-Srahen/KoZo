@@ -220,7 +220,7 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
         <div className={s.field}>
           <label className={s.label}>
             <IconStar size={12} stroke={1.6} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />
-            Rating <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(0–10)</span>
+            Rating <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(0 to 10)</span>
           </label>
           <input
             type="number"

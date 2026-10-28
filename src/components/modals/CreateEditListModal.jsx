@@ -105,7 +105,7 @@ export default function CreateEditListModal({ list, onClose, onSaved, onDeleted 
       </div>
 
       <div className={s.field}>
-        <label className={s.label}>Color <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional — tints the list chip)</span></label>
+        <label className={s.label}>Color <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional, tints the list chip)</span></label>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <div className={s.pills} style={{ flex: 1 }}>
             {COLOR_SUGGESTIONS.map(c => (

@@ -34,7 +34,7 @@ export default function UpdateBanner() {
           <span className={s.text}>
             {update.state === 'ready'
               ? <>KoZo {update.version} is ready to install.</>
-              : <>Downloading KoZo {update.version}{update.percent ? ` — ${update.percent}%` : '…'}</>}
+              : <>Downloading KoZo {update.version}{update.percent ? ` (${update.percent}%)` : '…'}</>}
           </span>
           {update.notes && (
             <button className={s.link} onClick={() => setWhatsNew({ version: update.version, notes: update.notes, upcoming: true })}>

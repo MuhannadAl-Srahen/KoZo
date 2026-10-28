@@ -163,7 +163,7 @@ function GeneralTab() {
       if (generalTabCache) generalTabCache.openAtLogin = false
       setStartupMsg({ type: 'error', text: 'Could not register startup: ' + (r.error || 'unknown error') })
     } else if (r.method === 'task_scheduler') {
-      setStartupMsg({ type: 'success', text: 'Registered via Task Scheduler — works even when KoZo runs as administrator.' })
+      setStartupMsg({ type: 'success', text: 'Registered via Task Scheduler. Works even when KoZo runs as administrator.' })
     } else if (r.method === 'registry') {
       setStartupMsg({ type: 'success', text: 'Registered in Windows startup registry.' })
     }
@@ -399,7 +399,7 @@ function SteamTab() {
     } else {
       setDetectMsg({
         type: 'error',
-        text: d?.error === 'timeout' ? 'Sign-in timed out — try again.' : 'Steam sign-in failed — try again.',
+        text: d?.error === 'timeout' ? 'Sign-in timed out. Try again.' : 'Steam sign-in failed. Try again.',
       })
     }
   }
@@ -413,7 +413,7 @@ function SteamTab() {
           <span>Steam Web API Key</span>
         </div>
         <p className={s.sectionDesc}>
-          <strong className={s.strong}>Optional</strong> — KoZo syncs achievements
+          <strong className={s.strong}>Optional</strong>, KoZo syncs achievements
           without a key as long as your Steam profile's Game details are public. A key adds support for
           private profiles and owned-games data. Get yours at{' '}
           <button
@@ -454,13 +454,13 @@ function SteamTab() {
           <span>Your Steam Profile</span>
         </div>
         <p className={s.sectionDesc}>
-          Connects <strong className={s.strong}>automatically</strong> — KoZo reads
+          Connects <strong className={s.strong}>automatically</strong>, KoZo reads
           your logged-in account from the Steam app on this PC. Use "Sign in with Steam" for a
           different account or when Steam isn't installed here. Nothing to type.
         </p>
         {steamUserId && (
           <StatusLine type="success">
-            Connected{steamPersona ? <> as <strong>{steamPersona}</strong></> : <> — {steamUserId}</>}
+            Connected{steamPersona ? <> as <strong>{steamPersona}</strong></> : <> ({steamUserId})</>}
           </StatusLine>
         )}
         {privacyError && (
@@ -472,7 +472,7 @@ function SteamTab() {
                 : <>
                     Steam wouldn't return unlocks for any game KoZo tried, which usually means your
                     profile's <strong>Game details</strong> are private. KoZo still reads unlocks
-                    straight from the Steam app on this PC, so achievements keep working — this only
+                    straight from the Steam app on this PC, so achievements keep working, this only
                     costs you Steam's real unlock dates. If you've already set Game details to Public,
                     hit Re-check.
                   </>}
@@ -482,7 +482,7 @@ function SteamTab() {
                   Open Steam privacy settings
                 </button>
                 {/* Steam caches privacy changes for a moment, and KoZo only
-                    re-tests on launch — so give it a way to confirm now. */}
+                    re-tests on launch, so give it a way to confirm now. */}
                 <button type="button" className={s.testBtn} disabled={privacyChecking}
                   onClick={async () => {
                     setPrivacyChecking(true)
@@ -501,12 +501,12 @@ function SteamTab() {
         )}
         <div className={s.keyRow}>
           <button type="button" className={s.testBtn}
-            title="Read your logged-in account from the local Steam install — no typing needed"
+            title="Read your logged-in account from the local Steam install, no typing needed"
             onClick={detectFromPc}>
             Detect from this PC
           </button>
           <button type="button" className={s.testBtn}
-            title="Sign in with Steam in your browser — for a different account or when Steam isn't installed here"
+            title="Sign in with Steam in your browser, for a different account or when Steam isn't installed here"
             disabled={signingIn}
             onClick={signInWithSteam}>
             <IconBrandSteam size={13} stroke={1.8} />
@@ -786,7 +786,7 @@ function AppearanceTab() {
           <span>Accent Color</span>
         </div>
         <p className={s.sectionDesc}>
-          Controls the highlight color used across the entire app — buttons, active states, and badges.
+          Controls the highlight color used across the entire app: buttons, active states, and badges.
         </p>
         <div className={s.swatchGrid}>
           {presets.map(p => (
@@ -819,7 +819,7 @@ function AppearanceTab() {
         <div className={s.toggleList}>
           <ToggleRow
             label="Match background to accent"
-            desc="Tints the app's dark background and cards with your accent color's hue — a themed dark look instead of the stock blue-violet."
+            desc="Tints the app's dark background and cards with your accent color's hue, a themed dark look instead of the stock blue-violet."
             checked={bgTint}
             onChange={setBgTint}
           />
@@ -934,10 +934,10 @@ function DataTab({ onManageSaves }) {
       <section className={s.section}>
         <div className={s.sectionHeader}>
           <IconCloud size={15} stroke={1.6} />
-          <span>Sync &amp; Backup — your data on any PC</span>
+          <span>Sync &amp; Backup: your data on any PC</span>
         </div>
         <p className={s.sectionDesc}>
-          No account needed — sync KoZo to <strong className={s.strong}>any folder</strong>:
+          No account needed, sync KoZo to <strong className={s.strong}>any folder</strong>:
           a cloud-synced folder (OneDrive/Drive/Dropbox), a network drive, or a USB stick. It keeps your
           library, playtime, achievements, lists AND game-save backups mirrored there. On a new PC:
           install KoZo, choose the same folder, hit Restore.
@@ -965,13 +965,13 @@ function DataTab({ onManageSaves }) {
         {sync?.configured && (
           <p className={s.sectionDescQuiet}>
             Syncing to <strong className={s.savePath} title={sync.folder}>{sync.folder}</strong>
-            {sync.lastBackupAt ? <> — last backup {new Date(sync.lastBackupAt).toLocaleString()}</> : ' — first backup will be written shortly'}
+            {sync.lastBackupAt ? <>. Last backup {new Date(sync.lastBackupAt).toLocaleString()}</> : '. The first backup will be written shortly'}
           </p>
         )}
 
         {importState === 'done' && importResult && (
           <StatusLine type="success">
-            Restored — {importResult.games} games, {importResult.sessions} sessions,
+            Restored {importResult.games} games, {importResult.sessions} sessions,
             {' '}{importResult.gameList} list items
           </StatusLine>
         )}
@@ -987,14 +987,14 @@ function DataTab({ onManageSaves }) {
           </div>
           <p className={s.sectionDesc}>
             Each game's save files back up into the same folder
-            {backupsDir && <> (<code className={s.savePath} title={backupsDir}>{backupsDir}</code>)</>} — great for
+            {backupsDir && <> (<code className={s.savePath} title={backupsDir}>{backupsDir}</code>)</>}, great for
             cracked/offline games with no cloud saves.
           </p>
 
           <div className={s.toggleList}>
             <ToggleRow
               label="Auto-back up saves after each session"
-              desc="After you finish playing, snapshots that game's saves automatically — keeps the last two sessions (older ones are overwritten so backups never balloon in size)."
+              desc="After you finish playing, snapshots that game's saves automatically, keeps the last two sessions (older ones are overwritten so backups never balloon in size)."
               checked={autoSaveEnabled}
               onChange={toggleAutoSave}
             />
@@ -1011,7 +1011,7 @@ function DataTab({ onManageSaves }) {
               {allState === 'done' && allResult && (
                 <StatusLine type={(allResult.noSaves || allResult.failed) ? 'warning' : 'success'}>
                   {allResult.backedUp} backed up
-                  {allResult.noSaves ? ` — ${allResult.noSaves} had no detectable save folder (open that game's Save Files to back up manually)` : ''}
+                  {allResult.noSaves ? `. ${allResult.noSaves} had no detectable save folder (open that game's Save Files to back up manually)` : ''}
                   {allResult.failed ? `, ${allResult.failed} failed` : ''}
                 </StatusLine>
               )}
@@ -1048,7 +1048,7 @@ function DataTab({ onManageSaves }) {
         </div>
 
         <p className={s.sectionDescQuiet}>
-          Restoring merges data in (matching entries are updated) — it never deletes anything or touches game saves.
+          Restoring merges data in (matching entries are updated), it never deletes anything or touches game saves.
         </p>
       </section>
     </div>
@@ -1060,7 +1060,7 @@ const FEATURE_GROUPS = [
   {
     title: 'Tracking',
     items: [
-      { Icon: IconClock,    name: 'Automatic playtime', desc: 'Detects running games and records sessions — no manual timers.' },
+      { Icon: IconClock,    name: 'Automatic playtime', desc: 'Detects running games and records sessions, no manual timers.' },
       { Icon: IconHistory,  name: 'Sessions timeline',  desc: 'Every play session grouped by day with durations and unlocks.' },
       { Icon: IconBolt,     name: 'Idle / AFK pause',   desc: 'Stops counting when you step away so overnight idling doesn’t inflate stats.' },
     ],
@@ -1068,37 +1068,37 @@ const FEATURE_GROUPS = [
   {
     title: 'Achievements',
     items: [
-      { Icon: IconBrandSteam, name: 'Steam sync',        desc: 'Imports your unlocks via the Steam Web API — automatically while you play and after each session. No interval to set.' },
-      { Icon: IconTrophy,     name: 'Cracked-game sync', desc: 'Reads Goldberg, CODEX, RUNE, EMPRESS, SKIDROW and more — watched live, so unlocks appear instantly.' },
-      { Icon: IconBell,       name: 'Live game overlay', desc: 'A toast pops over your game the moment you unlock something — Steam-style, in your accent color.' },
-      { Icon: IconDownload,   name: 'Achievement lists for any launcher', desc: "Xbox/Epic/other games auto-match a Steam achievement list on add — then tick off the ones you've earned." },
+      { Icon: IconBrandSteam, name: 'Steam sync',        desc: 'Imports your unlocks via the Steam Web API, automatically while you play and after each session. No interval to set.' },
+      { Icon: IconTrophy,     name: 'Cracked-game sync', desc: 'Reads Goldberg, CODEX, RUNE, EMPRESS, SKIDROW and more, watched live, so unlocks appear instantly.' },
+      { Icon: IconBell,       name: 'Live game overlay', desc: 'A toast pops over your game the moment you unlock something, Steam-style, in your accent color.' },
+      { Icon: IconDownload,   name: 'Achievement lists for any launcher', desc: "Xbox/Epic/other games auto-match a Steam achievement list on add, then tick off the ones you've earned." },
     ],
   },
   {
     title: 'Library',
     items: [
-      { Icon: IconSearch,         name: 'Scan PC',          desc: 'Finds installed games (Steam, Epic, GOG, Xbox, cracked) on your drives, with the right launcher badge — right from the Library toolbar.' },
-      { Icon: IconDeviceGamepad2, name: 'Add manually',     desc: 'Point KoZo at any .exe — perfect for offline games.' },
+      { Icon: IconSearch,         name: 'Scan PC',          desc: 'Finds installed games (Steam, Epic, GOG, Xbox, cracked) on your drives, with the right launcher badge, right from the Library toolbar.' },
+      { Icon: IconDeviceGamepad2, name: 'Add manually',     desc: 'Point KoZo at any .exe, perfect for offline games.' },
       { Icon: IconStar,           name: 'Favorites',        desc: 'Star a game to pin it to the top of your Library and Game List.' },
       { Icon: IconList,           name: 'Game List',        desc: 'A backlog / wishlist with statuses, genres, search, and Spotify-style custom lists.' },
       { Icon: IconEyeOff,         name: 'Status filter & hidden games', desc: 'Filter the Library by Playing/Finished/Dropped/On hold; hidden games tuck into a collapsed section at the bottom (their stats still count).' },
-      { Icon: IconLayoutGrid,     name: 'Drag & drop ordering', desc: 'Pick "Custom order" and drag cards into any arrangement you like — in the Library and the Game List.' },
+      { Icon: IconLayoutGrid,     name: 'Drag & drop ordering', desc: 'Pick "Custom order" and drag cards into any arrangement you like, in the Library and the Game List.' },
     ],
   },
   {
     title: 'Saves & Backups',
     items: [
       { Icon: IconDeviceFloppy, name: 'Save file finder',     desc: 'Locates each game’s real save folder (even tricky publisher paths).' },
-      { Icon: IconArchive,      name: 'Save backup & restore',desc: 'Snapshot and roll back any game’s saves — manually, all at once before a format, or automatically after each session (keeps the last two).' },
-      { Icon: IconCloud,        name: 'Folder sync', desc: 'Sync everything (game saves included) to any folder — cloud-synced, network drive, or USB — and restore on any PC. Fully offline, no account.' },
+      { Icon: IconArchive,      name: 'Save backup & restore',desc: 'Snapshot and roll back any game’s saves, manually, all at once before a format, or automatically after each session (keeps the last two).' },
+      { Icon: IconCloud,        name: 'Folder sync', desc: 'Sync everything (game saves included) to any folder, cloud-synced, network drive, or USB, and restore on any PC. Fully offline, no account.' },
     ],
   },
   {
     title: 'Personalize',
     items: [
       { Icon: IconUser,      name: 'Your profile',  desc: 'A profile page with a cropped avatar & banner, banner themes, a title, and a showcase of your favorite games.' },
-      { Icon: IconBolt,      name: 'XP & levels',   desc: 'Earn XP from playtime, rare achievements, play streaks and finished games — level up through tiers from Rookie to Mythic, shown on your profile.' },
-      { Icon: IconPalette,   name: 'Custom accent', desc: 'Pick any accent (presets or custom hex) — it themes the whole app, badges, and the live overlay.' },
+      { Icon: IconBolt,      name: 'XP & levels',   desc: 'Earn XP from playtime, rare achievements, play streaks and finished games, level up through tiers from Rookie to Mythic, shown on your profile.' },
+      { Icon: IconPalette,   name: 'Custom accent', desc: 'Pick any accent (presets or custom hex), it themes the whole app, badges, and the live overlay.' },
     ],
   },
   {
@@ -1174,15 +1174,15 @@ function AboutTab() {
   function updateLine(r) {
     if (r.error) {
       return ['error', r.error === 'timed_out'
-        ? "Couldn't reach the update server — check your connection."
+        ? "Couldn't reach the update server. Check your connection."
         : r.error]
     }
     if (r.notConfigured) return ['info', 'Update source not configured yet (set build.publish in package.json).']
-    if (r.noReleases) return ['info', `No releases published on ${r.repo} yet — build the app and publish a GitHub release to enable updates.`]
+    if (r.noReleases) return ['info', `No releases published on ${r.repo} yet. Build the app and publish a GitHub release to enable updates.`]
     if (r.updateAvailable) {
-      return ['success', `Update ${r.latest} available (you have ${r.current})${r.dev || r.manualOnly ? '' : ' — downloading in the background.'}`]
+      return ['success', `Update ${r.latest} available (you have ${r.current})${r.dev || r.manualOnly ? '' : '. Downloading in the background.'}`]
     }
-    return ['success', `You're up to date${r.latest ? ` — ${r.latest} is the latest release` : ''}${r.dev ? ' (dev build, checked against GitHub)' : ''}.`]
+    return ['success', `You're up to date${r.latest ? `. ${r.latest} is the latest release` : ''}${r.dev ? ' (dev build, checked against GitHub)' : ''}.`]
   }
 
   return (
@@ -1195,7 +1195,7 @@ function AboutTab() {
             <div className={s.aboutVersion}>Version {version || '…'}</div>
             <div className={s.aboutDesc}>
               A local-first game tracker for Windows. Track playtime, sessions, and
-              achievements — even for cracked and offline games.
+              achievements, even for cracked and offline games.
             </div>
           </div>
         </div>
@@ -1232,8 +1232,8 @@ function AboutTab() {
           {[
             ['Platform',            'Windows (Electron 41)'],
             ['Runtime',             'React 19 + SQLite'],
-            ['Data storage',        'Local — nothing leaves your PC'],
-            ['Steam integration',   'Steam Web API — optional; public profiles sync keyless'],
+            ['Data storage',        'Local, nothing leaves your PC'],
+            ['Steam integration',   'Steam Web API (optional). Public profiles sync without a key'],
             ['Crack support',       'Goldberg, CODEX, EMPRESS, ALI213, SSE, CreamAPI, SKIDROW, Reloaded, online-fix'],
           ].map(([k, v]) => (
             <div key={k} className={s.aboutDetailRow}>
@@ -1250,7 +1250,7 @@ function AboutTab() {
         <p className={s.sectionDesc}>
           Verify the achievement pipeline end to end: KoZo plants a synthetic crack file,
           runs the real scanner on it, records the unlock in the database, and fires the
-          real in-game overlay toast — then cleans everything up.
+          real in-game overlay toast, then cleans everything up.
         </p>
         <div className={s.keyRow}>
           <button type="button" className={s.testBtn} onClick={runTrackingTest} disabled={testing}>
@@ -1266,13 +1266,13 @@ function AboutTab() {
           <div className={s.statusStack}>
             {(testResult.steps || []).map((st, i) => (
               <StatusLine key={i} type={st.ok ? 'success' : 'error'}>
-                {st.name}{st.detail ? <span className={s.statusDetail}> — {st.detail}</span> : null}
+                {st.name}{st.detail ? <span className={s.statusDetail}>: {st.detail}</span> : null}
               </StatusLine>
             ))}
             <StatusLine type={testResult.ok ? 'success' : 'error'} className={s.statusSummary}>
               {testResult.ok
                 ? 'Achievement tracking is working on this PC.'
-                : 'Something failed — see the steps above.'}
+                : 'Something failed. See the steps above.'}
             </StatusLine>
           </div>
         )}

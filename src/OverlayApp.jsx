@@ -143,7 +143,7 @@ function SessionToast({ toast, onDismiss }) {
         )}
         <div className={s.toastInfo}>
           <div className={s.toastName}>{toast.gameName}</div>
-          <div className={s.toastDesc}>Session started — tracking playtime</div>
+          <div className={s.toastDesc}>Session started. Tracking playtime</div>
         </div>
       </div>
     </div>
@@ -283,7 +283,7 @@ function AchListToast({ toast, onDismiss }) {
       <CloseButton close={close} />
       <div className={s.toastHeader}>
         <IconTrophy size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
-        <span className={s.toastHeaderText}>{idle ? 'KoZo' : `Achievements — ${gameName}`}</span>
+        <span className={s.toastHeaderText}>{idle ? 'KoZo' : `Achievements: ${gameName}`}</span>
       </div>
       {idle ? (
         <div className={s.toastBody}>
@@ -313,7 +313,7 @@ function AchListToast({ toast, onDismiss }) {
           {remaining.length > 0 ? (
             <>
               <div className={s.achListLabel}>
-                Still locked — rarest first
+                Still locked, rarest first
                 {scrollable && <span className={s.achListCounter}>{remaining.length}</span>}
               </div>
               <div className={s.achListRows} ref={rowsRef} onScroll={onScroll}>
@@ -374,7 +374,7 @@ function LevelUpToast({ toast, onDismiss }) {
           </div>
         )}
         <div className={s.toastInfo}>
-          <div className={s.toastName}>Level {level} — {tier}</div>
+          <div className={s.toastName}>Level {level} · {tier}</div>
           <div className={s.toastDesc}>{totalXp?.toLocaleString?.() ?? totalXp} XP total. Keep it up!</div>
         </div>
       </div>
@@ -406,7 +406,7 @@ function SessionEndToast({ toast, onDismiss }) {
         <div className={s.toastInfo}>
           <div className={s.toastName}>{gameName}</div>
           <div className={s.toastDesc}>
-            {flashTime(durationSeconds || 0)} played — +{gainedXp} XP earned
+            {flashTime(durationSeconds || 0)} played · +{gainedXp} XP earned
           </div>
           {toNextLevel != null && (
             <div className={s.toastGame}>Only {toNextLevel} XP to the next level!</div>
@@ -587,7 +587,7 @@ function ReleaseToast({ toast, onDismiss }) {
           </div>
           <div className={s.toastDesc}>
             {one
-              ? `Released ${one.release_date} — now under "Out now" in your Game List`
+              ? `Released ${one.release_date}. Find it under "Out now" in your Game List`
               : games.map(g => g.name).slice(0, 4).join(', ')}
           </div>
         </div>

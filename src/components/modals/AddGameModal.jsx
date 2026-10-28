@@ -405,7 +405,7 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
               ? <div className={s.errorText}>{errors.exeName}</div>
               : <div className={s.inputHint}>
                   {!exeName.trim() && selected?.steam_app_id
-                    ? 'Optional for Steam games — Play works without it, but KoZo can only track playtime once it knows the executable.'
+                    ? 'Optional for Steam games. Play works without it, but KoZo can only track playtime once it knows the executable.'
                     : 'Click "Browse" to find the .exe on disk, or "Pick running" if the game is already open.'}
                 </div>
             }
@@ -427,7 +427,7 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
               <div className={s.warning}>
                 <IconAlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
                 "{exeName.trim()}" doesn't look like it belongs to "{name.trim()}". Every
-                minute that executable runs will be credited to this game — double-check
+                minute that executable runs will be credited to this game, so double-check
                 it's the right one.
               </div>
             )}
@@ -506,7 +506,7 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
               </div>
               <div className={s.inputHint}>
                 Shown as a badge on the cover. KoZo only syncs achievements for Steam and
-                cracked games — other launchers track playtime &amp; sessions only.
+                cracked games. Other launchers track playtime &amp; sessions only.
               </div>
             </div>
           )}

@@ -326,7 +326,7 @@ export default function Library() {
     { key: 'hidden', label: 'Hidden', Icon: IconEyeOff,
       games: sortGames(allGamesWithLive.filter(g => g.is_hidden && !g.is_archived && matchesFilters(g)), sortBy) },
     { key: 'archived', label: 'Archived', Icon: IconArchive,
-      hint: 'Removed from the Library — playtime, sessions and achievements are kept.',
+      hint: 'Removed from the Library. Playtime, sessions and achievements are kept.',
       games: sortGames(allGamesWithLive.filter(g => g.is_archived && matchesFilters(g)), sortBy) },
   ]
   // Header stats include hidden games — hiding only affects grid visibility,
@@ -637,7 +637,7 @@ export default function Library() {
           } : undefined}
           deleteIsArchive
           deleteLabel="Remove from library"
-          deleteConfirmLabel="Confirm — keep history"
+          deleteConfirmLabel="Confirm (history is kept)"
           deleteHint="Moves it to Archived. Playtime, sessions and achievements are kept."
         />
       )}
