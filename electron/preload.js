@@ -147,6 +147,14 @@ contextBridge.exposeInMainWorld('kozo', {
       // The achievement list toast is gone — release its scroll hotkeys.
       achListClosed: () => ipcRenderer.invoke('overlay:achListClosed'),
     },
+    sgdb: {
+      test: (key) => ipcRenderer.invoke('sgdb:test', key),
+      setKey: (key) => ipcRenderer.invoke('sgdb:setKey', key),
+      search: (name) => ipcRenderer.invoke('sgdb:search', name),
+      grids: (sgdbId) => ipcRenderer.invoke('sgdb:grids', sgdbId),
+      heroes: (sgdbId) => ipcRenderer.invoke('sgdb:heroes', sgdbId),
+      apply: (gameId, coverUrl, heroUrl) => ipcRenderer.invoke('sgdb:apply', gameId, coverUrl, heroUrl),
+    },
     tray: {
       data: () => ipcRenderer.invoke('tray:data'),
       action: (name, arg) => ipcRenderer.invoke('tray:action', name, arg),

@@ -582,7 +582,75 @@ function SteamTab() {
         </div>
         <Message msg={bannerMsg} />
       </section>
+
+      <SteamGridDbSection />
     </div>
+  )
+}
+
+// SteamGridDB key: covers + wide banners for games that aren't on Steam.
+const SGDB_KEY_URL = 'https://www.steamgriddb.com/profile/preferences/api'
+function SteamGridDbSection() {
+  const [key, setKey]     = useState('')
+  const [saved, setSaved] = useState('')
+  const [show, setShow]   = useState(false)
+  const [state, setState] = useState('idle')   // idle | saving | ok | error
+  const [msg, setMsg]     = useState('')
+
+  useEffect(() => {
+    window.kozo?.api?.settings?.get?.('steamgriddb_key').then(res => {
+      if (res?.ok && res.data) { setKey(res.data); setSaved(res.data) }
+    })
+  }, [])
+
+  async function save() {
+    setState('saving')
+    const res = await window.kozo?.api?.sgdb?.setKey?.(key)
+    const d = res?.ok ? res.data : null
+    if (d?.valid) {
+      setSaved(key.trim())
+      setState('ok')
+      setMsg(key.trim() ? 'Saved. Covers for your non-Steam games are being fetched in the background.' : 'Key removed.')
+    } else {
+      setState('error')
+      setMsg(d?.message || res?.error || 'Could not check the key.')
+    }
+  }
+
+  return (
+    <section className={s.section}>
+      <div className={s.sectionHeader}>
+        <IconPalette size={15} stroke={1.6} />
+        <span>Covers for non-Steam games</span>
+      </div>
+      <p className={s.sectionDesc}>
+        Games that aren't on Steam (League of Legends, Xbox or Epic exclusives) get their covers from{' '}
+        <strong className={s.strong}>SteamGridDB</strong>. Paste your free API key and KoZo fills them in
+        automatically. You can also pick a different cover from Edit, Find cover.{' '}
+        <button type="button" className={s.linkBtn} onClick={() => window.kozo?.api?.shell?.openExternal?.(SGDB_KEY_URL)}>
+          Get a free key
+        </button>
+      </p>
+      <div className={s.keyRow}>
+        <div className={`${s.keyInputWrap} hasRing`}>
+          <input type={show ? 'text' : 'password'} className={s.keyInput}
+            placeholder="SteamGridDB API key" value={key}
+            aria-label="SteamGridDB API key"
+            onChange={e => { setKey(e.target.value); setState('idle') }}
+            spellCheck={false} autoComplete="off" />
+          <button type="button" className={s.keyToggle} onClick={() => setShow(v => !v)}
+            aria-label={show ? 'Hide key' : 'Show key'}>
+            {show ? <IconEyeOff size={14} stroke={1.6} /> : <IconEye size={14} stroke={1.6} />}
+          </button>
+        </div>
+        <button type="button" className={s.testBtn} onClick={save} disabled={state === 'saving' || key.trim() === saved}>
+          {state === 'saving' ? <IconLoader2 size={13} stroke={1.8} className="spin" /> : 'Save'}
+        </button>
+      </div>
+      {(state === 'ok' || state === 'error') && (
+        <StatusLine type={state === 'ok' ? 'success' : 'error'}>{msg}</StatusLine>
+      )}
+    </section>
   )
 }
 

@@ -923,6 +923,7 @@ async function getComingSoon(feed = 'soon', page = 0) {
 }
 
 module.exports = {
+  getBannersDir, downloadFile,
   getAppAssets, downloadHero,
   getComingSoon, parseComingSoonHtml,
   testApiKey, searchGames, findAppByName, refreshGameData, refreshBanners, downloadBanner,

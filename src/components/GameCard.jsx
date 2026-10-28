@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { IconTrophy, IconCheck, IconClock, IconPlayerPlayFilled, IconStar, IconEyeOff } from '@tabler/icons-react'
 import { getBannerBg, getBannerIcon, formatPlaytime, formatDate, fileUrl, parseGenres } from '../lib/utils'
 import { LIBRARY_STATUSES, sourceOf, accentOf } from '../lib/cardModel'
+import GeneratedCover from './GeneratedCover'
 import InfoModal from './ui/InfoModal'
 import s from './GameCard.module.css'
 
@@ -53,9 +54,9 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
       onContextMenu={onContextMenu ? (e) => { e.preventDefault(); onContextMenu(e, game) } : undefined}
     >
       <div className={s.banner} style={{ background: bg }}>
-        {/* Icon is the base layer; a blurred fill + the contained cover overlay
-            it. If the image fails to load the icon shows again. */}
-        <Icon size={iconSize} className={s.bannerIcon} stroke={1.1} style={{ zIndex: 0 }} />
+        {/* A generated poster is the base layer; the real cover sits on top.
+            If the image is missing or fails to load, the poster shows. */}
+        <GeneratedCover name={game.name} Icon={src?.Icon || Icon} />
         {(() => {
           const localSrc = game.banner_local_path ? fileUrl(game.banner_local_path, game.banner_rev) : null
           const src = localSrc || game.banner_url

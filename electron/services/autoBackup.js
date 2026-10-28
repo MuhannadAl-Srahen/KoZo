@@ -26,7 +26,7 @@ const fs   = require('fs')
 const path = require('path')
 const logger = require('../logger')
 
-const SECRET_SETTINGS = new Set(['steam_api_key'])
+const SECRET_SETTINGS = new Set(['steam_api_key', 'steamgriddb_key'])
 
 const TABLES = ['games', 'sessions', 'achievements', 'achievement_unlocks', 'game_list', 'categories', 'custom_lists', 'custom_list_games', 'settings']
 

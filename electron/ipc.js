@@ -113,6 +113,10 @@ async function addLibraryGame(data) {
     // unlock import the appid path gets.
     const { autoImportSchemaByName, fetchAndStoreAchievements: fetchAndStore } = require('./services/achievementSync')
     setImmediate(async () => {
+      // Not on Steam → cover + hero from SteamGridDB when the user has a key.
+      try {
+        if (await require('./services/steamGridDb').autoArt(gamesQ.getGame(game.id))) broadcast('game:updated', game.id)
+      } catch {}
       await autoImportSchemaByName(game.id).catch(() => {})
       if (game?.is_cracked) await fetchAndStore(game.id).catch(() => {})
     })
@@ -1291,7 +1295,41 @@ async function refreshAllBannersJob() {
   broadcast('game:updated', null)
   return { upgraded }
 }
-handle('steam:refreshAllBanners', refreshAllBannersJob)
+handle('steam:refreshAllBanners', async () => {
+  const r = await refreshAllBannersJob()
+  // Games that aren't on Steam get their covers from SteamGridDB (if keyed).
+  try { if (await require('./services/steamGridDb').autoArtAll()) broadcast('game:updated', null) } catch {}
+  return r
+})
+
+// ── SteamGridDB (covers for non-Steam games) ─────────────────────────────────
+handle('sgdb:test', (key) => require('./services/steamGridDb').testKey(key))
+handle('sgdb:search', (name) => require('./services/steamGridDb').searchGame(name))
+handle('sgdb:grids', (sgdbId) => require('./services/steamGridDb').grids(sgdbId))
+handle('sgdb:heroes', (sgdbId) => require('./services/steamGridDb').heroes(sgdbId))
+handle('sgdb:apply', async (gameId, coverUrl, heroUrl) => {
+  const g = await require('./services/steamGridDb').applyArt(Number(gameId), coverUrl, heroUrl)
+  bk(); broadcast('game:updated', Number(gameId))
+  return g
+})
+// Saving a key: store it, then fill covers for every non-Steam game in the background.
+handle('sgdb:setKey', async (key) => {
+  const settingsQ = require('./db/queries/settings')
+  const clean = String(key || '').trim()
+  if (clean) {
+    const t = await require('./services/steamGridDb').testKey(clean)
+    if (!t.valid) return t
+  }
+  settingsQ.setSetting('steamgriddb_key', clean)
+  if (clean) {
+    require('./services/processWatcher').runWhenIdle('sgdbAutoArt', () => {
+      require('./services/steamGridDb').autoArtAll()
+        .then(n => { if (n) broadcast('game:updated', null) })
+        .catch(() => {})
+    })
+  }
+  return { valid: true }
+})
 
 // One-time art repair: covers/heroes fetched before KoZo knew about Steam's
 // hashed asset paths are wide headers or missing for newer titles. Re-run the
@@ -1571,7 +1609,7 @@ async function importBackupFile(filePath) {
   const TABLES = ['categories', 'games', 'game_list', 'custom_lists', 'custom_list_games', 'sessions', 'achievements', 'achievement_unlocks', 'settings']
   // Paths are per-machine (a restore on a new PC must keep the folders just set
   // up there) and the API key is never exported — keep the local values.
-  const LOCAL_SETTINGS = new Set(['sync_folder', 'auto_backup_dir', 'saves_backup_dir', 'steam_api_key'])
+  const LOCAL_SETTINGS = new Set(['sync_folder', 'auto_backup_dir', 'saves_backup_dir', 'steam_api_key', 'steamgriddb_key'])
   const rowsFor = (t) => t === 'settings' && Array.isArray(data[t])
     ? data[t].filter(r => !LOCAL_SETTINGS.has(r?.key))
     : data[t]

@@ -6,6 +6,7 @@ import {
 import Modal, { modalStyles as ms } from '../ui/Modal'
 import RunningProcessPicker from '../ui/RunningProcessPicker'
 import ImageCropModal from './ImageCropModal'
+import CoverPickerModal from './CoverPickerModal'
 import { FOREIGN_LAUNCHERS, KNOWN_SYSTEM_EXES, fileUrl } from '../../lib/utils'
 import cs from '../../styles/controls.module.css'
 import s from './AddGameModal.module.css'
@@ -31,6 +32,7 @@ export default function EditGameModal({ game, onClose, onSaved }) {
   // the placeholder forever, with no way to fix it from the UI.
   const [coverPath, setCoverPath]     = useState(game.banner_local_path || '')
   const [cropSrc, setCropSrc]         = useState(null)
+  const [findCover, setFindCover]     = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
 
   function onExeChange(val) {
@@ -373,15 +375,18 @@ export default function EditGameModal({ game, onClose, onSaved }) {
           >
             {coverPath ? 'Change cover' : 'Choose image'}
           </button>
+          <button type="button" className={s.fileBtn} onClick={() => setFindCover(true)}>
+            Find cover
+          </button>
           {coverPath
             ? <button type="button" className={s.fileBtn} onClick={() => setCoverPath('')}>Remove</button>
             : <span className={s.fileHint}>No file chosen</span>
           }
         </div>
         <div className={s.inputHint}>
-          Steam supplies art automatically, but only for games that are on Steam. Set your
-          own here for anything it can't find: League of Legends, launcher exclusives,
-          emulated titles.
+          Steam supplies art for games on Steam. For anything else (League of Legends,
+          launcher exclusives, emulated titles) use Find cover to pick one from SteamGridDB,
+          or choose your own image.
         </div>
       </div>
 
@@ -391,6 +396,14 @@ export default function EditGameModal({ game, onClose, onSaved }) {
     {/* Sibling, not a child — same as AddGameModal. Modal portals to body, so
         a crop modal declared inside another modal's subtree still escapes it,
         but keeping them siblings matches the pattern used everywhere else. */}
+    {findCover && (
+      <CoverPickerModal
+        game={game}
+        onClose={() => setFindCover(false)}
+        onApplied={(g) => { if (g?.banner_local_path) setCoverPath(g.banner_local_path); setFindCover(false) }}
+      />
+    )}
+
     {cropSrc && (
       <ImageCropModal
         src={cropSrc}

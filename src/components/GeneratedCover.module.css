@@ -1,0 +1,43 @@
+.cover {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  container-type: size;   /* the monogram scales with the card (cqw units) */
+  background:
+    linear-gradient(160deg,
+      hsl(var(--h) 48% 30%) 0%,
+      hsl(calc(var(--h) + 40) 46% 16%) 55%,
+      hsl(calc(var(--h) + 70) 40% 9%) 100%);
+}
+.glow {
+  position: absolute;
+  inset: -20%;
+  background: radial-gradient(circle at 30% 20%, color-mix(in srgb, var(--a) 35%, transparent), transparent 55%);
+}
+/* Diagonal sheen lines for texture */
+.lines {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.035) 0 2px, transparent 2px 14px);
+}
+.icon {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  color: rgba(255, 255, 255, 0.55);
+}
+.mono {
+  position: absolute;
+  top: 38%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: clamp(22px, 32cqw, 84px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: rgba(255, 255, 255, 0.9);
+  text-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  line-height: 1;
+}
+.compact .mono { font-size: 18px; top: 50%; }
+.compact .icon { display: none; }

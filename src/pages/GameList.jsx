@@ -15,6 +15,7 @@ import PlanMonthModal from '../components/modals/PlanMonthModal'
 import SearchableSelect from '../components/ui/SearchableSelect'
 import CardContextMenu from '../components/ui/CardContextMenu'
 import EmptyState from '../components/ui/EmptyState'
+import GeneratedCover from '../components/GeneratedCover'
 import InfoModal from '../components/ui/InfoModal'
 import { CardSkeletonGrid } from '../components/ui/Skeleton'
 import s from './GameList.module.css'
@@ -75,13 +76,8 @@ function GridCard({ item, onClick, selectionMode, selected, onToggle, onToggleFa
       onContextMenu={selectionMode ? undefined : (e) => { e.preventDefault(); onContextMenu?.(e, item) }}
     >
       <div className={s.cardBanner} style={{ background: bg }}>
-        {src
-          ? <>
-              <img src={src} alt="" aria-hidden="true" className={s.cardBannerBlur} loading="lazy" decoding="async" onError={bannerOnError} />
-              <img src={src} alt="" className={s.cardBannerImg} loading="lazy" decoding="async" onError={bannerOnError} />
-            </>
-          : <IconDeviceGamepad2 size={28} stroke={1.1} style={{ color: 'rgba(255,255,255,0.12)' }} />
-        }
+        <GeneratedCover name={item.name} />
+        {src && <img src={src} alt="" className={s.cardBannerImg} loading="lazy" decoding="async" onError={bannerOnError} />}
         {selectionMode && (
           <div className={`${s.cardCheckbox} ${selected ? s.cardCheckboxOn : ''}`}>
             {selected && <IconCheck size={12} stroke={3} />}
