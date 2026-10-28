@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('kozo', {
       update: (id, data) => ipcRenderer.invoke('games:update', id, data),
       delete: (id) => ipcRenderer.invoke('games:delete', id),
       reorder: (orderedIds) => ipcRenderer.invoke('games:reorder', orderedIds),
+      archive: (ids) => ipcRenderer.invoke('games:archive', ids),
+      unarchive: (ids) => ipcRenderer.invoke('games:unarchive', ids),
       launch: (id) => ipcRenderer.invoke('games:launch', id),
     },
     sessions: {

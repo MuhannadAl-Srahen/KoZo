@@ -24,7 +24,7 @@ function getGame(id) {
 
 // SQLite has no boolean type and better-sqlite3 refuses to bind one, so every
 // flag column is normalised to 0/1 before it reaches a statement.
-const FLAG_COLUMNS = ['is_installed', 'is_cracked', 'is_favorite', 'is_hidden', 'run_as_admin']
+const FLAG_COLUMNS = ['is_installed', 'is_cracked', 'is_favorite', 'is_hidden', 'run_as_admin', 'is_archived']
 function flag(value, fallback = 0) {
   if (value === undefined || value === null) return fallback
   return (value === 0 || value === false || value === '0') ? 0 : 1
@@ -48,7 +48,7 @@ function addGame(data) {
 }
 
 function updateGame(id, data) {
-  const allowed = ['name', 'exe_name', 'install_path', 'banner_url', 'banner_local_path', 'source', 'steam_app_id', 'is_installed', 'is_cracked', 'is_favorite', 'is_hidden', 'completion_status', 'completion_status_at', 'manual_appid', 'crack_dir', 'total_playtime_seconds', 'first_played_at', 'last_played_at', 'genres', 'display_order', 'notes', 'run_as_admin']
+  const allowed = ['name', 'exe_name', 'install_path', 'banner_url', 'banner_local_path', 'source', 'steam_app_id', 'is_installed', 'is_cracked', 'is_favorite', 'is_hidden', 'completion_status', 'completion_status_at', 'manual_appid', 'crack_dir', 'total_playtime_seconds', 'first_played_at', 'last_played_at', 'genres', 'display_order', 'notes', 'run_as_admin', 'is_archived']
   const keys = Object.keys(data).filter(k => allowed.includes(k))
   const sets = keys.map(k => `${k} = @${k}`).join(', ')
 

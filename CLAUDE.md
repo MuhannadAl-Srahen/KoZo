@@ -41,7 +41,7 @@ src/                 renderer (React)
 
 **Database:** `%APPDATA%\KoZo\kozo.db`, WAL, `foreign_keys=ON`. Logs go to `%APPDATA%\KoZo\logs`.
 - Tables: games, sessions, achievements, achievement_unlocks, game_list, custom_lists, custom_list_games, settings (key/value), scan_folders, categories (legacy).
-- Migrations have no version number. `runMigrations()` runs `ALTER TABLE … ADD COLUMN` statements in try/catch, plus one-time steps guarded by flags stored in settings. **New column → add it to `schema.sql` AND as an ALTER in `runMigrations()`.**
+- Migrations have no version number. `runMigrations()` runs `ALTER TABLE … ADD COLUMN` statements in try/catch, plus one-time steps guarded by flags stored in settings. **New column → add it as an `ALTER TABLE … ADD COLUMN` in `runMigrations()`** (`schema.sql` holds only the original columns).
 - better-sqlite3 refuses JS booleans, so flags must be 0/1 (`flag()` in `queries/games.js`). Named params (`@x`) throw if the key is missing.
 
 **Services (`electron/services/`)**
@@ -98,6 +98,7 @@ src/                 renderer (React)
 **Styling:** CSS Modules next to each component. Layout composes from `styles/page.module.css`, controls from `styles/controls.module.css`, surfaces from `styles/surface.module.css`. All tokens live in `styles/variables.css` (`--a` accent, `--status-*`, `--rarity-*`, `--sp-*`, `--r-*`, `--fs-*`, `--z-*`). For accent-derived colours use `color-mix(in srgb, var(--a) N%, transparent)`; never append hex alpha to a `var()`. No UI framework; icons come from `@tabler/icons-react`.
 
 ## Gotchas
+- Games are never deleted from the UI: "Remove from library" sets `games.is_archived = 1` (`games:archive`/`games:unarchive`), so sessions, achievements and XP survive. Library shows finished/dropped, hidden and archived games in collapsible shelves. Launching an archived game un-archives it.
 - The overlay is a separate BrowserWindow running the same bundle (`OverlayApp.jsx`). It queues messages until it calls `overlay:ready`.
 - Game List sort is `is_favorite DESC`, then `display_order`, then the default order. Drag-reorder rewrites `display_order` for the whole filtered list.
 - `games:add` only downloads banner art and genres when there's a `steam_app_id`.

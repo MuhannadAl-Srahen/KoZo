@@ -133,6 +133,17 @@ handle('shell:openExternal', (url) => {
 })
 handle('games:delete', (id) => { gamesQ.deleteGame(id); bk(); broadcast('game:updated', id); return true })
 
+// Archive instead of delete: the game leaves the Library grid but its sessions,
+// achievements and XP stay. Restoring is just flipping the flag back.
+function setArchived(ids, value) {
+  const list = (Array.isArray(ids) ? ids : [ids]).map(Number).filter(Number.isFinite)
+  for (const id of list) { gamesQ.updateGame(id, { is_archived: value }); broadcast('game:updated', id) }
+  bk()
+  return list.length
+}
+handle('games:archive',   (ids) => setArchived(ids, 1))
+handle('games:unarchive', (ids) => setArchived(ids, 0))
+
 // Persist a full drag-and-drop ordering: display_order = index in the given array.
 handle('games:reorder', (orderedIds) => {
   if (!Array.isArray(orderedIds) || !orderedIds.length) return false

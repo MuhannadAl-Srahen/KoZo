@@ -611,6 +611,10 @@ async function tick() {
         } catch {}
         // Auto-mark 'playing' (only from no-status/on-hold — never un-finishes).
         try { require('./statusSync').onSessionStarted(game.id) } catch {}
+        // Playing an archived game brings it back to the Library.
+        if (game.is_archived === 1) {
+          try { gamesQ.updateGame(game.id, { is_archived: 0 }); sendToRenderer('game:updated', game.id) } catch {}
+        }
         emitter.emit('change')
 
         // Sync achievements right away so anything unlocked before/at launch shows

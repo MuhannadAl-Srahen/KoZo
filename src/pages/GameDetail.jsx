@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   IconChevronLeft, IconTrophy, IconLock, IconCheck, IconHistory,
-  IconDotsVertical, IconTrash, IconRefresh, IconEdit, IconPlayerPlayFilled,
+  IconDotsVertical, IconArchive, IconArrowBackUp, IconRefresh, IconEdit, IconPlayerPlayFilled,
   IconStethoscope, IconFolderOpen, IconDeviceFloppy, IconDownload,
   IconCircleCheck, IconCircleOff, IconEye, IconEyeOff, IconChevronDown,
   IconChevronRight, IconAlertTriangle, IconDeviceGamepad2,
@@ -308,11 +308,18 @@ export default function GameDetail() {
     setHeroStage(st => (st === 0 && heroCdnUrl && heroPrimary !== heroCdnUrl) ? 1 : 2)
   }
 
+  // Removing archives the game: it leaves the Library, history is kept.
   async function handleDelete() {
     if (!confirmDelete) { setConfirmDelete(true); return }
     setDeleting(true)
-    await window.kozo?.api?.games?.delete(Number(id))
+    await window.kozo?.api?.games?.archive([Number(id)])
     navigate('/')
+  }
+
+  async function handleRestore() {
+    setMenuOpen(false)
+    await window.kozo?.api?.games?.unarchive([Number(id)])
+    await load()
   }
 
   // Automatically find this game on Steam by name and import its achievement list
@@ -855,18 +862,23 @@ export default function GameDetail() {
                   {game.is_hidden ? 'Unhide from library' : 'Hide from library'}
                 </button>
 
-                {!confirmDelete ? (
+                {game.is_archived ? (
+                  <button className={s.menuItem} onClick={handleRestore}>
+                    <IconArrowBackUp size={14} stroke={1.6} />
+                    Restore to Library
+                  </button>
+                ) : !confirmDelete ? (
                   <button
-                    className={`${s.menuItem} ${s.menuItemDanger}`}
+                    className={s.menuItem}
                     onClick={() => setConfirmDelete(true)}
                   >
-                    <IconTrash size={14} stroke={1.6} />
+                    <IconArchive size={14} stroke={1.6} />
                     Remove from Library
                   </button>
                 ) : (
                   <div className={s.menuConfirm}>
                     <div className={s.menuConfirmText}>
-                      Remove "{game.name}"? All sessions and achievements will be deleted.
+                      Remove "{game.name}" from the Library? Playtime, sessions and achievements are kept — restore it any time from Archived.
                     </div>
                     <div className={s.menuConfirmBtns}>
                       <button className={s.menuCancelBtn} onClick={() => setConfirmDelete(false)}>Cancel</button>
@@ -875,7 +887,7 @@ export default function GameDetail() {
                         onClick={handleDelete}
                         aria-busy={deleting || undefined}
                       >
-                        {deleting ? 'Removing…' : 'Remove'}
+                        {deleting ? 'Archiving…' : 'Remove'}
                       </button>
                     </div>
                   </div>

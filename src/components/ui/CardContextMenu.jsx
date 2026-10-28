@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { IconStar, IconEye, IconEyeOff, IconCircleOff, IconPencil, IconTrash, IconBrandSteam } from '@tabler/icons-react'
+import { IconStar, IconEye, IconEyeOff, IconCircleOff, IconPencil, IconTrash, IconBrandSteam, IconArchive, IconArrowBackUp } from '@tabler/icons-react'
 import { STATUS_META } from '../GameCard'
 import s from './CardContextMenu.module.css'
 
@@ -21,6 +21,10 @@ export default function CardContextMenu({
   onDelete,                // optional — danger item with two-click confirm
   deleteLabel = 'Remove',
   deleteHint = '',
+  deleteConfirmLabel = 'Confirm remove',
+  deleteIsArchive = false,   // archive icon + non-destructive wording
+  onRestore,               // optional — "Restore to library" (archived games)
+  extraItems = [],         // optional — [{ label, Icon, onClick }] plain actions
   statuses = STATUS_META,
   statusField = 'completion_status',
   clearable = true,        // whether clicking the active status clears it
@@ -122,19 +126,33 @@ export default function CardContextMenu({
           </>
         )}
 
+        {extraItems.map(({ label, Icon, onClick }) => (
+          <button key={label} className={s.item} onClick={() => { onClick(game); onClose() }}>
+            {Icon && <Icon size={13} />}
+            {label}
+          </button>
+        ))}
+
+        {onRestore && (
+          <button className={s.item} onClick={() => { onRestore(game); onClose() }}>
+            <IconArrowBackUp size={13} />
+            Restore to library
+          </button>
+        )}
+
         {onDelete && (
           <>
             <div className={s.divider} />
             <button
-              className={`${s.item} ${s.itemDanger}`}
+              className={`${s.item} ${deleteIsArchive ? '' : s.itemDanger}`}
               onClick={() => {
                 if (!confirmDel) { setConfirmDel(true); return }
                 onDelete(game)
                 onClose()
               }}
             >
-              <IconTrash size={13} />
-              {confirmDel ? 'Confirm remove' : deleteLabel}
+              {deleteIsArchive ? <IconArchive size={13} /> : <IconTrash size={13} />}
+              {confirmDel ? deleteConfirmLabel : deleteLabel}
             </button>
             {confirmDel && deleteHint && <div className={s.hint}>{deleteHint}</div>}
           </>

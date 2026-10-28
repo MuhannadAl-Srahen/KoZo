@@ -121,6 +121,8 @@ function runMigrations() {
     // `_imgBust`, which nothing anywhere ever assigned).
     try { db.exec('ALTER TABLE games ADD COLUMN banner_rev INTEGER DEFAULT 0') } catch (_) {}
     try { db.exec('ALTER TABLE game_list ADD COLUMN banner_rev INTEGER DEFAULT 0') } catch (_) {}
+    // Archived = removed from the Library grid with all history kept (replaces delete).
+    try { db.exec('ALTER TABLE games ADD COLUMN is_archived INTEGER DEFAULT 0') } catch (_) {}
 
     relaxUnlockedAtNotNull()
     migrateCategoriesToCustomLists()
