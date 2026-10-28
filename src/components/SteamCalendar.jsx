@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   IconChevronLeft, IconChevronRight, IconBrandSteam, IconBookmark, IconBookmarkFilled, IconCheck,
   IconX, IconCalendarMonth, IconLayoutGrid, IconLoader2, IconRefresh, IconClock,
+  IconCalendarEvent, IconFlame, IconCalendarWeek, IconHourglass, IconSearch,
 } from '@tabler/icons-react'
 import Modal, { modalStyles as ms } from './ui/Modal'
 import EmptyState from './ui/EmptyState'
@@ -13,8 +14,10 @@ import s from './SteamCalendar.module.css'
 
 // Steam-style release calendar: popular games coming soon plus the most
 // wishlisted upcoming games (main process: steamApi.getComingSoon), with real
-// portrait covers from steamApi.getAppAssets. Two layouts the user switches
-// between — Days (a poster wall per release day) and Month (a big grid).
+// portrait covers from steamApi.getAppAssets. Five layouts, each shaping the
+// whole tab: Strip (pick a day from a TV-guide row), Featured (most wishlisted
+// carousel + list), Week (a row per day), Days (poster wall per day) and Month
+// (big grid). Games with no day or month announced live in their own TBA view.
 // Track adds a game to the Game List as "upcoming", which drives release
 // notifications and the "My upcoming" tab.
 
@@ -22,7 +25,14 @@ const FEEDS = ['soon', 'wishlist']
 const START_PAGES = { soon: 2, wishlist: 3 }
 const MAX_PAGES = 10
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-const LATER_PREVIEW = 24
+const VIEWS = [
+  { key: 'strip',    label: 'Strip',    Icon: IconCalendarEvent },
+  { key: 'featured', label: 'Featured', Icon: IconFlame },
+  { key: 'week',     label: 'Week',     Icon: IconCalendarWeek },
+  { key: 'days',     label: 'Days',     Icon: IconLayoutGrid },
+  { key: 'month',    label: 'Month',    Icon: IconCalendarMonth },
+]
+const VIEW_KEYS = new Set([...VIEWS.map(v => v.key), 'tba'])
 const DAY_MS = 86400000
 
 // Survives tab switches: the feeds are cached in main for 6h anyway.
@@ -152,6 +162,270 @@ function PosterCard({ g, tracked, info, onOpen, onTrack, onUntrack, busy, compac
   )
 }
 
+// ── Wide store card (Strip and Week views) ──────────────────────────────────
+function WideCard({ g, tracked, info, onOpen, onTrack, onUntrack, busy }) {
+  return (
+    <div className={`${s.wide} ${tracked ? s.posterTracked : ''}`}>
+      <button className={s.wideHit} onClick={() => onOpen(g)} title={g.name}>
+        <Cover g={g} wide className={s.wideArt} />
+        <span className={s.wideShade} />
+        <span className={s.posterCountdown}>{countdownLabel(g.rel)}</span>
+        {(g.prepurchase || g.price) && (
+          <span className={s.posterPrice}>{g.prepurchase ? 'Pre-purchase' : g.price}</span>
+        )}
+        {tracked && <span className={s.posterMark}><IconBookmarkFilled size={12} /></span>}
+      </button>
+      <div className={s.wideInfo}>
+        <div className={s.wideName} title={g.name}>{g.name}</div>
+        <div className={s.wideMeta}>{g.release || 'To be announced'}</div>
+        <div className={s.posterActions}>
+          <TrackControl g={g} info={info} busy={busy} onTrack={onTrack} onUntrack={onUntrack} />
+          <button className={s.iconBtn} title="Steam page"
+            onClick={() => window.kozo?.api?.shell?.openExternal?.(`https://store.steampowered.com/app/${g.appid}`)}>
+            <IconBrandSteam size={13} />
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Strip view: a TV-guide row of days, then the picked day's releases ──────
+function StripView({ buckets, todayKey, wide }) {
+  const stripRef = useRef(null)
+  // Every day from today to the last loaded release (max ~4 months), plus a
+  // "Sometime in <month>" chip at the end of each month that has vague dates.
+  const chips = useMemo(() => {
+    const keys = [...buckets.byDay.keys()].filter(k => k >= todayKey).sort()
+    const last = keys.length ? keys[keys.length - 1] : todayKey
+    const out = []
+    const start = new Date(`${todayKey}T00:00:00`)
+    for (let i = 0; i < 125; i++) {
+      const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i)
+      const k = localDayKey(d)
+      if (k > last) break
+      out.push({ key: k, date: d, count: (buckets.byDay.get(k) || []).length })
+      const tomorrow = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)
+      if (tomorrow.getMonth() !== d.getMonth() || localDayKey(tomorrow) > last) {
+        const mk = monthKey(d)
+        const vague = buckets.byMonth.get(mk) || []
+        if (vague.length) out.push({ key: `m:${mk}`, month: mk, count: vague.length })
+      }
+    }
+    return out
+  }, [buckets, todayKey])
+  const firstWithGames = chips.find(c => c.count > 0)?.key || todayKey
+  const [picked, setPicked] = useState(null)
+  const sel = picked && chips.some(c => c.key === picked) ? picked : firstWithGames
+  useEffect(() => {
+    stripRef.current?.querySelector('[data-sel="1"]')?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' })
+  }, [sel])
+  const scroll = (d) => stripRef.current?.scrollBy({ left: d * stripRef.current.clientWidth * 0.7, behavior: 'smooth' })
+
+  const isMonth = sel.startsWith('m:')
+  const list = isMonth ? (buckets.byMonth.get(sel.slice(2)) || []) : (buckets.byDay.get(sel) || [])
+  const h = isMonth ? { main: `Sometime in ${formatMonthKey(sel.slice(2), 'long')}`, sub: 'Exact day not announced' } : dayHeading(sel)
+
+  return (
+    <>
+      <div className={s.stripWrap}>
+        <button className={s.stripArrow} onClick={() => scroll(-1)} aria-label="Earlier days"><IconChevronLeft size={16} /></button>
+        <div className={s.strip} ref={stripRef}>
+          {chips.map(c => c.month ? (
+            <button key={c.key} data-sel={sel === c.key ? '1' : undefined}
+              className={`${s.chip} ${s.chipMonth} ${sel === c.key ? s.chipSel : ''}`} onClick={() => setPicked(c.key)}>
+              <span className={s.chipWeekday}>Sometime in</span>
+              <span className={s.chipDay}>{new Date(`${c.month}-01T00:00:00`).toLocaleDateString(undefined, { month: 'short' })}</span>
+              <span className={s.chipCount}>{c.count}</span>
+            </button>
+          ) : (
+            <button key={c.key} data-sel={sel === c.key ? '1' : undefined}
+              className={`${s.chip} ${c.key === todayKey ? s.chipToday : ''} ${sel === c.key ? s.chipSel : ''} ${c.count ? '' : s.chipEmpty}`}
+              onClick={() => setPicked(c.key)} disabled={!c.count}>
+              <span className={s.chipWeekday}>{c.key === todayKey ? 'Today' : c.date.toLocaleDateString(undefined, { weekday: 'short' })}</span>
+              <span className={s.chipDay}>{c.date.getDate()}</span>
+              <span className={s.chipCount}>{c.count || ''}</span>
+              {c.date.getDate() === 1 && <span className={s.chipMonthTag}>{c.date.toLocaleDateString(undefined, { month: 'short' })}</span>}
+            </button>
+          ))}
+        </div>
+        <button className={s.stripArrow} onClick={() => scroll(1)} aria-label="Later days"><IconChevronRight size={16} /></button>
+      </div>
+
+      <div className={s.dayHead}>
+        <span className={s.dayHeadMain}>{h.main}</span>
+        <span className={s.dayHeadSub}>{h.sub}</span>
+        <span className={s.dayHeadCount}>{list.length} release{list.length !== 1 ? 's' : ''}</span>
+      </div>
+      {list.length
+        ? <div className={s.wideGrid}>{list.map(g => wide(g))}</div>
+        : <div className={s.muted}>No releases this day among the loaded games.</div>}
+    </>
+  )
+}
+
+// ── Featured view: a hero carousel of the most wishlisted, then a list ──────
+function FeaturedView({ games, buckets, todayKey, trackedAppIds, onOpen, renderTrack }) {
+  const featured = useMemo(() => games
+    .filter(g => g.wishRank != null && !(g.rel?.ts != null && g.rel.precision === 'day' && localDayKey(new Date(g.rel.ts)) < todayKey))
+    .sort((a, b) => a.wishRank - b.wishRank)
+    .slice(0, 8), [games, todayKey])
+  const [i, setI] = useState(0)
+  const [hover, setHover] = useState(false)
+  useEffect(() => {
+    if (hover || featured.length < 2) return
+    const t = setInterval(() => setI(n => (n + 1) % featured.length), 6000)
+    return () => clearInterval(t)
+  }, [hover, featured.length])
+  const cur = featured[Math.min(i, featured.length - 1)]
+
+  const horizon = localDayKey(new Date(Date.now() + 60 * DAY_MS))
+  const days = [...buckets.byDay.entries()].filter(([k]) => k >= todayKey && k <= horizon).sort(([a], [b]) => a.localeCompare(b))
+
+  return (
+    <>
+      {cur && (
+        <div className={s.hero} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+          <button className={s.heroHit} onClick={() => onOpen(cur)}>
+            <Cover key={cur.appid} g={cur} wide className={s.heroArt} />
+            <span className={s.heroShade} />
+            <span className={s.heroText}>
+              <span className={s.heroKicker}><IconFlame size={13} /> Most wishlisted #{Math.min(i, featured.length - 1) + 1}</span>
+              <span className={s.heroName}>{cur.name}</span>
+              <span className={s.heroMeta}>{cur.release || 'To be announced'}{cur.price ? `  ·  ${cur.prepurchase ? 'Pre-purchase' : cur.price}` : ''}</span>
+            </span>
+          </button>
+          <div className={s.heroActions}>{renderTrack(cur, true)}</div>
+          {featured.length > 1 && (
+            <>
+              <button className={`${s.heroArrow} ${s.heroArrowLeft}`} onClick={() => setI(n => (n - 1 + featured.length) % featured.length)} aria-label="Previous"><IconChevronLeft size={18} /></button>
+              <button className={`${s.heroArrow} ${s.heroArrowRight}`} onClick={() => setI(n => (n + 1) % featured.length)} aria-label="Next"><IconChevronRight size={18} /></button>
+              <div className={s.heroDots}>
+                {featured.map((g, k) => (
+                  <button key={g.appid} className={`${s.heroDot} ${k === i ? s.heroDotOn : ''}`} onClick={() => setI(k)} aria-label={g.name} />
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {days.map(([k, list]) => {
+        const h = dayHeading(k)
+        return (
+          <section key={k} className={s.daySection}>
+            <div className={`${s.dayHead} ${k === todayKey ? s.dayHeadToday : ''}`}>
+              <span className={s.dayHeadMain}>{h.main}</span>
+              <span className={s.dayHeadSub}>{h.sub}</span>
+              <span className={s.dayHeadCount}>{list.length}</span>
+            </div>
+            <div className={s.rowList}>
+              {list.map(g => (
+                <div key={g.appid} className={`${s.row} ${trackedAppIds.has(g.appid) ? s.rowTracked : ''}`}>
+                  <button className={s.rowHit} onClick={() => onOpen(g)}>
+                    <span className={s.rowThumb}><Cover g={g} wide className={s.rowThumbImg} /></span>
+                    <span className={s.rowName}>{g.name}</span>
+                    <span className={s.rowPrice}>{g.prepurchase ? 'Pre-purchase' : (g.price || '')}</span>
+                  </button>
+                  {renderTrack(g, false)}
+                  <button className={s.iconBtn} title="Steam page"
+                    onClick={() => window.kozo?.api?.shell?.openExternal?.(`https://store.steampowered.com/app/${g.appid}`)}>
+                    <IconBrandSteam size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+        )
+      })}
+      {!days.length && <div className={s.muted}>No dated releases in the next 60 days among the loaded games.</div>}
+    </>
+  )
+}
+
+// ── Week view: one row per day, cards scroll sideways ───────────────────────
+function mondayOf(d) {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7))
+  return x
+}
+
+function WeekView({ buckets, todayKey, weekStart, wide }) {
+  const days = Array.from({ length: 7 }, (_, n) => new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + n))
+  return (
+    <div className={s.weekRows}>
+      {days.map(d => {
+        const k = localDayKey(d)
+        const list = buckets.byDay.get(k) || []
+        return (
+          <div key={k} className={`${s.weekRow} ${k === todayKey ? s.weekRowToday : ''} ${k < todayKey ? s.weekRowPast : ''}`}>
+            <div className={s.weekDay}>
+              <span className={s.weekDayName}>{k === todayKey ? 'Today' : d.toLocaleDateString(undefined, { weekday: 'short' })}</span>
+              <span className={s.weekDayNum}>{d.getDate()}</span>
+              <span className={s.weekDayMonth}>{d.toLocaleDateString(undefined, { month: 'short' })}</span>
+            </div>
+            {list.length
+              ? <div className={s.weekCards}>{list.map(g => wide(g))}</div>
+              : <div className={s.weekEmpty}>No releases</div>}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── TBA view: every game without a day or month, searchable ─────────────────
+const TBA_PAGE = 60
+function TbaView({ later, poster }) {
+  const [q, setQ] = useState('')
+  const [sort, setSort] = useState('wish')
+  const [limit, setLimit] = useState(TBA_PAGE)
+  const filtered = later
+    .filter(g => !q.trim() || g.name.toLowerCase().includes(q.trim().toLowerCase()))
+    .sort((a, b) => (sort === 'name'
+      ? a.name.localeCompare(b.name)
+      : (a.wishRank ?? 1e9) - (b.wishRank ?? 1e9) || a.name.localeCompare(b.name)))
+  const shown = filtered.slice(0, limit)
+  // Group by announced year ("2026", "2027"); the rest is "To be announced".
+  const groups = new Map()
+  for (const g of shown) {
+    const y = g.rel?.ts != null ? String(new Date(g.rel.ts).getFullYear()) : 'To be announced'
+    if (!groups.has(y)) groups.set(y, [])
+    groups.get(y).push(g)
+  }
+  const order = [...groups.keys()].sort((a, b) => (a === 'To be announced') - (b === 'To be announced') || a.localeCompare(b))
+  return (
+    <>
+      <div className={s.nav}>
+        <div className={`${s.tbaSearch} hasRing`}>
+          <IconSearch size={14} />
+          <input value={q} onChange={e => { setQ(e.target.value); setLimit(TBA_PAGE) }} placeholder="Search undated games" aria-label="Search undated games" />
+        </div>
+        <div className={s.viewToggle}>
+          <button className={`${s.viewBtn} ${sort === 'wish' ? s.viewBtnActive : ''}`} onClick={() => setSort('wish')}>Most wishlisted</button>
+          <button className={`${s.viewBtn} ${sort === 'name' ? s.viewBtnActive : ''}`} onClick={() => setSort('name')}>A to Z</button>
+        </div>
+        <span className={s.muted}>{filtered.length} game{filtered.length !== 1 ? 's' : ''} without a release date</span>
+      </div>
+      {order.map(y => (
+        <section key={y} className={s.daySection}>
+          <div className={s.dayHead}>
+            <span className={s.dayHeadMain}>{y}</span>
+            <span className={s.dayHeadCount}>{groups.get(y).length}</span>
+          </div>
+          <div className={s.posterGrid}>{groups.get(y).map(g => poster(g))}</div>
+        </section>
+      ))}
+      {filtered.length > limit && (
+        <button className={s.textBtn} style={{ alignSelf: 'center' }} onClick={() => setLimit(l => l + TBA_PAGE)}>
+          Show more ({filtered.length - limit} left)
+        </button>
+      )}
+      {!filtered.length && <div className={s.muted}>Nothing matches.</div>}
+    </>
+  )
+}
+
 export default function SteamCalendar({ trackedAppIds, onTrack, onUntrack }) {
   const [games, setGames]     = useState(() => calendarCache?.games || [])
   const [art, setArt]         = useState(() => calendarCache?.art || {})
@@ -162,30 +436,39 @@ export default function SteamCalendar({ trackedAppIds, onTrack, onUntrack }) {
   const [error, setError]     = useState(null)
   const [month, setMonth]     = useState(() => monthStart(new Date()))
   const [view, setView]       = useState(() => {
-    try { return localStorage.getItem('kozo:calendar:view') === 'month' ? 'month' : 'days' } catch { return 'days' }
+    try { const v = localStorage.getItem('kozo:calendar:view'); return VIEW_KEYS.has(v) ? v : 'strip' } catch { return 'strip' }
   })
-  const zoomStyle = useCardZoom('calendar', view === 'days' ? 'grid' : 'month', { grid: 150 })   // Ctrl + mouse wheel poster size
+  const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()))
+  // Ctrl + mouse wheel card size, per layout (Month and Featured have fixed layouts).
+  const zoomStyle = useCardZoom('calendar', view, { strip: 300, week: 300, days: 150, tba: 150 })
   const [dayOpen, setDayOpen] = useState(null)    // { label, games }
   const [detail, setDetail]   = useState(null)    // game
   const [busyId, setBusyId]   = useState(null)
-  const [showAllLater, setShowAllLater] = useState(false)
 
   async function loadPages(target) {
     setLoading(true)
     setError(null)
-    const jobs = []
+    const jobs = [], meta = []
     for (const feed of FEEDS) {
       for (let p = pages[feed]; p < Math.min(target[feed], MAX_PAGES); p++) {
         jobs.push(window.kozo?.api?.steam?.comingSoon?.(feed, p))
+        meta.push({ feed, p })
       }
     }
     const results = await Promise.all(jobs)
     const failed = results.filter(r => !r?.ok)
-    const fresh = results.filter(r => r?.ok).flatMap(r => r.data?.items || [])
+    // wishRank = place in Steam's most-wishlisted feed (Featured view, TBA sort).
+    const fresh = results.flatMap((r, j) => (r?.ok ? (r.data?.items || []).map((g, n) => (
+      meta[j].feed === 'wishlist' ? { ...g, wishRank: meta[j].p * 50 + n } : g
+    )) : []))
     const nextPages = { soon: Math.min(target.soon, MAX_PAGES), wishlist: Math.min(target.wishlist, MAX_PAGES) }
 
     const byId = new Map(games.map(g => [g.appid, g]))
-    for (const g of fresh) if (!byId.has(g.appid)) byId.set(g.appid, g)
+    for (const g of fresh) {
+      const had = byId.get(g.appid)
+      if (!had) byId.set(g.appid, g)
+      else if (g.wishRank != null && had.wishRank == null) byId.set(g.appid, { ...had, wishRank: g.wishRank })
+    }
     const nextGames = [...byId.values()]
 
     // Show the games right away; real portrait covers stream in afterwards
@@ -225,10 +508,11 @@ export default function SteamCalendar({ trackedAppIds, onTrack, onUntrack }) {
 
   // Bucket every game by its release: exact day, month-only, or later/TBA.
   const buckets = useMemo(() => {
-    const byDay = new Map(), byMonth = new Map(), later = []
+    const byDay = new Map(), byMonth = new Map(), later = [], all = []
     for (const g of games) {
       const rel = parseRelease(g.release)
       const entry = { ...g, rel, art: art[g.appid] || art[String(g.appid)] || (artTried.has(Number(g.appid)) ? {} : null) }
+      all.push(entry)
       if (rel.ts != null && rel.precision === 'day') {
         const k = localDayKey(new Date(rel.ts))
         if (!byDay.has(k)) byDay.set(k, [])
@@ -241,7 +525,7 @@ export default function SteamCalendar({ trackedAppIds, onTrack, onUntrack }) {
         later.push(entry)
       }
     }
-    return { byDay, byMonth, later }
+    return { byDay, byMonth, later, all }
   }, [games, art, artTried])
 
   const mKey = monthKey(month)
@@ -253,9 +537,11 @@ export default function SteamCalendar({ trackedAppIds, onTrack, onUntrack }) {
     .sort(([a], [b]) => a.localeCompare(b))
   const vagueThisMonth = buckets.byMonth.get(mKey) || []
   const canLoadMore = pages.soon < MAX_PAGES || pages.wishlist < MAX_PAGES
-  const laterShown = showAllLater ? buckets.later : buckets.later.slice(0, LATER_PREVIEW)
+  const thisWeek = mondayOf(new Date())
+  const weekEnd = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 6)
 
   function shiftMonth(delta) { setMonth(m => new Date(m.getFullYear(), m.getMonth() + delta, 1)) }
+  function shiftWeek(delta) { setWeekStart(w => new Date(w.getFullYear(), w.getMonth(), w.getDate() + delta * 7)) }
   function setViewMode(v) { setView(v); try { localStorage.setItem('kozo:calendar:view', v) } catch {} }
 
   async function track(g) {
@@ -274,14 +560,31 @@ export default function SteamCalendar({ trackedAppIds, onTrack, onUntrack }) {
     <PosterCard key={g.appid} g={g} tracked={trackedAppIds.has(g.appid)} info={trackedAppIds.get?.(g.appid) || null}
       onOpen={setDetail} onTrack={track} onUntrack={untrack} busy={busyId === g.appid} {...extra} />
   )
+  const wide = (g) => (
+    <WideCard key={g.appid} g={g} tracked={trackedAppIds.has(g.appid)} info={trackedAppIds.get?.(g.appid) || null}
+      onOpen={setDetail} onTrack={track} onUntrack={untrack} busy={busyId === g.appid} />
+  )
+  const renderTrack = (g, big) => (
+    <TrackControl g={g} info={trackedAppIds.get?.(g.appid) || null} busy={busyId === g.appid}
+      onTrack={() => track(g)} onUntrack={() => untrack(g)} big={big} />
+  )
 
   return (
     <div className={s.wrap} style={zoomStyle}>
+      {/* Top bar: the layout picker, the TBA shelf, and loading more games */}
       <div className={s.nav}>
-        <button className={s.navBtn} onClick={() => shiftMonth(-1)} aria-label="Previous month"><IconChevronLeft size={16} /></button>
-        <div className={s.monthLabel}>{formatMonthKey(mKey, 'long')}</div>
-        <button className={s.navBtn} onClick={() => shiftMonth(1)} aria-label="Next month"><IconChevronRight size={16} /></button>
-        {!isCurrentMonth && <button className={s.textBtn} onClick={() => setMonth(monthStart(new Date()))}>Today</button>}
+        <div className={s.viewToggle} role="tablist" aria-label="Calendar layout">
+          {VIEWS.map(v => (
+            <button key={v.key} role="tab" aria-selected={view === v.key}
+              className={`${s.viewBtn} ${view === v.key ? s.viewBtnActive : ''}`} onClick={() => setViewMode(v.key)}>
+              <v.Icon size={14} /> {v.label}
+            </button>
+          ))}
+        </div>
+        <button className={`${s.viewBtn} ${s.tbaBtn} ${view === 'tba' ? s.viewBtnActive : ''}`} onClick={() => setViewMode('tba')}
+          title="Games without a release date">
+          <IconHourglass size={14} /> TBA <span className={s.tbaCount}>{buckets.later.length}</span>
+        </button>
         <div className={s.spacer} />
         {loading && <IconLoader2 size={15} className="spin" />}
         {canLoadMore && !loading && (
@@ -289,22 +592,42 @@ export default function SteamCalendar({ trackedAppIds, onTrack, onUntrack }) {
             <IconRefresh size={13} /> Load more games
           </button>
         )}
-        <div className={s.viewToggle} role="tablist">
-          <button className={`${s.viewBtn} ${view === 'days' ? s.viewBtnActive : ''}`} onClick={() => setViewMode('days')}>
-            <IconLayoutGrid size={14} /> Days
-          </button>
-          <button className={`${s.viewBtn} ${view === 'month' ? s.viewBtnActive : ''}`} onClick={() => setViewMode('month')}>
-            <IconCalendarMonth size={14} /> Month
-          </button>
-        </div>
       </div>
+
+      {/* Second bar: navigation that belongs to the chosen layout */}
+      {(view === 'days' || view === 'month') && (
+        <div className={s.nav}>
+          <button className={s.navBtn} onClick={() => shiftMonth(-1)} aria-label="Previous month"><IconChevronLeft size={16} /></button>
+          <div className={s.monthLabel}>{formatMonthKey(mKey, 'long')}</div>
+          <button className={s.navBtn} onClick={() => shiftMonth(1)} aria-label="Next month"><IconChevronRight size={16} /></button>
+          {!isCurrentMonth && <button className={s.textBtn} onClick={() => setMonth(monthStart(new Date()))}>Today</button>}
+        </div>
+      )}
+      {view === 'week' && (
+        <div className={s.nav}>
+          <button className={s.navBtn} onClick={() => shiftWeek(-1)} aria-label="Previous week"><IconChevronLeft size={16} /></button>
+          <div className={s.monthLabel}>
+            {weekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} to {weekEnd.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+          </div>
+          <button className={s.navBtn} onClick={() => shiftWeek(1)} aria-label="Next week"><IconChevronRight size={16} /></button>
+          {weekStart.getTime() !== thisWeek.getTime() && <button className={s.textBtn} onClick={() => setWeekStart(thisWeek)}>This week</button>}
+        </div>
+      )}
 
       {error && !games.length && (
         <EmptyState Icon={IconBrandSteam} title="Steam calendar unavailable" desc={`${error} Check your connection and try again.`} />
       )}
-      {loading && !games.length && view === 'days' && <PanelSkeleton lines={6} />}
+      {loading && !games.length && <PanelSkeleton lines={6} />}
 
-      {view === 'days' ? (
+      {games.length > 0 && view === 'strip' && <StripView buckets={buckets} todayKey={todayKey} wide={wide} />}
+      {games.length > 0 && view === 'featured' && (
+        <FeaturedView games={buckets.all} buckets={buckets} todayKey={todayKey} trackedAppIds={trackedAppIds}
+          onOpen={setDetail} renderTrack={renderTrack} />
+      )}
+      {games.length > 0 && view === 'week' && <WeekView buckets={buckets} todayKey={todayKey} weekStart={weekStart} wide={wide} />}
+      {games.length > 0 && view === 'tba' && <TbaView later={buckets.later} poster={poster} />}
+
+      {view === 'days' && (
         <>
           {monthDays.map(([k, list]) => {
             const h = dayHeading(k)
@@ -323,7 +646,8 @@ export default function SteamCalendar({ trackedAppIds, onTrack, onUntrack }) {
             <div className={s.muted}>No dated releases in {formatMonthKey(mKey, 'long')} among the loaded games{canLoadMore ? '. Try Load more games.' : '.'}</div>
           )}
         </>
-      ) : (
+      )}
+      {view === 'month' && (
         <div className={s.gridScroll}>
           <div className={s.grid}>
             {WEEKDAYS.map(d => <div key={d} className={s.weekday}>{d}</div>)}
@@ -358,28 +682,13 @@ export default function SteamCalendar({ trackedAppIds, onTrack, onUntrack }) {
         </div>
       )}
 
-      {vagueThisMonth.length > 0 && (
+      {(view === 'days' || view === 'month') && vagueThisMonth.length > 0 && (
         <section className={s.daySection}>
           <div className={s.dayHead}>
             <span className={s.dayHeadMain}>Sometime in {formatMonthKey(mKey, 'long')}</span>
             <span className={s.dayHeadCount}>{vagueThisMonth.length}</span>
           </div>
           <div className={s.posterGrid}>{vagueThisMonth.map(g => poster(g))}</div>
-        </section>
-      )}
-
-      {buckets.later.length > 0 && (
-        <section className={s.daySection}>
-          <div className={s.dayHead}>
-            <span className={s.dayHeadMain}>Later / date not announced</span>
-            <span className={s.dayHeadCount}>{buckets.later.length}</span>
-          </div>
-          <div className={s.posterGrid}>{laterShown.map(g => poster(g))}</div>
-          {buckets.later.length > LATER_PREVIEW && (
-            <button className={s.textBtn} style={{ alignSelf: 'center' }} onClick={() => setShowAllLater(v => !v)}>
-              {showAllLater ? 'Show fewer' : `Show all ${buckets.later.length}`}
-            </button>
-          )}
         </section>
       )}
 
