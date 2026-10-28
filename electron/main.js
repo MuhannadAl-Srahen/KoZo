@@ -437,6 +437,14 @@ app.on('before-quit', () => {
   app.isQuitting = true
 })
 
+// `npm run dev` (scripts/dev-electron.js) asks for a clean quit when a file in
+// electron/ changes, then starts a fresh process, so main-process edits apply.
+if (!app.isPackaged && typeof process.send === 'function') {
+  process.on('message', (m) => {
+    if (m === 'kozo:dev-restart') { app.isQuitting = true; app.quit() }
+  })
+}
+
 app.on('activate', () => { getOrCreateMainWindow() })
 
 module.exports = { getMainWindow: () => mainWindow, getOrCreateMainWindow }
