@@ -7,6 +7,39 @@ import s from './MediaGallery.module.css'
 // strip of every screenshot with arrow buttons at its ends, and a full-screen
 // lightbox (click the big image, ←/→ to browse, Esc to close).
 // `items` = [{ thumb, full }]; the first item is shown first.
+
+// Shows the (already cached) thumbnail the instant the picture changes, then
+// fades the full-size image in once it has downloaded. Keyed by the image, so
+// switching never leaves the previous picture on screen while the next loads.
+function ProgressiveImg({ item, fit = 'cover', onClick, onError }) {
+  const [loaded, setLoaded] = useState(false)
+  const full = item.full || item.thumb
+  return (
+    <span className={`${s.prog} ${fit === 'contain' ? s.progContain : ''}`} onClick={onClick}>
+      {item.thumb && item.thumb !== full && !loaded && <img className={s.progThumb} src={item.thumb} alt="" />}
+      <img
+        className={`${s.progFull} ${loaded ? s.progFullIn : ''}`}
+        src={full}
+        alt=""
+        decoding="async"
+        onLoad={() => setLoaded(true)}
+        onError={onError}
+      />
+    </span>
+  )
+}
+
+// Warm the browser cache with the pictures either side of the current one.
+function usePreloadAround(items, index) {
+  useEffect(() => {
+    if (items.length < 2) return
+    for (const d of [1, -1, 2]) {
+      const m = items[(index + d + items.length) % items.length]
+      if (m?.full) { const img = new Image(); img.decoding = 'async'; img.src = m.full }
+    }
+  }, [items.length, index])   // items is rebuilt every render; its length + index are what matter
+}
+
 export default function MediaGallery({ items = [], height }) {
   const list = items.filter(m => m && (m.full || m.thumb))
   const [index, setIndex] = useState(0)
@@ -15,6 +48,7 @@ export default function MediaGallery({ items = [], height }) {
   const stripRef = useRef(null)
   const [edges, setEdges] = useState({ left: false, right: false })
   useEffect(() => { setIndex(0) }, [list.length && list[0].full])
+  usePreloadAround(list, index)
 
   // Which strip arrows are useful (is there more to either side?).
   function measure() {
@@ -54,11 +88,9 @@ export default function MediaGallery({ items = [], height }) {
           if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1) }
         }}
       >
-        <img
+        <ProgressiveImg
           key={cur.full || cur.thumb}
-          className={s.viewerImg}
-          src={cur.full || cur.thumb}
-          alt=""
+          item={cur}
           onClick={() => setZoom(true)}
           onError={() => markBroken(cur)}
         />
@@ -112,9 +144,12 @@ export function Lightbox({ items, index, onIndex, onClose }) {
     return () => window.removeEventListener('keydown', onKey, true)
   })
   const cur = items[index]
+  usePreloadAround(items, index)
   return createPortal(
     <div className={s.lightbox} onClick={onClose}>
-      <img className={s.lightboxImg} src={cur.full || cur.thumb} alt="" onClick={(e) => e.stopPropagation()} />
+      <div className={s.lbStage}>
+        <ProgressiveImg key={cur.full || cur.thumb} item={cur} fit="contain" onClick={(e) => e.stopPropagation()} />
+      </div>
       {items.length > 1 && (
         <>
           <button className={`${s.lbArrow} ${s.arrowLeft}`} onClick={(e) => { e.stopPropagation(); step(-1) }} aria-label="Previous"><IconChevronLeft size={26} /></button>
