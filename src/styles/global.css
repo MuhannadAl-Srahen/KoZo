@@ -69,6 +69,14 @@ input, textarea, select {
   outline: var(--focus-w) solid var(--focus-color);
   outline-offset: var(--focus-offset);
 }
+/* Text fields draw their ring on the inside edge. An outside ring got cut off
+   wherever the field sits against the edge of a scrolling panel. */
+.hasRing:focus-within,
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline-offset: calc(var(--focus-w) * -1);
+}
 .hasRing :focus-visible { outline: none; }
 
 /* Controller-navigation ring (see src/lib/gamepadNav.js). Declared last so it

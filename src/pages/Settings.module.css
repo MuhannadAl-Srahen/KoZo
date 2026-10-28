@@ -64,7 +64,7 @@
   min-width: 0;
   overflow-y: auto;
   /* Keep content off the scrollbar: it used to sit right on buttons and status lines. */
-  padding-right: var(--sp-16);
+  padding: var(--sp-4) var(--sp-16) var(--sp-4) var(--sp-4);
   scrollbar-gutter: stable;
   transform: translateZ(0);
 }
