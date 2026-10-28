@@ -212,9 +212,13 @@ export default function Tour({ onDone }) {
     </div>
   )
 
-  const spot = rect && {
-    left: rect.left - PAD, top: rect.top - PAD, width: rect.width + PAD * 2, height: rect.height + PAD * 2,
-  }
+  // Kept 4px inside the window so the outline and glow are never cut off when
+  // the target touches an edge (the stats bar sits right under the title bar).
+  const spot = rect && (() => {
+    const left = Math.max(4, rect.left - PAD), top = Math.max(4, rect.top - PAD)
+    const right = Math.min(window.innerWidth - 4, rect.right + PAD), bottom = Math.min(window.innerHeight - 4, rect.bottom + PAD)
+    return { left, top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) }
+  })()
   const cardPos = rect ? placeCard({ ...rect, right: rect.right + PAD, bottom: rect.bottom + PAD, top: rect.top - PAD, left: rect.left - PAD }, cardH) : null
 
   if (paused) return null
