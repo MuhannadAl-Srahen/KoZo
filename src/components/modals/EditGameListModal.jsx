@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react'
 import { IconEdit, IconTrash, IconStar, IconBrandSteam, IconCheck } from '@tabler/icons-react'
 import Modal, { modalStyles as ms } from '../ui/Modal'
 import { LIST_STATUSES, LIST_STATUS_ORDER } from '../../lib/cardModel'
+import MonthPicker from '../ui/MonthPicker'
+import { formatMonthKey } from '../../lib/utils'
 import s from './AddGameModal.module.css'
 
 const STATUS_OPTIONS = LIST_STATUS_ORDER.map(value => ({ value, label: LIST_STATUSES[value].label }))
@@ -14,6 +16,8 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
   const [deleting, setDeleting]     = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [errors, setErrors]         = useState({})
+  const [plannedMonth, setPlannedMonth] = useState(item.planned_month || null)   // play plan 'YYYY-MM'
+  const [pickingMonth, setPickingMonth] = useState(false)
   const [confirmingClose, setConfirmingClose] = useState(false)
 
   // Custom-list membership (Spotify-playlist style, many-to-many).
@@ -48,6 +52,7 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
     name !== item.name ||
     status !== item.status ||
     rating !== (item.rating != null ? String(item.rating) : '') ||
+    (plannedMonth || null) !== (item.planned_month || null) ||
     memberIds.size !== initialMemberIds.size ||
     [...memberIds].some(id => !initialMemberIds.has(id))
 
@@ -81,6 +86,7 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
       // so a rename or a list toggle would silently cost the milestone.
       ...(status !== item.status ? { status } : {}),
       rating: status === 'finished' && rating !== '' ? Number(rating) : null,
+      planned_month: plannedMonth || null,
     })
     if (!res?.ok) {
       setSaving(false)
@@ -191,6 +197,23 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
             </button>
           ))}
         </div>
+      </div>
+
+      <div className={s.field}>
+        <label className={s.label}>Play plan</label>
+        <div className={s.pills}>
+          <button className={`${s.pill} ${plannedMonth ? s.pillActive : ''}`} onClick={() => setPickingMonth(v => !v)}>
+            {plannedMonth ? formatMonthKey(plannedMonth, 'long') : 'Not planned'}
+          </button>
+          {plannedMonth && (
+            <button className={s.pill} onClick={() => { setPlannedMonth(null); setPickingMonth(false) }}>Clear</button>
+          )}
+        </div>
+        {pickingMonth && (
+          <div style={{ marginTop: 8 }}>
+            <MonthPicker value={plannedMonth} onChange={(k) => { setPlannedMonth(k); setPickingMonth(false) }} />
+          </div>
+        )}
       </div>
 
       {status === 'finished' && (
