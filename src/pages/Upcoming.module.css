@@ -135,6 +135,100 @@
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
+/* Out-now cards get a success edge so they stand out in their section. */
+.cardOut { border-color: var(--success-border-strong); }
+
+/* Big countdown block — top-left glass tile ("12 / days"). */
+.countdown {
+  position: absolute;
+  top: var(--sp-10);
+  left: var(--sp-10);
+  z-index: var(--z-card);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 58px;
+  padding: var(--sp-6) var(--sp-10);
+  border-radius: var(--r-card);
+  background: var(--scrim-chip);
+  border: 1px solid var(--ab);
+  backdrop-filter: blur(8px);
+  color: var(--a);
+  line-height: 1;
+}
+.countdown.badgeSoon { color: var(--warning); border-color: var(--warning-border-strong); }
+.countdown.badgeOut  { color: var(--success); border-color: var(--success-border-strong); }
+.countdown.badgeTba  { color: var(--text-muted); border-color: var(--border); }
+.countdownBig { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
+.countdownUnit {
+  margin-top: 3px;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.85;
+}
+
+/* Hover actions — top-right */
+.cardActions {
+  position: absolute;
+  top: var(--sp-10);
+  right: var(--sp-10);
+  z-index: var(--z-card);
+  display: flex;
+  gap: var(--sp-6);
+  opacity: 0;
+  transition: opacity var(--dur-base) var(--ease);
+}
+.card:hover .cardActions,
+.card:focus-visible .cardActions { opacity: 1; }
+.cardAction {
+  display: inline-flex;
+  padding: var(--sp-6);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--scrim-chip);
+  color: var(--on-art);
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+}
+.cardAction:hover { color: var(--a); border-color: var(--ab); }
+
+.cardMetaRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-6);
+  margin-top: var(--sp-4);
+}
+.cardDate {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  font-size: var(--fs-xs);
+  color: var(--on-art-dim);
+}
+.cardGenre {
+  padding: 1px var(--sp-6);
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--on-art);
+  font-size: var(--fs-2xs);
+}
+.cardProgress {
+  height: 3px;
+  margin-top: var(--sp-8);
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+}
+.cardProgress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--a);
+}
+
 /* ── Detail popup ────────────────────────────────────────────── */
 .detailHero {
   position: relative;

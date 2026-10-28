@@ -51,9 +51,12 @@ function countdown(rel) {
 // at library_hero (3840×1240) — every card decoded a wallpaper-sized bitmap,
 // and unreleased games usually 404 on it, so first paint burned a failed
 // request per card before the real art even started. That was the page's lag.
-function wideArtSources(item) {
+function wideArtSources(item, art) {
   const id = item.steam_app_id
   const srcs = []
+  // Real store art first (hashed paths — newer titles 404 on the classic ones).
+  if (art?.hero) srcs.push(art.hero)
+  if (art?.header) srcs.push(art.header)
   if (id) {
     srcs.push(`https://cdn.akamai.steamstatic.com/steam/apps/${id}/capsule_616x353.jpg`)
     srcs.push(`https://cdn.akamai.steamstatic.com/steam/apps/${id}/header.jpg`)
@@ -62,10 +65,10 @@ function wideArtSources(item) {
   return srcs
 }
 
-function WideArt({ item, className }) {
-  const cacheKey = item?.id ?? item?.steam_app_id ?? item?.name
+function WideArt({ item, art, className }) {
+  const cacheKey = `${item?.id ?? item?.steam_app_id ?? item?.name}:${art?.hero ? 'a' : ''}`
   const [idx, setIdx] = useState(() => wideArtIndexCache.get(cacheKey) ?? 0)
-  const srcs = wideArtSources(item)
+  const srcs = wideArtSources(item, art)
   useEffect(() => {
     setIdx(wideArtIndexCache.get(cacheKey) ?? 0)
   }, [cacheKey])
@@ -100,7 +103,7 @@ function badgeClassFor(rel) {
 }
 
 // ── Detail popup — richer store info, Steam link, quick status ───────────────
-function DetailModal({ item, rel, onClose, onStatus }) {
+function DetailModal({ item, rel, art, onClose, onStatus }) {
   const [details, setDetails] = useState(undefined)   // undefined = loading, null = unavailable
 
   useEffect(() => {
@@ -120,7 +123,7 @@ function DetailModal({ item, rel, onClose, onStatus }) {
   return (
     <Modal title={item.name} icon={<IconCalendar size={17} stroke={1.6} />} width={620} onClose={onClose}>
       <div className={s.detailHero}>
-        <WideArt item={item} className={s.detailArt} />
+        <WideArt item={item} art={art} className={s.detailArt} />
         <span className={s.detailGrad} />
         <span className={`${s.badge} ${s.detailBadge} ${badgeClassFor(rel)}`}>
           {countdown(rel)}
@@ -167,19 +170,78 @@ function DetailModal({ item, rel, onClose, onStatus }) {
 }
 
 // ── Card ──────────────────────────────────────────────────────────────────────
-function UpcomingCard({ item, rel, onOpen }) {
-  const genres = parseGenres(item)
-  const sub = item.release_date || (genres.length ? genres.slice(0, 2).join(' · ') : 'To be announced')
+// Big countdown block: "12 / days", "Out / now", "This / month", "TBA".
+function countdownParts(rel) {
+  if (!rel || rel.ts == null) return { big: 'TBA', unit: 'no date yet' }
+  const now = Date.now()
+  if (rel.until <= now) return { big: 'Out', unit: 'now' }
+  if (rel.vague && rel.ts <= now) return { big: 'This', unit: rel.precision === 'month' ? 'month' : 'year' }
+  if (rel.precision === 'year') return { big: rel.label, unit: 'expected' }
+  const days = Math.ceil((rel.ts - now) / 86400000)
+  if (days <= 1 && !rel.vague) return { big: '1', unit: 'day' }
+  if (days < 60) return { big: `${rel.vague ? '~' : ''}${days}`, unit: 'days' }
+  const months = Math.round(days / 30.4)
+  return { big: `~${months}`, unit: months === 1 ? 'month' : 'months' }
+}
+
+// How far along the wait is, from when it was added to the list to release.
+function waitProgress(item, rel) {
+  if (!rel || rel.ts == null || !item.added_at) return null
+  const start = new Date(item.added_at).getTime()
+  const end = rel.ts
+  if (!Number.isFinite(start) || end <= start) return null
+  return Math.min(1, Math.max(0, (Date.now() - start) / (end - start)))
+}
+
+function UpcomingCard({ item, rel, art, onOpen, onStatus }) {
+  const genres = parseGenres(item).slice(0, 3)
+  const cd = countdownParts(rel)
+  const progress = waitProgress(item, rel)
+  const out = rel?.until != null && rel.until <= Date.now()
+  const open = () => onOpen({ item, rel })
+  const stop = (fn) => (e) => { e.stopPropagation(); fn() }
   return (
-    <button className={s.card} data-gpnav="" onClick={() => onOpen({ item, rel })}>
-      <WideArt item={item} className={s.cardArt} />
+    <div
+      className={`${s.card} ${out ? s.cardOut : ''}`}
+      role="button"
+      tabIndex={0}
+      data-gpnav=""
+      onClick={open}
+      onKeyDown={(e) => { if (e.key === 'Enter') open() }}
+    >
+      <WideArt item={item} art={art} className={s.cardArt} />
       <span className={s.cardGrad} />
-      <span className={`${s.badge} ${badgeClassFor(rel)}`}>{countdown(rel)}</span>
+
+      <div className={`${s.countdown} ${badgeClassFor(rel)}`}>
+        <span className={s.countdownBig}>{cd.big}</span>
+        <span className={s.countdownUnit}>{cd.unit}</span>
+      </div>
+
+      <div className={s.cardActions}>
+        {item.steam_app_id && (
+          <button className={s.cardAction} title="Steam page"
+            onClick={stop(() => window.kozo?.api?.shell?.openExternal(`https://store.steampowered.com/app/${item.steam_app_id}`))}>
+            <IconBrandSteam size={14} stroke={1.8} />
+          </button>
+        )}
+        <button className={s.cardAction} title="Move to Want to play" onClick={stop(() => onStatus(item, 'want_to_play'))}>
+          <IconBookmark size={14} stroke={1.8} />
+        </button>
+      </div>
+
       <div className={s.cardBody}>
         <div className={s.cardName} title={item.name}>{item.name}</div>
-        <div className={s.cardSub} title={sub}>{sub}</div>
+        <div className={s.cardMetaRow}>
+          <span className={s.cardDate}><IconCalendar size={12} stroke={1.8} /> {item.release_date || 'To be announced'}</span>
+          {genres.map(g => <span key={g} className={s.cardGenre}>{g}</span>)}
+        </div>
+        {progress != null && (
+          <div className={s.cardProgress} title={`${Math.round(progress * 100)}% of the wait done`}>
+            <span style={{ width: `${progress * 100}%` }} />
+          </div>
+        )}
       </div>
-    </button>
+    </div>
   )
 }
 
@@ -189,6 +251,7 @@ export default function Upcoming() {
   const [tab, setTab] = useState(() => localStorage.getItem('kozo:upcoming:tab') || 'mine')
   // Steam appids already on the Game List (any status) — the calendar marks them tracked.
   const [trackedAppIds, setTrackedAppIds] = useState(() => new Set())
+  const [art, setArt] = useState({})   // steam appid → real store art (steam:appAssets)
 
   async function loadTracked() {
     const res = await window.kozo?.api?.gameList?.list?.({ limit: 100000, offset: 0 })
@@ -204,6 +267,17 @@ export default function Upcoming() {
     })
     if (res?.ok) { await Promise.all([load(), loadTracked()]) }
   }
+
+  // Real hero/header art for the cards (newer titles 404 on the classic paths).
+  useEffect(() => {
+    const ids = (items || []).map(i => i.steam_app_id).filter(id => id && !art[id])
+    if (!ids.length) return
+    let alive = true
+    window.kozo?.api?.steam?.appAssets?.(ids).then(res => {
+      if (alive && res?.ok) setArt(prev => ({ ...prev, ...res.data }))
+    })
+    return () => { alive = false }
+  }, [items])
 
   function switchTab(next) {
     setTab(next)
@@ -313,7 +387,7 @@ export default function Upcoming() {
               </div>
               <div className={s.grid}>
                 {sec.entries.map(({ item, rel }) => (
-                  <UpcomingCard key={item.id} item={item} rel={rel} onOpen={setDetail} />
+                  <UpcomingCard key={item.id} item={item} rel={rel} art={art[item.steam_app_id]} onOpen={setDetail} onStatus={setStatus} />
                 ))}
               </div>
             </section>
@@ -323,6 +397,7 @@ export default function Upcoming() {
         {detail && (
           <DetailModal
             item={detail.item}
+            art={art[detail.item.steam_app_id]}
             rel={detail.rel}
             onClose={() => setDetail(null)}
             onStatus={(status) => setStatus(detail.item, status)}

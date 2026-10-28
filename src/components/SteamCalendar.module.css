@@ -92,10 +92,10 @@
   background: var(--surface-2);
   border: 1px solid var(--neutral-border);
   overflow: hidden;
-  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
+/* Lift by shadow, never translateY (a transformed ancestor traps fixed children). */
 .poster:hover {
-  transform: translateY(-3px);
   border-color: var(--ab);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
 }
