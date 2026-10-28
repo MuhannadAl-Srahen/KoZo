@@ -184,7 +184,7 @@
 .modalScroll {
   max-height: 60vh;
   overflow-y: auto;
-  padding-right: var(--sp-4);
+  padding-right: var(--sp-10);
   transform: translateZ(0);
 }
 

@@ -52,7 +52,7 @@
   gap: var(--sp-10);
   max-height: 52vh;
   overflow-y: auto;
-  padding-right: var(--sp-4);
+  padding-right: var(--sp-10);
 }
 .cover {
   position: relative;
