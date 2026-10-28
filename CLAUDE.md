@@ -98,6 +98,7 @@ src/                 renderer (React)
 **Styling:** CSS Modules next to each component. Layout composes from `styles/page.module.css`, controls from `styles/controls.module.css`, surfaces from `styles/surface.module.css`. All tokens live in `styles/variables.css` (`--a` accent, `--status-*`, `--rarity-*`, `--sp-*`, `--r-*`, `--fs-*`, `--z-*`). For accent-derived colours use `color-mix(in srgb, var(--a) N%, transparent)`; never append hex alpha to a `var()`. No UI framework; icons come from `@tabler/icons-react`.
 
 ## Gotchas
+- Every library game has a Game List row: `gameListQ.ensureListRowForGame` runs from `addLibraryGame` (ipc.js, shared by `games:add` and `gameList:moveToLibrary`) and the Scan PC add path, plus a one-time startup backfill (setting `migrated_library_to_list`). Rows link by `game_id`, else Steam appid, else name, the same rules as `statusSync`.
 - Games are never deleted from the UI: "Remove from library" sets `games.is_archived = 1` (`games:archive`/`games:unarchive`), so sessions, achievements and XP survive. Library shows finished/dropped, hidden and archived games in collapsible shelves. Launching an archived game un-archives it.
 - The overlay is a separate BrowserWindow running the same bundle (`OverlayApp.jsx`). It queues messages until it calls `overlay:ready`.
 - Game List sort is `is_favorite DESC`, then `display_order`, then the default order. Drag-reorder rewrites `display_order` for the whole filtered list.

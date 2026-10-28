@@ -225,6 +225,19 @@ Close any program that may be using it and start KoZo again.`)
     return
   }
 
+  // One-time: put every existing library game on the Game List (new adds are
+  // synced as they happen — see addLibraryGame in ipc.js).
+  try {
+    const settingsQ = require('./db/queries/settings')
+    if (settingsQ.getSetting('migrated_library_to_list') !== '1') {
+      const n = require('./db/queries/gameList').syncLibraryToList()
+      settingsQ.setSetting('migrated_library_to_list', '1')
+      if (n) require('./logger').info(`Library → Game List: added ${n} game(s)`)
+    }
+  } catch (e) {
+    try { require('./logger').warn('Library → Game List sync failed', { message: e.message }) } catch {}
+  }
+
   require('./ipc')
 
   createWindow()

@@ -122,4 +122,50 @@ function reorderGameListPage(filters = {}, offset = 0, pageIds = []) {
   return true
 }
 
-module.exports = { reorderGameListPage, listGameListItems, getGameListItem, addGameListItem, updateGameListItem, deleteGameListItem, distinctGenres }
+// ── Library → Game List sync ─────────────────────────────────────────────────
+// Every library game also has a Game List row. Linkage follows statusSync:
+// game_id, else Steam appid, else case-insensitive name.
+const SHARED = new Set(['playing', 'finished', 'dropped', 'on_hold'])
+
+function listStatusForGame(game) {
+  if (SHARED.has(game.completion_status)) return game.completion_status
+  return (game.total_playtime_seconds || 0) > 0 ? 'playing' : 'want_to_play'
+}
+
+// Insert a Game List row for a library game unless one is already linked.
+// Returns the new row id, or null when the game was already on the list.
+function ensureListRowForGame(game) {
+  if (!game?.id) return null
+  const db = getDb()
+  const linked = db.prepare(`
+    SELECT id, game_id FROM game_list
+    WHERE game_id = @id
+       OR (steam_app_id IS NOT NULL AND steam_app_id = @steam_app_id)
+       OR lower(name) = lower(@name)
+    LIMIT 1
+  `).get({ id: game.id, steam_app_id: game.steam_app_id ?? null, name: game.name || '' })
+  if (linked) {
+    if (linked.game_id !== game.id) db.prepare('UPDATE game_list SET game_id = ? WHERE id = ?').run(game.id, linked.id)
+    return null
+  }
+  // Game List cards load remote art only — use the Steam portrait when there is one.
+  const banner = game.steam_app_id
+    ? `https://cdn.akamai.steamstatic.com/steam/apps/${game.steam_app_id}/library_600x900_2x.jpg`
+    : (/^https?:/i.test(game.banner_url || '') ? game.banner_url : null)
+  const r = db.prepare(`
+    INSERT INTO game_list (game_id, steam_app_id, name, banner_url, status, genres)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(game.id, game.steam_app_id ?? null, game.name, banner, listStatusForGame(game), game.genres ?? null)
+  return Number(r.lastInsertRowid)
+}
+
+// One pass over the whole library (startup migration). Returns rows added.
+function syncLibraryToList() {
+  const db = getDb()
+  const games = db.prepare('SELECT * FROM games').all()
+  let added = 0
+  db.transaction(() => { for (const g of games) if (ensureListRowForGame(g)) added++ })()
+  return added
+}
+
+module.exports = { ensureListRowForGame, syncLibraryToList, listStatusForGame, reorderGameListPage, listGameListItems, getGameListItem, addGameListItem, updateGameListItem, deleteGameListItem, distinctGenres }

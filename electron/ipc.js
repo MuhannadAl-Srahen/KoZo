@@ -44,7 +44,9 @@ function handle(channel, fn) {
 // ── Games ────────────────────────────────────────────────────────────────────
 handle('games:list', () => gamesQ.listGamesWithStats())
 handle('games:get', (id) => gamesQ.getGame(id))
-handle('games:add', async (data) => {
+// Shared by games:add and gameList:moveToLibrary: insert, fetch Steam art +
+// genres + achievements, and make sure the game is on the Game List too.
+async function addLibraryGame(data) {
   // capsule_fallback is a transport-only hint for banner download — not a column.
   const { capsule_fallback, ...gameData } = data || {}
   const game = gamesQ.addGame(gameData)
@@ -109,9 +111,13 @@ handle('games:add', async (data) => {
     })
   }
 
+  try { gameListQ.ensureListRowForGame(gamesQ.getGame(game.id) || game) } catch (e) {
+    logger.warn('games:add: Game List sync failed', { message: e.message })
+  }
   bk()
   return game
-})
+}
+handle('games:add', addLibraryGame)
 handle('games:update', (id, data) => {
   // Status changes go through statusSync so linked Game List rows stay in step.
   const { completion_status, ...rest } = data || {}
@@ -634,6 +640,49 @@ handle('gameList:update', (id, data) => {
   bk(); broadcast('game:updated', null); return r
 })
 handle('gameList:delete', (id) => { gameListQ.deleteGameListItem(id); bk(); return true })
+// Game List → Library. Each row links to its library game when one exists
+// (archived ones come back), otherwise a new library game is created from the
+// row; Steam games get art/genres/achievements like a normal add. Non-Steam
+// games have no exe yet, so playtime tracking starts once one is set in Edit.
+handle('gameList:moveToLibrary', async (ids) => {
+  const statusSync = require('./services/statusSync')
+  const db = require('./db/database').getDb()
+  const moved = []
+  for (const id of (Array.isArray(ids) ? ids : [ids])) {
+    const row = gameListQ.getGameListItem(id)
+    if (!row) continue
+    let game = db.prepare(`
+      SELECT * FROM games
+      WHERE id = @game_id
+         OR (steam_app_id IS NOT NULL AND steam_app_id = @steam_app_id)
+         OR lower(name) = lower(@name)
+      LIMIT 1
+    `).get({ game_id: row.game_id ?? -1, steam_app_id: row.steam_app_id ?? null, name: row.name })
+    let created = false
+    if (game) {
+      if (game.is_archived) gamesQ.updateGame(game.id, { is_archived: 0 })
+    } else {
+      game = await addLibraryGame({
+        name: row.name,
+        steam_app_id: row.steam_app_id ?? null,
+        exe_name: '',
+        install_path: null,
+        source: row.steam_app_id ? 'steam' : 'manual',
+        is_installed: 0,
+        banner_url: row.banner_url || null,
+      })
+      created = true
+    }
+    if (row.game_id !== game.id) gameListQ.updateGameListItem(row.id, { game_id: game.id })
+    if (statusSync.SHARED_STATUSES.has(row.status) && !game.completion_status) {
+      try { statusSync.setGameStatus(game.id, row.status) } catch {}
+    }
+    broadcast('game:updated', game.id)
+    moved.push({ listId: row.id, gameId: game.id, name: row.name, created, needsExe: !row.steam_app_id && !game.exe_name })
+  }
+  bk()
+  return moved
+})
 handle('gameList:reorderPage', (filters, offset, pageIds) => {
   if (!Array.isArray(pageIds) || !pageIds.length) return false
   gameListQ.reorderGameListPage(filters || {}, Number(offset) || 0, pageIds)
@@ -1093,6 +1142,7 @@ handle('scanner:addGames', async (games) => {
         banner_local_path: null,
       })
       added.push(game)
+      try { gameListQ.ensureListRowForGame(game) } catch {}
       if (game.steam_app_id) existingAppIds.add(String(game.steam_app_id))
       if (game.install_path) existingPaths.add(game.install_path.toLowerCase())
 

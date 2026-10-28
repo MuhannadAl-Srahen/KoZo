@@ -3,6 +3,7 @@ import {
   IconPlus, IconLayoutGrid, IconList, IconLayoutColumns,
   IconDeviceGamepad2, IconPencil, IconSearch,
   IconCheckbox, IconSquare, IconTrash, IconX, IconCheck, IconStar, IconLoader2,
+  IconBooks,
 } from '@tabler/icons-react'
 import { getBannerBg, parseGenres } from '../lib/utils'
 import { LIST_STATUSES, LIST_STATUS_ORDER } from '../lib/cardModel'
@@ -13,6 +14,7 @@ import EditGameListModal from '../components/modals/EditGameListModal'
 import SearchableSelect from '../components/ui/SearchableSelect'
 import CardContextMenu from '../components/ui/CardContextMenu'
 import EmptyState from '../components/ui/EmptyState'
+import InfoModal from '../components/ui/InfoModal'
 import { CardSkeletonGrid } from '../components/ui/Skeleton'
 import s from './GameList.module.css'
 
@@ -254,6 +256,8 @@ export default function GameList() {
   const [selectedIds, setSelectedIds]     = useState(new Set())
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting]           = useState(false)
+  const [moving, setMoving]               = useState(false)
+  const [moveResult, setMoveResult]       = useState(null)   // InfoModal payload after Move to Library
 
   function enterSelection() { setSelectionMode(true); setSelectedIds(new Set()); setConfirmDelete(false) }
   function exitSelection()  { setSelectionMode(false); setSelectedIds(new Set()); setConfirmDelete(false) }
@@ -277,6 +281,31 @@ export default function GameList() {
     setItems(prev => prev.map(i => i.id === item.id ? { ...i, is_favorite: next } : i))
     await window.kozo?.api?.gameList?.update?.(item.id, { is_favorite: next })
     loadItems(page, { silent: true })
+  }
+
+  // Game List → Library for the given list rows (bulk or one card).
+  async function moveToLibrary(ids) {
+    if (!ids.length) return
+    setMoving(true)
+    const res = await window.kozo?.api?.gameList?.moveToLibrary?.(ids)
+    setMoving(false)
+    if (!res?.ok) {
+      setMoveResult({ variant: 'error', title: 'Could not move to Library', message: res?.error || 'Unknown error' })
+      return
+    }
+    const moved = res.data || []
+    const needsExe = moved.filter(m => m.needsExe).map(m => m.name)
+    setMoveResult({
+      variant: 'success',
+      title: `${moved.length} game${moved.length !== 1 ? 's' : ''} in your Library`,
+      message: moved.map(m => m.name).join(', '),
+      lines: needsExe.length
+        ? [`Set the .exe in Library → Edit to track playtime for: ${needsExe.join(', ')}`]
+        : [],
+    })
+    pageCache.clear()
+    loadItems(page, { silent: true })
+    if (selectionMode) exitSelection()
   }
 
   async function handleBulkDelete() {
@@ -519,6 +548,13 @@ export default function GameList() {
             {selectedIds.size === 0 ? 'Tap items to select' : `${selectedIds.size} selected`}
           </span>
 
+          {selectedIds.size > 0 && !confirmDelete && (
+            <button className={s.btnSecondary} onClick={() => moveToLibrary([...selectedIds])} disabled={moving}>
+              <IconBooks size={14} stroke={1.6} />
+              {moving ? 'Moving…' : `Move ${selectedIds.size} to Library`}
+            </button>
+          )}
+
           {selectedIds.size > 0 && (
             confirmDelete ? (
               <div className={s.confirmRow}>
@@ -696,6 +732,10 @@ export default function GameList() {
         />
       )}
 
+      {moveResult && (
+        <InfoModal {...moveResult} onClose={() => setMoveResult(null)} />
+      )}
+
       {editItem && !selectionMode && (
         <EditGameListModal
           item={editItem}
@@ -754,6 +794,7 @@ export default function GameList() {
             await window.kozo?.api?.gameList?.delete(item.id)
             await afterDelete()
           }}
+          extraItems={[{ label: 'Move to Library', Icon: IconBooks, onClick: (it) => moveToLibrary([it.id]) }]}
           deleteLabel="Remove from list"
           deleteHint="Removes this entry from your Game List. Library data is not affected."
         />
