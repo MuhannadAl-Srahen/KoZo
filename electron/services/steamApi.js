@@ -513,10 +513,12 @@ async function downloadBanner(appId, gameId, extraUrls = [], _viaParent = false)
   // A real portrait always beats a wide header: when the classic portrait path
   // 404s (newer titles), the hashed portrait from GetItems comes next.
   const a = await assetsFor(appId).catch(() => null)
+  // The hashed portrait (one cached GetItems call) goes first: on newer titles
+  // the classic paths 404 one after another before it is ever reached.
   const urls = [
+    a?.portrait,
     `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_600x900_2x.jpg`,
     `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_600x900.jpg`,
-    a?.portrait,
     `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/header.jpg`,
     `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/capsule_616x353.jpg`,
   ].filter(Boolean)

@@ -5,6 +5,7 @@ import {
 import Modal, { modalStyles as ms } from '../ui/Modal'
 import { getBannerBg } from '../../lib/utils'
 import { LIST_STATUSES, LIST_STATUS_ORDER } from '../../lib/cardModel'
+import { rankResults } from '../../lib/searchRank'
 import s from './AddGameModal.module.css'
 
 const STATUS_OPTIONS = LIST_STATUS_ORDER.map(value => ({ value, label: LIST_STATUSES[value].label }))
@@ -16,8 +17,6 @@ function artError(e, game) {
   if (!img.dataset.fb && game.capsule) { img.dataset.fb = '1'; img.src = game.capsule }
   else img.style.display = 'none'
 }
-
-const normName = (n) => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '')
 
 function debounce(fn, ms) {
   let t
@@ -83,8 +82,7 @@ export default function AddGameToListModal({ onClose, onSaved }) {
       setSearching(false)
       const steam = res?.ok ? (res.data || []) : []
       setResults(steam)
-      const onSteam = new Set(steam.map(g => normName(g.name)))
-      setSgdbResults(sg?.ok ? (sg.data || []).filter(h => !onSteam.has(normName(h.name))) : [])
+      setSgdbResults(sg?.ok ? (sg.data || []) : [])
     }, 400),
     []
   )
@@ -160,6 +158,32 @@ export default function AddGameToListModal({ onClose, onSaved }) {
 
   const showForm = selected || isManual
 
+  // One result row per source; rankResults decides the order.
+  const steamRow = (game) => (
+    <div key={game.steam_app_id} className={s.resultItem} onClick={() => pickGame(game)}>
+      <div className={s.resultIcon} style={{ background: getBannerBg(game.steam_app_id) }}>
+        <img src={game.header_image} alt="" onError={e => artError(e, game)} />
+      </div>
+      <div className={s.resultInfo}>
+        <div className={s.resultName}>{game.name}</div>
+        <div className={s.resultMeta}>Steam · #{game.steam_app_id}</div>
+      </div>
+    </div>
+  )
+  const sgdbRow = (hit) => (
+    <div key={`sgdb-${hit.sgdb_id}`} className={s.resultItem} onClick={() => pickSgdb(hit)}>
+      <div className={`${s.resultIcon} ${s.resultIconPortrait}`} style={{ background: getBannerBg(hit.sgdb_id) }}>
+        {hit.thumb
+          ? <img src={hit.thumb} alt="" onError={e => { e.target.style.display = 'none' }} />
+          : <IconDeviceGamepad2 size={18} stroke={1.3} style={{ color: 'rgba(255,255,255,0.15)' }} />}
+      </div>
+      <div className={s.resultInfo}>
+        <div className={s.resultName}>{hit.name}</div>
+        <div className={s.resultMeta}>{hit.year ? `${hit.year} · ` : ''}Not on Steam, cover from SteamGridDB</div>
+      </div>
+    </div>
+  )
+
   return (
     <Modal
       title="Add to Game List"
@@ -223,39 +247,10 @@ export default function AddGameToListModal({ onClose, onSaved }) {
 
       {!showForm && !searching && query.length >= 2 && (
         <div className={s.resultsList}>
-          {results.map(game => (
-            <div key={game.steam_app_id} className={s.resultItem} onClick={() => pickGame(game)}>
-              <div className={s.resultIcon} style={{ background: getBannerBg(game.steam_app_id) }}>
-                <img src={game.header_image} alt="" onError={e => artError(e, game)} />
-              </div>
-              <div className={s.resultInfo}>
-                <div className={s.resultName}>{game.name}</div>
-                <div className={s.resultMeta}>Steam · #{game.steam_app_id}</div>
-              </div>
-            </div>
-          ))}
+          {rankResults(query, results, sgdbResults).map(r => (r.kind === 'steam' ? steamRow(r.game) : sgdbRow(r.hit)))}
 
           {results.length === 0 && sgdbResults.length === 0 && (
             <div className={s.searchHint}>No Steam results found. Add manually below.</div>
-          )}
-
-          {sgdbResults.length > 0 && (
-            <>
-              <div className={s.resultsHeader}>Not on Steam</div>
-              {sgdbResults.map(hit => (
-                <div key={`sgdb-${hit.sgdb_id}`} className={s.resultItem} onClick={() => pickSgdb(hit)}>
-                  <div className={`${s.resultIcon} ${s.resultIconPortrait}`} style={{ background: getBannerBg(hit.sgdb_id) }}>
-                    {hit.thumb
-                      ? <img src={hit.thumb} alt="" onError={e => { e.target.style.display = 'none' }} />
-                      : <IconDeviceGamepad2 size={18} stroke={1.3} style={{ color: 'rgba(255,255,255,0.15)' }} />}
-                  </div>
-                  <div className={s.resultInfo}>
-                    <div className={s.resultName}>{hit.name}</div>
-                    <div className={s.resultMeta}>{hit.year ? `${hit.year} · ` : ''}Cover from SteamGridDB</div>
-                  </div>
-                </div>
-              ))}
-            </>
           )}
 
           <div className={s.manualOption} onClick={pickManual}>

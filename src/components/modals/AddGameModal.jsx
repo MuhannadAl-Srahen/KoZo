@@ -10,6 +10,7 @@ import {
   detectLauncherFromPath, deriveGameNameFromPath, exeLooksUnrelated, isHelperExe,
   KNOWN_SYSTEM_EXES, getBannerBg,
 } from '../../lib/utils'
+import { rankResults } from '../../lib/searchRank'
 import s from './AddGameModal.module.css'
 
 
@@ -44,8 +45,6 @@ function debounce(fn, ms) {
 function artChain(game) {
   return [game.header_image, game.capsule].filter(Boolean)
 }
-const normName = (n) => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '')
-
 function bestArt(game) {
   return artChain(game)[0] || null
 }
@@ -110,8 +109,7 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
       const steam = res?.ok ? (res.data || []) : []
       setResults(steam)
       // Only the ones Steam didn't already return.
-      const onSteam = new Set(steam.map(g => normName(g.name)))
-      setSgdbResults(sg?.ok ? (sg.data || []).filter(h => !onSteam.has(normName(h.name))) : [])
+      setSgdbResults(sg?.ok ? (sg.data || []) : [])
     }, 400),
     []
   )
@@ -227,9 +225,11 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
         // Library cards are portrait (2:3) → store the portrait cover. games:add
         // downloads a hi-res local copy; `capsule_fallback` lets it grab the
         // hashed capsule for new titles that have no portrait yet.
+        // A SteamGridDB pick shows its remote cover right away; the local copy
+        // is downloaded in the background.
         banner_url: selected?.steam_app_id
           ? `https://cdn.akamai.steamstatic.com/steam/apps/${selected.steam_app_id}/library_600x900_2x.jpg`
-          : null,
+          : (sgdbPick?.cover || null),
         capsule_fallback: selected?.capsule || null,
         sgdb_id: sgdbPick?.sgdb_id ?? null,
         sgdb_cover: sgdbPick?.cover ?? null,
@@ -257,6 +257,39 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
   const canSave  = name.trim() && (exeName.trim() || selected?.steam_app_id)
   // Only show results list when there's a query and no selection yet
   const showResults = !showForm && query.length >= 2
+
+  // One result row per source; rankResults decides the order.
+  const steamRow = (game) => (
+    <div
+      key={game.steam_app_id}
+      className={s.resultItem}
+      onClick={() => pickGame(game)}
+    >
+      <div className={s.resultIcon} style={{ background: getBannerBg(game.steam_app_id) }}>
+        {bestArt(game)
+          ? <img src={bestArt(game)} alt="" onError={e => bannerError(e, game)} />
+          : <IconDeviceGamepad2 size={18} stroke={1.3} style={{ color: 'rgba(255,255,255,0.15)' }} />
+        }
+      </div>
+      <div className={s.resultInfo}>
+        <div className={s.resultName}>{game.name}</div>
+        <div className={s.resultMeta}>Steam · App {game.steam_app_id}</div>
+      </div>
+    </div>
+  )
+  const sgdbRow = (hit) => (
+    <div key={`sgdb-${hit.sgdb_id}`} className={s.resultItem} onClick={() => pickSgdb(hit)}>
+      <div className={`${s.resultIcon} ${s.resultIconPortrait}`} style={{ background: getBannerBg(hit.sgdb_id) }}>
+        {hit.thumb
+          ? <img src={hit.thumb} alt="" onError={e => { e.target.style.display = 'none' }} />
+          : <IconDeviceGamepad2 size={18} stroke={1.3} style={{ color: 'rgba(255,255,255,0.15)' }} />}
+      </div>
+      <div className={s.resultInfo}>
+        <div className={s.resultName}>{hit.name}</div>
+        <div className={s.resultMeta}>{hit.year ? `${hit.year} · ` : ''}Not on Steam, cover from SteamGridDB</div>
+      </div>
+    </div>
+  )
 
   return (
    <>
@@ -318,46 +351,10 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
 
       {showResults && !searching && (
         <div className={s.resultsList}>
-          {results.map(game => (
-            <div
-              key={game.steam_app_id}
-              className={s.resultItem}
-              onClick={() => pickGame(game)}
-            >
-              <div className={s.resultIcon} style={{ background: getBannerBg(game.steam_app_id) }}>
-                {bestArt(game)
-                  ? <img src={bestArt(game)} alt="" onError={e => bannerError(e, game)} />
-                  : <IconDeviceGamepad2 size={18} stroke={1.3} style={{ color: 'rgba(255,255,255,0.15)' }} />
-                }
-              </div>
-              <div className={s.resultInfo}>
-                <div className={s.resultName}>{game.name}</div>
-                <div className={s.resultMeta}>Steam · App {game.steam_app_id}</div>
-              </div>
-            </div>
-          ))}
+          {rankResults(query, results, sgdbResults).map(r => (r.kind === 'steam' ? steamRow(r.game) : sgdbRow(r.hit)))}
 
           {results.length === 0 && sgdbResults.length === 0 && (
             <div className={s.searchHint}>No Steam results found. Add manually below.</div>
-          )}
-
-          {sgdbResults.length > 0 && (
-            <>
-              <div className={s.resultsHeader}>Not on Steam</div>
-              {sgdbResults.map(hit => (
-                <div key={`sgdb-${hit.sgdb_id}`} className={s.resultItem} onClick={() => pickSgdb(hit)}>
-                  <div className={`${s.resultIcon} ${s.resultIconPortrait}`} style={{ background: getBannerBg(hit.sgdb_id) }}>
-                    {hit.thumb
-                      ? <img src={hit.thumb} alt="" onError={e => { e.target.style.display = 'none' }} />
-                      : <IconDeviceGamepad2 size={18} stroke={1.3} style={{ color: 'rgba(255,255,255,0.15)' }} />}
-                  </div>
-                  <div className={s.resultInfo}>
-                    <div className={s.resultName}>{hit.name}</div>
-                    <div className={s.resultMeta}>{hit.year ? `${hit.year} · ` : ''}Cover from SteamGridDB</div>
-                  </div>
-                </div>
-              ))}
-            </>
           )}
           {!hasSgdbKey && (
             <div className={s.searchHint}>
