@@ -8,6 +8,40 @@ const BANNER_COLORS = [
   '#2a1a0a', '#2a0f0f', '#1e1a0a',
 ]
 
+// Exes that are never a game — warn if the user picks one as the executable.
+export const KNOWN_SYSTEM_EXES = new Set([
+  'explorer.exe', 'svchost.exe', 'winlogon.exe', 'csrss.exe',
+  'lsass.exe', 'services.exe', 'system', 'taskmgr.exe',
+])
+
+// "5m ago" / "Yesterday" / "Mar 4" for feed timestamps.
+export function timeAgo(iso) {
+  if (!iso) return ''
+  const then = new Date(iso).getTime()
+  if (!Number.isFinite(then)) return ''
+  const diffMin = Math.floor((Date.now() - then) / 60000)
+  if (diffMin < 1) return 'just now'
+  if (diffMin < 60) return `${diffMin}m ago`
+  const diffH = Math.floor(diffMin / 60)
+  if (diffH < 24) return `${diffH}h ago`
+  const diffD = Math.floor(diffH / 24)
+  if (diffD === 1) return 'Yesterday'
+  if (diffD < 7) return `${diffD}d ago`
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
+// Rarity token for a global-unlock %, on the same bands as rarityLabel(). The
+// --rarity-* colors are fixed semantics (deliberately NOT accent-derived).
+// null when the % is unknown, so callers pick their own fallback.
+export function rarityColor(pct) {
+  if (pct == null) return null
+  if (pct < 5)     return 'var(--rarity-ultra)'
+  if (pct < 15)    return 'var(--rarity-very)'
+  if (pct < 30)    return 'var(--rarity-rare)'
+  if (pct < 50)    return 'var(--rarity-uncommon)'
+  return 'var(--rarity-common)'
+}
+
 export function getBannerBg(id) {
   return BANNER_COLORS[(id || 0) % BANNER_COLORS.length]
 }

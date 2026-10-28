@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   IconSearch, IconPlus, IconCheck, IconAlertTriangle,
   IconDeviceGamepad2, IconCrosshair, IconFolderOpen, IconX,
@@ -8,13 +8,10 @@ import RunningProcessPicker from '../ui/RunningProcessPicker'
 import ImageCropModal from './ImageCropModal'
 import {
   detectLauncherFromPath, deriveGameNameFromPath, exeLooksUnrelated, isHelperExe,
+  KNOWN_SYSTEM_EXES, getBannerBg,
 } from '../../lib/utils'
 import s from './AddGameModal.module.css'
 
-const KNOWN_SYSTEM_EXES = new Set([
-  'explorer.exe', 'svchost.exe', 'winlogon.exe', 'csrss.exe',
-  'lsass.exe', 'services.exe', 'system', 'taskmgr.exe',
-])
 
 // Detect official vs cracked from install path. Known store paths = official.
 const OFFICIAL_PATH_HINTS = [
@@ -41,8 +38,6 @@ function debounce(fn, ms) {
   return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms) }
 }
 
-const BANNER_BG = ['#1a0f2e','#0f1e3a','#0f2a1e','#2a1a0a','#2a0f0f','#1e1a0a']
-function bannerBg(id) { return BANNER_BG[(id || 0) % BANNER_BG.length] }
 
 // Sharp appid header.jpg first; if it 404s (new/unreleased title) fall back to
 // the hashed capsule from search, then to the icon.
@@ -89,13 +84,18 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
   const [dupWarn, setDupWarn]         = useState(false)
   const [showPicker, setShowPicker]   = useState(false)
 
+  // Steam search is a network call — a slow earlier response must not
+  // overwrite a newer one, so only the latest request's result is applied.
+  const searchSeq = useRef(0)
   const doSearch = useCallback(
     debounce(async (q) => {
+      const seq = ++searchSeq.current
       if (!q.trim() || q.length < 2) { setResults([]); setSearching(false); return }
       setSearching(true)
       const res = await window.kozo?.api?.steam?.search(q)
+      if (seq !== searchSeq.current) return
       setSearching(false)
-      setResults(res?.ok ? res.data : [])
+      setResults(res?.ok ? (res.data || []) : [])
     }, 400),
     []
   )
@@ -225,7 +225,8 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
   }
 
   const showForm = selected || isManual
-  const canSave  = name.trim() && exeName.trim()
+  // Mirrors handleSave: a Steam game launches via steam://, so its exe is optional.
+  const canSave  = name.trim() && (exeName.trim() || selected?.steam_app_id)
   // Only show results list when there's a query and no selection yet
   const showResults = !showForm && query.length >= 2
 
@@ -265,7 +266,7 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
       ) : (
         <div className={s.selectedChip}>
           {selected && (
-            <div className={s.selectedThumb} style={{ background: bannerBg(selected.steam_app_id) }}>
+            <div className={s.selectedThumb} style={{ background: getBannerBg(selected.steam_app_id) }}>
               {bestArt(selected)
                 ? <img src={bestArt(selected)} alt="" onError={e => bannerError(e, selected)} />
                 : <IconDeviceGamepad2 size={14} stroke={1.4} style={{ color: 'rgba(255,255,255,0.3)' }} />
@@ -292,7 +293,7 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
               className={s.resultItem}
               onClick={() => pickGame(game)}
             >
-              <div className={s.resultIcon} style={{ background: bannerBg(game.steam_app_id) }}>
+              <div className={s.resultIcon} style={{ background: getBannerBg(game.steam_app_id) }}>
                 {bestArt(game)
                   ? <img src={bestArt(game)} alt="" onError={e => bannerError(e, game)} />
                   : <IconDeviceGamepad2 size={18} stroke={1.3} style={{ color: 'rgba(255,255,255,0.15)' }} />

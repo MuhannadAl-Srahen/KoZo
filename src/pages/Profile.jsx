@@ -6,7 +6,7 @@ import {
   IconLoader2, IconPalette, IconTrash, IconCircleCheckFilled, IconChevronRight,
   IconUser,
 } from '@tabler/icons-react'
-import { fileUrl, formatPlaytime, getBannerBg } from '../lib/utils'
+import { fileUrl, formatPlaytime, getBannerBg, timeAgo } from '../lib/utils'
 import { useAccentColor } from '../context/AccentColorContext'
 import ImageCropModal from '../components/modals/ImageCropModal'
 import Modal from '../components/ui/Modal'
@@ -97,21 +97,6 @@ function coverError(e, remote) {
 }
 
 // Compact "when" for XP history rows: "2m ago", "3h ago", "Yesterday", "Jun 12".
-function timeAgo(iso) {
-  if (!iso) return ''
-  const then = new Date(iso).getTime()
-  if (!Number.isFinite(then)) return ''
-  const diffMin = Math.floor((Date.now() - then) / 60000)
-  if (diffMin < 1) return 'just now'
-  if (diffMin < 60) return `${diffMin}m ago`
-  const diffH = Math.floor(diffMin / 60)
-  if (diffH < 24) return `${diffH}h ago`
-  const diffD = Math.floor(diffH / 24)
-  if (diffD === 1) return 'Yesterday'
-  if (diffD < 7) return `${diffD}d ago`
-  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-}
-
 const XP_EVENT_META = {
   session: { Icon: IconClock, color: TINT_PLAY, verb: 'Played' },
   achievement: { Icon: IconTrophy, color: TINT_ACH, verb: 'Unlocked' },

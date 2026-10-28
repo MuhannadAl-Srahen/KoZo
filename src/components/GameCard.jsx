@@ -49,6 +49,7 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
     <div
       className={`${s.card} ${variant === 'small' ? s.cardSmall : ''} ${(!game.is_installed || game.is_hidden) && !selectionMode ? s.cardDimmed : ''} ${game._isLive && !selectionMode ? s.cardLive : ''} ${selected ? s.cardSelected : ''}`}
       onClick={handleClick}
+      data-gpclick=""
       onContextMenu={onContextMenu ? (e) => { e.preventDefault(); onContextMenu(e, game) } : undefined}
     >
       <div className={s.banner} style={{ background: bg }}>
@@ -228,6 +229,7 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite, onConte
     <div
       className={`${s.listCard} ${(!game.is_installed || game.is_hidden) && !selectionMode ? s.cardDimmed : ''} ${game._isLive && !selectionMode ? s.listCardLive : ''} ${selected ? s.listCardSelected : ''}`}
       onClick={handleClick}
+      data-gpclick=""
       onContextMenu={onContextMenu ? (e) => { e.preventDefault(); onContextMenu(e, game) } : undefined}
     >
       {/* Portrait thumbnail — blurred fill + contain cover, selection overlay */}

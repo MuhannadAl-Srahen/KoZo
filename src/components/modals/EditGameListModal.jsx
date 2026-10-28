@@ -1,16 +1,10 @@
 import React, { useState, useEffect } from 'react'
 import { IconEdit, IconTrash, IconStar, IconBrandSteam, IconCheck } from '@tabler/icons-react'
 import Modal, { modalStyles as ms } from '../ui/Modal'
+import { LIST_STATUSES, LIST_STATUS_ORDER } from '../../lib/cardModel'
 import s from './AddGameModal.module.css'
 
-const STATUS_OPTIONS = [
-  { value: 'want_to_play', label: 'Want to play' },
-  { value: 'playing',      label: 'Playing' },
-  { value: 'finished',     label: 'Finished' },
-  { value: 'on_hold',      label: 'On hold' },
-  { value: 'dropped',      label: 'Dropped' },
-  { value: 'upcoming',     label: 'Upcoming' },
-]
+const STATUS_OPTIONS = LIST_STATUS_ORDER.map(value => ({ value, label: LIST_STATUSES[value].label }))
 
 export default function EditGameListModal({ item, onClose, onSaved, onDeleted }) {
   const [name, setName]             = useState(item.name)

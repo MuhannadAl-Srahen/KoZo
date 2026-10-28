@@ -1,21 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   IconSearch, IconPlus, IconCheck, IconDeviceGamepad2, IconStar, IconX,
 } from '@tabler/icons-react'
 import Modal, { modalStyles as ms } from '../ui/Modal'
+import { getBannerBg } from '../../lib/utils'
+import { LIST_STATUSES, LIST_STATUS_ORDER } from '../../lib/cardModel'
 import s from './AddGameModal.module.css'
 
-const STATUS_OPTIONS = [
-  { value: 'want_to_play', label: 'Want to play' },
-  { value: 'playing',      label: 'Playing' },
-  { value: 'finished',     label: 'Finished' },
-  { value: 'on_hold',      label: 'On hold' },
-  { value: 'dropped',      label: 'Dropped' },
-  { value: 'upcoming',     label: 'Upcoming' },
-]
+const STATUS_OPTIONS = LIST_STATUS_ORDER.map(value => ({ value, label: LIST_STATUSES[value].label }))
 
-const BANNER_BG = ['#1a0f2e','#0f1e3a','#0f2a1e','#2a1a0a','#2a0f0f','#1e1a0a']
-function bannerBg(id) { return BANNER_BG[(id || 0) % BANNER_BG.length] }
 
 // header.jpg → hashed capsule → hide (same approach as Add Game).
 function artError(e, game) {
@@ -69,13 +62,18 @@ export default function AddGameToListModal({ onClose, onSaved }) {
     else onClose()
   }
 
+  // Steam search is a network call — a slow earlier response must not
+  // overwrite a newer one, so only the latest request's result is applied.
+  const searchSeq = useRef(0)
   const doSearch = useCallback(
     debounce(async (q) => {
+      const seq = ++searchSeq.current
       if (!q.trim() || q.length < 2) { setResults([]); setSearching(false); return }
       setSearching(true)
       const res = await window.kozo?.api?.steam?.search(q)
+      if (seq !== searchSeq.current) return
       setSearching(false)
-      setResults(res?.ok ? res.data : [])
+      setResults(res?.ok ? (res.data || []) : [])
     }, 400),
     []
   )
@@ -187,7 +185,7 @@ export default function AddGameToListModal({ onClose, onSaved }) {
       ) : (
         <div className={s.selectedChip}>
           {selected && (
-            <div className={s.selectedThumb} style={{ background: bannerBg(selected.steam_app_id) }}>
+            <div className={s.selectedThumb} style={{ background: getBannerBg(selected.steam_app_id) }}>
               <img src={selected.header_image} alt="" onError={e => artError(e, selected)} />
             </div>
           )}
@@ -206,7 +204,7 @@ export default function AddGameToListModal({ onClose, onSaved }) {
         <div className={s.resultsList}>
           {results.map(game => (
             <div key={game.steam_app_id} className={s.resultItem} onClick={() => pickGame(game)}>
-              <div className={s.resultIcon} style={{ background: bannerBg(game.steam_app_id) }}>
+              <div className={s.resultIcon} style={{ background: getBannerBg(game.steam_app_id) }}>
                 <img src={game.header_image} alt="" onError={e => artError(e, game)} />
               </div>
               <div className={s.resultInfo}>

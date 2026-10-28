@@ -6,14 +6,10 @@ import {
 import Modal, { modalStyles as ms } from '../ui/Modal'
 import RunningProcessPicker from '../ui/RunningProcessPicker'
 import ImageCropModal from './ImageCropModal'
-import { FOREIGN_LAUNCHERS, fileUrl } from '../../lib/utils'
+import { FOREIGN_LAUNCHERS, KNOWN_SYSTEM_EXES, fileUrl } from '../../lib/utils'
 import cs from '../../styles/controls.module.css'
 import s from './AddGameModal.module.css'
 
-const KNOWN_SYSTEM_EXES = new Set([
-  'explorer.exe', 'svchost.exe', 'winlogon.exe', 'csrss.exe',
-  'lsass.exe', 'services.exe', 'system', 'taskmgr.exe',
-])
 
 export default function EditGameModal({ game, onClose, onSaved }) {
   const [name, setName]               = useState(game.name || '')

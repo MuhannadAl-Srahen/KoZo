@@ -7,7 +7,7 @@ import {
   IconCircleCheck, IconCircleOff, IconEye, IconEyeOff, IconChevronDown,
   IconChevronRight, IconAlertTriangle, IconDeviceGamepad2,
 } from '@tabler/icons-react'
-import { getBannerBg, getBannerIcon, formatPlaytime, formatDate, formatDateTime, fileUrl, isSteamTracked, launcherLabel, localDayKey } from '../lib/utils'
+import { getBannerBg, getBannerIcon, formatPlaytime, formatDate, formatDateTime, fileUrl, isSteamTracked, launcherLabel, localDayKey, rarityColor } from '../lib/utils'
 import { STATUS_META } from '../components/GameCard'
 import AchievementModal from '../components/modals/AchievementModal'
 import EditGameModal from '../components/modals/EditGameModal'
@@ -92,13 +92,7 @@ function AchCard({ ach, onClick, onQuickToggle }) {
   // (lib/utils.js) and the modal's badge, on the fixed --rarity-* tokens that
   // never follow the accent. No global % → the CSS falls back to the accent
   // via var(--rar, var(--a)).
-  const gp = ach.global_unlock_percent
-  const rarityColor = gp == null ? null
-    : gp < 5  ? 'var(--rarity-ultra)'
-    : gp < 15 ? 'var(--rarity-very)'
-    : gp < 30 ? 'var(--rarity-rare)'
-    : gp < 50 ? 'var(--rarity-uncommon)'
-    :           'var(--rarity-common)'
+  const achRarity = rarityColor(ach.global_unlock_percent)
 
   return (
     <div
@@ -107,7 +101,7 @@ function AchCard({ ach, onClick, onQuickToggle }) {
     >
       <div
         className={`${s.achIcon} ${unlocked ? s.achIconUnlocked : s.achIconLocked}`}
-        style={unlocked && rarityColor ? { '--rar': rarityColor } : undefined}
+        style={unlocked && achRarity ? { '--rar': achRarity } : undefined}
       >
         {ach.icon_url
           ? <img src={ach.icon_url} alt="" loading="lazy" decoding="async" />
@@ -432,6 +426,9 @@ export default function GameDetail() {
     if (diag) {
       if (diag.error === 'no_stats_for_game') {
         lines.push('This game has no Steam achievements at all.')
+      } else if (diag.error === 'invalid_key') {
+        variant = 'error'
+        lines.push('Steam rejected your Web API key — check it in Settings → Steam.')
       } else if (diag.error) {
         variant = 'error'
         lines.push(`Steam error: ${diag.error}`)

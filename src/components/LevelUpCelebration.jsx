@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { IconArrowBigUpLines, IconX } from '@tabler/icons-react'
 import s from './LevelUpCelebration.module.css'
@@ -20,14 +20,18 @@ const CONFETTI = Array.from({ length: 18 }, (_, i) => i)
 export default function LevelUpCelebration() {
   const [data, setData] = useState(null)
   const [leaving, setLeaving] = useState(false)
+  // The fade-out timer; a level-up arriving mid-fade must cancel it, or the
+  // stale timer wipes the new celebration.
+  const closeTimer = useRef(null)
 
   useEffect(() => {
     if (!window.kozo?.events?.onXpLevelUp) return
     const off = window.kozo.events.onXpLevelUp((payload) => {
+      clearTimeout(closeTimer.current)
       setLeaving(false)
       setData(payload)
     })
-    return () => off?.()
+    return () => { off?.(); clearTimeout(closeTimer.current) }
   }, [])
 
   // Auto-dismiss, but generously — this is the payoff for tens of hours.
@@ -39,7 +43,8 @@ export default function LevelUpCelebration() {
 
   function close() {
     setLeaving(true)
-    setTimeout(() => { setData(null); setLeaving(false) }, 260)
+    clearTimeout(closeTimer.current)
+    closeTimer.current = setTimeout(() => { setData(null); setLeaving(false) }, 260)
   }
 
   if (!data) return null

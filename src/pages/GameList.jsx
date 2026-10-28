@@ -5,6 +5,7 @@ import {
   IconCheckbox, IconSquare, IconTrash, IconX, IconCheck, IconStar, IconLoader2,
 } from '@tabler/icons-react'
 import { getBannerBg, parseGenres } from '../lib/utils'
+import { LIST_STATUSES, LIST_STATUS_ORDER } from '../lib/cardModel'
 import AddGameToListModal from '../components/modals/AddGameToListModal'
 import AddGamesToCustomListModal from '../components/modals/AddGamesToCustomListModal'
 import CreateEditListModal from '../components/modals/CreateEditListModal'
@@ -15,14 +16,8 @@ import EmptyState from '../components/ui/EmptyState'
 import { CardSkeletonGrid } from '../components/ui/Skeleton'
 import s from './GameList.module.css'
 
-const STATUS_CONFIG = {
-  want_to_play: { label: 'Want to play', color: 'var(--a)' },
-  playing:      { label: 'Playing',      color: 'var(--status-playing)' },
-  finished:     { label: 'Finished',     color: 'var(--status-finished)' },
-  on_hold:      { label: 'On hold',      color: 'var(--status-onhold)' },
-  dropped:      { label: 'Dropped',      color: 'var(--status-dropped)' },
-  upcoming:     { label: 'Upcoming',     color: 'var(--status-upcoming)' },
-}
+// Game List statuses in menu order (label + color from lib/cardModel).
+const STATUS_CONFIG = Object.fromEntries(LIST_STATUS_ORDER.map(k => [k, { label: LIST_STATUSES[k].label, color: LIST_STATUSES[k].color }]))
 
 const PAGE_SIZE = 20
 
@@ -73,6 +68,7 @@ function GridCard({ item, onClick, selectionMode, selected, onToggle, onToggleFa
     <div
       className={`${s.card} ${selected ? s.cardSelected : ''}`}
       onClick={handleClick}
+      data-gpclick=""
       onContextMenu={selectionMode ? undefined : (e) => { e.preventDefault(); onContextMenu?.(e, item) }}
     >
       <div className={s.cardBanner} style={{ background: bg }}>
@@ -141,6 +137,7 @@ function ListRow({ item, onClick, selectionMode, selected, onToggle, onToggleFav
     <div
       className={`${s.listRow} ${selected ? s.listRowSelected : ''}`}
       onClick={handleClick}
+      data-gpnav=""
       onContextMenu={selectionMode ? undefined : (e) => { e.preventDefault(); onContextMenu?.(e, item) }}
     >
       {/* Portrait thumbnail with blurred fill */}
@@ -187,7 +184,7 @@ function ListRow({ item, onClick, selectionMode, selected, onToggle, onToggleFav
           )}
           <div
             className={s.listStatusBadge}
-            style={{ color: cfg.color, borderColor: cfg.color + '55', background: cfg.color + '18' }}
+            style={{ color: cfg.color, borderColor: `color-mix(in srgb, ${cfg.color} 33%, transparent)`, background: `color-mix(in srgb, ${cfg.color} 9%, transparent)` }}
           >
             {cfg.label}
           </div>
@@ -227,9 +224,9 @@ export default function GameList() {
   const [dragOverId, setDragOverId] = useState(null) // drop-target highlight
   const dragIdRef = useRef(null)
 
-  // Drag-reorder within the current page/filter view. Persists sequential
-  // display_order values offset by the page, so pages stay in sequence; rows
-  // never dragged (display_order NULL) always sort after ordered ones.
+  // Drag-reorder within the current page/filter view. The main process splices
+  // this page's new order into the whole list (gameList:reorderPage), so a drop
+  // on page 2 stays on page 2 and favorites keep leading.
   async function handleCardDrop(targetId) {
     const dragId = dragIdRef.current
     dragIdRef.current = null
@@ -242,12 +239,13 @@ export default function GameList() {
     const [moved] = pageItems.splice(from, 1)
     pageItems.splice(to, 0, moved)
     setItems(pageItems)
-    const base = (page - 1) * PAGE_SIZE
-    for (let i = 0; i < pageItems.length; i++) {
-      if (pageItems[i].display_order !== base + i) {
-        await window.kozo?.api?.gameList?.update?.(pageItems[i].id, { display_order: base + i })
-      }
-    }
+    const filters = {}
+    if (statusFilter) filters.status = statusFilter
+    if (genreFilter)  filters.genre = genreFilter
+    if (activeListId) filters.listId = activeListId
+    if (searchText?.trim()) filters.search = searchText.trim()
+    await window.kozo?.api?.gameList?.reorderPage?.(filters, (page - 1) * PAGE_SIZE, pageItems.map(i => i.id))
+    pageCache.clear()
     loadItems(page, { silent: true })
   }
 
@@ -396,6 +394,19 @@ export default function GameList() {
     setShowAdd(false)
     setEditItem(null)
     loadItems(page)
+    loadLists()
+    loadGenres()
+    loadAllTotal()
+  }
+
+  // Removing the last card on a later page would refetch an empty page and show
+  // "No games here yet" — step back a page instead.
+  async function afterDelete() {
+    setEditItem(null)
+    const target = items.length <= 1 && page > 1 ? page - 1 : page
+    if (target !== page) setPage(target)
+    pageCache.clear()
+    await loadItems(target)
     loadLists()
     loadGenres()
     loadAllTotal()
@@ -690,7 +701,7 @@ export default function GameList() {
           item={editItem}
           onClose={() => setEditItem(null)}
           onSaved={afterSave}
-          onDeleted={afterSave}
+          onDeleted={afterDelete}
         />
       )}
 
@@ -741,10 +752,7 @@ export default function GameList() {
           onEdit={setEditItem}
           onDelete={async (item) => {
             await window.kozo?.api?.gameList?.delete(item.id)
-            await loadItems(page)
-            loadLists()
-            loadGenres()
-            loadAllTotal()
+            await afterDelete()
           }}
           deleteLabel="Remove from list"
           deleteHint="Removes this entry from your Game List. Library data is not affected."

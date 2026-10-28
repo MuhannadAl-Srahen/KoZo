@@ -104,7 +104,7 @@ function DailyChart({ data, period, selectedDay, onSelectDay }) {
             const isNow   = m.key === curKey
             return (
               <div key={m.key} className={`${s.chartCol} ${s.chartColStatic}`}
-                title={`${MONTHS[m.monthIdx]} ${m.year} — ${formatPlaytime(m.seconds) || 'No activity'}`}>
+                title={`${MONTHS[m.monthIdx]} ${m.year} — ${m.seconds ? formatPlaytime(m.seconds) : 'No activity'}`}>
                 <div className={s.chartBarArea}>
                   <div className={[s.chartBar, hasData ? '' : s.chartBarEmpty, isNow ? s.chartBarToday : ''].join(' ')}
                     style={{ height: hasData ? `${pct}%` : undefined }} />
@@ -147,7 +147,7 @@ function DailyChart({ data, period, selectedDay, onSelectDay }) {
               key={d.day}
               className={s.chartCol}
               aria-pressed={isSel}
-              title={`${prettyDay(d.day)} — ${formatPlaytime(d.seconds) || 'No activity'}`}
+              title={`${prettyDay(d.day)} — ${d.seconds ? formatPlaytime(d.seconds) : 'No activity'}`}
               onClick={() => onSelectDay(isSel ? null : d.day)}
             >
               <div className={s.chartBarArea}>
@@ -205,7 +205,7 @@ function HourlyChart({ data, selectedHour, onSelectHour }) {
               key={h.hour}
               className={s.chartCol}
               aria-pressed={isSel}
-              title={`${fmtHour(h.hour)} — ${formatPlaytime(h.seconds) || 'No activity'}`}
+              title={`${fmtHour(h.hour)} — ${h.seconds ? formatPlaytime(h.seconds) : 'No activity'}`}
               onClick={() => onSelectHour(isSel ? null : h.hour)}
             >
               <div className={s.chartBarArea}>
@@ -445,7 +445,7 @@ export default function Statistics() {
                 )}
                 {period === '1d' && selectedHour != null && (
                   <button type="button" className={s.dayPill} onClick={() => setSelectedHour(null)}>
-                    {fmtHour(selectedHour)}–{fmtHour((selectedHour + 1) % 24)} · {formatPlaytime(hourSeconds(stats?.hourlyActivity, selectedHour)) || 'No activity'}
+                    {fmtHour(selectedHour)}–{fmtHour((selectedHour + 1) % 24)} · {hourSeconds(stats?.hourlyActivity, selectedHour) ? formatPlaytime(hourSeconds(stats?.hourlyActivity, selectedHour)) : 'No activity'}
                     <IconX size={12} stroke={2.2} />
                   </button>
                 )}
