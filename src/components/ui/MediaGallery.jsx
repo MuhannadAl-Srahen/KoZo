@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { IconChevronLeft, IconChevronRight, IconX, IconMaximize } from '@tabler/icons-react'
 import s from './MediaGallery.module.css'
 
-// Game media: a big viewer, a clickable thumbnail strip, and a full-screen
+// Game media, laid out like a Steam store page: a big viewer, a scrollable
+// strip of every screenshot with arrow buttons at its ends, and a full-screen
 // lightbox (click the big image, ←/→ to browse, Esc to close).
 // `items` = [{ thumb, full }]; the first item is shown first.
 export default function MediaGallery({ items = [], height }) {
@@ -11,7 +12,28 @@ export default function MediaGallery({ items = [], height }) {
   const [index, setIndex] = useState(0)
   const [zoom, setZoom] = useState(false)
   const [broken, setBroken] = useState(() => new Set())
+  const stripRef = useRef(null)
+  const [edges, setEdges] = useState({ left: false, right: false })
   useEffect(() => { setIndex(0) }, [list.length && list[0].full])
+
+  // Which strip arrows are useful (is there more to either side?).
+  function measure() {
+    const el = stripRef.current
+    if (!el) return
+    const left = el.scrollLeft > 2
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 2
+    setEdges(prev => (prev.left === left && prev.right === right ? prev : { left, right }))
+  }
+  useEffect(() => {
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [list.length, broken.size])
+  // Keep the selected thumbnail in view, like Steam does.
+  useEffect(() => {
+    stripRef.current?.querySelector('[data-active="1"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
+  }, [index])
+  const scrollStrip = (d) => stripRef.current?.scrollBy({ left: d * stripRef.current.clientWidth * 0.8, behavior: 'smooth' })
 
   const shown = list.filter(m => !broken.has(m.full || m.thumb))
   if (!shown.length) return null
@@ -51,12 +73,25 @@ export default function MediaGallery({ items = [], height }) {
       </div>
 
       {shown.length > 1 && (
-        <div className={s.strip}>
-          {shown.map((m, k) => (
-            <button key={m.full || m.thumb} className={`${s.thumb} ${k === i ? s.thumbActive : ''}`} onClick={() => setIndex(k)}>
-              <img src={m.thumb || m.full} alt="" loading="lazy" onError={() => markBroken(m)} />
+        <div className={s.stripWrap}>
+          <div className={s.strip} ref={stripRef} onScroll={measure}>
+            {shown.map((m, k) => (
+              <button key={m.full || m.thumb} data-active={k === i ? '1' : undefined}
+                className={`${s.thumb} ${k === i ? s.thumbActive : ''}`} onClick={() => setIndex(k)}>
+                <img src={m.thumb || m.full} alt="" loading="lazy" onError={() => markBroken(m)} onLoad={measure} />
+              </button>
+            ))}
+          </div>
+          {edges.left && (
+            <button className={`${s.stripArrow} ${s.stripArrowLeft}`} onClick={() => scrollStrip(-1)} aria-label="Scroll left">
+              <IconChevronLeft size={16} />
             </button>
-          ))}
+          )}
+          {edges.right && (
+            <button className={`${s.stripArrow} ${s.stripArrowRight}`} onClick={() => scrollStrip(1)} aria-label="Scroll right">
+              <IconChevronRight size={16} />
+            </button>
+          )}
         </div>
       )}
 

@@ -327,7 +327,7 @@ async function getStoreDetails(appId) {
         header_image: d.header_image || null,
         screenshots: (d.screenshots || []).slice(0, 4).map(sc => sc.path_thumbnail).filter(Boolean),
         // Gallery: thumbnails for the strip, full size for the viewer / lightbox.
-        media: (d.screenshots || []).slice(0, 12)
+        media: (d.screenshots || [])
           .map(sc => ({ thumb: sc.path_thumbnail, full: sc.path_full || sc.path_thumbnail }))
           .filter(m => m.thumb),
         price: d.is_free ? 'Free to play' : (d.price_overview?.final_formatted || null),
