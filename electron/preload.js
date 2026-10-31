@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 7,
+  rev: 8,
   // Settings → Appearance → UI scale.
   ui: {
     setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('kozo', {
       get: (id) => ipcRenderer.invoke('games:get', id),
       add: (data) => ipcRenderer.invoke('games:add', data),
       planMonth: (gameIds, month) => ipcRenderer.invoke('games:planMonth', gameIds, month),
+      finished: () => ipcRenderer.invoke('games:finished'),
       update: (id, data) => ipcRenderer.invoke('games:update', id, data),
       delete: (id) => ipcRenderer.invoke('games:delete', id),
       reorder: (orderedIds) => ipcRenderer.invoke('games:reorder', orderedIds),
@@ -46,6 +47,7 @@ contextBridge.exposeInMainWorld('kozo', {
       update: (id, data) => ipcRenderer.invoke('gameList:update', id, data),
       delete: (id) => ipcRenderer.invoke('gameList:delete', id),
       untrack: (id) => ipcRenderer.invoke('gameList:untrack', id),
+      rate: (ref, rating) => ipcRenderer.invoke('gameList:rate', ref, rating),
       tracked: () => ipcRenderer.invoke('gameList:tracked'),
       reorderPage: (filters, offset, pageIds) => ipcRenderer.invoke('gameList:reorderPage', filters, offset, pageIds),
       moveToLibrary: (ids) => ipcRenderer.invoke('gameList:moveToLibrary', ids),
@@ -209,6 +211,7 @@ contextBridge.exposeInMainWorld('kozo', {
       onSessionUndetected: sub('session:undetected', pass),
       onAchievementUnlocked: sub('achievement:unlocked', pass),
       onGameUpdated: sub('game:updated', pass),
+      onGameFinished: sub('game:finished', pass),
       onScanProgress: sub('scanner:progress', pass),
       onBannerRefreshProgress: sub('banners:refreshProgress', pass),
       // Steam refused (or resumed allowing) a player-unlock read — library-wide,

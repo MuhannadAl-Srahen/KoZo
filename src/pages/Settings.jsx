@@ -1379,18 +1379,18 @@ const FEATURE_GROUPS = [
   {
     title: 'Tracking',
     items: [
-      { Icon: IconClock,    name: 'Automatic playtime', go: '/sessions', desc: 'Detects running games and records sessions, no manual timers.' },
-      { Icon: IconHistory,  name: 'Sessions timeline', go: '/sessions',  desc: 'Every play session grouped by day with durations and unlocks.' },
+      { Icon: IconClock,    name: 'Automatic playtime', go: '/activity?tab=sessions', desc: 'Detects running games and records sessions, no manual timers.' },
+      { Icon: IconHistory,  name: 'Sessions timeline', go: '/activity?tab=sessions',  desc: 'Every play session grouped by day with durations and unlocks.' },
       { Icon: IconBolt,     name: 'Idle / AFK pause', go: 'tab:general',   desc: 'Stops counting when you step away so overnight idling doesn’t inflate stats.' },
     ],
   },
   {
     title: 'Achievements',
     items: [
-      { Icon: IconBrandSteam, name: 'Steam sync', go: '/achievements',        desc: 'Imports your unlocks via the Steam Web API, automatically while you play and after each session. No interval to set.' },
-      { Icon: IconTrophy,     name: 'Cracked-game sync', go: '/achievements', desc: 'Reads Goldberg, CODEX, RUNE, EMPRESS, SKIDROW and more, watched live, so unlocks appear instantly.' },
+      { Icon: IconBrandSteam, name: 'Steam sync', go: '/activity?tab=achievements',        desc: 'Imports your unlocks via the Steam Web API, automatically while you play and after each session. No interval to set.' },
+      { Icon: IconTrophy,     name: 'Cracked-game sync', go: '/activity?tab=achievements', desc: 'Reads Goldberg, CODEX, RUNE, EMPRESS, SKIDROW and more, watched live, so unlocks appear instantly.' },
       { Icon: IconBell,       name: 'Live game overlay', go: 'overlay:test', desc: 'A toast pops over your game the moment you unlock something, Steam-style, in your accent color.' },
-      { Icon: IconDownload,   name: 'Achievement lists for any launcher', go: '/achievements', desc: "Xbox/Epic/other games auto-match a Steam achievement list on add, then tick off the ones you've earned." },
+      { Icon: IconDownload,   name: 'Achievement lists for any launcher', go: '/activity?tab=achievements', desc: "Xbox/Epic/other games auto-match a Steam achievement list on add, then tick off the ones you've earned." },
     ],
   },
   {
@@ -1423,7 +1423,7 @@ const FEATURE_GROUPS = [
   {
     title: 'Insights & App',
     items: [
-      { Icon: IconChartBar,  name: 'Statistics', go: '/statistics',    desc: 'Playtime trends with an hourly 24h view, daily/monthly charts, and click-a-day (or hour) to focus it.' },
+      { Icon: IconChartBar,  name: 'Statistics', go: '/activity?tab=overview',    desc: 'Playtime trends with an hourly 24h view, daily/monthly charts, and click-a-day (or hour) to focus it.' },
       { Icon: IconBell,      name: 'In-game status (Alt+K)', go: 'tab:about', desc: 'Press Alt+K while playing to flash your live session time and achievement progress over the game.' },
       { Icon: IconTrophy,    name: 'Achievement list (Alt+J)', go: 'tab:about', desc: 'Press Alt+J while playing to flash your progress and the rarest achievements you still have left, right over the game.' },
       { Icon: IconRocket,    name: 'Tray & startup', go: 'tab:general',desc: 'Runs quietly in the system tray and can launch with Windows.' },

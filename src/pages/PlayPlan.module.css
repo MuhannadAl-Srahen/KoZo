@@ -1,0 +1,104 @@
+.page { composes: page from '../styles/page.module.css'; }
+.toolbar { composes: toolbar from '../styles/page.module.css'; }
+.pageTitle { composes: pageTitle from '../styles/page.module.css'; display: inline-flex; align-items: center; gap: var(--sp-8); }
+.content { composes: content from '../styles/page.module.css'; display: flex; flex-direction: column; gap: var(--sp-16); }
+.spacer { flex: 1; }
+.btnPrimary { composes: btn btnPrimary btnMd from '../styles/controls.module.css'; }
+.muted { color: var(--text-muted); font-size: var(--fs-sm); padding: var(--sp-12); }
+
+/* ── Month strip ─────────────────────────────────────────────── */
+.months {
+  display: flex;
+  gap: var(--sp-6);
+  overflow-x: auto;
+  padding: 3px 2px var(--sp-6);
+}
+.month {
+  flex: 0 0 auto;
+  width: 76px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: var(--sp-8) var(--sp-4);
+  border: 1px solid var(--neutral-border);
+  border-radius: var(--r-card);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.month:hover { border-color: var(--ab); color: var(--text-primary); }
+.monthName { font-size: var(--fs-md); font-weight: 800; color: var(--text-primary); text-transform: capitalize; }
+.monthYear { font-size: var(--fs-2xs); color: var(--text-muted); }
+.monthCount { min-height: 15px; font-size: var(--fs-2xs); font-weight: 700; color: var(--a); }
+.monthHas { border-color: color-mix(in srgb, var(--a) 35%, var(--neutral-border)); }
+.monthNow .monthYear { color: var(--a); font-weight: 700; }
+.monthOn, .monthOn:hover { background: var(--a); border-color: var(--a); }
+.monthOn .monthName, .monthOn .monthYear, .monthOn .monthCount { color: var(--accent-ink); }
+.monthDrop { outline: 2px dashed var(--a); outline-offset: 2px; }
+.monthNone { width: 96px; justify-content: center; gap: var(--sp-4); }
+
+.heading { display: flex; align-items: baseline; gap: var(--sp-10); border-bottom: 1px solid var(--border-subtle); padding-bottom: var(--sp-6); }
+.headingMain { font-size: var(--fs-lg); font-weight: 700; color: var(--text-primary); text-transform: capitalize; }
+.headingCount { font-size: var(--fs-xs); color: var(--text-muted); }
+
+/* ── Cards ───────────────────────────────────────────────────── */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 200px), 1fr));   /* Ctrl+wheel */
+  gap: var(--sp-12);
+}
+.card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--surface-2);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.card:hover { border-color: var(--ab); box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35); }
+.cover { position: relative; aspect-ratio: 2 / 3; background: var(--surface-3); overflow: hidden; }
+.cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.info { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-8) var(--sp-10) var(--sp-10); }
+.name { font-size: var(--fs-md); font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meta { display: flex; gap: var(--sp-6); font-size: var(--fs-xs); min-width: 0; }
+.genres { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── Add games picker ────────────────────────────────────────── */
+.search {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: var(--sp-6) var(--sp-10);
+  border: 1px solid var(--neutral-border);
+  border-radius: var(--r-input);
+  background: var(--surface-3);
+  color: var(--text-muted);
+  margin-bottom: var(--sp-10);
+}
+.search input { flex: 1; border: none; outline: none; background: none; color: var(--text-primary); font-family: inherit; font-size: var(--fs-md); }
+.pickList { display: flex; flex-direction: column; gap: var(--sp-4); max-height: 52vh; overflow-y: auto; padding-right: var(--sp-8); }
+.pickRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  padding: var(--sp-4) var(--sp-8) var(--sp-4) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.pickRow:hover { border-color: var(--ab); }
+.pickRowOn { border-color: var(--a); background: var(--ad); }
+.pickThumb { position: relative; flex-shrink: 0; width: 32px; height: 48px; border-radius: var(--r-sm); overflow: hidden; background: var(--surface-3); }
+.pickThumb img { width: 100%; height: 100%; object-fit: cover; }
+.pickName { flex: 1; min-width: 0; font-size: var(--fs-md); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pickStatus { font-size: var(--fs-xs); color: var(--text-muted); }
+.pickCheck { color: var(--a); }

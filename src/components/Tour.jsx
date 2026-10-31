@@ -40,9 +40,9 @@ const STEPS = [
     body: 'Your backlog and wishlist live here, synced with your Library. Click Game List to open it.',
   },
   {
-    route: '/game-list', target: 'month-filter',
+    route: '/game-list', target: 'nav-plan',
     title: 'Plan your month',
-    body: 'Select a few games, choose Plan for month, then filter by that month to see what you mean to play next.',
+    body: 'Pick a few games with Plan for month, and the Play Plan tab lays out what you mean to play, month by month.',
   },
   {
     route: '/game-list', target: 'nav-upcoming', clickToContinue: true,
@@ -52,7 +52,7 @@ const STEPS = [
   {
     route: '/upcoming', target: 'upcoming-tabs',
     title: 'Steam release calendar',
-    body: 'My upcoming counts down the games you track. Steam calendar shows every popular release by day. Track one and KoZo tells you the moment it is out.',
+    body: "Steam's release calendar, picked for your taste. Track a game and KoZo tells you the moment it is out.",
   },
   {
     route: '/upcoming', target: 'nav-profile',

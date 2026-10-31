@@ -3,9 +3,9 @@ import { NavLink, useLocation } from 'react-router-dom'
 import {
   IconLayoutGrid,
   IconList,
-  IconTrophy,
   IconCalendar,
-  IconHistory,
+  IconCalendarEvent,
+  IconFlag,
   IconChartBar,
   IconSettings,
 } from '@tabler/icons-react'
@@ -23,10 +23,11 @@ function initials(name) {
 export const NAV_ITEMS = [
   { path: '/',              label: 'Library',      Icon: IconLayoutGrid },
   { path: '/game-list',     label: 'Game List',    Icon: IconList },
-  { path: '/achievements',  label: 'Achievements', Icon: IconTrophy },
+  { path: '/plan',          label: 'Play Plan',    Icon: IconCalendarEvent },
+  { path: '/finished',      label: 'Finished',     Icon: IconFlag },
   { path: '/upcoming',      label: 'Upcoming',     Icon: IconCalendar },
-  { path: '/sessions',      label: 'Sessions',     Icon: IconHistory },
-  { path: '/statistics',    label: 'Statistics',   Icon: IconChartBar },
+  // Statistics, Sessions and Achievements live together under Activity.
+  { path: '/activity',      label: 'Activity',     Icon: IconChartBar },
 ]
 
 function formatSessionTime(startedAt, idleSeconds = 0) {

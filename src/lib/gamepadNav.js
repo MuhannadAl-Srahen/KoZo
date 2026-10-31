@@ -9,7 +9,7 @@
 // ring is the `.gpFocus` class; any mouse or keyboard input hides it. Polling
 // runs ONLY while a gamepad is connected.
 
-const ROUTES = ['/', '/game-list', '/achievements', '/upcoming', '/sessions', '/statistics', '/profile']
+const ROUTES = ['/', '/game-list', '/plan', '/finished', '/upcoming', '/activity', '/profile']
 
 const POLL_MS = 90
 const FIRST_REPEAT_MS = 350

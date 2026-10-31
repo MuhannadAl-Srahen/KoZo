@@ -1,0 +1,33 @@
+.head { display: flex; align-items: center; gap: var(--sp-12); margin-bottom: var(--sp-16); }
+.cover { position: relative; flex-shrink: 0; width: 64px; aspect-ratio: 2 / 3; border-radius: var(--r-md); overflow: hidden; background: var(--surface-3); }
+.cover img { width: 100%; height: 100%; object-fit: cover; }
+.name { font-size: var(--fs-lg); font-weight: 700; color: var(--text-primary); }
+.ask { font-size: var(--fs-sm); color: var(--text-secondary); margin-top: 2px; }
+
+.scale { display: grid; grid-template-columns: repeat(10, 1fr); gap: var(--sp-4); }
+.point {
+  aspect-ratio: 1;
+  border: 1px solid var(--neutral-border);
+  border-radius: var(--r-md);
+  background: var(--surface-3);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--fs-md);
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease, border-color 0.1s ease;
+}
+.pointOn { background: color-mix(in srgb, var(--a) 30%, var(--surface-3)); border-color: var(--ab); color: var(--text-primary); }
+.pointPicked { background: var(--a); border-color: var(--a); color: var(--accent-ink); }
+
+.value {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-6);
+  margin-top: var(--sp-12);
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+}
+.value svg { color: #fbbf24; }
+.value strong { font-size: var(--fs-xl); color: var(--text-primary); }

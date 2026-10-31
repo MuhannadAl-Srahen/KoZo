@@ -8,10 +8,11 @@ import Sidebar from './components/Sidebar'
 import Library from './pages/Library'
 import GameDetail from './pages/GameDetail'
 import GameList from './pages/GameList'
-import AchievementsHub from './pages/AchievementsHub'
 import Upcoming from './pages/Upcoming'
-import Sessions from './pages/Sessions'
-import Statistics from './pages/Statistics'
+import Activity from './pages/Activity'
+import PlayPlan from './pages/PlayPlan'
+import Finished from './pages/Finished'
+import RateGameModal from './components/modals/RateGameModal'
 import Profile from './pages/Profile'
 import Settings from './pages/Settings'
 import UnknownGamePrompt from './components/UnknownGamePrompt'
@@ -61,6 +62,12 @@ function Wallpaper() {
 
 export default function App() {
   const [showOnboarding, setShowOnboarding] = useState(false)
+  // A game was just marked Finished somewhere: ask for a 1 to 10 rating.
+  const [rateGame, setRateGame] = useState(null)
+  useEffect(() => {
+    const off = window.kozo?.events?.onGameFinished?.((g) => { if (g?.name) setRateGame(g) })
+    return () => off?.()
+  }, [])
 
   // While the main window is hidden, minimized or behind another window
   // (usually a game), every CSS animation pauses: live-session pulses,
@@ -126,10 +133,14 @@ export default function App() {
               <Route path="/" element={<Library />} />
               <Route path="/game/:id" element={<GameDetail />} />
               <Route path="/game-list" element={<GameList />} />
-              <Route path="/achievements" element={<AchievementsHub />} />
+              <Route path="/plan" element={<PlayPlan />} />
+              <Route path="/finished" element={<Finished />} />
               <Route path="/upcoming" element={<Upcoming />} />
-              <Route path="/sessions" element={<Sessions />} />
-              <Route path="/statistics" element={<Statistics />} />
+              <Route path="/activity" element={<Activity />} />
+              {/* The three pages Activity combined: old links land on their section. */}
+              <Route path="/statistics" element={<Navigate to="/activity?tab=overview" replace />} />
+              <Route path="/sessions" element={<Navigate to="/activity?tab=sessions" replace />} />
+              <Route path="/achievements" element={<Navigate to="/activity?tab=achievements" replace />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="*" element={<Navigate to="/" replace />} />
@@ -142,6 +153,7 @@ export default function App() {
         <UnknownGamePrompt />
         <LevelUpCelebration />
         {showOnboarding && <Tour onDone={() => setShowOnboarding(false)} />}
+        {rateGame && <RateGameModal game={rateGame} onClose={() => setRateGame(null)} />}
       </HashRouter>
      </AppearanceProvider>
     </AccentColorProvider>

@@ -675,6 +675,7 @@ handle('gameList:update', (id, data) => {
   // game's Finished flag on any unrelated edit (rename, rating, list membership).
   if (data?.status && data.status !== prev?.status) {
     try { require('./services/statusSync').syncFromGameList(id, data.status) } catch (e) { logger.warn('statusSync from game list failed', { message: e.message }) }
+    if (data.status === 'finished') require('./services/statusSync').announceFinished({ listId: id })
   }
   // Newly marked "upcoming" with no stored release date → fetch it right away so
   // the Upcoming tab shows the countdown immediately (not on the next backfill).
@@ -1375,6 +1376,46 @@ handle('steam:refreshAllBanners', async () => {
 // ── SteamGridDB (covers for non-Steam games) ─────────────────────────────────
 handle('sgdb:test', (key) => require('./services/steamGridDb').testKey(key))
 handle('sgdb:search', (name) => require('./services/steamGridDb').searchGame(name))
+// Rate a finished game 1 to 10. The rating lives on the Game List row; a
+// Library game without one gets its row created first.
+handle('gameList:rate', ({ listId = null, gameId = null } = {}, rating) => {
+  const value = rating == null ? null : Math.max(1, Math.min(10, Math.round(Number(rating))))
+  let id = listId
+  if (!id && gameId) {
+    const g = gamesQ.getGame(Number(gameId))
+    if (g) gameListQ.ensureListRowForGame(g)
+    id = require('./db/database').getDb().prepare('SELECT id FROM game_list WHERE game_id = ? LIMIT 1').get(Number(gameId))?.id
+  }
+  if (!id) throw new Error('Game not found')
+  gameListQ.updateGameListItem(id, { rating: value })
+  bk(); broadcast('game:updated', null)
+  return value
+})
+
+// Every finished game, Library and Game List together (linked ones once),
+// for the Finished tab: cover, rating, playtime, achievements, finish date.
+handle('games:finished', () => {
+  const db = require('./db/database').getDb()
+  const lib = db.prepare(`
+    SELECT g.id AS game_id, g.name, g.banner_local_path, g.banner_url, g.banner_rev, g.total_playtime_seconds,
+           g.completion_status_at AS finished_at, g.steam_app_id, g.genres,
+           (SELECT COUNT(*) FROM achievements a WHERE a.game_id = g.id) AS ach_total,
+           (SELECT COUNT(DISTINCT au.achievement_id) FROM achievement_unlocks au JOIN achievements a ON a.id = au.achievement_id WHERE a.game_id = g.id) AS ach_unlocked,
+           gl.id AS list_id, gl.rating, gl.banner_url AS list_banner
+    FROM games g LEFT JOIN game_list gl ON gl.game_id = g.id
+    WHERE g.completion_status = 'finished' AND g.is_archived = 0
+    GROUP BY g.id
+  `).all()
+  const listOnly = db.prepare(`
+    SELECT NULL AS game_id, gl.name, NULL AS banner_local_path, gl.banner_url, NULL AS banner_rev, 0 AS total_playtime_seconds,
+           gl.added_at AS finished_at, gl.steam_app_id, gl.genres, 0 AS ach_total, 0 AS ach_unlocked,
+           gl.id AS list_id, gl.rating, gl.banner_url AS list_banner
+    FROM game_list gl
+    WHERE gl.status = 'finished' AND (gl.game_id IS NULL OR gl.game_id NOT IN (SELECT id FROM games WHERE completion_status = 'finished'))
+  `).all()
+  return [...lib, ...listOnly]
+})
+
 // Untrack a release from the Steam calendar. A row still marked Upcoming was
 // only ever on the list because it was tracked, so it goes; a game you also
 // set to Want to play / Playing stays on your list and just stops being watched.

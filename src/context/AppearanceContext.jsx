@@ -6,7 +6,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react'
 // data attributes the stylesheets react to (styles/variables.css,
 // GameCard.module.css, GameList.module.css), plus the preload zoom factor.
 
-export const NAV_PATHS = ['/', '/game-list', '/achievements', '/upcoming', '/sessions', '/statistics']
+export const NAV_PATHS = ['/', '/game-list', '/plan', '/finished', '/upcoming', '/activity']
 
 export const DEFAULT_APPEARANCE = {
   scale: 1,                       // 0.9 | 1 | 1.1 | 1.25
@@ -24,8 +24,16 @@ function normalize(saved) {
   const p = { ...d, ...(saved || {}) }
   p.cards = { ...d.cards, ...(saved?.cards || {}) }
   p.bg = { ...d.bg, ...(saved?.bg || {}) }
-  const known = Array.isArray(saved?.nav) ? saved.nav.filter(n => NAV_PATHS.includes(n?.path)) : []
-  p.nav = [...known, ...NAV_PATHS.filter(x => !known.some(n => n.path === x)).map(path => ({ path, hidden: false }))]
+  // Saved order first; a tab added in a later version slots in right after the
+  // tab it follows by default (not at the end), and removed tabs drop out.
+  const nav = Array.isArray(saved?.nav) ? saved.nav.filter(n => NAV_PATHS.includes(n?.path)) : []
+  NAV_PATHS.forEach((path, i) => {
+    if (nav.some(n => n.path === path)) return
+    const before = NAV_PATHS.slice(0, i).reverse().find(x => nav.some(n => n.path === x))
+    const at = before ? nav.findIndex(n => n.path === before) + 1 : 0
+    nav.splice(at, 0, { path, hidden: false })
+  })
+  p.nav = nav
   p.nav = p.nav.map(n => (n.path === '/' ? { ...n, hidden: false } : n))   // Library always shows
   return p
 }
