@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 8,
+  rev: 9,
   // Settings → Appearance → UI scale.
   ui: {
     setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
@@ -52,6 +52,8 @@ contextBridge.exposeInMainWorld('kozo', {
       reorderPage: (filters, offset, pageIds) => ipcRenderer.invoke('gameList:reorderPage', filters, offset, pageIds),
       moveToLibrary: (ids) => ipcRenderer.invoke('gameList:moveToLibrary', ids),
       plannedMonths: () => ipcRenderer.invoke('gameList:plannedMonths'),
+      planBoard: (month, from, to) => ipcRenderer.invoke('gameList:planBoard', month, from, to),
+      planSummary: () => ipcRenderer.invoke('gameList:planSummary'),
       planMonth: (ids, month) => ipcRenderer.invoke('gameList:planMonth', ids, month),
     },
     customLists: {

@@ -737,6 +737,27 @@ handle('gameList:moveToLibrary', async (ids) => {
   return moved
 })
 handle('gameList:plannedMonths', () => gameListQ.plannedMonths())
+// Play Plan board: one month's planned rows, plus how long each linked game
+// was played inside that month (local month bounds come from the renderer).
+handle('gameList:planBoard', (month, from, to) => {
+  if (!/^\d{4}-\d{2}$/.test(String(month || ''))) return []
+  return require('./db/database').getDb().prepare(`
+    SELECT gl.*,
+      (SELECT g.banner_local_path FROM games g WHERE g.id = gl.game_id) AS game_banner_local_path,
+      (SELECT COALESCE(SUM(s.duration_seconds), 0) FROM sessions s
+        WHERE s.game_id = gl.game_id AND s.started_at >= ? AND s.started_at < ?) AS month_seconds
+    FROM game_list gl
+    WHERE gl.planned_month = ?
+    ORDER BY gl.is_favorite DESC, gl.display_order IS NULL, gl.display_order, gl.id
+  `).all(String(from || ''), String(to || ''), month)
+})
+// Every month that has plans: how many games, and how many of them are done.
+handle('gameList:planSummary', () => require('./db/database').getDb().prepare(`
+  SELECT planned_month AS month, COUNT(*) AS total,
+         SUM(CASE WHEN status = 'finished' THEN 1 ELSE 0 END) AS done
+  FROM game_list WHERE planned_month IS NOT NULL
+  GROUP BY planned_month ORDER BY planned_month
+`).all())
 handle('gameList:planMonth', (ids, month) => {
   const list = (Array.isArray(ids) ? ids : [ids]).map(Number).filter(Number.isFinite)
   const value = gameListQ.setPlannedMonth(list, month)
@@ -1401,6 +1422,9 @@ handle('games:finished', () => {
            g.completion_status_at AS finished_at, g.steam_app_id, g.genres,
            (SELECT COUNT(*) FROM achievements a WHERE a.game_id = g.id) AS ach_total,
            (SELECT COUNT(DISTINCT au.achievement_id) FROM achievement_unlocks au JOIN achievements a ON a.id = au.achievement_id WHERE a.game_id = g.id) AS ach_unlocked,
+           (SELECT COUNT(*) FROM sessions s WHERE s.game_id = g.id) AS session_count,
+           (SELECT MIN(s.started_at) FROM sessions s WHERE s.game_id = g.id) AS first_session_at,
+           g.first_played_at, g.hero_local_path,
            gl.id AS list_id, gl.rating, gl.banner_url AS list_banner
     FROM games g LEFT JOIN game_list gl ON gl.game_id = g.id
     WHERE g.completion_status = 'finished' AND g.is_archived = 0
@@ -1409,6 +1433,7 @@ handle('games:finished', () => {
   const listOnly = db.prepare(`
     SELECT NULL AS game_id, gl.name, NULL AS banner_local_path, gl.banner_url, NULL AS banner_rev, 0 AS total_playtime_seconds,
            gl.added_at AS finished_at, gl.steam_app_id, gl.genres, 0 AS ach_total, 0 AS ach_unlocked,
+           0 AS session_count, NULL AS first_session_at, NULL AS first_played_at, NULL AS hero_local_path,
            gl.id AS list_id, gl.rating, gl.banner_url AS list_banner
     FROM game_list gl
     WHERE gl.status = 'finished' AND (gl.game_id IS NULL OR gl.game_id NOT IN (SELECT id FROM games WHERE completion_status = 'finished'))

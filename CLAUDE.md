@@ -71,8 +71,8 @@ src/                 renderer (React)
 | `/` | Library |
 | `/game/:id` | GameDetail |
 | `/game-list` | GameList (paged, 20 per page) |
-| `/plan` | PlayPlan (month strip; games by `game_list.planned_month`; drag a card onto a month) |
-| `/finished` | Finished (Library + Game List finished games by year, with ratings; `games:finished`) |
+| `/plan` | PlayPlan: month board with lanes Up next / Playing / Done (drag across lanes sets the status; Done = finished, which opens the rating), progress and hours this month (`gameList:planBoard`), coming months and past recap (`gameList:planSummary`); drag a card onto a month chip to re-plan |
+| `/finished` | Finished (Library + Game List finished games by year, with ratings; `games:finished`); a card opens `FinishedGameModal` (stats, rating, game page, Play again) |
 | `/upcoming` | Upcoming = `components/SteamCalendar.jsx` only (data from `steam:comingSoon`). Layouts Steam (default, day columns from today), Strip, Week, Days, Month; TBA and Tracked shelves; "Picked for you" keeps 4 per day scored by taste (`steam:tasteProfile` + GetItems tag ids) and popularity (`wishRank`/`popRank`) |
 | `/activity` | Activity: `?tab=overview` (Statistics), `sessions` (Sessions), `achievements` (AchievementsHub). `/statistics`, `/sessions`, `/achievements` redirect here |
 | `/profile` | Profile |
