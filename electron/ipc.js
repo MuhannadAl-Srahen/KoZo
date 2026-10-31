@@ -304,18 +304,6 @@ handle('saves:backupAll', async () => {
   }
 })
 
-// Library right-click → Open file location: Explorer with the game's file
-// selected (its launcher file when it has one), else just its folder.
-handle('games:revealFile', (id) => {
-  const fs = require('fs')
-  const g = gamesQ.getGame(Number(id))
-  if (!g) throw new Error('Game not found')
-  const file = g.launch_file || (g.install_path && g.exe_name ? path.join(g.install_path, g.exe_name) : null)
-  if (file && fs.existsSync(file)) { shell.showItemInFolder(file); return true }
-  if (g.install_path && fs.existsSync(g.install_path)) { shell.openPath(g.install_path); return true }
-  throw new Error('KoZo does not know where this game is installed. Set its .exe in Edit.')
-})
-
 // Open a folder in Windows Explorer (used by the save-file finder).
 handle('shell:openPath', async (p) => {
   if (typeof p !== 'string' || !p) return false

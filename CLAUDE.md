@@ -61,7 +61,7 @@ src/                 renderer (React)
 | statusSync, installCheck | Keep game status and list status in step; update the installed flag and relocate moved games. |
 | releaseWatch | Refreshes tracked upcoming games' Steam dates (delays), then flags released ones: overlay toast once, plus the `unseen_releases` setting behind the "Now out" panel (`ReleasedPanel`) and the Upcoming sidebar badge. Runs at startup, every 6h, and when the main window is shown. |
 | statusFlash (Alt+K), achievementListFlash (Alt+J) | Overlay info panels. |
-| controllerInput | PowerShell XInput probe, so controller play doesn't count as AFK. |
+| controllerInput | PowerShell XInput probe, so controller play doesn't count as AFK. AFK (`idle_pause_min`, default 5) is applied in `processWatcher.heartbeatSession`: the tick that first flags AFK subtracts the whole quiet span since the last input, not only the part past the threshold. |
 | controllerWake | Always-on PowerShell XInput loop (120 ms): View + Menu held 1s calls `showFromAnywhere({ gamepad: true })` in main.js (also bound to Ctrl+Shift+K), which brings KoZo to front and sends `gamepad:wake`. |
 | appUpdater | electron-updater: broadcasts `app:update` state for `UpdateBanner`, and `app:whatsNew` shows release notes once after an update. |
 | trackingSelfTest, notifications | Settings → "Test achievement tracking"; notifications is a no-op. |

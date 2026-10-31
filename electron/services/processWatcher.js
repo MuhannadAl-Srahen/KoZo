@@ -361,9 +361,18 @@ function heartbeatSession(game, session, gapMs, now) {
   // controller tracking is on) beyond the threshold, count this tick's
   // elapsed time as idle (subtracted from playtime when the session ends).
   const idleThresh = getIdlePauseSec()
-  const isIdleNow  = idleThresh > 0 && effectiveIdleSeconds() >= idleThresh
+  const idleNowSec = idleThresh > 0 ? effectiveIdleSeconds() : 0
+  const isIdleNow  = idleThresh > 0 && idleNowSec >= idleThresh
   if (isIdleNow) {
-    session.idle_seconds = (session.idle_seconds || 0) + Math.round(gapMs / 1000)
+    let add = Math.round(gapMs / 1000)
+    // The tick that first flags AFK also takes back the quiet minutes before
+    // the threshold was reached: all of the time since the last input is
+    // away time, not just the part after the threshold. Before this, every
+    // AFK spell credited the threshold (5 min by default) as playtime.
+    if (!session.idle) add = Math.max(add, Math.round(idleNowSec))
+    const elapsedSec = Math.floor((now - new Date(session.started_at).getTime()) / 1000)
+    const total = (session.idle_seconds || 0) + add
+    session.idle_seconds = Number.isFinite(elapsedSec) ? Math.min(Math.max(0, elapsedSec), total) : total
   }
   // Broadcast idle state EVERY tick while idle (not just on transitions):
   // the renderer computes the live timer as now − started_at − idle_seconds,

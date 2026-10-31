@@ -3,10 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import {
   IconEdit, IconCheck, IconX, IconClock, IconDeviceGamepad2,
   IconTrophy, IconHistory, IconFlame, IconCalendar, IconPhoto, IconStar,
-  IconLoader2, IconPalette, IconTrash, IconCircleCheckFilled, IconChevronRight,
-  IconUser,
+  IconLoader2, IconTrash, IconCircleCheckFilled, IconChevronRight,
+  IconUser, IconFlag, IconChartBar, IconCategory, IconPlus,
 } from '@tabler/icons-react'
-import { fileUrl, formatPlaytime, getBannerBg, timeAgo } from '../lib/utils'
+import { fileUrl, formatPlaytime, getBannerBg, timeAgo, localDayKey } from '../lib/utils'
 import { useAccentColor } from '../context/AccentColorContext'
 import ImageCropModal from '../components/modals/ImageCropModal'
 import Modal from '../components/ui/Modal'
@@ -94,6 +94,33 @@ function coverError(e, remote) {
     return
   }
   img.style.display = 'none'
+}
+
+// A year of play, Monday-first columns, for the profile heatmap. `daily` is
+// stats.dailyActivity ([{ day: 'YYYY-MM-DD' local, seconds }]).
+const HEAT_WEEKS = 52
+function buildHeatmap(daily) {
+  const byDay = new Map((daily || []).map(d => [d.day, d.seconds || 0]))
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const start = new Date(today)
+  start.setDate(start.getDate() - ((today.getDay() + 6) % 7) - (HEAT_WEEKS - 1) * 7)
+  const weeks = []
+  let total = 0, daysPlayed = 0, lastMonth = -1
+  for (let w = 0; w < HEAT_WEEKS; w++) {
+    const days = []
+    let month = null
+    for (let d = 0; d < 7; d++) {
+      const dt = new Date(start); dt.setDate(start.getDate() + w * 7 + d)
+      const future = dt > today
+      const seconds = future ? 0 : (byDay.get(localDayKey(dt)) || 0)
+      if (seconds) { total += seconds; daysPlayed++ }
+      if (d === 0 && dt.getMonth() !== lastMonth) { month = dt.toLocaleDateString(undefined, { month: 'short' }); lastMonth = dt.getMonth() }
+      const level = !seconds ? 0 : seconds < 1800 ? 1 : seconds < 3600 ? 2 : seconds < 7200 ? 3 : 4
+      days.push({ seconds, level, future, label: dt.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) })
+    }
+    weeks.push({ month, days })
+  }
+  return { weeks, total, daysPlayed }
 }
 
 // Compact "when" for XP history rows: "2m ago", "3h ago", "Yesterday", "Jun 12".
@@ -298,8 +325,7 @@ export default function Profile() {
     })
   }
 
-  // First load: the real skeleton, toolbar included — this page used to render a
-  // bare centred spinner with no toolbar at all.
+  // First load: the real skeleton, toolbar included, laid out like the page.
   if (loading) {
     return (
       <div className={s.page}>
@@ -312,24 +338,25 @@ export default function Profile() {
           </div>
         </div>
         <div className={s.scroll}>
-          <div className={s.scrollInner}>
+          <div className={s.body}>
             <div className={s.hero}>
               <div className={s.heroGradient} style={{ background: BANNER_STYLES.accent }} />
               <div className={s.heroShade} />
             </div>
-            <div className={s.body}>
-              <XpCardGhost />
-              <div className={s.statGrid}>
-                {Array.from({ length: 6 }, (_, i) => (
-                  <div key={i} className={s.statCard}>
-                    <Skeleton w={38} h={38} r="var(--r-input)" />
-                    <div className={s.statBody}>
-                      <Skeleton w={70} h={16} />
-                      <Skeleton w={95} h={11} style={{ marginTop: 6 }} />
-                    </div>
+            <div className={s.statGrid}>
+              {Array.from({ length: 6 }, (_, i) => (
+                <div key={i} className={s.statCard}>
+                  <Skeleton w={34} h={34} r="var(--r-input)" />
+                  <div className={s.statBody}>
+                    <Skeleton w={70} h={16} />
+                    <Skeleton w={90} h={11} style={{ marginTop: 6 }} />
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
+            </div>
+            <div className={s.columns}>
+              <div className={s.colMain}><XpCardGhost /></div>
+              <div className={s.colSide}><Skeleton h={220} r="var(--r-card)" /></div>
             </div>
           </div>
         </div>
@@ -341,18 +368,20 @@ export default function Profile() {
   const sessions = stats?.sessionCount?.count ?? 0
   const unlocked = stats?.achievementCounts?.unlocked ?? 0
   const longest = stats?.longestSessions?.[0]?.duration_seconds ?? 0
-  const mostPlayed = stats?.topGames?.[0]?.name || 'None yet'
+  const finishedCount = xp?.finishedCount ?? 0
 
   const avatarSrc = avatar ? fileUrl(avatar, imgBust || undefined) : null
   const showcaseGames = showcase.map(id => games.find(g => String(g.id) === id)).filter(Boolean)
+  const gameById = new Map(games.map(g => [g.id, g]))
+  const coverOf = (g) => (g?.banner_local_path ? fileUrl(g.banner_local_path, imgBust || undefined) : g?.banner_url) || null
 
   const STAT_CARDS = [
-    { Icon: IconClock, label: 'Total playtime', value: formatPlaytime(playSec), color: TINT_PLAY },
+    { Icon: IconClock, label: 'Played', value: formatPlaytime(playSec), color: TINT_PLAY },
     { Icon: IconDeviceGamepad2, label: 'Games', value: games.length, color: TINT_GAMES },
+    { Icon: IconFlag, label: 'Finished', value: finishedCount, color: TINT_GAMES },
     { Icon: IconTrophy, label: 'Achievements', value: unlocked, color: TINT_ACH },
     { Icon: IconHistory, label: 'Sessions', value: sessions, color: TINT_SESS },
     { Icon: IconFlame, label: 'Longest session', value: longest ? formatPlaytime(longest) : 'None yet', color: TINT_FIRE },
-    { Icon: IconStar, label: 'Most played', value: mostPlayed, color: TINT_PLAY },
   ]
 
   const heroBg = banner ? undefined : (BANNER_STYLES[bannerStyle] || BANNER_STYLES.accent)
@@ -367,7 +396,7 @@ export default function Profile() {
         : showcaseGames[0].banner_url))
     : null
 
-  // Top genres — aggregate library genres weighted by playtime.
+  // Top genres: library genres weighted by playtime, drawn as bars.
   const genreSeconds = {}
   for (const g of games) {
     let gs = []
@@ -376,9 +405,13 @@ export default function Profile() {
       genreSeconds[name] = (genreSeconds[name] || 0) + (g.total_playtime_seconds || 0) + 1
     }
   }
-  const topGenres = Object.entries(genreSeconds)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 6)
+  const topGenres = Object.entries(genreSeconds).sort((a, b) => b[1] - a[1]).slice(0, 6)
+  const genreMax = topGenres[0]?.[1] || 1
+
+  const topGames = (stats?.topGames || []).slice(0, 5)
+  const topMax = topGames[0]?.seconds || 1
+  const heat = buildHeatmap(stats?.dailyActivity)
+  const entries = mergeXpHistory(xpHistory)
 
   return (
     <div className={s.page}>
@@ -414,8 +447,8 @@ export default function Profile() {
       </div>
 
       <div className={s.scroll}>
-        <div className={s.scrollInner}>
-          {/* Hero — full-bleed, so it keeps no gutter of its own */}
+        <div className={s.body}>
+          {/* Hero card: banner art, avatar and who you are */}
           <div className={s.hero}>
             {bannerSrc
               ? <>
@@ -424,25 +457,8 @@ export default function Profile() {
               </>
               : <>
                 {showcaseArt && (
-                  <img
-                    src={showcaseArt}
-                    className={s.heroBlur}
-                    alt=""
-                    aria-hidden="true"
-                    decoding="async"
-                    onError={e => {
-                      // Local hero/banner file missing (e.g. post-restore) —
-                      // fall back to the remote cover once, then give up.
-                      const img = e.target
-                      const remote = showcaseGames[0]?.banner_url
-                      if (remote && img.src !== remote && !img.dataset.fallbackTried) {
-                        img.dataset.fallbackTried = '1'
-                        img.src = remote
-                        return
-                      }
-                      img.style.display = 'none'
-                    }}
-                  />
+                  <img src={showcaseArt} className={s.heroBlur} alt="" aria-hidden="true" decoding="async"
+                    onError={e => coverError(e, showcaseGames[0]?.banner_url)} />
                 )}
                 <div className={`${s.heroGradient} ${showcaseArt ? s.heroGradientOverArt : ''}`} style={{ background: heroBg }} />
               </>}
@@ -482,6 +498,7 @@ export default function Profile() {
                     ? <img src={avatarSrc} alt="" decoding="async" onError={e => { e.target.style.display = 'none' }} />
                     : <span className={s.avatarInitials}>{initials(name)}</span>}
                 </div>
+                {xp && !editing && <span className={s.avatarLvl} title={`Level ${xp.level}`}>{xp.level}</span>}
                 {editing && (
                   <button className={s.avatarPick} title="Change avatar" aria-label="Change avatar" onClick={() => chooseImage('avatar', setAvatar)}>
                     <IconPhoto size={13} stroke={1.9} />
@@ -500,22 +517,26 @@ export default function Profile() {
                     ? <input className={s.nameInput} value={name} maxLength={32} onChange={e => setName(e.target.value)} placeholder="Your name" aria-label="Profile name" />
                     : <div className={s.name} title={name}>{name}</div>}
                   {!editing && title && <span className={s.titlePill}>{title}</span>}
-                  {!editing && xp && <span className={s.levelPill}>LVL {xp.level}</span>}
                 </div>
                 {editing
                   ? <input className={s.taglineInput} value={tagline} maxLength={80} onChange={e => setTagline(e.target.value)} placeholder="Add a tagline…" aria-label="Profile tagline" />
                   : (tagline ? <div className={s.tagline}>{tagline}</div> : <div className={s.taglineMuted}>No tagline yet</div>)}
+                {!editing && (
+                  <div className={s.heroMeta}>
+                    {xp && <span className={s.heroTier}>{xp.tier}</span>}
+                    <span><IconCalendar size={12} stroke={1.8} /> Since {memberSince(createdAt)}</span>
+                    {xp?.currentStreak > 0 && <span><IconFlame size={12} stroke={1.8} style={{ color: TINT_FIRE }} /> {xp.currentStreak} day streak</span>}
+                  </div>
+                )}
               </div>
-
             </div>
           </div>
 
-          {/* One gutter for everything below the hero */}
-          <div className={s.body}>
-            {/* Title picker (edit only) */}
-            {editing && (
-              <div className={s.titlePicker}>
-                <span className={s.titlePickerLabel}>Title</span>
+          {/* Everything you can change, together, while editing */}
+          {editing && (
+            <div className={s.editPanel}>
+              <div className={s.editRow}>
+                <span className={s.editLabel}>Title</span>
                 <div className={s.titleOptions}>
                   {TITLES.map(t => (
                     <button key={t || 'none'} type="button"
@@ -527,165 +548,204 @@ export default function Profile() {
                   ))}
                 </div>
               </div>
-            )}
-
-            {/* XP / Level — motivational hero (the single progression system; the old
-                playtime "rank ladder" bar was removed — it duplicated this). While XP
-                is still loading the ghost holds the exact same height. */}
-            {!xp ? <XpCardGhost /> : (() => {
-              const R = 52, C = 2 * Math.PI * R
-              const dash = C * Math.min(1, (xp.progress || 0) / 100)
-              return (
-                <div className={s.xpCard}>
-                  <div className={s.xpHero}>
-                    {/* Circular level ring */}
-                    <div className={s.xpRing}>
-                      <svg width="120" height="120" viewBox="0 0 120 120">
-                        {/* Progress stroke gradient: accent → brightened accent.
-                            stop-color lives in the CSS module so both stops
-                            re-derive from var(--a) when the accent changes. */}
-                        <defs>
-                          <linearGradient id="xpRingGrad" x1="0" y1="0" x2="1" y2="1">
-                            <stop offset="0%" className={s.xpGradStart} />
-                            <stop offset="100%" className={s.xpGradEnd} />
-                          </linearGradient>
-                        </defs>
-                        <circle cx="60" cy="60" r={R} className={s.xpRingTrack} />
-                        <circle cx="60" cy="60" r={R} className={s.xpRingFill}
-                          strokeDasharray={`${dash} ${C}`} strokeLinecap="round"
-                          transform="rotate(-90 60 60)" />
-                      </svg>
-                      <div className={s.xpRingInner}>
-                        <span className={s.xpRingLvl}>{xp.level}</span>
-                        <span className={s.xpRingWord}>LEVEL</span>
-                      </div>
-                    </div>
-
-                    <div className={s.xpHeroInfo}>
-                      <div className={s.xpTier}>{xp.tier}</div>
-                      <div className={s.xpTotal}>{xp.totalXp.toLocaleString()} XP earned</div>
-                      {/* Next-reward hook */}
-                      <div className={s.xpHook}>
-                        <strong>{(xp.toNextLevel ?? 0).toLocaleString()} XP</strong> to Level {xp.level + 1}
-                        {xp.nextTier && (
-                          <span className={s.xpHookTier}>
-                            <IconChevronRight size={12} stroke={2} />
-                            {xp.nextTier.level - xp.level} {xp.nextTier.level - xp.level === 1 ? 'level' : 'levels'} to {xp.nextTier.name}
-                          </span>
-                        )}
-                      </div>
-                      <div className={s.xpBarTrack}><div className={s.xpBarFill} style={{ width: `${xp.progress}%` }} /></div>
-                    </div>
-
-                    <div className={s.xpStreaks}>
-                      <div className={s.xpStreak} title="Days played in a row right now">
-                        <IconFlame size={16} stroke={1.8} style={{ color: xp.currentStreak > 0 ? TINT_FIRE : 'var(--text-muted)' }} />
-                        <span><strong>{xp.currentStreak}</strong>d</span>
-                      </div>
-                      <div className={s.xpStreakSub}>streak</div>
-                      <div className={s.xpStreakSub}>best {xp.longestStreak}d</div>
-                    </div>
-                  </div>
-
-                  <div className={s.xpBreakdown}>
-                    {[
-                      { Icon: IconClock, label: 'Playtime', value: xp.breakdown.playtime, color: TINT_PLAY, sub: `${xp.playDays} days played` },
-                      { Icon: IconTrophy, label: 'Achievements', value: xp.breakdown.achievements, color: TINT_ACH, sub: `${xp.unlockCount} unlocked` },
-                      { Icon: IconCircleCheckFilled, label: 'Finished', value: xp.breakdown.finished, color: TINT_GAMES, sub: `${xp.finishedCount} game${xp.finishedCount === 1 ? '' : 's'}` },
-                      { Icon: IconFlame, label: 'Streaks', value: xp.breakdown.streak, color: TINT_FIRE, sub: `best ${xp.longestStreak}d` },
-                    ].map(b => (
-                      <div key={b.label} className={s.xpSource}>
-                        <b.Icon size={15} stroke={1.7} style={{ color: b.color }} />
-                        <span className={s.xpSourceVal}>+{b.value.toLocaleString()}</span>
-                        <span className={s.xpSourceLabel} title={b.label}>{b.label}</span>
-                        <span className={s.xpSourceSub} title={b.sub}>{b.sub}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Recent XP — same-day sessions merged per game, newest 6 in a
-                      compact grid; "Show all" opens a modal so the page never grows. */}
-                  {xpHistory.length > 0 && (() => {
-                    const entries = mergeXpHistory(xpHistory)
-                    return (
-                      <div className={s.xpHistory}>
-                        <div className={s.xpHistoryTitle}>Recent XP</div>
-                        <div className={s.xpHistoryGrid}>
-                          {entries.slice(0, 6).map((e, i) => (
-                            <XpEntryCard key={`${e.type}-${e.ts}-${i}`} entry={e} />
-                          ))}
-                        </div>
-                        {entries.length > 6 && (
-                          <button className={s.xpShowAll} onClick={() => setXpModalOpen(true)}>
-                            Show all ({entries.length})
-                          </button>
-                        )}
-                      </div>
-                    )
-                  })()}
-                </div>
-              )
-            })()}
-
-            {/* Stat grid */}
-            <div className={s.statGrid}>
-              {STAT_CARDS.map(({ Icon, label, value, color }) => (
-                <div key={label} className={s.statCard}>
-                  <div className={s.statIcon} style={{ color, background: tint(color, 12), borderColor: tint(color, 24) }}>
-                    <Icon size={17} stroke={1.6} />
-                  </div>
-                  <div className={s.statBody}>
-                    <div className={s.statValue} title={String(value)}>{value}</div>
-                    <div className={s.statLabel}>{label}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className={s.memberRow}>
-              <IconCalendar size={13} stroke={1.7} /> Member since {memberSince(createdAt)}
-            </div>
-
-            {/* Top genres — what you actually play, weighted by playtime */}
-            {topGenres.length > 0 && (
-              <div className={s.section}>
-                <div className={s.sectionTitle}>Top Genres</div>
-                <div className={s.genreRow}>
-                  {topGenres.map(([gName, sec], i) => (
-                    <span key={gName} className={`${s.genreTag} ${i === 0 ? s.genreTagTop : ''}`}>
-                      {gName}
-                      <span className={s.genreTagTime}>{formatPlaytime(sec)}</span>
-                    </span>
+              <div className={s.editRow}>
+                <span className={s.editLabel}>Accent</span>
+                <div className={s.accentRow}>
+                  {presets.map(p => (
+                    <button key={p.value}
+                      className={`${s.accentDot} ${accent === p.value ? s.accentDotActive : ''}`}
+                      style={{ '--dot': p.value }} onClick={() => setAccent(p.value)}
+                      title={p.label} aria-label={p.label} aria-pressed={accent === p.value}>
+                      {accent === p.value && <IconCheck size={11} stroke={3} />}
+                    </button>
                   ))}
                 </div>
               </div>
-            )}
+              <div className={s.editRowTop}>
+                <span className={s.editLabel}>Showcase <span className={s.editHint}>{showcase.length} of {MAX_SHOWCASE}</span></span>
+                {games.length
+                  ? <div className={s.picker}>
+                    {games.map(g => {
+                      const sid = String(g.id)
+                      const idx = showcase.indexOf(sid)
+                      const on = idx !== -1
+                      const src = coverOf(g)
+                      return (
+                        <button type="button" key={g.id}
+                          aria-pressed={on}
+                          className={`${s.pickCard} ${on ? s.pickCardOn : ''}`}
+                          onClick={() => toggleShowcase(g.id)} title={g.name}>
+                          <div className={s.pickBanner} style={{ background: getBannerBg(g.id) }}>
+                            {src
+                              ? <img src={src} className={s.pickImg} alt="" loading="lazy" decoding="async" onError={e => coverError(e, g.banner_url)} />
+                              : <IconDeviceGamepad2 size={20} stroke={1.1} style={{ color: 'var(--on-art-muted)' }} />}
+                            {on && <span className={s.pickOrder}>{idx + 1}</span>}
+                          </div>
+                          <div className={s.pickName} title={g.name}>{g.name}</div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  : <div className={s.editHint}>Add games to your Library first.</div>}
+              </div>
+            </div>
+          )}
 
-            {/* Showcase shelf */}
-            <div className={s.section}>
-              <div className={s.sectionTitle}>
-                Showcase
-                {editing && <span className={s.sectionHint}> · pick up to {MAX_SHOWCASE} ({showcase.length}/{MAX_SHOWCASE})</span>}
+          {/* Stat strip: one even row */}
+          <div className={s.statGrid}>
+            {STAT_CARDS.map(({ Icon, label, value, color }) => (
+              <div key={label} className={s.statCard}>
+                <div className={s.statIcon} style={{ color, background: tint(color, 12), borderColor: tint(color, 24) }}>
+                  <Icon size={16} stroke={1.7} />
+                </div>
+                <div className={s.statBody}>
+                  <div className={s.statValue} title={String(value)}>{value}</div>
+                  <div className={s.statLabel}>{label}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className={s.columns}>
+            <div className={s.colMain}>
+              {/* XP / Level: the single progression system */}
+              {!xp ? <XpCardGhost /> : (() => {
+                const R = 52, C = 2 * Math.PI * R
+                const dash = C * Math.min(1, (xp.progress || 0) / 100)
+                return (
+                  <div className={s.xpCard}>
+                    <div className={s.xpHero}>
+                      <div className={s.xpRing}>
+                        <svg width="120" height="120" viewBox="0 0 120 120">
+                          {/* stop-color lives in the CSS module so both stops
+                              re-derive from var(--a) when the accent changes. */}
+                          <defs>
+                            <linearGradient id="xpRingGrad" x1="0" y1="0" x2="1" y2="1">
+                              <stop offset="0%" className={s.xpGradStart} />
+                              <stop offset="100%" className={s.xpGradEnd} />
+                            </linearGradient>
+                          </defs>
+                          <circle cx="60" cy="60" r={R} className={s.xpRingTrack} />
+                          <circle cx="60" cy="60" r={R} className={s.xpRingFill}
+                            strokeDasharray={`${dash} ${C}`} strokeLinecap="round"
+                            transform="rotate(-90 60 60)" />
+                        </svg>
+                        <div className={s.xpRingInner}>
+                          <span className={s.xpRingLvl}>{xp.level}</span>
+                          <span className={s.xpRingWord}>LEVEL</span>
+                        </div>
+                      </div>
+
+                      <div className={s.xpHeroInfo}>
+                        <div className={s.xpTier}>{xp.tier}</div>
+                        <div className={s.xpTotal}>{xp.totalXp.toLocaleString()} XP earned</div>
+                        <div className={s.xpHook}>
+                          <strong>{(xp.toNextLevel ?? 0).toLocaleString()} XP</strong> to Level {xp.level + 1}
+                          {xp.nextTier && (
+                            <span className={s.xpHookTier}>
+                              <IconChevronRight size={12} stroke={2} />
+                              {xp.nextTier.level - xp.level} {xp.nextTier.level - xp.level === 1 ? 'level' : 'levels'} to {xp.nextTier.name}
+                            </span>
+                          )}
+                        </div>
+                        <div className={s.xpBarTrack}><div className={s.xpBarFill} style={{ width: `${xp.progress}%` }} /></div>
+                      </div>
+
+                      <div className={s.xpStreaks}>
+                        <div className={s.xpStreak} title="Days played in a row right now">
+                          <IconFlame size={16} stroke={1.8} style={{ color: xp.currentStreak > 0 ? TINT_FIRE : 'var(--text-muted)' }} />
+                          <span><strong>{xp.currentStreak}</strong>d</span>
+                        </div>
+                        <div className={s.xpStreakSub}>streak</div>
+                        <div className={s.xpStreakSub}>best {xp.longestStreak}d</div>
+                      </div>
+                    </div>
+
+                    <div className={s.xpBreakdown}>
+                      {[
+                        { Icon: IconClock, label: 'Playtime', value: xp.breakdown.playtime, color: TINT_PLAY, sub: `${xp.playDays} days played` },
+                        { Icon: IconTrophy, label: 'Achievements', value: xp.breakdown.achievements, color: TINT_ACH, sub: `${xp.unlockCount} unlocked` },
+                        { Icon: IconCircleCheckFilled, label: 'Finished', value: xp.breakdown.finished, color: TINT_GAMES, sub: `${xp.finishedCount} game${xp.finishedCount === 1 ? '' : 's'}` },
+                        { Icon: IconFlame, label: 'Streaks', value: xp.breakdown.streak, color: TINT_FIRE, sub: `best ${xp.longestStreak}d` },
+                      ].map(b => (
+                        <div key={b.label} className={s.xpSource}>
+                          <b.Icon size={15} stroke={1.7} style={{ color: b.color }} />
+                          <span className={s.xpSourceVal}>+{b.value.toLocaleString()}</span>
+                          <span className={s.xpSourceLabel} title={b.label}>{b.label}</span>
+                          <span className={s.xpSourceSub} title={b.sub}>{b.sub}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {/* Play heatmap: the last 52 weeks, one square per day */}
+              <div className={s.card}>
+                <div className={s.cardHead}>
+                  <span className={s.cardTitle}><IconChartBar size={14} stroke={1.8} /> Last 12 months</span>
+                  <span className={s.cardNote}>{heat.daysPlayed} {heat.daysPlayed === 1 ? 'day' : 'days'} played · {formatPlaytime(heat.total)}</span>
+                </div>
+                <div className={s.heatMonths} style={{ '--weeks': heat.weeks.length }}>
+                  {heat.weeks.map((w, i) => <span key={i}>{w.month || ''}</span>)}
+                </div>
+                <div className={s.heat} style={{ '--weeks': heat.weeks.length }}>
+                  {heat.weeks.flatMap((w, wi) => w.days.map((d, di) => (
+                    <span key={`${wi}-${di}`}
+                      className={`${s.heatCell} ${d.future ? s.heatFuture : ''}`}
+                      data-l={d.level}
+                      title={d.future ? undefined : `${d.label}: ${d.seconds ? formatPlaytime(d.seconds) : 'no play'}`} />
+                  )))}
+                </div>
+                <div className={s.heatLegend}>
+                  Less
+                  {[0, 1, 2, 3, 4].map(l => <span key={l} className={s.heatCell} data-l={l} />)}
+                  More
+                </div>
               </div>
 
-              {!editing && (
-                showcaseGames.length
+              {/* Recent XP: same-day sessions merged per game */}
+              {entries.length > 0 && (
+                <div className={s.card}>
+                  <div className={s.cardHead}>
+                    <span className={s.cardTitle}><IconHistory size={14} stroke={1.8} /> Recent XP</span>
+                    {entries.length > 6 && (
+                      <button className={s.cardLink} onClick={() => setXpModalOpen(true)}>Show all ({entries.length})</button>
+                    )}
+                  </div>
+                  <div className={s.xpHistoryGrid}>
+                    {entries.slice(0, 6).map((e, i) => (
+                      <XpEntryCard key={`${e.type}-${e.ts}-${i}`} entry={e} />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className={s.colSide}>
+              {/* Showcase: four slots, the first is the favorite */}
+              <div className={s.card}>
+                <div className={s.cardHead}>
+                  <span className={s.cardTitle}><IconStar size={14} stroke={1.8} /> Showcase</span>
+                </div>
+                {showcaseGames.length
                   ? <div className={s.shelf}>
-                    {showcaseGames.map((g, i) => {
-                      const src = g.banner_local_path ? fileUrl(g.banner_local_path, imgBust || undefined) : g.banner_url
+                    {Array.from({ length: MAX_SHOWCASE }, (_, i) => {
+                      const g = showcaseGames[i]
+                      if (!g) return <button key={`empty-${i}`} type="button" className={s.shelfEmpty} onClick={startEdit} aria-label="Pin a game"><IconPlus size={16} stroke={1.8} /></button>
+                      const src = coverOf(g)
                       return (
-                        <div key={g.id} className={s.shelfCard} onClick={() => navigate(`/game/${g.id}`)} title={g.name}>
+                        <div key={g.id} className={s.shelfCard} onClick={() => navigate(`/game/${g.id}`)} title={g.name} data-gpnav="">
                           <div className={s.shelfBanner} style={{ background: getBannerBg(g.id) }}>
                             {src
-                              ? <>
-                                <img src={src} className={s.shelfBlur} alt="" aria-hidden="true" loading="lazy" decoding="async" onError={e => coverError(e, g.banner_url)} />
-                                <img src={src} className={s.shelfImg} alt="" loading="lazy" decoding="async" onError={e => coverError(e, g.banner_url)} />
-                              </>
-                              : <IconDeviceGamepad2 size={24} stroke={1.1} style={{ color: 'var(--on-art-muted)' }} />}
-                            {i === 0 && <div className={s.favTag}><IconStar size={10} stroke={2} /> Favorite</div>}
+                              ? <img src={src} className={s.shelfImg} alt="" loading="lazy" decoding="async" onError={e => coverError(e, g.banner_url)} />
+                              : <IconDeviceGamepad2 size={22} stroke={1.1} style={{ color: 'var(--on-art-muted)' }} />}
+                            {i === 0 && <div className={s.favTag} title="Favorite"><IconStar size={10} stroke={2} /></div>}
+                            <div className={s.shelfInfo}>
+                              <div className={s.shelfName}>{g.name}</div>
+                              <div className={s.shelfMeta}>{formatPlaytime(g.total_playtime_seconds)}</div>
+                            </div>
                           </div>
-                          <div className={s.shelfName} title={g.name}>{g.name}</div>
-                          <div className={s.shelfMeta}>{formatPlaytime(g.total_playtime_seconds)}</div>
                         </div>
                       )
                     })}
@@ -696,61 +756,56 @@ export default function Profile() {
                     title="No games pinned yet"
                     desc={`Pin up to ${MAX_SHOWCASE} favorites and they'll headline your profile.`}
                     action={{ label: 'Edit profile', onClick: startEdit, Icon: IconEdit }}
-                  />
-              )}
+                  />}
+              </div>
 
-              {editing && (
-                games.length
-                  ? <div className={s.picker}>
-                    {games.map(g => {
-                      const sid = String(g.id)
-                      const idx = showcase.indexOf(sid)
-                      const on = idx !== -1
-                      const src = g.banner_local_path ? fileUrl(g.banner_local_path, imgBust || undefined) : g.banner_url
+              {/* Most played: top 5 by time, with a bar each */}
+              {topGames.length > 0 && (
+                <div className={s.card}>
+                  <div className={s.cardHead}>
+                    <span className={s.cardTitle}><IconDeviceGamepad2 size={14} stroke={1.8} /> Most played</span>
+                  </div>
+                  <div className={s.topList}>
+                    {topGames.map((t, i) => {
+                      const g = gameById.get(t.id)
+                      const src = t.banner_local_path ? fileUrl(t.banner_local_path, imgBust || undefined) : g?.banner_url
                       return (
-                        <button type="button" key={g.id}
-                          aria-pressed={on}
-                          className={`${s.pickCard} ${on ? s.pickCardOn : ''}`}
-                          onClick={() => toggleShowcase(g.id)} title={g.name}>
-                          <div className={s.pickBanner} style={{ background: getBannerBg(g.id) }}>
-                            {src
-                              ? <>
-                                <img src={src} className={s.pickImgBlur} alt="" aria-hidden="true" loading="lazy" decoding="async" onError={e => coverError(e, g.banner_url)} />
-                                <img src={src} className={s.pickImg} alt="" loading="lazy" decoding="async" onError={e => coverError(e, g.banner_url)} />
-                              </>
-                              : <IconDeviceGamepad2 size={20} stroke={1.1} style={{ color: 'var(--on-art-muted)' }} />}
-                            {on && <span className={s.pickOrder}>{idx + 1}</span>}
+                        <div key={t.id} className={s.topRow} onClick={() => navigate(`/game/${t.id}`)} data-gpnav="">
+                          <span className={s.topRank}>{i + 1}</span>
+                          <div className={s.topCover} style={{ background: getBannerBg(t.id) }}>
+                            {src && <img src={src} alt="" loading="lazy" decoding="async" onError={e => coverError(e, g?.banner_url)} />}
                           </div>
-                          <div className={s.pickName} title={g.name}>{g.name}</div>
-                        </button>
+                          <div className={s.topInfo}>
+                            <div className={s.topLine}>
+                              <span className={s.topName} title={t.name}>{t.name}</span>
+                              <span className={s.topTime}>{formatPlaytime(t.seconds)}</span>
+                            </div>
+                            <div className={s.bar}><div className={s.barFill} style={{ width: `${Math.max(4, (t.seconds / topMax) * 100)}%` }} /></div>
+                          </div>
+                        </div>
                       )
                     })}
                   </div>
-                  : <EmptyState
-                    size="sm"
-                    Icon={IconDeviceGamepad2}
-                    title="Nothing to show off yet"
-                    desc="Add games to your library first. They'll appear here as showcase picks."
-                  />
+                </div>
               )}
-            </div>
 
-            {/* Accent quick-pick */}
-            <div className={s.section}>
-              <div className={s.sectionTitle}>
-                <IconPalette size={13} stroke={1.7} /> Accent Color
-              </div>
-              <div className={s.accentRow}>
-                {presets.map(p => (
-                  <button key={p.value}
-                    className={`${s.accentDot} ${accent === p.value ? s.accentDotActive : ''}`}
-                    style={{ '--dot': p.value }} onClick={() => setAccent(p.value)}
-                    title={p.label} aria-label={p.label} aria-pressed={accent === p.value}>
-                    {accent === p.value && <IconCheck size={11} stroke={3} />}
-                  </button>
-                ))}
-              </div>
-              <div className={s.accentHint}>Custom hex + more in Settings → Appearance. The accent flows through the whole app: toasts, overlay, badges, everything.</div>
+              {/* Top genres: what you actually play, weighted by playtime */}
+              {topGenres.length > 0 && (
+                <div className={s.card}>
+                  <div className={s.cardHead}>
+                    <span className={s.cardTitle}><IconCategory size={14} stroke={1.8} /> Top genres</span>
+                  </div>
+                  <div className={s.genreList}>
+                    {topGenres.map(([gName, sec]) => (
+                      <div key={gName} className={s.genreRow}>
+                        <span className={s.genreName}>{gName}</span>
+                        <div className={s.bar}><div className={s.barFill} style={{ width: `${Math.max(4, (sec / genreMax) * 100)}%` }} /></div>
+                        <span className={s.genreTime}>{formatPlaytime(sec)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -770,7 +825,7 @@ export default function Profile() {
         <Modal title="Recent XP" icon={<IconHistory size={17} stroke={1.6} />} width={640} onClose={() => setXpModalOpen(false)}>
           <div className={s.modalScroll}>
             <div className={s.xpHistoryGrid}>
-              {mergeXpHistory(xpHistory).map((e, i) => (
+              {entries.map((e, i) => (
                 <XpEntryCard key={`${e.type}-${e.ts}-${i}`} entry={e} />
               ))}
             </div>

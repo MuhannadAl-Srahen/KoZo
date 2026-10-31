@@ -22,7 +22,6 @@ contextBridge.exposeInMainWorld('kozo', {
       archive: (ids) => ipcRenderer.invoke('games:archive', ids),
       unarchive: (ids) => ipcRenderer.invoke('games:unarchive', ids),
       launch: (id) => ipcRenderer.invoke('games:launch', id),
-      revealFile: (id) => ipcRenderer.invoke('games:revealFile', id),
     },
     sessions: {
       list: (filters) => ipcRenderer.invoke('sessions:list', filters),
