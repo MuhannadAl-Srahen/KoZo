@@ -1156,8 +1156,28 @@ emitter.on('idle', () => {
  *
  * Filters out hard-deny system processes. Sorts game-y paths first.
  */
+// Everyday apps and dev tools that show up while a game runs but never are
+// one: the "Pick a running game" list files them under "Other apps".
+const EVERYDAY_APPS = new Set([
+  'excel.exe','winword.exe','powerpnt.exe','outlook.exe','onenote.exe','msaccess.exe','teams.exe','ms-teams.exe',
+  'discord.exe','slack.exe','spotify.exe','zoom.exe','skype.exe','telegram.exe','whatsapp.exe','signal.exe',
+  'obs64.exe','obs32.exe','vlc.exe','mpc-hc64.exe','potplayermini64.exe','audacity.exe',
+  'notepad.exe','notepad++.exe','sublime_text.exe','idea64.exe','pycharm64.exe','devenv.exe','rider64.exe',
+  'bun.exe','deno.exe','vite.exe','concurrently.exe','esbuild.exe','git.exe','gh.exe','docker desktop.exe','docker.exe',
+  'steam.exe','steamwebhelper.exe','epicgameslauncher.exe','galaxyclient.exe','eadesktop.exe','battle.net.exe','ubisoftconnect.exe','upc.exe',
+  'msiafterburner.exe','rtss.exe','nvcontainer.exe','radeonsoftware.exe','armourycrate.exe',
+  'taskmgr.exe','processhacker.exe','systeminformer.exe','everything.exe','7zfm.exe','winrar.exe','qbittorrent.exe',
+  'photoshop.exe','figma.exe','blender.exe','obsidian.exe','notion.exe','postman.exe','wallpaper64.exe','wallpaper32.exe',
+])
+const APP_PATH_HINTS = [
+  '\\node_modules\\', '\\.bun\\', '\\nodejs\\', '\\microsoft office\\', '\\program files\\git\\',
+  '\\appdata\\local\\programs\\', '\\appdata\\local\\discord', '\\docker\\',
+]
+
 async function listRunningProcesses() {
-  const ps = `Get-Process | Where-Object { $_.Path } | Select-Object Name, Path | ConvertTo-Json -Compress`
+  // MainWindowHandle: background helpers (build tools, services) have no
+  // window, and a game always has one.
+  const ps = `Get-Process | Where-Object { $_.Path } | Select-Object Name, Path, @{n='W';e={[int64]$_.MainWindowHandle}} | ConvertTo-Json -Compress`
   try {
     const { stdout } = await execP(
       `powershell.exe -NoProfile -NonInteractive -Command "${ps}"`,
@@ -1176,19 +1196,21 @@ async function listRunningProcesses() {
       if (seen.has(key)) continue
       if (HARD_DENY.has(key)) continue
       const path = item.Path || ''
-      if (NON_GAME_PATH_HINTS.some(s => path.toLowerCase().replace(/\//g, '\\').includes(s))) continue
+      const lowerPath = path.toLowerCase().replace(/\//g, '\\')
+      if (NON_GAME_PATH_HINTS.some(s => lowerPath.includes(s))) continue
       seen.add(key)
+      const likely = looksLikeGamePath(path)
+      const app = !likely && (EVERYDAY_APPS.has(key) || APP_PATH_HINTS.some(s => lowerPath.includes(s)) || !item.W)
       results.push({
         exe_name: name,
         install_path: path.replace(/\\[^\\]+$/, ''),  // strip the exe filename
-        is_likely_game: looksLikeGamePath(path),
+        is_likely_game: likely,
+        kind: likely ? 'game' : app ? 'app' : 'maybe',
       })
     }
-    // Sort: likely games first, then alphabetically
-    results.sort((a, b) => {
-      if (a.is_likely_game !== b.is_likely_game) return a.is_likely_game ? -1 : 1
-      return a.exe_name.localeCompare(b.exe_name)
-    })
+    // Likely games first, then other windowed programs, then everyday apps.
+    const rank = { game: 0, maybe: 1, app: 2 }
+    results.sort((a, b) => (rank[a.kind] - rank[b.kind]) || a.exe_name.localeCompare(b.exe_name))
     return results
   } catch (e) {
     logger.warn('listRunningProcesses failed', { message: e.message })

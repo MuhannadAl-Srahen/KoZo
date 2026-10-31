@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 9,
+  rev: 10,
   // Settings → Appearance → UI scale.
   ui: {
     setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('kozo', {
       archive: (ids) => ipcRenderer.invoke('games:archive', ids),
       unarchive: (ids) => ipcRenderer.invoke('games:unarchive', ids),
       launch: (id) => ipcRenderer.invoke('games:launch', id),
+      revealFile: (id) => ipcRenderer.invoke('games:revealFile', id),
     },
     sessions: {
       list: (filters) => ipcRenderer.invoke('sessions:list', filters),
@@ -140,6 +141,7 @@ contextBridge.exposeInMainWorld('kozo', {
     },
     dialog: {
       pickExe: (defaultPath) => ipcRenderer.invoke('dialog:pickExe', defaultPath),
+      exeCandidates: (dir) => ipcRenderer.invoke('dialog:exeCandidates', dir),
       pickImageData: () => ipcRenderer.invoke('image:pickData'),
       saveCroppedImage: (payload) => ipcRenderer.invoke('image:saveCropped', payload),
       pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
@@ -206,6 +208,7 @@ contextBridge.exposeInMainWorld('kozo', {
     }
     const pass = (cb, payload) => cb(payload)
     return {
+      onGamepadWake: sub('gamepad:wake', pass),
       onSessionStarted: sub('session:started', pass),
       onSessionEnded: sub('session:ended', pass),
       onSessionIdle: sub('session:idle', pass),

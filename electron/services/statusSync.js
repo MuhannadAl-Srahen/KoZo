@@ -61,7 +61,9 @@ function linkedGame(listRow) {
  * status leaves list rows untouched — a cleared card shouldn't erase a backlog
  * entry the user curated on the Game List page.
  */
-function setGameStatus(gameId, status) {
+// `announce: false` (Move to Library) skips the rating prompt: carrying a
+// Finished status over is not finishing the game now.
+function setGameStatus(gameId, status, { announce = true } = {}) {
   const value = status || null
   if (value && !SHARED_STATUSES.has(value)) throw new Error(`Invalid game status: ${status}`)
 
@@ -86,7 +88,7 @@ function setGameStatus(gameId, status) {
   // Finishing a game is worth XP — surface a level-up right away if it caused one.
   if (value === 'finished') {
     try { require('./xpTracker').check({ reason: 'finished', gameName: game.name }) } catch {}
-    announceFinished({ gameId })
+    if (announce) announceFinished({ gameId })
   }
   return db().prepare('SELECT * FROM games WHERE id = ?').get(gameId)
 }

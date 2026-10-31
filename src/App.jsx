@@ -14,12 +14,14 @@ import Activity from './pages/Activity'
 import PlayPlan from './pages/PlayPlan'
 import Finished from './pages/Finished'
 import RateGameModal from './components/modals/RateGameModal'
+import MakePlayableModal from './components/modals/MakePlayableModal'
 import Profile from './pages/Profile'
 import Settings from './pages/Settings'
 import UnknownGamePrompt from './components/UnknownGamePrompt'
 import Tour from './components/Tour'
 import LevelUpCelebration from './components/LevelUpCelebration'
 import UpdateBanner from './components/UpdateBanner'
+import GamepadHints from './components/GamepadHints'
 
 // Controller navigation — must live under the router so useNavigate works.
 function GamepadNav() {
@@ -92,6 +94,14 @@ export default function App() {
   const [showOnboarding, setShowOnboarding] = useState(false)
   // A game was just marked Finished somewhere: ask for a 1 to 10 rating.
   const [rateGame, setRateGame] = useState(null)
+  // Move to Library (Game List, Now out) hands its moved games here so the
+  // "Make it playable" step can ask for each one's .exe.
+  const [playable, setPlayable] = useState(null)
+  useEffect(() => {
+    const on = (e) => { const list = (e.detail || []).filter(g => g.needsExe); if (list.length) setPlayable(list) }
+    window.addEventListener('kozo:make-playable', on)
+    return () => window.removeEventListener('kozo:make-playable', on)
+  }, [])
   useEffect(() => {
     const off = window.kozo?.events?.onGameFinished?.((g) => { if (g?.name) setRateGame(g) })
     return () => off?.()
@@ -183,6 +193,8 @@ export default function App() {
         <LevelUpCelebration />
         {showOnboarding && <Tour onDone={() => setShowOnboarding(false)} />}
         {rateGame && <RateGameModal game={rateGame} onClose={() => setRateGame(null)} />}
+        <GamepadHints />
+        {playable && <MakePlayableModal games={playable} onClose={() => setPlayable(null)} />}
       </HashRouter>
      </AppearanceProvider>
     </AccentColorProvider>

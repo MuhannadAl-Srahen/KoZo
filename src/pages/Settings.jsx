@@ -1452,6 +1452,8 @@ const FEATURE_GROUPS = [
       { Icon: IconBell,      name: 'In-game status (Alt+K)', go: 'tab:about', desc: 'Press Alt+K while playing to flash your live session time and achievement progress over the game.' },
       { Icon: IconTrophy,    name: 'Achievement list (Alt+J)', go: 'tab:about', desc: 'Press Alt+J while playing to flash your progress and the rarest achievements you still have left, right over the game.' },
       { Icon: IconRocket,    name: 'Tray & startup', go: 'tab:general',desc: 'Runs quietly in the system tray and can launch with Windows.' },
+      { Icon: IconRocket,    name: 'Open KoZo from anywhere', go: 'tab:general', desc: 'Press Ctrl+Shift+K, or hold View and Menu on a controller for a second, to bring KoZo up even when it is closed to the tray.' },
+      { Icon: IconDeviceGamepad2, name: 'Controller control', go: '/', desc: 'Drive the whole app with a controller: D-pad to move, A to select, B to go back, X for options, Y to search, LB and RB to switch tabs.' },
     ],
   },
 ]

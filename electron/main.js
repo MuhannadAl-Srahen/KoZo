@@ -182,6 +182,22 @@ function getOrCreateMainWindow(afterShow) {
   return win
 }
 
+// Bring KoZo in front of whatever has focus (often a fullscreen game). Windows
+// refuses a plain focus() from a background app, so the window is briefly
+// made always-on-top and focus is taken explicitly. A controller wake also
+// tells the renderer to start controller navigation right away.
+function showFromAnywhere({ gamepad = false } = {}) {
+  getOrCreateMainWindow((win) => {
+    try {
+      win.setAlwaysOnTop(true)
+      app.focus({ steal: true })
+      win.focus()
+      setTimeout(() => { if (!win.isDestroyed()) win.setAlwaysOnTop(false) }, 400)
+    } catch {}
+    if (gamepad) { try { win.webContents.send('gamepad:wake') } catch {} }
+  })
+}
+
 // Focus the existing window if a second instance is launched (recreating it
 // first if it was unloaded while sitting hidden in the tray).
 app.on('second-instance', () => { getOrCreateMainWindow() })
@@ -320,6 +336,16 @@ Close any program that may be using it and start KoZo again.`)
     require('./logger').warn('globalShortcut Alt+J error: ' + e.message)
   }
 
+  // Open KoZo from anywhere, even closed in the tray: Ctrl + Shift + K on the
+  // keyboard, or View + Menu held for a second on a controller.
+  try {
+    const ok = globalShortcut.register('Control+Shift+K', () => showFromAnywhere())
+    if (!ok) require('./logger').warn('globalShortcut Ctrl+Shift+K registration failed (in use by another app)')
+  } catch (e) {
+    require('./logger').warn('globalShortcut Ctrl+Shift+K error: ' + e.message)
+  }
+  require('./services/controllerWake').start(() => showFromAnywhere({ gamepad: true }))
+
   // Periodic safety-net for automatic backup (no-op unless the user enabled it)
   require('./services/autoBackup').startPeriodic()
 
@@ -415,6 +441,7 @@ function flushOnExit() {
   _exitFlushed = true
   try { require('./services/processWatcher').stop() } catch {}
   try { require('./services/crackWatcher').stopWatching() } catch {}
+  try { require('./services/controllerWake').stop() } catch {}
   try { require('./services/autoBackup').flush() } catch {}
   // Save snapshots deferred to idle would otherwise die with the process.
   try { require('./services/autoSaveBackup').flushPending() } catch {}

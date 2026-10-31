@@ -128,6 +128,9 @@ function runMigrations() {
     // Release alerts follow this flag, not the status: a tracked game moved
     // to Want to play before it comes out still gets its "Out now" alert.
     try { db.exec('ALTER TABLE game_list ADD COLUMN release_watch INTEGER DEFAULT 0') } catch (_) {}
+    // A .bat / .cmd / .lnk that starts the game (cracked copies often ship
+    // one). Play runs it; exe_name stays the process KoZo watches for playtime.
+    try { db.exec('ALTER TABLE games ADD COLUMN launch_file TEXT') } catch (_) {}
     try {
       const done = db.prepare("SELECT value FROM settings WHERE key = 'release_watch_v1'").get()
       if (!done) {

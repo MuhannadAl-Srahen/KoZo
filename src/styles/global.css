@@ -83,10 +83,16 @@ select:focus-visible {
 
 /* Controller-navigation ring (see src/lib/gamepadNav.js). Declared last so it
    wins ties at equal specificity when a click also grants DOM focus. */
-.gpFocus {
-  outline: var(--focus-w) solid var(--focus-color);
-  outline-offset: var(--focus-offset);
+[data-gpfocus] {
+  outline: 2px solid var(--a);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--a) 22%, transparent), 0 12px 28px rgba(0, 0, 0, 0.45);
+  transition: outline-offset 0.12s ease, box-shadow 0.12s ease;
 }
+/* Cards lift a little under the controller ring. Scale, not translate: a
+   transformed card never holds a fixed-position child (menus portal out). */
+[data-gpnav][data-gpfocus] { transform: scale(1.03); }
+html[data-gamepad] .app-main { scroll-behavior: smooth; }
 
 /* ── Motion ──────────────────────────────────────────────────────────── */
 @keyframes spin {

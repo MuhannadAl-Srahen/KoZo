@@ -23,7 +23,10 @@ export default function ReleasedPanel({ onChanged }) {
 
   async function act(r, kind) {
     setBusy(r.id)
-    if (kind === 'library') await window.kozo.api.gameList.moveToLibrary([r.id])
+    if (kind === 'library') {
+      const res = await window.kozo.api.gameList.moveToLibrary([r.id])
+      if (res?.ok) window.dispatchEvent(new CustomEvent('kozo:make-playable', { detail: res.data }))
+    }
     else if (kind === 'want') await window.kozo.api.gameList.update(r.id, { status: 'want_to_play' })
     await window.kozo.api.releases.dismiss([r.id])
     setBusy(null)

@@ -4,6 +4,7 @@ import {
   IconChevronDown, IconChevronRight,
 } from '@tabler/icons-react'
 import Modal, { modalStyles as ms } from '../ui/Modal'
+import LauncherNote from '../ui/LauncherNote'
 import RunningProcessPicker from '../ui/RunningProcessPicker'
 import ImageCropModal from './ImageCropModal'
 import CoverPickerModal from './CoverPickerModal'
@@ -16,6 +17,8 @@ export default function EditGameModal({ game, onClose, onSaved }) {
   const [name, setName]               = useState(game.name || '')
   const [exeName, setExeName]         = useState(game.exe_name || '')
   const [installPath, setInstallPath] = useState(game.install_path || '')
+  const [launchFile, setLaunchFile]   = useState(game.launch_file || '')   // .bat / shortcut Play runs
+  const [candidates, setCandidates]   = useState([])
   const [isInstalled, setIsInstalled] = useState(game.is_installed ? 1 : 0)
   const [isCracked, setIsCracked]     = useState(game.is_cracked ? 1 : 0)
   const [source, setSource]           = useState(game.source || 'manual')
@@ -64,6 +67,7 @@ export default function EditGameModal({ game, onClose, onSaved }) {
         name: name.trim(),
         exe_name: exeName.trim(),
         install_path: installPath.trim() || null,
+        launch_file: launchFile || null,
         is_installed: isInstalled,
         is_cracked: isCracked,
         source,
@@ -142,9 +146,11 @@ export default function EditGameModal({ game, onClose, onSaved }) {
             onClick={async () => {
               const res = await window.kozo?.api?.dialog?.pickExe(installPath || undefined)
               if (res?.ok && res.data) {
-                setExeName(res.data.exe_name)
+                setExeName(res.data.exe_name || '')
                 setInstallPath(res.data.install_path)
-                setExeWarn(KNOWN_SYSTEM_EXES.has(res.data.exe_name.toLowerCase()))
+                setLaunchFile(res.data.launch_file || '')
+                setCandidates(res.data.candidates || [])
+                setExeWarn(KNOWN_SYSTEM_EXES.has((res.data.exe_name || '').toLowerCase()))
                 setErrors(p => ({ ...p, exeName: '' }))
               }
             }}
@@ -164,6 +170,10 @@ export default function EditGameModal({ game, onClose, onSaved }) {
           </button>
         </div>
 
+        <LauncherNote launchFile={launchFile} candidates={candidates} exeName={exeName}
+          onPickExe={(c) => { setExeName(c.exe_name); setInstallPath(c.install_path) }}
+          onClear={() => { setLaunchFile(''); setCandidates([]) }} />
+
         {showPicker && (
           <div className={s.pickerWrap}>
             <RunningProcessPicker
@@ -181,7 +191,7 @@ export default function EditGameModal({ game, onClose, onSaved }) {
 
         {errors.exeName
           ? <div className={s.errorText}>{errors.exeName}</div>
-          : <div className={s.inputHint}>Click "Browse" to locate the game's .exe on disk (most reliable). Or "Pick running" if it's already open.</div>
+          : <div className={s.inputHint}>Click "Browse" to pick the game's .exe (or the .bat or shortcut it starts from). Or "Pick running" if it's already open.</div>
         }
         {exeWarn && (
           <div className={s.warning}>

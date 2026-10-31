@@ -132,3 +132,19 @@
 }
 
 .emptyIcon { color: var(--text-muted); }
+
+/* Everyday apps (Excel, Discord, build tools), shown after "Show other apps". */
+.itemApp { opacity: 1; filter: saturate(0.4) brightness(0.8); }
+.moreBtn {
+  width: 100%;
+  padding: var(--sp-8);
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  background: none;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.moreBtn:hover { color: var(--a); }

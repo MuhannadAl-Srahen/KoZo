@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
-  IconPlus, IconList, IconLayoutColumns,
+  IconPlus, IconList, IconLayoutColumns, IconFolderOpen,
   IconDeviceGamepad2, IconScan, IconLoader2, IconCheckbox, IconSquare,
   IconX, IconCheck, IconSearch, IconEyeOff, IconChevronRight, IconChevronDown,
   IconArchive, IconFlag, IconCalendarEvent, IconTrash,
@@ -686,6 +686,7 @@ export default function Library() {
           }}
           extraItems={[
             { label: 'Plan for month…', Icon: IconCalendarEvent, onClick: (g) => setPlanIds([g.id]) },
+            ...((ctxMenu.game.install_path || ctxMenu.game.launch_file) ? [{ label: 'Open file location', Icon: IconFolderOpen, onClick: (g) => window.kozo?.api?.games?.revealFile?.(g.id) }] : []),
           ]}
         />
       )}

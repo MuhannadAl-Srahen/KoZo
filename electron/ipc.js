@@ -46,7 +46,9 @@ handle('games:list', () => gamesQ.listGamesWithStats())
 handle('games:get', (id) => gamesQ.getGame(id))
 // Shared by games:add and gameList:moveToLibrary: insert, fetch Steam art +
 // genres + achievements, and make sure the game is on the Game List too.
-async function addLibraryGame(data) {
+// `quick` (Move to Library): don't wait for the banner download; the row's own
+// art shows until the file lands and game:updated repaints the card.
+async function addLibraryGame(data, { quick = false } = {}) {
   // capsule_fallback is a transport-only hint for banner download — not a column.
   // sgdb_id / sgdb_cover: the SteamGridDB game the user picked in Add Game's
   // "Not on Steam" results; its cover is applied as-is instead of a name guess.
@@ -56,7 +58,7 @@ async function addLibraryGame(data) {
   if (game?.steam_app_id) {
     // Download the banner NOW so it shows immediately when Library refreshes after add.
     // This is why Game List never has this problem — it stores a CDN URL instantly.
-    try {
+    const fetchBanner = async () => { try {
       const { downloadBanner } = require('./services/steamApi')
       const fallback = capsule_fallback ? [capsule_fallback] : []
       const bannerPath = await downloadBanner(game.steam_app_id, game.id, fallback)
@@ -74,7 +76,9 @@ async function addLibraryGame(data) {
         if (url) game.banner_url = url
       }
       logger.warn(`Banner download failed for game ${game.id}`, { message: e.message })
-    }
+    } }
+    if (quick) setImmediate(() => { fetchBanner().then(() => { try { broadcast('game:updated', game.id) } catch {} }) })
+    else await fetchBanner()
 
     // Achievements sync in background — doesn't block the add response
     const { fetchAndStoreAchievements } = require('./services/achievementSync')
@@ -138,7 +142,7 @@ async function addLibraryGame(data) {
   bk()
   return game
 }
-handle('games:add', addLibraryGame)
+handle('games:add', (data) => addLibraryGame(data))
 // Plan library games for a month: the plan lives on each game's Game List row
 // (created if missing), so the Library and Game List month filters agree.
 handle('games:planMonth', (gameIds, month) => {
@@ -300,6 +304,18 @@ handle('saves:backupAll', async () => {
   }
 })
 
+// Library right-click → Open file location: Explorer with the game's file
+// selected (its launcher file when it has one), else just its folder.
+handle('games:revealFile', (id) => {
+  const fs = require('fs')
+  const g = gamesQ.getGame(Number(id))
+  if (!g) throw new Error('Game not found')
+  const file = g.launch_file || (g.install_path && g.exe_name ? path.join(g.install_path, g.exe_name) : null)
+  if (file && fs.existsSync(file)) { shell.showItemInFolder(file); return true }
+  if (g.install_path && fs.existsSync(g.install_path)) { shell.openPath(g.install_path); return true }
+  throw new Error('KoZo does not know where this game is installed. Set its .exe in Edit.')
+})
+
 // Open a folder in Windows Explorer (used by the save-file finder).
 handle('shell:openPath', async (p) => {
   if (typeof p !== 'string' || !p) return false
@@ -369,6 +385,19 @@ async function doLaunch(id) {
     !!game.exe_name &&
     !/^steam_\d+\.exe$/i.test(game.exe_name) &&   // sync placeholder
     fs.existsSync(path.join(game.install_path, game.exe_name))
+
+  // A launcher file (.bat / .cmd / .lnk) wins when it's there: it is how the
+  // copy on disk expects to be started. Run from its own folder, like a
+  // double-click; processWatcher picks the game up by exe_name as usual.
+  if (game.launch_file && fs.existsSync(game.launch_file)) {
+    const { spawn } = require('child_process')
+    const child = spawn('cmd.exe', ['/c', 'start', '""', '/d', path.dirname(game.launch_file), game.launch_file], {
+      cwd: path.dirname(game.launch_file), detached: true, stdio: 'ignore', windowsHide: true,
+    })
+    child.on('error', (e) => logger.warn(`launcher start failed for "${game.name}": ${e.message}`))
+    child.unref()
+    return { launched: 'launcher', path: game.launch_file }
+  }
 
   if (hasUsableLocalExe) {
     const fullPath = path.join(game.install_path, game.exe_name)
@@ -723,15 +752,20 @@ handle('gameList:moveToLibrary', async (ids) => {
         source: row.steam_app_id ? 'steam' : 'manual',
         is_installed: 0,
         banner_url: row.banner_url || null,
-      })
+      }, { quick: true })
       created = true
     }
     if (row.game_id !== game.id) gameListQ.updateGameListItem(row.id, { game_id: game.id })
     if (statusSync.SHARED_STATUSES.has(row.status) && !game.completion_status) {
-      try { statusSync.setGameStatus(game.id, row.status) } catch {}
+      try { statusSync.setGameStatus(game.id, row.status, { announce: false }) } catch {}
     }
     broadcast('game:updated', game.id)
-    moved.push({ listId: row.id, gameId: game.id, name: row.name, created, needsExe: !row.steam_app_id && !game.exe_name })
+    moved.push({
+      listId: row.id, gameId: game.id, name: row.name, created,
+      cover: game.banner_local_path ? null : (row.banner_url || game.banner_url || null),
+      coverPath: game.banner_local_path || null,
+      needsExe: !game.exe_name,
+    })
   }
   bk()
   return moved
@@ -818,13 +852,37 @@ handle('watcher:pause',  () => { require('./services/processWatcher').pause();  
 handle('watcher:resume', () => { require('./services/processWatcher').resume(); return true })
 
 // ── File picker for game executable ─────────────────────────────────────────
+// The game's program, or a launcher file (.bat / .cmd / .lnk) that starts it.
+// For a launcher, `launch_file` is what Play runs and `exe_name` is the best
+// guess at the real game program in the same folder (what KoZo watches for
+// playtime); `candidates` lists the other .exe files there, biggest first.
+const HELPER_EXE = /^(unins|uninstall|setup|install|vc_?redist|dxsetup|dxwebsetup|crashreport|crashhandler|unitycrashhandler|ue4prereq|uerprereq|easyanticheat|be_?service|launcherpatcher|updater|notification_helper|cefprocess|quicksfv)/i
+function exeCandidates(dir) {
+  const fs = require('fs')
+  const out = []
+  const scan = (d, depth) => {
+    let entries = []
+    try { entries = fs.readdirSync(d, { withFileTypes: true }) } catch { return }
+    for (const e of entries) {
+      const full = path.join(d, e.name)
+      if (e.isFile() && /\.exe$/i.test(e.name) && !HELPER_EXE.test(e.name)) {
+        try { out.push({ exe_name: e.name, install_path: d, size: fs.statSync(full).size }) } catch {}
+      } else if (e.isDirectory() && depth < 2 && !/^(redist|_commonredist|directx|support|__installer|engine)$/i.test(e.name)) {
+        scan(full, depth + 1)
+      }
+    }
+  }
+  scan(dir, 0)
+  return out.sort((x, y) => y.size - x.size).slice(0, 8)
+}
+
 handle('dialog:pickExe', async (defaultPath) => {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
   const opts = {
-    title: 'Select the game executable',
+    title: 'Select the game (.exe) or its launcher (.bat, .cmd, shortcut)',
     properties: ['openFile'],
     filters: [
-      { name: 'Executables', extensions: ['exe'] },
+      { name: 'Games and launchers', extensions: ['exe', 'bat', 'cmd', 'lnk'] },
       { name: 'All files', extensions: ['*'] },
     ],
   }
@@ -834,12 +892,38 @@ handle('dialog:pickExe', async (defaultPath) => {
     : await dialog.showOpenDialog(opts)
   if (result.canceled || !result.filePaths?.[0]) return null
   const full = result.filePaths[0]
+  const ext = path.extname(full).toLowerCase()
+  if (ext === '.lnk') {
+    // A shortcut straight to an .exe is that .exe (its arguments kept by
+    // launching through the shortcut); anything else is treated like a .bat.
+    let target = null
+    try { target = require('electron').shell.readShortcutLink(full).target } catch {}
+    if (target && /\.exe$/i.test(target)) {
+      return { exe_name: path.basename(target), install_path: path.dirname(target), full_path: target, launch_file: full }
+    }
+  }
+  if (ext === '.bat' || ext === '.cmd' || ext === '.lnk') {
+    const dir = path.dirname(full)
+    const candidates = exeCandidates(dir)
+    return {
+      launch_file: full,
+      exe_name: candidates[0]?.exe_name || null,
+      install_path: candidates[0]?.install_path || dir,
+      candidates,
+      full_path: full,
+    }
+  }
   return {
     exe_name: path.basename(full),
     install_path: path.dirname(full),
     full_path: full,
+    launch_file: null,
   }
 })
+
+// .exe files near a folder (the "which program is the game?" step after
+// picking a launcher).
+handle('dialog:exeCandidates', (dir) => (dir ? exeCandidates(String(dir)) : []))
 
 // Pick an image and return its bytes as a data: URL so the renderer can load it
 // into a <canvas> WITHOUT cross-origin canvas tainting (the kozo:// protocol is a

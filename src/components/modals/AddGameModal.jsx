@@ -5,6 +5,7 @@ import {
 } from '@tabler/icons-react'
 import Modal, { modalStyles as ms } from '../ui/Modal'
 import RunningProcessPicker from '../ui/RunningProcessPicker'
+import LauncherNote from '../ui/LauncherNote'
 import ImageCropModal from './ImageCropModal'
 import {
   detectLauncherFromPath, deriveGameNameFromPath, exeLooksUnrelated, isHelperExe,
@@ -75,6 +76,8 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
   const [name, setName]               = useState(initialQuery)
   const [exeName, setExeName]         = useState(prefillExe || '')
   const [installPath, setInstallPath] = useState(prefillInstallPath || '')
+  const [launchFile, setLaunchFile]   = useState('')   // .bat / shortcut Play runs
+  const [candidates, setCandidates]   = useState([])
   const [bannerPath, setBannerPath]   = useState('')
   const [cropSrc, setCropSrc]         = useState(null)   // data: URL pending crop
   const [isCracked, setIsCracked]     = useState(0)
@@ -241,6 +244,7 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
 
       setSaving(false)
       if (res?.ok) {
+        if (launchFile && res.data?.id) await window.kozo?.api?.games?.update?.(res.data.id, { launch_file: launchFile })
         onAdded?.(res.data)
         onClose()
       } else {
@@ -413,9 +417,11 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
                 onClick={async () => {
                   const res = await window.kozo?.api?.dialog?.pickExe(installPath || undefined)
                   if (res?.ok && res.data) {
-                    setExeName(res.data.exe_name)
+                    setExeName(res.data.exe_name || '')
                     setInstallPath(res.data.install_path)
-                    setExeWarn(KNOWN_SYSTEM_EXES.has(res.data.exe_name.toLowerCase()))
+                    setLaunchFile(res.data.launch_file || '')
+                    setCandidates(res.data.candidates || [])
+                    setExeWarn(KNOWN_SYSTEM_EXES.has((res.data.exe_name || '').toLowerCase()))
                     setErrors(p => ({ ...p, exeName: '' }))
                     // Auto-detect official vs cracked + the launcher from the path
                     const detected = detectOfficialFromPath(res.data.install_path)
@@ -433,6 +439,10 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
                 Pick running
               </button>
             </div>
+
+            <LauncherNote launchFile={launchFile} candidates={candidates} exeName={exeName}
+              onPickExe={(c) => { setExeName(c.exe_name); setInstallPath(c.install_path) }}
+              onClear={() => { setLaunchFile(''); setCandidates([]) }} />
 
             {showPicker && (
               <div className={s.pickerWrap}>
@@ -458,7 +468,7 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
               : <div className={s.inputHint}>
                   {!exeName.trim() && selected?.steam_app_id
                     ? 'Optional for Steam games. Play works without it, but KoZo can only track playtime once it knows the executable.'
-                    : 'Click "Browse" to find the .exe on disk, or "Pick running" if the game is already open.'}
+                    : 'Click "Browse" to find the .exe (or the .bat or shortcut it starts from), or "Pick running" if the game is already open.'}
                 </div>
             }
             {exeWarn && (

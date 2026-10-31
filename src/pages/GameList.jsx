@@ -290,7 +290,9 @@ export default function GameList() {
     loadItems(page, { silent: true })
   }
 
-  // Game List → Library for the given list rows (bulk or one card).
+  // Game List → Library for the given list rows (bulk or one card). The
+  // move itself is quick (art downloads later); then App's "Make it playable"
+  // step asks for each game's .exe.
   async function moveToLibrary(ids) {
     if (!ids.length) return
     setMoving(true)
@@ -300,16 +302,7 @@ export default function GameList() {
       setMoveResult({ variant: 'error', title: 'Could not move to Library', message: res?.error || 'Unknown error' })
       return
     }
-    const moved = res.data || []
-    const needsExe = moved.filter(m => m.needsExe).map(m => m.name)
-    setMoveResult({
-      variant: 'success',
-      title: `${moved.length} game${moved.length !== 1 ? 's' : ''} in your Library`,
-      message: moved.map(m => m.name).join(', '),
-      lines: needsExe.length
-        ? [`Set the .exe in Library → Edit to track playtime for: ${needsExe.join(', ')}`]
-        : [],
-    })
+    window.dispatchEvent(new CustomEvent('kozo:make-playable', { detail: res.data || [] }))
     pageCache.clear()
     loadItems(page, { silent: true })
     if (selectionMode) exitSelection()
