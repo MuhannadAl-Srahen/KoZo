@@ -51,6 +51,23 @@ export default function Upcoming() {
     await load()
   }
 
+  // Right-click → Want to play: a game on your list changes status (its watch
+  // stays), anything else is added as Want to play and watched.
+  async function wantGame(g) {
+    const info = byAppId.get(Number(g.appid))
+    if (info) await window.kozo?.api?.gameList?.update?.(info.id, { status: 'want_to_play' })
+    else {
+      await window.kozo?.api?.gameList?.add?.({
+        name: g.name,
+        steam_app_id: g.appid,
+        status: 'want_to_play',
+        release_date: g.release || null,
+        release_watch: 1,
+      })
+    }
+    await load()
+  }
+
   async function untrackGame(g) {
     const info = byAppId.get(Number(g.appid))
     if (!info) return
@@ -70,7 +87,7 @@ export default function Upcoming() {
       <div className={s.content}>
         <div className={s.inner}>
           <ReleasedPanel onChanged={load} />
-          <SteamCalendar byAppId={byAppId} trackedRows={tracked} onTrack={trackGame} onUntrack={untrackGame} />
+          <SteamCalendar byAppId={byAppId} trackedRows={tracked} onTrack={trackGame} onUntrack={untrackGame} onWant={wantGame} />
         </div>
       </div>
     </div>

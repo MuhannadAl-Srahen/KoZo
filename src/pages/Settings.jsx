@@ -13,7 +13,7 @@ import {
 import { useAccentColor } from '../context/AccentColorContext'
 import { useAppearance, DEFAULT_APPEARANCE } from '../context/AppearanceContext'
 import { NAV_ITEMS } from '../components/Sidebar'
-import SearchableSelect from '../components/ui/SearchableSelect'
+import { fileUrl } from '../lib/utils'
 import HoneycombLogo from '../components/HoneycombLogo'
 import ScanResultModal from '../components/modals/ScanResultModal'
 import SaveManagerModal from '../components/modals/SaveManagerModal'
@@ -910,12 +910,13 @@ function ScanPCTab() {
   )
 }
 
-// Segmented choice row (UI scale, spacing, corners, background mode).
-function Segmented({ value, options, onChange, label }) {
+// Segmented choice row (UI scale, spacing, corners, background mode, start
+// page). `wrap` lets a long set of choices flow onto a second line.
+function Segmented({ value, options, onChange, label, wrap = false }) {
   return (
     <div className={s.segRow}>
       <span className={s.segLabel}>{label}</span>
-      <div className={s.seg} role="radiogroup" aria-label={label}>
+      <div className={`${s.seg} ${wrap ? s.segWrap : ''}`} role="radiogroup" aria-label={label}>
         {options.map(o => (
           <button key={String(o.value)} type="button" role="radio" aria-checked={value === o.value}
             className={`${s.segBtn} ${value === o.value ? s.segBtnOn : ''}`} onClick={() => onChange(o.value)}>
@@ -935,6 +936,37 @@ function SliderRow({ label, value, min, max, unit, onChange }) {
         onChange={e => onChange(Number(e.target.value))} />
       <span className={s.sliderValue}>{value}{unit}</span>
     </label>
+  )
+}
+
+// Background → A game's art: click a game's wide art to use it. Search
+// narrows the strip; the picked one carries an accent ring.
+function GameArtPicker({ games, value, onPick }) {
+  const [q, setQ] = useState('')
+  const shown = games
+    .filter(g => !q.trim() || g.name.toLowerCase().includes(q.trim().toLowerCase()))
+    .sort((a, b) => (String(a.id) === String(value) ? -1 : String(b.id) === String(value) ? 1 : (b.total_playtime_seconds || 0) - (a.total_playtime_seconds || 0)))
+  return (
+    <div className={s.artPicker}>
+      <div className={s.segRow}>
+        <span className={s.segLabel}>Game</span>
+        <input className={s.artSearch} value={q} onChange={e => setQ(e.target.value)} placeholder="Search your games" />
+      </div>
+      <div className={s.artStrip} role="radiogroup" aria-label="Game art">
+        {shown.length === 0 && <span className={s.artNone}>No games with art match.</span>}
+        {shown.map(g => {
+          const on = String(g.id) === String(value)
+          return (
+            <button key={g.id} type="button" role="radio" aria-checked={on} title={g.name}
+              className={`${s.artTile} ${on ? s.artTileOn : ''}`} onClick={() => onPick(g)}>
+              <img src={fileUrl(g.hero_local_path || g.banner_local_path)} alt="" loading="lazy" decoding="async" />
+              <span className={s.artName}>{g.name}</span>
+              {on && <span className={s.artCheck}><IconCheck size={13} stroke={2.4} /></span>}
+            </button>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
@@ -1028,11 +1060,8 @@ function AppearanceCustomize() {
             )
           })}
         </div>
-        <div className={s.segRow}>
-          <span className={s.segLabel}>Start page</span>
-          <SearchableSelect value={prefs.startPage} onChange={v => setPrefs({ startPage: v || '/' })}
-            options={START_PAGES} searchable={false} width={200} placeholder="Library" />
-        </div>
+        <Segmented label="Start page" value={prefs.startPage || '/'} onChange={v => setPrefs({ startPage: v })}
+          options={START_PAGES} wrap />
       </section>
 
       <section className={s.section}>
@@ -1060,19 +1089,8 @@ function AppearanceCustomize() {
             </div>
           )}
           {prefs.bg.mode === 'game' && (
-            <div className={s.segRow}>
-              <span className={s.segLabel}>Game</span>
-              <SearchableSelect
-                value={prefs.bg.gameId}
-                onChange={v => {
-                  const g = games.find(x => String(x.id) === String(v))
-                  setBg({ gameId: v || null, gameArt: g ? (g.hero_local_path || g.banner_local_path) : null })
-                }}
-                options={games.map(g => ({ value: g.id, label: g.name }))}
-                placeholder="Pick a game"
-                width={260}
-              />
-            </div>
+            <GameArtPicker games={games} value={prefs.bg.gameId}
+              onPick={g => setBg({ gameId: g.id, gameArt: g.hero_local_path || g.banner_local_path })} />
           )}
           {prefs.bg.mode !== 'off' && (
             <>

@@ -73,7 +73,7 @@ src/                 renderer (React)
 | `/game-list` | GameList (paged, 20 per page) |
 | `/plan` | PlayPlan: month board with lanes Up next / Playing / Done (drag across lanes sets the status; Done = finished, which opens the rating), progress and hours this month (`gameList:planBoard`), coming months and past recap (`gameList:planSummary`); drag a card onto a month chip to re-plan |
 | `/finished` | Finished (Library + Game List finished games by year, with ratings; `games:finished`); a card opens `FinishedGameModal` (stats, rating, game page, Play again) |
-| `/upcoming` | Upcoming = `components/SteamCalendar.jsx` only (data from `steam:comingSoon`). Layouts Steam (default, day columns from today), Strip, Week, Days, Month; TBA and Tracked shelves; "Picked for you" keeps 4 per day scored by taste (`steam:tasteProfile` + GetItems tag ids) and popularity (`wishRank`/`popRank`) |
+| `/upcoming` | Upcoming = `components/SteamCalendar.jsx` only (data from `steam:comingSoon`). Layouts Steam (default, day columns from today), Strip, Week, Month; TBA and Tracked shelves; "Picked for you" keeps 4 per day scored by taste (`steam:tasteProfile` + GetItems tag ids) and popularity (`wishRank`/`popRank`) |
 | `/activity` | Activity: `?tab=overview` (Statistics), `sessions` (Sessions), `achievements` (AchievementsHub). `/statistics`, `/sessions`, `/achievements` redirect here |
 | `/profile` | Profile |
 | `/settings` | Settings (tabs) |
@@ -86,7 +86,7 @@ src/                 renderer (React)
 - `components/ui/Modal.jsx`: renders into `<body>`, Escape closes the top modal only, `onRequestClose` for "unsaved changes?" guards. Use its exported `modalStyles` for footer buttons.
 - `ui/InfoModal` instead of `alert()`.
 - `ui/SearchableSelect` for every dropdown.
-- `ui/CardContextMenu` for right-click menus.
+- `ui/ContextMenu` for right-click menus (cover header, rows, `sub` flyouts, `confirm` rows; pages build their own items). `ui/CardContextMenu` wraps it for Library/Game List cards.
 - `ui/Skeleton` (`CardSkeletonGrid`, `RowSkeleton`, …) and `ui/EmptyState`.
 - `ui/RunningProcessPicker`.
 - `lib/utils.js`:
@@ -100,7 +100,7 @@ src/                 renderer (React)
 **Styling:** CSS Modules next to each component. Layout composes from `styles/page.module.css`, controls from `styles/controls.module.css`, surfaces from `styles/surface.module.css`. All tokens live in `styles/variables.css` (`--a` accent, `--status-*`, `--rarity-*`, `--sp-*`, `--r-*`, `--fs-*`, `--z-*`). For accent-derived colours use `color-mix(in srgb, var(--a) N%, transparent)`; never append hex alpha to a `var()`. No UI framework; icons come from `@tabler/icons-react`.
 
 ## Gotchas
-- Release tracking is `game_list.release_watch` (not the status): Track / status Upcoming set it, other statuses keep it, `gameList:untrack` clears it (deleting the row only if still Upcoming). releaseWatch selects `release_watch = 1`.
+- Release tracking is `game_list.release_watch` (not the status); a game released over 14 days ago is never watched or announced (`releaseWatch.isLongReleased`): Track / status Upcoming set it, other statuses keep it, `gameList:untrack` clears it (deleting the row only if still Upcoming). releaseWatch selects `release_watch = 1`.
 - Marking a game Finished (statusSync `setGameStatus` or `gameList:update`) broadcasts `game:finished`; App.jsx opens `RateGameModal` (1 to 10, `gameList:rate`, stored on the Game List row).
 - Ctrl + mouse wheel depends on the pointer: over a card grid (any element with the `useCardZoom` style, which always sets `--zoom-grid`) it resizes the cards; anywhere else, or over `[data-zoom-ignore]`, it changes the UI scale (`CtrlWheelZoom` in App.jsx, 80 to 150% in 5% steps). Ratings use `ui/RatingPicker` (fixed heights, hover from pointer x) in RateGameModal and FinishedGameModal.
 - Library and Game List have only Big grid and List views; the month filter lives in Play Plan.

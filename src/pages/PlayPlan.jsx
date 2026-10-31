@@ -2,16 +2,18 @@ import React, { useEffect, useMemo, useState } from 'react'
 import {
   IconCalendarEvent, IconPlus, IconSearch, IconCalendarOff, IconCheck, IconChevronLeft, IconChevronRight,
   IconPlayerPlayFilled, IconListCheck, IconDeviceGamepad2, IconFlag, IconStarFilled, IconClock,
+  IconPencil, IconBrandSteam, IconX, IconArrowRight, IconCalendarMonth,
 } from '@tabler/icons-react'
 import { fileUrl, formatMonthKey, formatPlaytime, monthKey } from '../lib/utils'
 import { LIST_STATUSES } from '../lib/cardModel'
 import GeneratedCover from '../components/GeneratedCover'
-import CardContextMenu from '../components/ui/CardContextMenu'
+import ContextMenu from '../components/ui/ContextMenu'
 import EmptyState from '../components/ui/EmptyState'
 import InfoModal from '../components/ui/InfoModal'
 import Modal, { modalStyles as ms } from '../components/ui/Modal'
 import EditGameListModal from '../components/modals/EditGameListModal'
 import PlanMonthModal from '../components/modals/PlanMonthModal'
+import RateGameModal from '../components/modals/RateGameModal'
 import useCardZoom from '../lib/useCardZoom'
 import { ratingColor } from '../components/ui/RatingPicker'
 import s from './PlayPlan.module.css'
@@ -184,6 +186,7 @@ export default function PlayPlan() {
   const [dropOn, setDropOn] = useState(null)   // month chip or lane being dragged over
   const [edit, setEdit] = useState(null)
   const [ctx, setCtx] = useState(null)
+  const [rateItem, setRateItem] = useState(null)
   const [moveIds, setMoveIds] = useState(null)
   const [adding, setAdding] = useState(false)
   const [launchError, setLaunchError] = useState(null)
@@ -259,6 +262,39 @@ export default function PlayPlan() {
   const playedSec = (items || []).reduce((a, i) => a + (i.month_seconds || 0), 0)
   const pct = total ? Math.round((done / total) * 100) : 0
   const openCtx = (e, it) => setCtx({ x: e.clientX, y: e.clientY, item: it })
+
+  // Right-click on a plan card: only what fits a plan (no Upcoming status).
+  async function setStatus(it, status) {
+    await window.kozo?.api?.gameList?.update?.(it.id, { status })
+    reload()
+  }
+  function planMenu(it) {
+    const lane = laneOf(it.status)
+    const next = lane === 'next' ? { label: 'Start playing', Icon: IconDeviceGamepad2, status: 'playing' }
+      : lane === 'playing' ? { label: 'Mark as done', Icon: IconFlag, status: 'finished' } : null
+    const here = it.planned_month
+    const monthsAhead = Array.from({ length: 6 }, (_, i) => shiftMonth(thisMonth, i))
+    return [
+      it.game_id && it.status !== 'finished' && it.status !== 'dropped' && { label: 'Play', Icon: IconPlayerPlayFilled, color: 'var(--a)', onClick: () => play(it) },
+      next && { label: next.label, Icon: IconArrowRight, onClick: () => setStatus(it, next.status) },
+      { label: 'Status', Icon: IconListCheck, hint: it.status === 'dropped' ? 'Dropped' : LANES.find(l => l.key === lane)?.label, sub: [
+        { label: 'Up next', Icon: IconListCheck, active: lane === 'next', onClick: () => setStatus(it, 'want_to_play') },
+        { label: 'Playing', Icon: IconDeviceGamepad2, color: 'var(--status-playing)', active: it.status === 'playing', onClick: () => setStatus(it, 'playing') },
+        { label: 'Done', Icon: IconFlag, color: '#fbbf24', active: it.status === 'finished', onClick: () => setStatus(it, 'finished') },
+        { label: 'Dropped', Icon: IconX, color: 'var(--status-dropped)', active: it.status === 'dropped', onClick: () => setStatus(it, 'dropped') },
+      ] },
+      it.status === 'finished' && { label: it.rating ? `Change rating (${Math.round(it.rating)}/10)` : 'Rate it…', Icon: IconStarFilled, color: '#fbbf24', onClick: () => setRateItem(it) },
+      { label: 'Move to month', Icon: IconCalendarMonth, sub: [
+        ...monthsAhead.map(m => ({ label: formatMonthKey(m, 'long'), Icon: IconCalendarEvent, active: here === m, onClick: () => moveTo([it.id], m) })),
+        { divider: true },
+        { label: 'Other month…', Icon: IconCalendarEvent, onClick: () => setMoveIds([it.id]) },
+      ] },
+      { divider: true },
+      { label: 'Edit…', Icon: IconPencil, onClick: () => setEdit(it) },
+      it.steam_app_id && { label: 'Steam page', Icon: IconBrandSteam, onClick: () => window.kozo?.api?.shell?.openExternal?.(`https://store.steampowered.com/app/${it.steam_app_id}`) },
+      here && { label: 'Remove from the plan', Icon: IconCalendarOff, danger: true, onClick: () => moveTo([it.id], 'none') },
+    ]
+  }
 
   return (
     <div className={s.page}>
@@ -422,20 +458,22 @@ export default function PlayPlan() {
       </div>
 
       {ctx && (
-        <CardContextMenu
+        <ContextMenu
           x={ctx.x}
           y={ctx.y}
-          game={ctx.item}
-          statuses={LIST_STATUSES}
-          statusField="status"
-          clearable={false}
           onClose={() => setCtx(null)}
-          onSetStatus={async (it, status) => { if (status) { await window.kozo?.api?.gameList?.update?.(it.id, { status }); reload() } }}
-          onEdit={(it) => setEdit(it)}
-          extraItems={[
-            { label: 'Move to another month…', Icon: IconCalendarEvent, onClick: (it) => setMoveIds([it.id]) },
-            { label: 'Remove from the plan', Icon: IconCalendarOff, onClick: (it) => moveTo([it.id], 'none') },
-          ]}
+          header={{
+            cover: coverOf(ctx.item),
+            name: ctx.item.name,
+            sub: [LANES.find(l => l.key === laneOf(ctx.item.status))?.label, ctx.item.planned_month && formatMonthKey(ctx.item.planned_month)].filter(Boolean).join(' · '),
+          }}
+          items={planMenu(ctx.item)}
+        />
+      )}
+      {rateItem && (
+        <RateGameModal
+          game={{ listId: rateItem.id, gameId: rateItem.game_id, name: rateItem.name, coverUrl: coverOf(rateItem), rating: rateItem.rating }}
+          onClose={() => { setRateItem(null); reload() }}
         />
       )}
       {moveIds && (
