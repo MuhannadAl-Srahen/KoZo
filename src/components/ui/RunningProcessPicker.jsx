@@ -13,6 +13,7 @@ export default function RunningProcessPicker({ onPick, onClose }) {
   const [procs, setProcs]     = useState([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery]     = useState('')
+  const [showApps, setShowApps] = useState(false)   // everyday apps (Excel, Discord, build tools) hidden at first
   // Closing the picker mid-scan unmounts it while listRunning() is still in flight.
   const alive                 = useRef(true)
 
@@ -34,12 +35,14 @@ export default function RunningProcessPicker({ onPick, onClose }) {
   }, [])
 
   const q = query.trim().toLowerCase()
-  const filtered = q
+  const matching = q
     ? procs.filter(p =>
         p.exe_name.toLowerCase().includes(q) ||
         (p.install_path || '').toLowerCase().includes(q)
       )
     : procs
+  const hiddenApps = matching.filter(p => p.kind === 'app')
+  const filtered = showApps ? matching : matching.filter(p => p.kind !== 'app')
 
   return (
     <div className={s.popover}>
@@ -64,7 +67,7 @@ export default function RunningProcessPicker({ onPick, onClose }) {
           </button>
         </div>
         <div className={s.hint}>
-          Start your game first, then pick its process here. Highlighted items look like games.
+          Start your game first, then pick it here. Games are listed first; everyday apps are hidden.
         </div>
       </div>
 
@@ -79,7 +82,7 @@ export default function RunningProcessPicker({ onPick, onClose }) {
         {!loading && filtered.length === 0 && (
           <div className={s.empty}>
             <IconDeviceGamepad2 size={28} stroke={1.2} className={s.emptyIcon} />
-            <span>No matching processes</span>
+            <span>{q ? 'No matching processes' : 'No game is running right now. Start it, then press refresh.'}</span>
           </div>
         )}
 
@@ -87,7 +90,7 @@ export default function RunningProcessPicker({ onPick, onClose }) {
           <button
             key={p.exe_name + p.install_path}
             type="button"
-            className={`${s.item} ${p.is_likely_game ? s.itemGame : ''}`}
+            className={`${s.item} ${p.is_likely_game ? s.itemGame : ''} ${p.kind === 'app' ? s.itemApp : ''}`}
             onClick={() => onPick(p)}
             title={p.install_path ? `${p.exe_name}\n${p.install_path}` : p.exe_name}
           >
@@ -100,6 +103,11 @@ export default function RunningProcessPicker({ onPick, onClose }) {
             )}
           </button>
         ))}
+        {!loading && hiddenApps.length > 0 && (
+          <button type="button" className={s.moreBtn} onClick={() => setShowApps(v => !v)}>
+            {showApps ? 'Hide other apps' : `Show other apps (${hiddenApps.length})`}
+          </button>
+        )}
       </div>
     </div>
   )

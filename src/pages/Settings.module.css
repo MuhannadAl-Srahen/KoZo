@@ -783,7 +783,7 @@
 /* ── Appearance: segmented choices, sliders, sidebar tab list ──────────── */
 .segList { display: flex; flex-direction: column; gap: var(--sp-10); }
 .segRow { display: flex; align-items: center; gap: var(--sp-12); flex-wrap: wrap; }
-.segLabel { min-width: 96px; font-size: var(--fs-md); color: var(--text-secondary); }
+.segLabel { min-width: 124px; font-size: var(--fs-md); color: var(--text-secondary); }
 .seg {
   display: inline-flex;
   padding: 3px;
@@ -843,3 +843,62 @@
 }
 .navRowBtn:hover:not(:disabled) { color: var(--a); border-color: var(--ab); }
 .navRowBtn:disabled { opacity: 0.35; cursor: default; }
+
+/* Start page chips wrap onto a second line in a narrow window. */
+.segWrap { flex-wrap: wrap; max-width: 620px; }
+
+/* Background → A game's art: a strip of the games' wide art. */
+.artPicker { display: flex; flex-direction: column; gap: var(--sp-10); }
+.artSearch {
+  composes: input from '../styles/controls.module.css';
+  width: 260px;
+  padding: var(--sp-6) var(--sp-10);
+}
+.artStrip {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 168px;
+  gap: var(--sp-10);
+  overflow-x: auto;
+  padding: 3px 3px var(--sp-8);
+}
+.artTile {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: var(--r-card);
+  background: var(--surface-3);
+  overflow: hidden;
+  cursor: pointer;
+  font-family: inherit;
+}
+.artTile img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.artTile:hover { border-color: var(--ab); }
+.artTileOn, .artTileOn:hover { border-color: var(--a); box-shadow: 0 0 0 2px color-mix(in srgb, var(--a) 35%, transparent); }
+.artName {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: var(--sp-12) var(--sp-8) var(--sp-4);
+  background: linear-gradient(to top, rgba(8, 8, 14, 0.9), transparent);
+  color: #fff;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.artCheck {
+  position: absolute;
+  top: var(--sp-6);
+  right: var(--sp-6);
+  display: inline-flex;
+  padding: 3px;
+  border-radius: var(--r-pill);
+  background: var(--a);
+  color: var(--accent-ink);
+}
+.artNone { font-size: var(--fs-sm); color: var(--text-muted); }

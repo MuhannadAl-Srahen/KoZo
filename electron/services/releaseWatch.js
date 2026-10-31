@@ -28,6 +28,15 @@ function releasedTs(str) {
   return Number.isFinite(t) ? t : null
 }
 
+// A game released more than two weeks ago is old news: setting an already
+// released game to Upcoming (or tracking it late) must never announce it as
+// "Now out". Such rows are quietly unwatched instead.
+const FRESH_MS = 14 * 24 * 60 * 60 * 1000
+function isLongReleased(str) {
+  const ts = releasedTs(str)
+  return ts != null && ts < Date.now() - FRESH_MS
+}
+
 // Released games the user hasn't acknowledged in the app yet — shown as the
 // "Now out" panel and the Upcoming badge, so a release that happened while
 // KoZo (or the overlay) wasn't visible is never missed.
@@ -69,7 +78,7 @@ async function refreshUpcomingDates() {
     const { getStoreDetails } = require('./steamApi')
     const gameListQ = require('../db/queries/gameList')
     const db = require('../db/database').getDb()
-    const rows = db.prepare("SELECT id, steam_app_id, release_date, genres FROM game_list WHERE status = 'upcoming' AND steam_app_id IS NOT NULL").all()
+    const rows = db.prepare("SELECT id, steam_app_id, release_date, genres FROM game_list WHERE release_watch = 1 AND steam_app_id IS NOT NULL").all()
     let changed = 0
     for (const row of rows) {
       const d = await getStoreDetails(row.steam_app_id).catch(() => null)
@@ -99,13 +108,18 @@ function check() {
     const db = require('../db/database').getDb()
     const rows = db.prepare(`
       SELECT id, name, steam_app_id, release_date, banner_url, game_id FROM game_list
-      WHERE status = 'upcoming' AND release_date IS NOT NULL
+      WHERE release_watch = 1 AND release_date IS NOT NULL
         AND (release_notified IS NULL OR release_notified = 0)
     `).all()
 
+    const stale = rows.filter(r => isLongReleased(r.release_date))
+    if (stale.length) {
+      const unwatch = db.prepare('UPDATE game_list SET release_notified = 1, release_watch = 0 WHERE id = ?')
+      for (const r of stale) unwatch.run(r.id)
+    }
     const released = rows.filter(r => {
       const ts = releasedTs(r.release_date)
-      return ts != null && ts <= Date.now()
+      return ts != null && ts <= Date.now() && !isLongReleased(r.release_date)
     })
     if (!released.length) return
 
@@ -178,8 +192,28 @@ async function refreshAndCheck() {
   check()
 }
 
+// One time: "Now out" entries that were never new (old games set to Upcoming
+// before the two-week rule) go away, and their rows stop being watched.
+function cleanupStale() {
+  try {
+    const settings = require('../db/queries/settings')
+    if (settings.getSetting('release_unseen_cleanup_v1')) return
+    const unseen = getUnseen()
+    const old = unseen.filter(r => isLongReleased(r.release_date))
+    if (old.length) {
+      const db = require('../db/database').getDb()
+      const unwatch = db.prepare('UPDATE game_list SET release_watch = 0 WHERE id = ?')
+      for (const r of old) unwatch.run(r.id)
+      setUnseen(unseen.filter(r => !isLongReleased(r.release_date)))
+      logger.info(`releaseWatch: cleared ${old.length} old "Now out" entr${old.length === 1 ? 'y' : 'ies'}`)
+    }
+    settings.setSetting('release_unseen_cleanup_v1', '1')
+  } catch (e) { logger.warn('releaseWatch: cleanup failed', { message: e.message }) }
+}
+
 function start() {
   if (_timer) return
+  cleanupStale()
   setTimeout(check, 12000)             // once shortly after startup (no network)
   // The network refresh waits until no game is running (runWhenIdle), so it
   // never adds store requests and DB writes on top of a play session.
@@ -191,4 +225,4 @@ function start() {
   _timer = setInterval(idleRefresh, CHECK_EVERY_MS)
 }
 
-module.exports = { start, check, refreshUpcomingDates, getUnseen, dismiss, sendReleaseToast }
+module.exports = { start, check, refreshUpcomingDates, getUnseen, dismiss, sendReleaseToast, isLongReleased }

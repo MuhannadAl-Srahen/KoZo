@@ -423,7 +423,7 @@ async function getAppAssets(appIds) {
       const input = {
         ids: batch.map(appid => ({ appid })),
         context: { language: 'english', country_code: 'US' },
-        data_request: { include_assets: true },
+        data_request: { include_assets: true, include_tag_count: 12 },
       }
       const data = await getJSON('https://api.steampowered.com/IStoreBrowseService/GetItems/v1/', { input_json: JSON.stringify(input) })
       for (const item of data?.response?.store_items || []) {
@@ -433,6 +433,7 @@ async function getAppAssets(appIds) {
           hero:     assetUrl(a, 'library_hero_2x', 'library_hero'),
           header:   assetUrl(a, 'header_2x', 'header'),
           capsule:  assetUrl(a, 'main_capsule_2x', 'main_capsule'),
+          tags:     Array.isArray(item.tagids) ? item.tagids.slice(0, 12) : [],   // Steam tag ids, most voted first
         }
         capSet(assetCache, item.appid, { at: Date.now(), assets }, 2000)
         out.set(item.appid, assets)
@@ -442,6 +443,40 @@ async function getAppAssets(appIds) {
     }
   }))
   return out
+}
+
+// Steam's tag id → name list (keyless), cached for a week.
+let tagNameCache = null   // { at, names: { id: name } }
+async function getTagNames() {
+  if (tagNameCache && Date.now() - tagNameCache.at < 7 * 86400000) return tagNameCache.names
+  const data = await getJSON('https://api.steampowered.com/IStoreService/GetTagList/v1/', { language: 'english' })
+  const names = {}
+  for (const t of data?.response?.tags || []) names[t.tagid] = t.name
+  tagNameCache = { at: Date.now(), names }
+  return names
+}
+
+// What you play, for the calendar's "Picked for you": every genre of your
+// Library games, weighted by playtime (a game you never launched still counts
+// a little). Weights are normalised to 0..1, keyed by lower-case name.
+async function getTasteProfile() {
+  const db = require('../db/database').getDb()
+  const rows = db.prepare('SELECT genres, total_playtime_seconds FROM games WHERE genres IS NOT NULL AND is_archived = 0').all()
+  const w = {}
+  for (const r of rows) {
+    let genres = []
+    try { genres = JSON.parse(r.genres) } catch {}
+    const weight = 1 + Math.log1p((r.total_playtime_seconds || 0) / 3600)
+    for (const g of genres) {
+      const k = String(g).toLowerCase()
+      w[k] = (w[k] || 0) + weight
+    }
+  }
+  const max = Math.max(1, ...Object.values(w))
+  for (const k of Object.keys(w)) w[k] = +(w[k] / max).toFixed(3)
+  let tagNames = {}
+  try { tagNames = await getTagNames() } catch {}
+  return { weights: w, tagNames }
 }
 
 async function assetsFor(appId) {
@@ -996,7 +1031,7 @@ async function getComingSoon(feed = 'soon', page = 0) {
 }
 
 module.exports = {
-  shrinkCover,
+  shrinkCover, getTasteProfile,
   getBannersDir, downloadFile,
   getAppAssets, downloadHero,
   getComingSoon, parseComingSoonHtml,

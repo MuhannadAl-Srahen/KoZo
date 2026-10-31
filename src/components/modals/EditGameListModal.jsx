@@ -139,16 +139,13 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
     }
   }
 
-  let genres = []
-  try { genres = JSON.parse(item.genres || '[]') } catch {}
-
   return (
     <Modal
       title="Edit Game"
       icon={<IconEdit size={17} stroke={1.6} />}
       onClose={onClose}
       onRequestClose={requestClose}
-      width={media.length ? 640 : 460}
+      width={media.length ? 760 : 560}
       footer={
         <div style={{ display: 'flex', gap: 8, width: '100%', alignItems: 'center' }}>
           <button
@@ -199,17 +196,6 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
         />
         {errors.name && <div className={s.errorText}>{errors.name}</div>}
       </div>
-
-      {genres.length > 0 && (
-        <div className={s.field}>
-          <label className={s.label}>Genres <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(from Steam)</span></label>
-          <div className={s.pills}>
-            {genres.map(g => (
-              <span key={g} className={s.pill} style={{ cursor: 'default' }}>{g}</span>
-            ))}
-          </div>
-        </div>
-      )}
 
       <div className={s.field}>
         <label className={s.label}>Status</label>

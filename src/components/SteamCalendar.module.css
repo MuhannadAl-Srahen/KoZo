@@ -474,109 +474,73 @@
 .chipMonth { width: 88px; }
 .chipMonth .chipDay { font-size: var(--fs-md); }
 
-/* ── Featured view ───────────────────────────────────────────── */
-.hero {
-  position: relative;
-  border-radius: var(--r-lg);
-  overflow: hidden;
-  border: 1px solid var(--neutral-border);
-  background: var(--surface-2);
+/* ── Steam view: day columns, like the store's calendar ──────── */
+.steamGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 230px), 1fr));   /* Ctrl+wheel */
+  gap: var(--sp-10);
+  align-items: start;
 }
-.heroHit {
+.steamDay {
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+  border: 1px solid var(--neutral-border);
+  border-radius: var(--r-card);
+  overflow: hidden;
+}
+.steamDayHead {
+  padding: var(--sp-8) var(--sp-10);
+  background: linear-gradient(90deg, var(--surface-3), transparent);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+.steamDayToday { color: var(--a); background: linear-gradient(90deg, var(--ad), transparent); }
+.steamDayList { display: flex; flex-direction: column; gap: var(--sp-8); padding: var(--sp-8); }
+.steamCap { position: relative; border-radius: var(--r-md); overflow: hidden; }
+.steamCapTracked { box-shadow: 0 0 0 2px var(--a); }
+.steamCapHit {
   position: relative;
   display: block;
   width: 100%;
-  height: clamp(220px, 34vw, 400px);
+  aspect-ratio: 616 / 353;
   padding: 0;
   border: none;
-  background: none;
+  background: var(--surface-3);
   cursor: pointer;
-  text-align: left;
-  font-family: inherit;
 }
-.heroArt { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; animation: heroIn 0.4s ease; }
-@keyframes heroIn { from { opacity: 0; } to { opacity: 1; } }
-.heroShade {
+.steamCapArt { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transition: transform 0.2s ease; }
+.steamCap:hover .steamCapArt { transform: scale(1.03); }
+.steamCapHover {
   position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, rgba(8, 8, 14, 0.88) 0%, rgba(8, 8, 14, 0.45) 45%, transparent 75%),
-              linear-gradient(to top, rgba(8, 8, 14, 0.7), transparent 45%);
-}
-.heroText {
-  position: absolute;
-  left: var(--sp-24);
-  bottom: var(--sp-32);
-  max-width: 55%;
+  left: var(--sp-6);
+  right: var(--sp-6);
+  bottom: var(--sp-6);
   display: flex;
-  flex-direction: column;
-  gap: var(--sp-6);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
 }
-.heroKicker {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-4);
-  color: var(--a);
+.steamCap:hover .steamCapHover, .steamCap:focus-within .steamCapHover { opacity: 1; transform: none; }
+.steamCapHover > * { flex: 1; background: var(--scrim-chip); }
+.steamMore {
+  align-self: stretch;
+  padding: var(--sp-6) var(--sp-10);
+  border: 1px dashed var(--neutral-border);
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
   font-size: var(--fs-xs);
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-.heroName { font-size: clamp(22px, 3vw, 36px); font-weight: 800; color: #fff; line-height: 1.1; text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6); }
-.heroMeta { font-size: var(--fs-sm); color: rgba(255, 255, 255, 0.8); }
-.heroActions { position: absolute; right: var(--sp-20); bottom: var(--sp-24); display: flex; }
-.heroArrow {
-  position: absolute;
-  top: 50%;
-  width: 38px;
-  height: 38px;
-  margin-top: -19px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--ab);
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--surface-1) 85%, transparent);
-  color: var(--text-primary);
+  font-weight: 600;
   cursor: pointer;
 }
-.heroArrow:hover { background: var(--a); color: var(--accent-ink); border-color: var(--a); }
-.heroArrowLeft { left: var(--sp-10); }
-.heroArrowRight { right: var(--sp-10); }
-.heroDots { position: absolute; left: 50%; bottom: var(--sp-10); transform: translateX(-50%); display: flex; gap: var(--sp-6); }
-.heroDot { width: 8px; height: 8px; padding: 0; border: none; border-radius: var(--r-pill); background: rgba(255, 255, 255, 0.35); cursor: pointer; transition: width 0.2s ease; }
-.heroDotOn { width: 22px; background: var(--a); }
-
-.rowList { display: flex; flex-direction: column; gap: var(--sp-4); }
-.row {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-8);
-  padding: var(--sp-4) var(--sp-8) var(--sp-4) var(--sp-4);
-  border: 1px solid var(--neutral-border);
-  border-radius: var(--r-card);
-  background: var(--surface-2);
-}
-.row:hover { border-color: var(--ab); }
-.rowTracked { border-color: var(--a); }
-.rowHit {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--sp-12);
-  padding: 0;
-  border: none;
-  background: none;
-  color: inherit;
-  font-family: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.rowThumb { position: relative; flex-shrink: 0; width: 128px; aspect-ratio: 616 / 353; border-radius: var(--r-md); overflow: hidden; background: var(--surface-3); }
-.rowThumbImg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.rowName { flex: 1; min-width: 0; font-size: var(--fs-md); font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.rowPrice { flex-shrink: 0; font-size: var(--fs-xs); color: var(--success); font-weight: 600; }
-.row .trackBtn { flex: 0 0 auto; min-width: 104px; }
+.steamMore:hover { color: var(--a); border-color: var(--ab); }
+.weekCards .steamMore { align-self: center; white-space: nowrap; }
+.posterGrid .steamMore { align-self: center; }
 
 /* ── Week view ───────────────────────────────────────────────── */
 .weekRows { display: flex; flex-direction: column; gap: var(--sp-8); }
@@ -606,3 +570,10 @@
   padding-bottom: var(--sp-4);
 }
 .weekEmpty { flex: 1; display: flex; align-items: center; color: var(--text-muted); font-size: var(--fs-sm); }
+
+/* The day popup ("+N more"): bigger posters with room around them. */
+.dayModalGrid {
+  --card-min: 180px;
+  gap: var(--sp-16);
+  padding: var(--sp-8) var(--sp-4);
+}

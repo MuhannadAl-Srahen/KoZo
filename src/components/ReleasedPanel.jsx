@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
-import { IconConfetti, IconBooks, IconBookmark, IconX } from '@tabler/icons-react'
+import { IconConfetti, IconBooks, IconBookmark, IconX, IconBrandSteam } from '@tabler/icons-react'
+import ContextMenu from './ui/ContextMenu'
 import s from './ReleasedPanel.module.css'
 
 // "Now out" — tracked upcoming games whose release date has passed and that the
@@ -9,6 +10,7 @@ import s from './ReleasedPanel.module.css'
 export default function ReleasedPanel({ onChanged }) {
   const [list, setList] = useState([])
   const [busy, setBusy] = useState(null)
+  const [menu, setMenu] = useState(null)   // right-click: { x, y, r }
 
   useEffect(() => {
     let alive = true
@@ -21,7 +23,10 @@ export default function ReleasedPanel({ onChanged }) {
 
   async function act(r, kind) {
     setBusy(r.id)
-    if (kind === 'library') await window.kozo.api.gameList.moveToLibrary([r.id])
+    if (kind === 'library') {
+      const res = await window.kozo.api.gameList.moveToLibrary([r.id])
+      if (res?.ok) window.dispatchEvent(new CustomEvent('kozo:make-playable', { detail: res.data }))
+    }
     else if (kind === 'want') await window.kozo.api.gameList.update(r.id, { status: 'want_to_play' })
     await window.kozo.api.releases.dismiss([r.id])
     setBusy(null)
@@ -37,7 +42,7 @@ export default function ReleasedPanel({ onChanged }) {
       </div>
       <div className={s.rows}>
         {list.map(r => (
-          <div key={r.id} className={s.row}>
+          <div key={r.id} className={s.row} onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, r }) }}>
             {r.steam_app_id && (
               <img className={s.art} src={`https://cdn.akamai.steamstatic.com/steam/apps/${r.steam_app_id}/capsule_184x69.jpg`} alt="" onError={e => { e.currentTarget.style.visibility = 'hidden' }} />
             )}
@@ -55,6 +60,25 @@ export default function ReleasedPanel({ onChanged }) {
           </div>
         ))}
       </div>
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          header={{
+            cover: menu.r.steam_app_id ? `https://cdn.akamai.steamstatic.com/steam/apps/${menu.r.steam_app_id}/capsule_184x69.jpg` : null,
+            name: menu.r.name,
+            sub: `Released ${menu.r.release_date}`,
+          }}
+          items={[
+            { label: 'Move to Library', Icon: IconBooks, onClick: () => act(menu.r, 'library') },
+            { label: 'Want to play', Icon: IconBookmark, onClick: () => act(menu.r, 'want') },
+            menu.r.steam_app_id && { label: 'Steam page', Icon: IconBrandSteam, onClick: () => window.kozo?.api?.shell?.openExternal?.(`https://store.steampowered.com/app/${menu.r.steam_app_id}`) },
+            { divider: true },
+            { label: 'Dismiss', Icon: IconX, onClick: () => act(menu.r, 'dismiss') },
+          ]}
+        />
+      )}
     </div>
   )
 }

@@ -90,6 +90,7 @@
   flex: 1;
   overflow-y: auto;
   padding: var(--sp-16) var(--sp-20);
+  scrollbar-gutter: stable;   /* the scrollbar never sits on the content */
   transform: translateZ(0);
 }
 
@@ -127,3 +128,9 @@
   color: var(--error);
   border-color: var(--error-border-strong);
 }
+
+/* KoZo pauses every animation while it's unfocused (global.css). A dialog that
+   opens then (the rating prompt after finishing from the tray) would freeze on
+   its first, invisible frame, so it skips the fade-in instead. */
+:global(html[data-inactive]) .overlay,
+:global(html[data-inactive]) .modal { animation: none !important; }

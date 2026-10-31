@@ -46,7 +46,9 @@ handle('games:list', () => gamesQ.listGamesWithStats())
 handle('games:get', (id) => gamesQ.getGame(id))
 // Shared by games:add and gameList:moveToLibrary: insert, fetch Steam art +
 // genres + achievements, and make sure the game is on the Game List too.
-async function addLibraryGame(data) {
+// `quick` (Move to Library): don't wait for the banner download; the row's own
+// art shows until the file lands and game:updated repaints the card.
+async function addLibraryGame(data, { quick = false } = {}) {
   // capsule_fallback is a transport-only hint for banner download — not a column.
   // sgdb_id / sgdb_cover: the SteamGridDB game the user picked in Add Game's
   // "Not on Steam" results; its cover is applied as-is instead of a name guess.
@@ -56,7 +58,7 @@ async function addLibraryGame(data) {
   if (game?.steam_app_id) {
     // Download the banner NOW so it shows immediately when Library refreshes after add.
     // This is why Game List never has this problem — it stores a CDN URL instantly.
-    try {
+    const fetchBanner = async () => { try {
       const { downloadBanner } = require('./services/steamApi')
       const fallback = capsule_fallback ? [capsule_fallback] : []
       const bannerPath = await downloadBanner(game.steam_app_id, game.id, fallback)
@@ -74,7 +76,9 @@ async function addLibraryGame(data) {
         if (url) game.banner_url = url
       }
       logger.warn(`Banner download failed for game ${game.id}`, { message: e.message })
-    }
+    } }
+    if (quick) setImmediate(() => { fetchBanner().then(() => { try { broadcast('game:updated', game.id) } catch {} }) })
+    else await fetchBanner()
 
     // Achievements sync in background — doesn't block the add response
     const { fetchAndStoreAchievements } = require('./services/achievementSync')
@@ -138,7 +142,7 @@ async function addLibraryGame(data) {
   bk()
   return game
 }
-handle('games:add', addLibraryGame)
+handle('games:add', (data) => addLibraryGame(data))
 // Plan library games for a month: the plan lives on each game's Game List row
 // (created if missing), so the Library and Game List month filters agree.
 handle('games:planMonth', (gameIds, month) => {
@@ -369,6 +373,19 @@ async function doLaunch(id) {
     !!game.exe_name &&
     !/^steam_\d+\.exe$/i.test(game.exe_name) &&   // sync placeholder
     fs.existsSync(path.join(game.install_path, game.exe_name))
+
+  // A launcher file (.bat / .cmd / .lnk) wins when it's there: it is how the
+  // copy on disk expects to be started. Run from its own folder, like a
+  // double-click; processWatcher picks the game up by exe_name as usual.
+  if (game.launch_file && fs.existsSync(game.launch_file)) {
+    const { spawn } = require('child_process')
+    const child = spawn('cmd.exe', ['/c', 'start', '""', '/d', path.dirname(game.launch_file), game.launch_file], {
+      cwd: path.dirname(game.launch_file), detached: true, stdio: 'ignore', windowsHide: true,
+    })
+    child.on('error', (e) => logger.warn(`launcher start failed for "${game.name}": ${e.message}`))
+    child.unref()
+    return { launched: 'launcher', path: game.launch_file }
+  }
 
   if (hasUsableLocalExe) {
     const fullPath = path.join(game.install_path, game.exe_name)
@@ -675,6 +692,7 @@ handle('gameList:update', (id, data) => {
   // game's Finished flag on any unrelated edit (rename, rating, list membership).
   if (data?.status && data.status !== prev?.status) {
     try { require('./services/statusSync').syncFromGameList(id, data.status) } catch (e) { logger.warn('statusSync from game list failed', { message: e.message }) }
+    if (data.status === 'finished') require('./services/statusSync').announceFinished({ listId: id })
   }
   // Newly marked "upcoming" with no stored release date → fetch it right away so
   // the Upcoming tab shows the countdown immediately (not on the next backfill).
@@ -722,20 +740,46 @@ handle('gameList:moveToLibrary', async (ids) => {
         source: row.steam_app_id ? 'steam' : 'manual',
         is_installed: 0,
         banner_url: row.banner_url || null,
-      })
+      }, { quick: true })
       created = true
     }
     if (row.game_id !== game.id) gameListQ.updateGameListItem(row.id, { game_id: game.id })
     if (statusSync.SHARED_STATUSES.has(row.status) && !game.completion_status) {
-      try { statusSync.setGameStatus(game.id, row.status) } catch {}
+      try { statusSync.setGameStatus(game.id, row.status, { announce: false }) } catch {}
     }
     broadcast('game:updated', game.id)
-    moved.push({ listId: row.id, gameId: game.id, name: row.name, created, needsExe: !row.steam_app_id && !game.exe_name })
+    moved.push({
+      listId: row.id, gameId: game.id, name: row.name, created,
+      cover: game.banner_local_path ? null : (row.banner_url || game.banner_url || null),
+      coverPath: game.banner_local_path || null,
+      needsExe: !game.exe_name,
+    })
   }
   bk()
   return moved
 })
 handle('gameList:plannedMonths', () => gameListQ.plannedMonths())
+// Play Plan board: one month's planned rows, plus how long each linked game
+// was played inside that month (local month bounds come from the renderer).
+handle('gameList:planBoard', (month, from, to) => {
+  if (!/^\d{4}-\d{2}$/.test(String(month || ''))) return []
+  return require('./db/database').getDb().prepare(`
+    SELECT gl.*,
+      (SELECT g.banner_local_path FROM games g WHERE g.id = gl.game_id) AS game_banner_local_path,
+      (SELECT COALESCE(SUM(s.duration_seconds), 0) FROM sessions s
+        WHERE s.game_id = gl.game_id AND s.started_at >= ? AND s.started_at < ?) AS month_seconds
+    FROM game_list gl
+    WHERE gl.planned_month = ?
+    ORDER BY gl.is_favorite DESC, gl.display_order IS NULL, gl.display_order, gl.id
+  `).all(String(from || ''), String(to || ''), month)
+})
+// Every month that has plans: how many games, and how many of them are done.
+handle('gameList:planSummary', () => require('./db/database').getDb().prepare(`
+  SELECT planned_month AS month, COUNT(*) AS total,
+         SUM(CASE WHEN status = 'finished' THEN 1 ELSE 0 END) AS done
+  FROM game_list WHERE planned_month IS NOT NULL
+  GROUP BY planned_month ORDER BY planned_month
+`).all())
 handle('gameList:planMonth', (ids, month) => {
   const list = (Array.isArray(ids) ? ids : [ids]).map(Number).filter(Number.isFinite)
   const value = gameListQ.setPlannedMonth(list, month)
@@ -796,13 +840,37 @@ handle('watcher:pause',  () => { require('./services/processWatcher').pause();  
 handle('watcher:resume', () => { require('./services/processWatcher').resume(); return true })
 
 // ── File picker for game executable ─────────────────────────────────────────
+// The game's program, or a launcher file (.bat / .cmd / .lnk) that starts it.
+// For a launcher, `launch_file` is what Play runs and `exe_name` is the best
+// guess at the real game program in the same folder (what KoZo watches for
+// playtime); `candidates` lists the other .exe files there, biggest first.
+const HELPER_EXE = /^(unins|uninstall|setup|install|vc_?redist|dxsetup|dxwebsetup|crashreport|crashhandler|unitycrashhandler|ue4prereq|uerprereq|easyanticheat|be_?service|launcherpatcher|updater|notification_helper|cefprocess|quicksfv)/i
+function exeCandidates(dir) {
+  const fs = require('fs')
+  const out = []
+  const scan = (d, depth) => {
+    let entries = []
+    try { entries = fs.readdirSync(d, { withFileTypes: true }) } catch { return }
+    for (const e of entries) {
+      const full = path.join(d, e.name)
+      if (e.isFile() && /\.exe$/i.test(e.name) && !HELPER_EXE.test(e.name)) {
+        try { out.push({ exe_name: e.name, install_path: d, size: fs.statSync(full).size }) } catch {}
+      } else if (e.isDirectory() && depth < 2 && !/^(redist|_commonredist|directx|support|__installer|engine)$/i.test(e.name)) {
+        scan(full, depth + 1)
+      }
+    }
+  }
+  scan(dir, 0)
+  return out.sort((x, y) => y.size - x.size).slice(0, 8)
+}
+
 handle('dialog:pickExe', async (defaultPath) => {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
   const opts = {
-    title: 'Select the game executable',
+    title: 'Select the game (.exe) or its launcher (.bat, .cmd, shortcut)',
     properties: ['openFile'],
     filters: [
-      { name: 'Executables', extensions: ['exe'] },
+      { name: 'Games and launchers', extensions: ['exe', 'bat', 'cmd', 'lnk'] },
       { name: 'All files', extensions: ['*'] },
     ],
   }
@@ -812,12 +880,38 @@ handle('dialog:pickExe', async (defaultPath) => {
     : await dialog.showOpenDialog(opts)
   if (result.canceled || !result.filePaths?.[0]) return null
   const full = result.filePaths[0]
+  const ext = path.extname(full).toLowerCase()
+  if (ext === '.lnk') {
+    // A shortcut straight to an .exe is that .exe (its arguments kept by
+    // launching through the shortcut); anything else is treated like a .bat.
+    let target = null
+    try { target = require('electron').shell.readShortcutLink(full).target } catch {}
+    if (target && /\.exe$/i.test(target)) {
+      return { exe_name: path.basename(target), install_path: path.dirname(target), full_path: target, launch_file: full }
+    }
+  }
+  if (ext === '.bat' || ext === '.cmd' || ext === '.lnk') {
+    const dir = path.dirname(full)
+    const candidates = exeCandidates(dir)
+    return {
+      launch_file: full,
+      exe_name: candidates[0]?.exe_name || null,
+      install_path: candidates[0]?.install_path || dir,
+      candidates,
+      full_path: full,
+    }
+  }
   return {
     exe_name: path.basename(full),
     install_path: path.dirname(full),
     full_path: full,
+    launch_file: null,
   }
 })
+
+// .exe files near a folder (the "which program is the game?" step after
+// picking a launcher).
+handle('dialog:exeCandidates', (dir) => (dir ? exeCandidates(String(dir)) : []))
 
 // Pick an image and return its bytes as a data: URL so the renderer can load it
 // into a <canvas> WITHOUT cross-origin canvas tainting (the kozo:// protocol is a
@@ -1282,6 +1376,7 @@ handle('steam:signIn', () => require('./services/steamOpenId').signIn())
 handle('steam:storeDetails', (appId) => require('./services/steamApi').getStoreDetails(appId))
 handle('steam:comingSoon', (feed, page) => require('./services/steamApi').getComingSoon(feed, page))
 // appIds → { [appid]: { portrait, hero, header, capsule } } real store art URLs.
+handle('steam:tasteProfile', () => require('./services/steamApi').getTasteProfile())
 handle('steam:appAssets', async (appIds) => Object.fromEntries(await require('./services/steamApi').getAppAssets(appIds)))
 
 // Called when the Upcoming tab opens: warms the store-details cache for every
@@ -1374,6 +1469,70 @@ handle('steam:refreshAllBanners', async () => {
 // ── SteamGridDB (covers for non-Steam games) ─────────────────────────────────
 handle('sgdb:test', (key) => require('./services/steamGridDb').testKey(key))
 handle('sgdb:search', (name) => require('./services/steamGridDb').searchGame(name))
+// Rate a finished game 1 to 10. The rating lives on the Game List row; a
+// Library game without one gets its row created first.
+handle('gameList:rate', ({ listId = null, gameId = null } = {}, rating) => {
+  const value = rating == null ? null : Math.max(1, Math.min(10, Math.round(Number(rating))))
+  let id = listId
+  if (!id && gameId) {
+    const g = gamesQ.getGame(Number(gameId))
+    if (g) gameListQ.ensureListRowForGame(g)
+    id = require('./db/database').getDb().prepare('SELECT id FROM game_list WHERE game_id = ? LIMIT 1').get(Number(gameId))?.id
+  }
+  if (!id) throw new Error('Game not found')
+  gameListQ.updateGameListItem(id, { rating: value })
+  bk(); broadcast('game:updated', null)
+  return value
+})
+
+// Every finished game, Library and Game List together (linked ones once),
+// for the Finished tab: cover, rating, playtime, achievements, finish date.
+handle('games:finished', () => {
+  const db = require('./db/database').getDb()
+  const lib = db.prepare(`
+    SELECT g.id AS game_id, g.name, g.banner_local_path, g.banner_url, g.banner_rev, g.total_playtime_seconds,
+           g.completion_status_at AS finished_at, g.steam_app_id, g.genres,
+           (SELECT COUNT(*) FROM achievements a WHERE a.game_id = g.id) AS ach_total,
+           (SELECT COUNT(DISTINCT au.achievement_id) FROM achievement_unlocks au JOIN achievements a ON a.id = au.achievement_id WHERE a.game_id = g.id) AS ach_unlocked,
+           (SELECT COUNT(*) FROM sessions s WHERE s.game_id = g.id) AS session_count,
+           (SELECT MIN(s.started_at) FROM sessions s WHERE s.game_id = g.id) AS first_session_at,
+           g.first_played_at, g.hero_local_path,
+           gl.id AS list_id, gl.rating, gl.banner_url AS list_banner
+    FROM games g LEFT JOIN game_list gl ON gl.game_id = g.id
+    WHERE g.completion_status = 'finished' AND g.is_archived = 0
+    GROUP BY g.id
+  `).all()
+  const listOnly = db.prepare(`
+    SELECT NULL AS game_id, gl.name, NULL AS banner_local_path, gl.banner_url, NULL AS banner_rev, 0 AS total_playtime_seconds,
+           gl.added_at AS finished_at, gl.steam_app_id, gl.genres, 0 AS ach_total, 0 AS ach_unlocked,
+           0 AS session_count, NULL AS first_session_at, NULL AS first_played_at, NULL AS hero_local_path,
+           gl.id AS list_id, gl.rating, gl.banner_url AS list_banner
+    FROM game_list gl
+    WHERE gl.status = 'finished' AND (gl.game_id IS NULL OR gl.game_id NOT IN (SELECT id FROM games WHERE completion_status = 'finished'))
+  `).all()
+  return [...lib, ...listOnly]
+})
+
+// Untrack a release from the Steam calendar. A row still marked Upcoming was
+// only ever on the list because it was tracked, so it goes; a game you also
+// set to Want to play / Playing stays on your list and just stops being watched.
+handle('gameList:untrack', (id) => {
+  const db = require('./db/database').getDb()
+  const row = db.prepare('SELECT id, status FROM game_list WHERE id = ?').get(Number(id))
+  if (!row) return false
+  if (row.status === 'upcoming') gameListQ.deleteGameListItem(row.id)
+  else db.prepare('UPDATE game_list SET release_watch = 0 WHERE id = ?').run(row.id)
+  bk(); broadcast('game:updated', null)
+  return true
+})
+
+// Every release-watched game (any status), for the calendar's Tracked shelf
+// and the "Tracked" marks on its cards.
+handle('gameList:tracked', () => require('./db/database').getDb().prepare(`
+  SELECT id, game_id, steam_app_id, name, banner_url, status, release_date, genres, added_at
+  FROM game_list WHERE release_watch = 1 ORDER BY release_date IS NULL, id
+`).all())
+
 // Settings → Appearance → Background: copy the chosen picture into KoZo's own
 // folder (so moving or deleting the original doesn't break it) and return
 // that path. Earlier wallpapers are removed. null when the dialog is cancelled.

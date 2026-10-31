@@ -30,7 +30,7 @@ export default function SteamGameModal({ appId, name, release, countdown, art, f
       title={name}
       icon={<IconBrandSteam size={17} stroke={1.6} />}
       onClose={onClose}
-      width={860}
+      width={1100}
       footer={
         <div className={s.footer}>
           {appId && (
@@ -75,7 +75,7 @@ export default function SteamGameModal({ appId, name, release, countdown, art, f
           </div>
 
           {details?.genres?.length > 0 && (
-            <div className={s.chips}>{details.genres.map(g => <span key={g} className={s.chip}>{g}</span>)}</div>
+            <div className={s.chips}>{[...new Set(details.genres)].map(g => <span key={g} className={s.chip}>{g}</span>)}</div>
           )}
 
           {details === undefined && <PanelSkeleton lines={4} />}
@@ -83,7 +83,7 @@ export default function SteamGameModal({ appId, name, release, countdown, art, f
           {details === null && <p className={s.muted}>Steam has no store details for this game yet.</p>}
 
           {details?.categories?.length > 0 && (
-            <div className={s.chips}>{details.categories.map(c => <span key={c} className={s.chipMuted}>{c}</span>)}</div>
+            <div className={s.chips}>{[...new Set(details.categories)].map(c => <span key={c} className={s.chipMuted}>{c}</span>)}</div>
           )}
         </div>
       </div>

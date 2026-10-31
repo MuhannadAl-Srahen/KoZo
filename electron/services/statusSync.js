@@ -61,7 +61,9 @@ function linkedGame(listRow) {
  * status leaves list rows untouched — a cleared card shouldn't erase a backlog
  * entry the user curated on the Game List page.
  */
-function setGameStatus(gameId, status) {
+// `announce: false` (Move to Library) skips the rating prompt: carrying a
+// Finished status over is not finishing the game now.
+function setGameStatus(gameId, status, { announce = true } = {}) {
   const value = status || null
   if (value && !SHARED_STATUSES.has(value)) throw new Error(`Invalid game status: ${status}`)
 
@@ -86,6 +88,7 @@ function setGameStatus(gameId, status) {
   // Finishing a game is worth XP — surface a level-up right away if it caused one.
   if (value === 'finished') {
     try { require('./xpTracker').check({ reason: 'finished', gameName: game.name }) } catch {}
+    if (announce) announceFinished({ gameId })
   }
   return db().prepare('SELECT * FROM games WHERE id = ?').get(gameId)
 }
@@ -134,4 +137,25 @@ function onSessionStarted(gameId) {
   }
 }
 
-module.exports = { setGameStatus, syncFromGameList, onSessionStarted, SHARED_STATUSES }
+// A game was just marked Finished (Library or Game List): the renderer opens
+// the 1 to 10 rating dialog. The rating lives on the Game List row.
+function announceFinished({ gameId = null, listId = null }) {
+  try {
+    const d = db()
+    const g = gameId ? d.prepare('SELECT id, name, banner_local_path, banner_url, steam_app_id FROM games WHERE id = ?').get(gameId) : null
+    const row = listId
+      ? d.prepare('SELECT id, game_id, name, banner_url, rating FROM game_list WHERE id = ?').get(listId)
+      : (g ? d.prepare('SELECT id, game_id, name, banner_url, rating FROM game_list WHERE game_id = ? LIMIT 1').get(g.id) : null)
+    const game = g || (row?.game_id ? d.prepare('SELECT id, name, banner_local_path, banner_url FROM games WHERE id = ?').get(row.game_id) : null)
+    broadcast('game:finished', {
+      gameId: game?.id ?? null,
+      listId: row?.id ?? null,
+      name: game?.name || row?.name || '',
+      coverPath: game?.banner_local_path || null,
+      coverUrl: row?.banner_url || game?.banner_url || null,
+      rating: row?.rating ?? null,
+    })
+  } catch (e) { logger.warn('statusSync: finished announce failed', { message: e.message }) }
+}
+
+module.exports = { setGameStatus, syncFromGameList, onSessionStarted, announceFinished, SHARED_STATUSES }

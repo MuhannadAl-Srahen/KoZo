@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
-  IconHistory, IconTrophy, IconDeviceGamepad2, IconClock, IconFilterOff,
+  IconHistory, IconTrophy, IconDeviceGamepad2, IconClock, IconFilterOff, IconExternalLink, IconPlayerPlayFilled,
 } from '@tabler/icons-react'
 import { getBannerBg, formatPlaytime, fileUrl, localDayKey } from '../lib/utils'
 import SearchableSelect from '../components/ui/SearchableSelect'
 import EmptyState from '../components/ui/EmptyState'
+import ContextMenu from '../components/ui/ContextMenu'
 import { RowSkeleton } from '../components/ui/Skeleton'
 import s from './Sessions.module.css'
 
@@ -69,6 +71,8 @@ function SessionThumb({ session }) {
 }
 
 export default function Sessions() {
+  const navigate = useNavigate()
+  const [menu, setMenu]           = useState(null)   // right-click: { x, y, session }
   const [sessions, setSessions]   = useState([])
   const [games, setGames]         = useState([])
   const [gameId, setGameId]       = useState('')
@@ -225,7 +229,7 @@ export default function Sessions() {
 
                 <div className={s.dayRows}>
                   {daySessions.map(session => (
-                    <div key={session.id} className={s.sessionRow}>
+                    <div key={session.id} className={s.sessionRow} onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, session }) }}>
                       <SessionThumb session={session} />
 
                       {/* Game + time range */}
@@ -269,6 +273,23 @@ export default function Sessions() {
           )}
         </div>
       </div>
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          header={{
+            cover: menu.session.banner_local_path ? fileUrl(menu.session.banner_local_path) : (menu.session.banner_url || null),
+            name: menu.session.game_name,
+            sub: sessionTimeRange(menu.session.started_at, menu.session.duration_seconds),
+          }}
+          items={[
+            { label: 'Play', Icon: IconPlayerPlayFilled, color: 'var(--a)', onClick: () => window.kozo?.api?.games?.launch?.(menu.session.game_id) },
+            { label: 'Open game page', Icon: IconExternalLink, onClick: () => navigate(`/game/${menu.session.game_id}`) },
+            { label: 'Only this game', Icon: IconDeviceGamepad2, onClick: () => setGameId(String(menu.session.game_id)) },
+          ]}
+        />
+      )}
     </div>
   )
 }

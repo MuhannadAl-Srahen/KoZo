@@ -13,7 +13,7 @@ import {
 import { useAccentColor } from '../context/AccentColorContext'
 import { useAppearance, DEFAULT_APPEARANCE } from '../context/AppearanceContext'
 import { NAV_ITEMS } from '../components/Sidebar'
-import SearchableSelect from '../components/ui/SearchableSelect'
+import { fileUrl } from '../lib/utils'
 import HoneycombLogo from '../components/HoneycombLogo'
 import ScanResultModal from '../components/modals/ScanResultModal'
 import SaveManagerModal from '../components/modals/SaveManagerModal'
@@ -910,12 +910,13 @@ function ScanPCTab() {
   )
 }
 
-// Segmented choice row (UI scale, spacing, corners, background mode).
-function Segmented({ value, options, onChange, label }) {
+// Segmented choice row (UI scale, spacing, corners, background mode, start
+// page). `wrap` lets a long set of choices flow onto a second line.
+function Segmented({ value, options, onChange, label, wrap = false }) {
   return (
     <div className={s.segRow}>
       <span className={s.segLabel}>{label}</span>
-      <div className={s.seg} role="radiogroup" aria-label={label}>
+      <div className={`${s.seg} ${wrap ? s.segWrap : ''}`} role="radiogroup" aria-label={label}>
         {options.map(o => (
           <button key={String(o.value)} type="button" role="radio" aria-checked={value === o.value}
             className={`${s.segBtn} ${value === o.value ? s.segBtnOn : ''}`} onClick={() => onChange(o.value)}>
@@ -935,6 +936,37 @@ function SliderRow({ label, value, min, max, unit, onChange }) {
         onChange={e => onChange(Number(e.target.value))} />
       <span className={s.sliderValue}>{value}{unit}</span>
     </label>
+  )
+}
+
+// Background → A game's art: click a game's wide art to use it. Search
+// narrows the strip; the picked one carries an accent ring.
+function GameArtPicker({ games, value, onPick }) {
+  const [q, setQ] = useState('')
+  const shown = games
+    .filter(g => !q.trim() || g.name.toLowerCase().includes(q.trim().toLowerCase()))
+    .sort((a, b) => (String(a.id) === String(value) ? -1 : String(b.id) === String(value) ? 1 : (b.total_playtime_seconds || 0) - (a.total_playtime_seconds || 0)))
+  return (
+    <div className={s.artPicker}>
+      <div className={s.segRow}>
+        <span className={s.segLabel}>Game</span>
+        <input className={s.artSearch} value={q} onChange={e => setQ(e.target.value)} placeholder="Search your games" />
+      </div>
+      <div className={s.artStrip} role="radiogroup" aria-label="Game art">
+        {shown.length === 0 && <span className={s.artNone}>No games with art match.</span>}
+        {shown.map(g => {
+          const on = String(g.id) === String(value)
+          return (
+            <button key={g.id} type="button" role="radio" aria-checked={on} title={g.name}
+              className={`${s.artTile} ${on ? s.artTileOn : ''}`} onClick={() => onPick(g)}>
+              <img src={fileUrl(g.hero_local_path || g.banner_local_path)} alt="" loading="lazy" decoding="async" />
+              <span className={s.artName}>{g.name}</span>
+              {on && <span className={s.artCheck}><IconCheck size={13} stroke={2.4} /></span>}
+            </button>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
@@ -978,7 +1010,7 @@ function AppearanceCustomize() {
           <span>Size and density</span>
         </div>
         <div className={s.segList}>
-          <Segmented label="UI scale" value={prefs.scale} onChange={v => setPrefs({ scale: v })}
+          <Segmented label={`UI scale ${Math.round((prefs.scale || 1) * 100)}%`} value={prefs.scale} onChange={v => setPrefs({ scale: v })}
             options={[{ value: 0.9, label: '90%' }, { value: 1, label: '100%' }, { value: 1.1, label: '110%' }, { value: 1.25, label: '125%' }]} />
           <Segmented label="Spacing" value={prefs.density} onChange={v => setPrefs({ density: v })}
             options={[{ value: 'comfortable', label: 'Comfortable' }, { value: 'compact', label: 'Compact' }]} />
@@ -1028,11 +1060,8 @@ function AppearanceCustomize() {
             )
           })}
         </div>
-        <div className={s.segRow}>
-          <span className={s.segLabel}>Start page</span>
-          <SearchableSelect value={prefs.startPage} onChange={v => setPrefs({ startPage: v || '/' })}
-            options={START_PAGES} searchable={false} width={200} placeholder="Library" />
-        </div>
+        <Segmented label="Start page" value={prefs.startPage || '/'} onChange={v => setPrefs({ startPage: v })}
+          options={START_PAGES} wrap />
       </section>
 
       <section className={s.section}>
@@ -1042,7 +1071,14 @@ function AppearanceCustomize() {
         </div>
         <p className={s.sectionDesc}>Put a picture behind every page. Cards and panels stay solid so text is easy to read.</p>
         <div className={s.segList}>
-          <Segmented label="Picture" value={prefs.bg.mode} onChange={v => setBg({ mode: v })}
+          <Segmented label="Picture" value={prefs.bg.mode} onChange={v => {
+            // "A game's art" with nothing picked yet: start from your most
+            // played game that has art, so the change shows at once.
+            if (v === 'game' && !prefs.bg.gameArt && games.length) {
+              const g = [...games].sort((a, b) => (b.total_playtime_seconds || 0) - (a.total_playtime_seconds || 0))[0]
+              setBg({ mode: v, gameId: g.id, gameArt: g.hero_local_path || g.banner_local_path })
+            } else setBg({ mode: v })
+          }}
             options={[{ value: 'off', label: 'Off' }, { value: 'image', label: 'My image' }, { value: 'game', label: "A game's art" }]} />
           {prefs.bg.mode === 'image' && (
             <div className={s.segRow}>
@@ -1053,19 +1089,8 @@ function AppearanceCustomize() {
             </div>
           )}
           {prefs.bg.mode === 'game' && (
-            <div className={s.segRow}>
-              <span className={s.segLabel}>Game</span>
-              <SearchableSelect
-                value={prefs.bg.gameId}
-                onChange={v => {
-                  const g = games.find(x => String(x.id) === String(v))
-                  setBg({ gameId: v || null, gameArt: g ? (g.hero_local_path || g.banner_local_path) : null })
-                }}
-                options={games.map(g => ({ value: g.id, label: g.name }))}
-                placeholder="Pick a game"
-                width={260}
-              />
-            </div>
+            <GameArtPicker games={games} value={prefs.bg.gameId}
+              onPick={g => setBg({ gameId: g.id, gameArt: g.hero_local_path || g.banner_local_path })} />
           )}
           {prefs.bg.mode !== 'off' && (
             <>
@@ -1379,18 +1404,18 @@ const FEATURE_GROUPS = [
   {
     title: 'Tracking',
     items: [
-      { Icon: IconClock,    name: 'Automatic playtime', go: '/sessions', desc: 'Detects running games and records sessions, no manual timers.' },
-      { Icon: IconHistory,  name: 'Sessions timeline', go: '/sessions',  desc: 'Every play session grouped by day with durations and unlocks.' },
+      { Icon: IconClock,    name: 'Automatic playtime', go: '/activity?tab=sessions', desc: 'Detects running games and records sessions, no manual timers.' },
+      { Icon: IconHistory,  name: 'Sessions timeline', go: '/activity?tab=sessions',  desc: 'Every play session grouped by day with durations and unlocks.' },
       { Icon: IconBolt,     name: 'Idle / AFK pause', go: 'tab:general',   desc: 'Stops counting when you step away so overnight idling doesn’t inflate stats.' },
     ],
   },
   {
     title: 'Achievements',
     items: [
-      { Icon: IconBrandSteam, name: 'Steam sync', go: '/achievements',        desc: 'Imports your unlocks via the Steam Web API, automatically while you play and after each session. No interval to set.' },
-      { Icon: IconTrophy,     name: 'Cracked-game sync', go: '/achievements', desc: 'Reads Goldberg, CODEX, RUNE, EMPRESS, SKIDROW and more, watched live, so unlocks appear instantly.' },
+      { Icon: IconBrandSteam, name: 'Steam sync', go: '/activity?tab=achievements',        desc: 'Imports your unlocks via the Steam Web API, automatically while you play and after each session. No interval to set.' },
+      { Icon: IconTrophy,     name: 'Cracked-game sync', go: '/activity?tab=achievements', desc: 'Reads Goldberg, CODEX, RUNE, EMPRESS, SKIDROW and more, watched live, so unlocks appear instantly.' },
       { Icon: IconBell,       name: 'Live game overlay', go: 'overlay:test', desc: 'A toast pops over your game the moment you unlock something, Steam-style, in your accent color.' },
-      { Icon: IconDownload,   name: 'Achievement lists for any launcher', go: '/achievements', desc: "Xbox/Epic/other games auto-match a Steam achievement list on add, then tick off the ones you've earned." },
+      { Icon: IconDownload,   name: 'Achievement lists for any launcher', go: '/activity?tab=achievements', desc: "Xbox/Epic/other games auto-match a Steam achievement list on add, then tick off the ones you've earned." },
     ],
   },
   {
@@ -1423,10 +1448,12 @@ const FEATURE_GROUPS = [
   {
     title: 'Insights & App',
     items: [
-      { Icon: IconChartBar,  name: 'Statistics', go: '/statistics',    desc: 'Playtime trends with an hourly 24h view, daily/monthly charts, and click-a-day (or hour) to focus it.' },
+      { Icon: IconChartBar,  name: 'Statistics', go: '/activity?tab=overview',    desc: 'Playtime trends with an hourly 24h view, daily/monthly charts, and click-a-day (or hour) to focus it.' },
       { Icon: IconBell,      name: 'In-game status (Alt+K)', go: 'tab:about', desc: 'Press Alt+K while playing to flash your live session time and achievement progress over the game.' },
       { Icon: IconTrophy,    name: 'Achievement list (Alt+J)', go: 'tab:about', desc: 'Press Alt+J while playing to flash your progress and the rarest achievements you still have left, right over the game.' },
       { Icon: IconRocket,    name: 'Tray & startup', go: 'tab:general',desc: 'Runs quietly in the system tray and can launch with Windows.' },
+      { Icon: IconRocket,    name: 'Open KoZo from anywhere', go: 'tab:general', desc: 'Press Ctrl+Shift+K, or hold View and Menu on a controller for a second, to bring KoZo up even when it is closed to the tray.' },
+      { Icon: IconDeviceGamepad2, name: 'Controller control', go: '/', desc: 'Drive the whole app with a controller: D-pad to move, A to select, B to go back, X for options, Y to search, LB and RB to switch tabs.' },
     ],
   },
 ]

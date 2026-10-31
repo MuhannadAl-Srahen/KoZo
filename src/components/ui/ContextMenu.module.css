@@ -1,0 +1,82 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-scrim);
+}
+
+.menu {
+  position: fixed;
+  z-index: var(--z-menu);
+  width: 248px;
+  padding: var(--sp-4);
+  background: var(--surface-3);
+  border: 1px solid var(--border-accent-soft);
+  border-radius: var(--r-card);
+  box-shadow: var(--elev-3, var(--elev-2));
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+}
+.flyout { width: 200px; }
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  padding: var(--sp-6) var(--sp-6) var(--sp-8);
+  margin-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.cover {
+  position: relative;
+  flex-shrink: 0;
+  width: 34px;
+  height: 46px;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.headText { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.name { font-size: var(--fs-md); font-weight: 700; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sub { font-size: var(--fs-xs); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.rows { display: flex; flex-direction: column; }
+.section {
+  padding: var(--sp-6) var(--sp-8) var(--sp-2);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  width: 100%;
+  min-height: 32px;
+  padding: 0 var(--sp-8);
+  border: none;
+  border-radius: var(--r-input);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: var(--t-control);
+}
+.item:hover:not(:disabled), .itemOpen { background: var(--ad); color: var(--text-primary); }
+.item:disabled { opacity: 0.45; cursor: default; }
+.itemActive, .itemActive:hover:not(:disabled) { color: var(--a); }
+.itemDanger { color: var(--error); }
+.itemDanger:hover:not(:disabled) { background: var(--error-bg-hover); color: var(--error); }
+
+.icon { display: inline-flex; width: 16px; justify-content: center; flex-shrink: 0; }
+.label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hint { font-size: var(--fs-2xs); color: var(--text-muted); }
+.check { color: var(--a); flex-shrink: 0; }
+.chev { color: var(--text-muted); flex-shrink: 0; }
+
+.divider { height: 1px; margin: var(--sp-4) var(--sp-2); background: var(--border-subtle); }

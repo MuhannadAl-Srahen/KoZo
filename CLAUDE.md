@@ -61,7 +61,8 @@ src/                 renderer (React)
 | statusSync, installCheck | Keep game status and list status in step; update the installed flag and relocate moved games. |
 | releaseWatch | Refreshes tracked upcoming games' Steam dates (delays), then flags released ones: overlay toast once, plus the `unseen_releases` setting behind the "Now out" panel (`ReleasedPanel`) and the Upcoming sidebar badge. Runs at startup, every 6h, and when the main window is shown. |
 | statusFlash (Alt+K), achievementListFlash (Alt+J) | Overlay info panels. |
-| controllerInput | PowerShell XInput probe, so controller play doesn't count as AFK. |
+| controllerInput | PowerShell XInput probe, so controller play doesn't count as AFK. AFK (`idle_pause_min`, default 5) is applied in `processWatcher.heartbeatSession`: the tick that first flags AFK subtracts the whole quiet span since the last input, not only the part past the threshold. |
+| controllerWake | Always-on PowerShell XInput loop (120 ms): View + Menu held 1s calls `showFromAnywhere({ gamepad: true })` in main.js (also bound to Ctrl+Shift+K), which brings KoZo to front and sends `gamepad:wake`. |
 | appUpdater | electron-updater: broadcasts `app:update` state for `UpdateBanner`, and `app:whatsNew` shows release notes once after an update. |
 | trackingSelfTest, notifications | Settings → "Test achievement tracking"; notifications is a no-op. |
 
@@ -71,10 +72,10 @@ src/                 renderer (React)
 | `/` | Library |
 | `/game/:id` | GameDetail |
 | `/game-list` | GameList (paged, 20 per page) |
-| `/achievements` | AchievementsHub |
-| `/upcoming` | Upcoming (My upcoming + Steam calendar tab: `components/SteamCalendar.jsx`, data from `steam:comingSoon`; layouts Strip, Featured, Week, Days, Month plus a TBA view for undated games; `wishRank` = place in the most-wishlisted feed) |
-| `/sessions` | Sessions |
-| `/statistics` | Statistics |
+| `/plan` | PlayPlan: month board with lanes Up next / Playing / Done (drag across lanes sets the status; Done = finished, which opens the rating), progress and hours this month (`gameList:planBoard`), coming months and past recap (`gameList:planSummary`); drag a card onto a month chip to re-plan |
+| `/finished` | Finished (Library + Game List finished games by year, with ratings; `games:finished`); a card opens `FinishedGameModal` (stats, rating, game page, Play again) |
+| `/upcoming` | Upcoming = `components/SteamCalendar.jsx` only (data from `steam:comingSoon`). Layouts Steam (default, day columns from today), Strip, Week, Month; TBA and Tracked shelves; "Picked for you" keeps 4 per day scored by taste (`steam:tasteProfile` + GetItems tag ids) and popularity (`wishRank`/`popRank`) |
+| `/activity` | Activity: `?tab=overview` (Statistics), `sessions` (Sessions), `achievements` (AchievementsHub). `/statistics`, `/sessions`, `/achievements` redirect here |
 | `/profile` | Profile |
 | `/settings` | Settings (tabs) |
 
@@ -86,7 +87,7 @@ src/                 renderer (React)
 - `components/ui/Modal.jsx`: renders into `<body>`, Escape closes the top modal only, `onRequestClose` for "unsaved changes?" guards. Use its exported `modalStyles` for footer buttons.
 - `ui/InfoModal` instead of `alert()`.
 - `ui/SearchableSelect` for every dropdown.
-- `ui/CardContextMenu` for right-click menus.
+- `ui/ContextMenu` for right-click menus (cover header, rows, `sub` flyouts, `confirm` rows; pages build their own items). `ui/CardContextMenu` wraps it for Library/Game List cards.
 - `ui/Skeleton` (`CardSkeletonGrid`, `RowSkeleton`, …) and `ui/EmptyState`.
 - `ui/RunningProcessPicker`.
 - `lib/utils.js`:
@@ -100,6 +101,11 @@ src/                 renderer (React)
 **Styling:** CSS Modules next to each component. Layout composes from `styles/page.module.css`, controls from `styles/controls.module.css`, surfaces from `styles/surface.module.css`. All tokens live in `styles/variables.css` (`--a` accent, `--status-*`, `--rarity-*`, `--sp-*`, `--r-*`, `--fs-*`, `--z-*`). For accent-derived colours use `color-mix(in srgb, var(--a) N%, transparent)`; never append hex alpha to a `var()`. No UI framework; icons come from `@tabler/icons-react`.
 
 ## Gotchas
+- Release tracking is `game_list.release_watch` (not the status); a game released over 14 days ago is never watched or announced (`releaseWatch.isLongReleased`): Track / status Upcoming set it, other statuses keep it, `gameList:untrack` clears it (deleting the row only if still Upcoming). releaseWatch selects `release_watch = 1`.
+- Marking a game Finished (statusSync `setGameStatus` or `gameList:update`) broadcasts `game:finished`; App.jsx opens `RateGameModal` (1 to 10, `gameList:rate`, stored on the Game List row).
+- Ctrl + mouse wheel depends on the pointer: over a card grid (any element with the `useCardZoom` style, which always sets `--zoom-grid`) it resizes the cards; anywhere else, or over `[data-zoom-ignore]`, it changes the UI scale (`CtrlWheelZoom` in App.jsx, 80 to 150% in 5% steps). Ratings use `ui/RatingPicker` (fixed heights, hover from pointer x) in RateGameModal and FinishedGameModal.
+- Library and Game List have only Big grid and List views; the month filter lives in Play Plan.
+- The wallpaper (`Wallpaper` in App.jsx) is fixed behind the whole window; with it on, `.app-main` and the sidebar turn see-through.
 - Resource rules (keep them): autoBackup only writes after `markDirty()` (30 min safety net); idle process scans relax 20s → 45s after 10 quiet minutes; the controller PowerShell probe starts at most once per session; in-session Steam Web API polls every 60s when `steamStatsWatcher.isWatching(game)`; Steam caches go through `capSet`; stored covers are shrunk to 600 px wide (`steamApi.shrinkCover`). Renderer: `html[data-inactive]` pauses every animation while KoZo is hidden or unfocused; gamepad polling starts only after the first `gamepadconnected`; no `backdrop-filter` on repeated chips; wide calendar art uses the 616px capsule (hero only for Featured).
 - Remove from library offers Keep history (`games:archive`) or Delete with history (`games:delete`, accepts an id or array, also deletes the banner/hero files).
 - Card grids size their columns from `--card-min` (Ctrl + mouse wheel via `lib/useCardZoom.js`, saved per page and view). Keep new grids on the same variable.
@@ -118,6 +124,8 @@ src/                 renderer (React)
 - Non-Steam covers come from SteamGridDB (`services/steamGridDb.js`, key in setting `steamgriddb_key`, never backed up). Auto-applied on add and from Refresh images; Edit → Find cover (`CoverPickerModal`) lets the user pick. With no art at all, `GeneratedCover` draws a name-based poster under every card.
 - Setting `show_adult_games` adds `ignore_preferences` + the age-gate cookie to Steam store search and the calendar feeds (`adultSearchOpts` in steamApi.js).
 - First-run walkthrough = `components/Tour.jsx`: steps spotlight real controls tagged `data-tour="…"` (Library `scan-pc`/`add-game`/`library-stats`, sidebar `nav-*`, Game List `month-filter`, Upcoming `upcoming-tabs`). Renaming or removing a tagged control breaks its step. Store-style game popup = `components/SteamGameModal.jsx` (gallery via `ui/MediaGallery.jsx`).
+- Controller: `lib/gamepadNav.js` drives every page (cards with `data-gpnav` plus normal focusables, scoped to the open menu or dialog). A select, B close/back, X right-click menu, Y search, LB/RB sidebar tabs, LT/RT in-page tabs, right stick scroll. The ring is the `data-gpfocus` attribute (React would wipe a class); `components/GamepadHints.jsx` shows the legend. Chromium's fake mousemoves on scroll must not count as mouse input.
+- Games can start from a launcher file: `games.launch_file` (.bat/.cmd/.lnk) wins in `doLaunch`; `exe_name` stays the watched process. `dialog:pickExe` accepts launchers and returns `candidates` (.exe files nearby, `dialog:exeCandidates`); `ui/LauncherNote` shows the choice in Add/Edit Game and MakePlayableModal. Move to Library is quick (`addLibraryGame(..., { quick: true })`), never announces Finished, then App opens `MakePlayableModal` via the `kozo:make-playable` window event.
 - App text never uses em/en dashes (user preference): write commas, colons or periods instead.
 - Steam art: newer titles keep portrait/hero under hashed paths, so `steam/apps/<id>/library_600x900_2x.jpg` 404s. `steamApi.getAppAssets(appIds)` (IStoreBrowseService/GetItems, keyless, batched, cached 24h; IPC `steam:appAssets`) returns the real `portrait`/`hero`/`header`/`capsule` URLs. `downloadBanner`, `resolveBannerUrl` and `downloadHero` use it. Cards always `object-fit: cover`.
 - Every library game has a Game List row: `gameListQ.ensureListRowForGame` runs from `addLibraryGame` (ipc.js, shared by `games:add` and `gameList:moveToLibrary`) and the Scan PC add path, plus a one-time startup backfill (setting `migrated_library_to_list`). Rows link by `game_id`, else Steam appid, else name, the same rules as `statusSync`.

@@ -33,7 +33,6 @@ const pageCache = new Map()
 
 const VIEW_OPTIONS = [
   { key: 'big',  Icon: IconLayoutColumns, title: 'Big grid' },
-  { key: 'grid', Icon: IconLayoutGrid,    title: 'Small grid' },
   { key: 'list', Icon: IconList,          title: 'List' },
 ]
 
@@ -210,15 +209,16 @@ export default function GameList() {
   const [page, setPage]         = useState(1)
   const [statusFilter, setStatusFilter] = useState('')
   const [genreFilter, setGenreFilter]   = useState('')
-  const [monthFilter, setMonthFilter]   = useState('')     // play plan: 'YYYY-MM' | 'none' | ''
-  const [monthOptions, setMonthOptions] = useState([])     // [{ month, count }]
+  // The month filter moved to its own tab (Play Plan); the Game List no longer filters by month.
+  const monthFilter = ''
   const [planIds, setPlanIds]           = useState(null)   // ids for the Plan-for-month modal
   const [searchText, setSearchText]     = useState('')
   const [genreOptions, setGenreOptions] = useState([])
   const [customLists, setCustomLists]   = useState([])
   const [activeListId, setActiveListId] = useState(null)   // null = All
-  const [view, setView]         = useState(() => localStorage.getItem('kozo:view:gamelist') || 'big')
-  const zoomStyle = useCardZoom('gamelist', view, { big: 220, grid: 168 }, { min: 140, max: 380 })   // Ctrl + mouse wheel card size
+  // Big grid or list (Small grid is gone: Ctrl + mouse wheel sizes the cards).
+  const [view, setView]         = useState(() => (localStorage.getItem('kozo:view:gamelist') === 'list' ? 'list' : 'big'))
+  const zoomStyle = useCardZoom('gamelist', view, { big: 220 }, { min: 140, max: 380 })   // Ctrl + mouse wheel card size
   const [loading, setLoading]   = useState(true)
   const [switching, setSwitching] = useState(false)   // filter change with grid kept on screen
   const itemsRef = useRef([])
@@ -290,7 +290,9 @@ export default function GameList() {
     loadItems(page, { silent: true })
   }
 
-  // Game List → Library for the given list rows (bulk or one card).
+  // Game List → Library for the given list rows (bulk or one card). The
+  // move itself is quick (art downloads later); then App's "Make it playable"
+  // step asks for each game's .exe.
   async function moveToLibrary(ids) {
     if (!ids.length) return
     setMoving(true)
@@ -300,16 +302,7 @@ export default function GameList() {
       setMoveResult({ variant: 'error', title: 'Could not move to Library', message: res?.error || 'Unknown error' })
       return
     }
-    const moved = res.data || []
-    const needsExe = moved.filter(m => m.needsExe).map(m => m.name)
-    setMoveResult({
-      variant: 'success',
-      title: `${moved.length} game${moved.length !== 1 ? 's' : ''} in your Library`,
-      message: moved.map(m => m.name).join(', '),
-      lines: needsExe.length
-        ? [`Set the .exe in Library → Edit to track playtime for: ${needsExe.join(', ')}`]
-        : [],
-    })
+    window.dispatchEvent(new CustomEvent('kozo:make-playable', { detail: res.data || [] }))
     pageCache.clear()
     loadItems(page, { silent: true })
     if (selectionMode) exitSelection()
@@ -342,9 +335,6 @@ export default function GameList() {
   const loadGenres = useCallback(async () => {
     const res = await window.kozo?.api?.genres?.distinct()
     if (res?.ok) setGenreOptions(res.data ?? [])
-    // Planned months change with the same mutations, so refresh them together.
-    const months = await window.kozo?.api?.gameList?.plannedMonths?.()
-    if (months?.ok) setMonthOptions(months.data ?? [])
   }, [])
 
   // One cheap unfiltered row just for its `total`. Refreshed alongside the
@@ -417,12 +407,6 @@ export default function GameList() {
     setGenreFilter(v)
     setPage(1)
     loadItems(1, { genre: v })
-  }
-
-  function handleMonthChange(v) {
-    setMonthFilter(v)
-    setPage(1)
-    loadItems(1, { month: v })
   }
 
   async function savePlan(month) {
@@ -519,19 +503,6 @@ export default function GameList() {
                 { value: 'upcoming',     label: 'Upcoming' },
               ]}
             />
-            <span data-tour="month-filter" style={{ display: 'inline-flex' }}>
-            <SearchableSelect
-              value={monthFilter}
-              onChange={handleMonthChange}
-              searchable={false}
-              placeholder="Any month"
-              width={150}
-              options={[
-                ...monthOptions.map(m => ({ value: m.month, label: `${formatMonthKey(m.month)} (${m.count})` })),
-                { value: 'none', label: 'Not planned' },
-              ]}
-            />
-            </span>
             {genreOptions.length > 0 && (
               <SearchableSelect
                 value={genreFilter}
@@ -692,8 +663,8 @@ export default function GameList() {
           />
         )}
 
-        {!loading && items.length > 0 && (view === 'big' || view === 'grid') && (
-          <div className={view === 'big' ? s.bigGrid : s.grid} style={zoomStyle}>
+        {!loading && items.length > 0 && view === 'big' && (
+          <div className={s.bigGrid} style={zoomStyle}>
             {items.map(item => {
               const draggable = !selectionMode
               return (

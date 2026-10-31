@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 7,
+  rev: 10,
   // Settings → Appearance → UI scale.
   ui: {
     setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('kozo', {
       get: (id) => ipcRenderer.invoke('games:get', id),
       add: (data) => ipcRenderer.invoke('games:add', data),
       planMonth: (gameIds, month) => ipcRenderer.invoke('games:planMonth', gameIds, month),
+      finished: () => ipcRenderer.invoke('games:finished'),
       update: (id, data) => ipcRenderer.invoke('games:update', id, data),
       delete: (id) => ipcRenderer.invoke('games:delete', id),
       reorder: (orderedIds) => ipcRenderer.invoke('games:reorder', orderedIds),
@@ -45,9 +46,14 @@ contextBridge.exposeInMainWorld('kozo', {
       add: (data) => ipcRenderer.invoke('gameList:add', data),
       update: (id, data) => ipcRenderer.invoke('gameList:update', id, data),
       delete: (id) => ipcRenderer.invoke('gameList:delete', id),
+      untrack: (id) => ipcRenderer.invoke('gameList:untrack', id),
+      rate: (ref, rating) => ipcRenderer.invoke('gameList:rate', ref, rating),
+      tracked: () => ipcRenderer.invoke('gameList:tracked'),
       reorderPage: (filters, offset, pageIds) => ipcRenderer.invoke('gameList:reorderPage', filters, offset, pageIds),
       moveToLibrary: (ids) => ipcRenderer.invoke('gameList:moveToLibrary', ids),
       plannedMonths: () => ipcRenderer.invoke('gameList:plannedMonths'),
+      planBoard: (month, from, to) => ipcRenderer.invoke('gameList:planBoard', month, from, to),
+      planSummary: () => ipcRenderer.invoke('gameList:planSummary'),
       planMonth: (ids, month) => ipcRenderer.invoke('gameList:planMonth', ids, month),
     },
     customLists: {
@@ -80,6 +86,7 @@ contextBridge.exposeInMainWorld('kozo', {
       storeDetails: (appId) => ipcRenderer.invoke('steam:storeDetails', appId),
       comingSoon: (feed, page) => ipcRenderer.invoke('steam:comingSoon', feed, page),
       appAssets: (appIds) => ipcRenderer.invoke('steam:appAssets', appIds),
+      tasteProfile: () => ipcRenderer.invoke('steam:tasteProfile'),
       lastSyncError: (gameId) => ipcRenderer.invoke('steam:lastSyncError', gameId),
       recheckPrivacy: () => ipcRenderer.invoke('steam:recheckPrivacy'),
       getProfile: (overrides) => ipcRenderer.invoke('steam:getProfile', overrides),
@@ -133,6 +140,7 @@ contextBridge.exposeInMainWorld('kozo', {
     },
     dialog: {
       pickExe: (defaultPath) => ipcRenderer.invoke('dialog:pickExe', defaultPath),
+      exeCandidates: (dir) => ipcRenderer.invoke('dialog:exeCandidates', dir),
       pickImageData: () => ipcRenderer.invoke('image:pickData'),
       saveCroppedImage: (payload) => ipcRenderer.invoke('image:saveCropped', payload),
       pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
@@ -199,6 +207,7 @@ contextBridge.exposeInMainWorld('kozo', {
     }
     const pass = (cb, payload) => cb(payload)
     return {
+      onGamepadWake: sub('gamepad:wake', pass),
       onSessionStarted: sub('session:started', pass),
       onSessionEnded: sub('session:ended', pass),
       onSessionIdle: sub('session:idle', pass),
@@ -206,6 +215,7 @@ contextBridge.exposeInMainWorld('kozo', {
       onSessionUndetected: sub('session:undetected', pass),
       onAchievementUnlocked: sub('achievement:unlocked', pass),
       onGameUpdated: sub('game:updated', pass),
+      onGameFinished: sub('game:finished', pass),
       onScanProgress: sub('scanner:progress', pass),
       onBannerRefreshProgress: sub('banners:refreshProgress', pass),
       // Steam refused (or resumed allowing) a player-unlock read — library-wide,
