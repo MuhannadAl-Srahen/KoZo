@@ -3,6 +3,7 @@ import { HashRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'r
 import { AccentColorProvider } from './context/AccentColorContext'
 import { AppearanceProvider, useAppearance } from './context/AppearanceContext'
 import { fileUrl } from './lib/utils'
+import { cardZoomActive } from './lib/useCardZoom'
 import { initGamepadNav } from './lib/gamepadNav'
 import Sidebar from './components/Sidebar'
 import Library from './pages/Library'
@@ -39,6 +40,32 @@ function StartPage() {
     if (location.pathname === '/' && prefs.startPage && prefs.startPage !== '/') navigate(prefs.startPage, { replace: true })
   }, [loaded])
   return null
+}
+
+// Ctrl + mouse wheel works on every tab: pages with a card grid resize their
+// cards (lib/useCardZoom); everywhere else it changes the whole UI scale in 5%
+// steps (80 to 150%), the same setting as Settings → Appearance → UI scale.
+function CtrlWheelZoom() {
+  const { setPrefs } = useAppearance()
+  const [pill, setPill] = useState(null)
+  useEffect(() => {
+    let hideT
+    const onWheel = (e) => {
+      if (!e.ctrlKey) return
+      e.preventDefault()   // never Chromium's own page zoom
+      if (cardZoomActive() || document.querySelector('[role="dialog"]')) return
+      setPrefs(p => {
+        const next = Math.round(Math.min(1.5, Math.max(0.8, (p.scale || 1) + (e.deltaY < 0 ? 0.05 : -0.05))) * 100) / 100
+        setPill(Math.round(next * 100))
+        clearTimeout(hideT)
+        hideT = setTimeout(() => setPill(null), 1200)
+        return { ...p, scale: next }
+      })
+    }
+    window.addEventListener('wheel', onWheel, { passive: false })
+    return () => { clearTimeout(hideT); window.removeEventListener('wheel', onWheel) }
+  }, [])
+  return pill ? <div className="zoom-pill" role="status">UI {pill}%</div> : null
 }
 
 // Settings → Appearance → Background: a picture behind every page, blurred and
@@ -124,10 +151,11 @@ export default function App() {
      <AppearanceProvider>
       <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <StartPage />
+        <CtrlWheelZoom />
+        <Wallpaper />
         <div className="app-layout">
           <Sidebar />
           <div className="app-main">
-            <Wallpaper />
             <UpdateBanner />
             <Routes>
               <Route path="/" element={<Library />} />

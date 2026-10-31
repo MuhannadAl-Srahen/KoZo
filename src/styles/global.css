@@ -148,13 +148,14 @@ ul, ol { list-style: none; }
     var(--bg);
 }
 
-/* Settings → Appearance → Background. The picture sits behind every page
-   inside .app-main (its own stacking context); cards and panels stay solid. */
-.app-main { position: relative; isolation: isolate; }
+/* Settings → Appearance → Background. The picture sits behind the whole
+   window (sidebar included). The main area and the sidebar turn see-through
+   over it; cards and panels stay solid so text is easy to read. */
 html[data-wallpaper] .app-main {
   background: radial-gradient(1100px 420px at 16% -8%, var(--ad), transparent 62%);
 }
-.app-wallpaper { position: absolute; inset: 0; z-index: -1; overflow: hidden; background: var(--bg); }
+html[data-wallpaper] aside { background: color-mix(in srgb, var(--surface-1) 72%, transparent); }
+.app-wallpaper { position: fixed; inset: 0; z-index: -1; overflow: hidden; background: var(--bg); pointer-events: none; }
 .app-wallpaper-img {
   position: absolute;
   inset: -40px;               /* room for the blur so edges don't fade in */
@@ -191,4 +192,22 @@ html[data-inactive] *,
 html[data-inactive] *::before,
 html[data-inactive] *::after {
   animation-play-state: paused !important;
+}
+
+/* Ctrl + mouse wheel UI scale readout (App.jsx CtrlWheelZoom) */
+.zoom-pill {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  z-index: var(--z-menu, 1000);
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  border: 1px solid var(--ab);
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
 }

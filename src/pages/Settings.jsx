@@ -978,7 +978,7 @@ function AppearanceCustomize() {
           <span>Size and density</span>
         </div>
         <div className={s.segList}>
-          <Segmented label="UI scale" value={prefs.scale} onChange={v => setPrefs({ scale: v })}
+          <Segmented label={`UI scale ${Math.round((prefs.scale || 1) * 100)}%`} value={prefs.scale} onChange={v => setPrefs({ scale: v })}
             options={[{ value: 0.9, label: '90%' }, { value: 1, label: '100%' }, { value: 1.1, label: '110%' }, { value: 1.25, label: '125%' }]} />
           <Segmented label="Spacing" value={prefs.density} onChange={v => setPrefs({ density: v })}
             options={[{ value: 'comfortable', label: 'Comfortable' }, { value: 'compact', label: 'Compact' }]} />
@@ -1042,7 +1042,14 @@ function AppearanceCustomize() {
         </div>
         <p className={s.sectionDesc}>Put a picture behind every page. Cards and panels stay solid so text is easy to read.</p>
         <div className={s.segList}>
-          <Segmented label="Picture" value={prefs.bg.mode} onChange={v => setBg({ mode: v })}
+          <Segmented label="Picture" value={prefs.bg.mode} onChange={v => {
+            // "A game's art" with nothing picked yet: start from your most
+            // played game that has art, so the change shows at once.
+            if (v === 'game' && !prefs.bg.gameArt && games.length) {
+              const g = [...games].sort((a, b) => (b.total_playtime_seconds || 0) - (a.total_playtime_seconds || 0))[0]
+              setBg({ mode: v, gameId: g.id, gameArt: g.hero_local_path || g.banner_local_path })
+            } else setBg({ mode: v })
+          }}
             options={[{ value: 'off', label: 'Off' }, { value: 'image', label: 'My image' }, { value: 'game', label: "A game's art" }]} />
           {prefs.bg.mode === 'image' && (
             <div className={s.segRow}>

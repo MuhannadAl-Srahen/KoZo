@@ -7,6 +7,11 @@ import { useEffect, useState } from 'react'
 // size, so small posters and wide cards both stay usable.
 function clamp(n, min, max) { return Math.min(max, Math.max(min, n)) }
 
+// How many card grids are listening right now. Pages without one get the
+// App-wide fallback instead: Ctrl + wheel changes the UI scale (App.jsx).
+let activeGrids = 0
+export function cardZoomActive() { return activeGrids > 0 }
+
 function read(key, min, max) {
   try {
     const n = parseInt(localStorage.getItem(key), 10)
@@ -36,7 +41,8 @@ export default function useCardZoom(pageKey, view, defaults = { big: 220, small:
       })
     }
     window.addEventListener('wheel', onWheel, { passive: false })
-    return () => window.removeEventListener('wheel', onWheel)
+    activeGrids++
+    return () => { activeGrids--; window.removeEventListener('wheel', onWheel) }
   }, [storageKey, base, min, max, step])
 
   return size ? { '--card-min': `${size}px` } : undefined

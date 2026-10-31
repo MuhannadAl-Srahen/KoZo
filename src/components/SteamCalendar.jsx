@@ -277,9 +277,10 @@ function StripView({ buckets, todayKey, wide, dayPick, onMore }) {
 // One column per day that has releases: a header, then the day's capsules
 // (art only; hover for Track). In "Picked for you" a day shows its best few
 // with "+N more" for the rest.
-function SteamView({ days, todayKey, dayPick, isTracked, renderTrack, onOpen, onMore }) {
-  if (!days.length) return <div className={s.muted}>No dated releases this month among the loaded games.</div>
+function SteamView({ days, todayKey, dayPick, isTracked, renderTrack, onOpen, onMore, onLater }) {
+  if (!days.length) return <div className={s.muted}>No dated releases ahead among the loaded games. Try Load more games.</div>
   return (
+    <>
     <div className={s.steamGrid}>
       {days.map(([k, full]) => {
         const list = dayPick(full)
@@ -310,6 +311,8 @@ function SteamView({ days, todayKey, dayPick, isTracked, renderTrack, onOpen, on
         )
       })}
     </div>
+    {onLater && <button className={s.textBtn} style={{ alignSelf: 'center' }} onClick={onLater}>Show later days</button>}
+    </>
   )
 }
 
@@ -431,6 +434,7 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
     window.kozo?.api?.steam?.tasteProfile?.().then(r => { if (r?.ok) setTaste(r.data) }).catch(() => {})
   }, [])
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()))
+  const [steamDays, setSteamDays] = useState(42)   // Steam view: how far ahead (days) it reaches
   // Ctrl + mouse wheel card size, per layout (Month has a fixed layout).
   const zoomStyle = useCardZoom('calendar', view, { steam: 230, strip: 300, week: 300, days: 150, tba: 150, tracked: 150 })
   const [dayOpen, setDayOpen] = useState(null)    // { label, games }
@@ -569,6 +573,13 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
     .filter(([k]) => k.startsWith(mKey) && (!isCurrentMonth || k >= todayKey))
     .sort(([a], [b]) => a.localeCompare(b))
   const vagueThisMonth = buckets.byMonth.get(mKey) || []
+  // Steam view: a rolling run of release days from today, like the store's
+  // calendar (no month paging; "Show later days" reaches further).
+  const steamHorizon = localDayKey(new Date(Date.now() + steamDays * DAY_MS))
+  const steamRun = [...buckets.byDay.entries()]
+    .filter(([k]) => k >= todayKey && k <= steamHorizon)
+    .sort(([a], [b]) => a.localeCompare(b))
+  const steamHasLater = [...buckets.byDay.keys()].some(k => k > steamHorizon)
   const canLoadMore = pages.soon < MAX_PAGES || pages.wishlist < MAX_PAGES
   const thisWeek = mondayOf(new Date())
   const weekEnd = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 6)
@@ -640,7 +651,7 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
       </div>
 
       {/* Second bar: navigation that belongs to the chosen layout */}
-      {(view === 'steam' || view === 'days' || view === 'month') && (
+      {(view === 'days' || view === 'month') && (
         <div className={s.nav}>
           <button className={s.navBtn} onClick={() => shiftMonth(-1)} aria-label="Previous month"><IconChevronLeft size={16} /></button>
           <div className={s.monthLabel}>{formatMonthKey(mKey, 'long')}</div>
@@ -665,8 +676,9 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
       {loading && !games.length && <PanelSkeleton lines={6} />}
 
       {games.length > 0 && view === 'steam' && (
-        <SteamView days={monthDays} todayKey={todayKey} dayPick={dayPick} isTracked={isTracked}
-          renderTrack={renderTrack} onOpen={setDetail} onMore={openMore} />
+        <SteamView days={steamRun} todayKey={todayKey} dayPick={dayPick} isTracked={isTracked}
+          renderTrack={renderTrack} onOpen={setDetail} onMore={openMore}
+          onLater={steamHasLater ? () => setSteamDays(d => d + 42) : null} />
       )}
       {games.length > 0 && view === 'strip' && <StripView buckets={buckets} todayKey={todayKey} wide={wide} dayPick={dayPick} onMore={openMore} />}
       {games.length > 0 && view === 'week' && <WeekView buckets={buckets} todayKey={todayKey} weekStart={weekStart} wide={wide} dayPick={dayPick} onMore={openMore} />}
@@ -733,7 +745,7 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
         </div>
       )}
 
-      {(view === 'steam' || view === 'days' || view === 'month') && vagueThisMonth.length > 0 && (
+      {(view === 'days' || view === 'month') && vagueThisMonth.length > 0 && (
         <section className={s.daySection}>
           <div className={s.dayHead}>
             <span className={s.dayHeadMain}>Sometime in {formatMonthKey(mKey, 'long')}</span>

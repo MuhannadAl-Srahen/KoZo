@@ -783,7 +783,7 @@
 /* ── Appearance: segmented choices, sliders, sidebar tab list ──────────── */
 .segList { display: flex; flex-direction: column; gap: var(--sp-10); }
 .segRow { display: flex; align-items: center; gap: var(--sp-12); flex-wrap: wrap; }
-.segLabel { min-width: 96px; font-size: var(--fs-md); color: var(--text-secondary); }
+.segLabel { min-width: 124px; font-size: var(--fs-md); color: var(--text-secondary); }
 .seg {
   display: inline-flex;
   padding: 3px;

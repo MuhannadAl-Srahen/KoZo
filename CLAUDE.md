@@ -71,10 +71,10 @@ src/                 renderer (React)
 | `/` | Library |
 | `/game/:id` | GameDetail |
 | `/game-list` | GameList (paged, 20 per page) |
-| `/achievements` | AchievementsHub |
-| `/upcoming` | Upcoming (My upcoming + Steam calendar tab: `components/SteamCalendar.jsx`, data from `steam:comingSoon`; layouts Strip, Featured, Week, Days, Month plus a TBA view for undated games; `wishRank` = place in the most-wishlisted feed) |
-| `/sessions` | Sessions |
-| `/statistics` | Statistics |
+| `/plan` | PlayPlan (month strip; games by `game_list.planned_month`; drag a card onto a month) |
+| `/finished` | Finished (Library + Game List finished games by year, with ratings; `games:finished`) |
+| `/upcoming` | Upcoming = `components/SteamCalendar.jsx` only (data from `steam:comingSoon`). Layouts Steam (default, day columns from today), Strip, Week, Days, Month; TBA and Tracked shelves; "Picked for you" keeps 4 per day scored by taste (`steam:tasteProfile` + GetItems tag ids) and popularity (`wishRank`/`popRank`) |
+| `/activity` | Activity: `?tab=overview` (Statistics), `sessions` (Sessions), `achievements` (AchievementsHub). `/statistics`, `/sessions`, `/achievements` redirect here |
 | `/profile` | Profile |
 | `/settings` | Settings (tabs) |
 
@@ -100,6 +100,11 @@ src/                 renderer (React)
 **Styling:** CSS Modules next to each component. Layout composes from `styles/page.module.css`, controls from `styles/controls.module.css`, surfaces from `styles/surface.module.css`. All tokens live in `styles/variables.css` (`--a` accent, `--status-*`, `--rarity-*`, `--sp-*`, `--r-*`, `--fs-*`, `--z-*`). For accent-derived colours use `color-mix(in srgb, var(--a) N%, transparent)`; never append hex alpha to a `var()`. No UI framework; icons come from `@tabler/icons-react`.
 
 ## Gotchas
+- Release tracking is `game_list.release_watch` (not the status): Track / status Upcoming set it, other statuses keep it, `gameList:untrack` clears it (deleting the row only if still Upcoming). releaseWatch selects `release_watch = 1`.
+- Marking a game Finished (statusSync `setGameStatus` or `gameList:update`) broadcasts `game:finished`; App.jsx opens `RateGameModal` (1 to 10, `gameList:rate`, stored on the Game List row).
+- Ctrl + mouse wheel: card grids use `useCardZoom` (registers itself); any page without one falls back to the UI scale (`CtrlWheelZoom` in App.jsx, 80 to 150% in 5% steps).
+- Library and Game List have only Big grid and List views; the month filter lives in Play Plan.
+- The wallpaper (`Wallpaper` in App.jsx) is fixed behind the whole window; with it on, `.app-main` and the sidebar turn see-through.
 - Resource rules (keep them): autoBackup only writes after `markDirty()` (30 min safety net); idle process scans relax 20s → 45s after 10 quiet minutes; the controller PowerShell probe starts at most once per session; in-session Steam Web API polls every 60s when `steamStatsWatcher.isWatching(game)`; Steam caches go through `capSet`; stored covers are shrunk to 600 px wide (`steamApi.shrinkCover`). Renderer: `html[data-inactive]` pauses every animation while KoZo is hidden or unfocused; gamepad polling starts only after the first `gamepadconnected`; no `backdrop-filter` on repeated chips; wide calendar art uses the 616px capsule (hero only for Featured).
 - Remove from library offers Keep history (`games:archive`) or Delete with history (`games:delete`, accepts an id or array, also deletes the banner/hero files).
 - Card grids size their columns from `--card-min` (Ctrl + mouse wheel via `lib/useCardZoom.js`, saved per page and view). Keep new grids on the same variable.
