@@ -125,6 +125,16 @@ function runMigrations() {
     try { db.exec('ALTER TABLE games ADD COLUMN is_archived INTEGER DEFAULT 0') } catch (_) {}
     // Game List play plan: the month ('YYYY-MM') the user means to play a game in.
     try { db.exec('ALTER TABLE game_list ADD COLUMN planned_month TEXT') } catch (_) {}
+    // Release alerts follow this flag, not the status: a tracked game moved
+    // to Want to play before it comes out still gets its "Out now" alert.
+    try { db.exec('ALTER TABLE game_list ADD COLUMN release_watch INTEGER DEFAULT 0') } catch (_) {}
+    try {
+      const done = db.prepare("SELECT value FROM settings WHERE key = 'release_watch_v1'").get()
+      if (!done) {
+        db.exec("UPDATE game_list SET release_watch = 1 WHERE status = 'upcoming'")
+        db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('release_watch_v1', '1')").run()
+      }
+    } catch (_) {}
 
     relaxUnlockedAtNotNull()
     migrateCategoriesToCustomLists()

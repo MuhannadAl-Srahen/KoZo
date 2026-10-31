@@ -87,11 +87,18 @@ function addGameListItem(data) {
     INSERT INTO game_list (game_id, steam_app_id, name, banner_url, category_id, status, rating, genres, release_date)
     VALUES (@game_id, @steam_app_id, @name, @banner_url, @category_id, @status, @rating, @genres, @release_date)
   `).run({ game_id: null, steam_app_id: null, banner_url: null, category_id: null, rating: null, genres: null, release_date: null, ...data })
+  // Added as Upcoming (Track, or the Upcoming status): watch for its release.
+  if (data.status === 'upcoming' || data.release_watch) {
+    getDb().prepare('UPDATE game_list SET release_watch = 1 WHERE id = ?').run(result.lastInsertRowid)
+  }
   return getGameListItem(result.lastInsertRowid)
 }
 
 function updateGameListItem(id, data) {
-  const allowed = ['game_id', 'steam_app_id', 'name', 'banner_url', 'category_id', 'status', 'rating', 'is_favorite', 'genres', 'display_order', 'release_date', 'planned_month']
+  const allowed = ['game_id', 'steam_app_id', 'name', 'banner_url', 'category_id', 'status', 'rating', 'is_favorite', 'genres', 'display_order', 'release_date', 'planned_month', 'release_watch']
+  // Setting a game to Upcoming starts watching its release; any other status
+  // leaves the watch alone (only Untrack or the release itself ends it).
+  if (data.status === 'upcoming') data = { ...data, release_watch: 1 }
   const sets = Object.keys(data)
     .filter(k => allowed.includes(k))
     .map(k => `${k} = @${k}`)

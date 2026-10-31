@@ -69,7 +69,7 @@ async function refreshUpcomingDates() {
     const { getStoreDetails } = require('./steamApi')
     const gameListQ = require('../db/queries/gameList')
     const db = require('../db/database').getDb()
-    const rows = db.prepare("SELECT id, steam_app_id, release_date, genres FROM game_list WHERE status = 'upcoming' AND steam_app_id IS NOT NULL").all()
+    const rows = db.prepare("SELECT id, steam_app_id, release_date, genres FROM game_list WHERE release_watch = 1 AND steam_app_id IS NOT NULL").all()
     let changed = 0
     for (const row of rows) {
       const d = await getStoreDetails(row.steam_app_id).catch(() => null)
@@ -99,7 +99,7 @@ function check() {
     const db = require('../db/database').getDb()
     const rows = db.prepare(`
       SELECT id, name, steam_app_id, release_date, banner_url, game_id FROM game_list
-      WHERE status = 'upcoming' AND release_date IS NOT NULL
+      WHERE release_watch = 1 AND release_date IS NOT NULL
         AND (release_notified IS NULL OR release_notified = 0)
     `).all()
 

@@ -1282,6 +1282,7 @@ handle('steam:signIn', () => require('./services/steamOpenId').signIn())
 handle('steam:storeDetails', (appId) => require('./services/steamApi').getStoreDetails(appId))
 handle('steam:comingSoon', (feed, page) => require('./services/steamApi').getComingSoon(feed, page))
 // appIds → { [appid]: { portrait, hero, header, capsule } } real store art URLs.
+handle('steam:tasteProfile', () => require('./services/steamApi').getTasteProfile())
 handle('steam:appAssets', async (appIds) => Object.fromEntries(await require('./services/steamApi').getAppAssets(appIds)))
 
 // Called when the Upcoming tab opens: warms the store-details cache for every
@@ -1374,6 +1375,26 @@ handle('steam:refreshAllBanners', async () => {
 // ── SteamGridDB (covers for non-Steam games) ─────────────────────────────────
 handle('sgdb:test', (key) => require('./services/steamGridDb').testKey(key))
 handle('sgdb:search', (name) => require('./services/steamGridDb').searchGame(name))
+// Untrack a release from the Steam calendar. A row still marked Upcoming was
+// only ever on the list because it was tracked, so it goes; a game you also
+// set to Want to play / Playing stays on your list and just stops being watched.
+handle('gameList:untrack', (id) => {
+  const db = require('./db/database').getDb()
+  const row = db.prepare('SELECT id, status FROM game_list WHERE id = ?').get(Number(id))
+  if (!row) return false
+  if (row.status === 'upcoming') gameListQ.deleteGameListItem(row.id)
+  else db.prepare('UPDATE game_list SET release_watch = 0 WHERE id = ?').run(row.id)
+  bk(); broadcast('game:updated', null)
+  return true
+})
+
+// Every release-watched game (any status), for the calendar's Tracked shelf
+// and the "Tracked" marks on its cards.
+handle('gameList:tracked', () => require('./db/database').getDb().prepare(`
+  SELECT id, game_id, steam_app_id, name, banner_url, status, release_date, genres, added_at
+  FROM game_list WHERE release_watch = 1 ORDER BY release_date IS NULL, id
+`).all())
+
 // Settings → Appearance → Background: copy the chosen picture into KoZo's own
 // folder (so moving or deleting the original doesn't break it) and return
 // that path. Earlier wallpapers are removed. null when the dialog is cancelled.
