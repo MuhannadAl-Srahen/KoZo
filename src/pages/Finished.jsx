@@ -1,15 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { IconFlag, IconStarFilled, IconClock, IconTrophy } from '@tabler/icons-react'
 import { fileUrl, formatPlaytime, formatDate } from '../lib/utils'
 import GeneratedCover from '../components/GeneratedCover'
 import EmptyState from '../components/ui/EmptyState'
 import RateGameModal from '../components/modals/RateGameModal'
+import FinishedGameModal from '../components/modals/FinishedGameModal'
 import useCardZoom from '../lib/useCardZoom'
 import s from './Finished.module.css'
 
 // Every game you've finished, Library and Game List together, grouped by the
-// year you finished it, with your 1 to 10 rating (click it to change).
+// year you finished it, with your 1 to 10 rating (click it to change). A card
+// opens FinishedGameModal: the run's stats, rating, game page and Play again.
 
 const SORTS = [
   { key: 'recent', label: 'Recently finished' },
@@ -50,10 +51,10 @@ function FinishedCard({ g, onRate, onOpen }) {
 }
 
 export default function Finished() {
-  const navigate = useNavigate()
   const [games, setGames] = useState(null)
   const [sort, setSort] = useState(() => localStorage.getItem('kozo:finished:sort') || 'recent')
   const [rating, setRating] = useState(null)   // game being rated
+  const [summary, setSummary] = useState(null) // game whose popup is open
   const zoomStyle = useCardZoom('finished', 'grid', { grid: 200 }, { min: 140, max: 380 })   // Ctrl + mouse wheel
 
   async function load() {
@@ -119,7 +120,7 @@ export default function Finished() {
                 <FinishedCard
                   key={(g.game_id ? 'g' : 'l') + (g.game_id || g.list_id)}
                   g={g}
-                  onOpen={() => (g.game_id ? navigate(`/game/${g.game_id}`) : navigate('/game-list'))}
+                  onOpen={() => setSummary(g)}
                   onRate={() => setRating({
                     gameId: g.game_id, listId: g.list_id, name: g.name,
                     coverPath: g.banner_local_path, coverUrl: g.list_banner || g.banner_url, rating: g.rating,
@@ -131,6 +132,7 @@ export default function Finished() {
         ))}
       </div>
 
+      {summary && <FinishedGameModal g={summary} onClose={() => setSummary(null)} onChanged={load} />}
       {rating && <RateGameModal game={rating} onClose={() => { setRating(null); load() }} />}
     </div>
   )

@@ -570,3 +570,10 @@
   padding-bottom: var(--sp-4);
 }
 .weekEmpty { flex: 1; display: flex; align-items: center; color: var(--text-muted); font-size: var(--fs-sm); }
+
+/* The day popup ("+N more"): bigger posters with room around them. */
+.dayModalGrid {
+  --card-min: 180px;
+  gap: var(--sp-16);
+  padding: var(--sp-8) var(--sp-4);
+}

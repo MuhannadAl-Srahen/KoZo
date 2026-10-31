@@ -756,8 +756,8 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
       )}
 
       {dayOpen && (
-        <Modal title={dayOpen.label} icon={<IconCalendarMonth size={17} stroke={1.6} />} onClose={() => setDayOpen(null)} width={760}>
-          <div className={s.posterGrid}>{dayOpen.games.map(g => poster(g))}</div>
+        <Modal title={dayOpen.label} icon={<IconCalendarMonth size={17} stroke={1.6} />} onClose={() => setDayOpen(null)} width={1080}>
+          <div className={`${s.posterGrid} ${s.dayModalGrid}`}>{dayOpen.games.map(g => poster(g))}</div>
         </Modal>
       )}
 
