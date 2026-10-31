@@ -83,6 +83,15 @@ function dayHeading(key) {
 // shimmer, never the blurry 231px search capsule stretched over the card.
 // `hero` asks for the 3840px library hero (only a big banner would need it);
 // every other wide spot uses the 616px store capsule.
+// App ids ordered by release, soonest first (undated last): the days on
+// screen first get their art first.
+function soonestFirst(games) {
+  return games
+    .map(g => ({ id: g.appid, ts: parseRelease(g.release).ts ?? Infinity }))
+    .sort((a, b) => a.ts - b.ts)
+    .map(x => x.id)
+}
+
 function Cover({ g, wide = false, hero = false, className }) {
   const srcs = (wide
     ? (hero ? [g.art?.hero, g.art?.header, g.art?.capsule, g.capsule] : [g.art?.capsule, g.art?.header, g.capsule])
@@ -477,14 +486,16 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
     if (failed.length && !fresh.length) setError(failed[0]?.error || 'Could not reach the Steam store.')
     setLoading(false)
 
-    await fetchArt(nextGames.map(g => g.appid).filter(id => !art[id]))
+    await fetchArt(soonestFirst(nextGames).filter(id => !art[id]))
   }
 
-  // Portrait art for these games, 100 per request so the first covers show
-  // quickly. Every id is marked tried afterwards, found or not.
+  // Portrait art for these games, 100 per request, up to three requests at a
+  // time, so the first covers show quickly. Every id is marked tried
+  // afterwards, found or not.
   async function fetchArt(ids) {
-    for (let k = 0; k < ids.length; k += 100) {
-      const chunk = ids.slice(k, k + 100)
+    const chunks = []
+    for (let k = 0; k < ids.length; k += 100) chunks.push(ids.slice(k, k + 100))
+    const one = async (chunk) => {
       const res = await window.kozo?.api?.steam?.appAssets?.(chunk).catch(() => null)
       if (res?.ok) {
         setArt(prev => {
@@ -495,6 +506,9 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
       }
       setArtTried(prev => { const n = new Set(prev); chunk.forEach(id => n.add(Number(id))); return n })
     }
+    let next = 0
+    const lane = async () => { while (next < chunks.length) await one(chunks[next++]) }
+    await Promise.all([lane(), lane(), lane()])
   }
 
   // Tracked games that aren't in the loaded feeds still need their art.
@@ -506,7 +520,7 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
   useEffect(() => {
     if (!calendarCache) { loadPages(START_PAGES); return }
     // Cached games whose art never arrived (an earlier request failed): ask again.
-    const missing = calendarCache.games.map(g => g.appid).filter(id => !calendarCache.art?.[id])
+    const missing = soonestFirst(calendarCache.games).filter(id => !calendarCache.art?.[id])
     if (missing.length) fetchArt(missing)
   }, [])
 

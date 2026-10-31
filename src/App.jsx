@@ -24,9 +24,13 @@ import UpdateBanner from './components/UpdateBanner'
 import GamepadHints from './components/GamepadHints'
 
 // Controller navigation — must live under the router so useNavigate works.
+// Set up once: `navigate` changes on every route change under HashRouter, and
+// re-running the setup used to stop the controller after the first page change.
 function GamepadNav() {
   const navigate = useNavigate()
-  useEffect(() => initGamepadNav({ navigate }), [navigate])
+  const navRef = useRef(navigate)
+  navRef.current = navigate
+  useEffect(() => initGamepadNav({ navigate: (...a) => navRef.current(...a) }), [])
   return null
 }
 

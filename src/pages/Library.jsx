@@ -8,6 +8,8 @@ import {
 } from '@tabler/icons-react'
 import GameCard, { formatPlaytime, STATUS_META } from '../components/GameCard'
 import AddGameModal from '../components/modals/AddGameModal'
+import EditGameModal from '../components/modals/EditGameModal'
+import InfoModal from '../components/ui/InfoModal'
 import ScanResultModal from '../components/modals/ScanResultModal'
 import SearchableSelect from '../components/ui/SearchableSelect'
 import CardContextMenu from '../components/ui/CardContextMenu'
@@ -118,6 +120,8 @@ export default function Library() {
   const [statusFilter, setStatusFilter] = useState(() => localStorage.getItem('kozo:status:library') || '')
   const [planIds, setPlanIds] = useState(null)   // game ids for the Plan-for-month modal
   const [ctxMenu, setCtxMenu]       = useState(null)  // null | { x, y, game }
+  const [editGame, setEditGame]     = useState(null)  // game opened in Edit from the card menu
+  const [launchMsg, setLaunchMsg]   = useState(null)  // { variant, title, message } after Play from the menu
   const [dragOverId, setDragOverId] = useState(null)  // drop-target highlight (custom sort)
   const dragIdRef = React.useRef(null)
 
@@ -666,6 +670,12 @@ export default function Library() {
             window.kozo?.api?.games?.update(game.id, { is_hidden: next })
           }}
           onToggleFavorite={handleFavorite}
+          onPlay={ctxMenu.game.is_archived ? undefined : async (game) => {
+            const res = await window.kozo?.api?.games?.launch(game.id)
+            if (!res?.ok) setLaunchMsg({ variant: 'error', title: "Couldn't launch", message: `${game.name}: ${res?.error || 'Failed to launch'}` })
+            else if (res?.data?.warning) setLaunchMsg({ variant: 'warning', title: game.name, message: res.data.warning })
+          }}
+          onEdit={(game) => setEditGame(game)}
           onDelete={ctxMenu.game.is_archived ? undefined : async (game) => {
             setGames(prev => { const u = prev.map(g => g.id === game.id ? { ...g, is_archived: 1 } : g); libraryCache = u; return u })
             await window.kozo?.api?.games?.archive([game.id])
@@ -689,6 +699,15 @@ export default function Library() {
           ]}
         />
       )}
+
+      {editGame && (
+        <EditGameModal
+          game={editGame}
+          onClose={() => setEditGame(null)}
+          onSaved={() => loadGames({ silent: true })}
+        />
+      )}
+      {launchMsg && <InfoModal {...launchMsg} onClose={() => setLaunchMsg(null)} />}
 
       {planIds && (
         <PlanMonthModal

@@ -134,24 +134,37 @@ function moveFocus(dir) {
   const fx = from.left + from.width / 2
   const fy = from.top + from.height / 2
 
-  let best = null
-  let bestScore = Infinity
-  for (const el of targets) {
-    if (el === _focused) continue
-    const r = el.getBoundingClientRect()
-    const cx = r.left + r.width / 2
-    const cy = r.top + r.height / 2
-    const dx = cx - fx
-    const dy = cy - fy
-    let primary, cross
-    if (dir === 'left')       { primary = -dx; cross = Math.abs(dy) }
-    else if (dir === 'right') { primary = dx;  cross = Math.abs(dy) }
-    else if (dir === 'up')    { primary = -dy; cross = Math.abs(dx) }
-    else                      { primary = dy;  cross = Math.abs(dx) }
-    if (primary < 8) continue                 // must actually be in that direction
-    const score = primary + cross * 2         // bias against sideways drift
-    if (score < bestScore) { bestScore = score; best = el }
+  // Prefer targets wholly past the current element's edge: centre distance
+  // alone let a sidebar link just under a tall poster's middle beat the card
+  // below it. Centre-only scoring stays as the fallback for overlaps.
+  const pick = (strict) => {
+    let best = null
+    let bestScore = Infinity
+    for (const el of targets) {
+      if (el === _focused) continue
+      const r = el.getBoundingClientRect()
+      if (strict) {
+        if (dir === 'down'  && r.top    < from.bottom - 4) continue
+        if (dir === 'up'    && r.bottom > from.top + 4)    continue
+        if (dir === 'right' && r.left   < from.right - 4)  continue
+        if (dir === 'left'  && r.right  > from.left + 4)   continue
+      }
+      const cx = r.left + r.width / 2
+      const cy = r.top + r.height / 2
+      const dx = cx - fx
+      const dy = cy - fy
+      let primary, cross
+      if (dir === 'left')       { primary = -dx; cross = Math.abs(dy) }
+      else if (dir === 'right') { primary = dx;  cross = Math.abs(dy) }
+      else if (dir === 'up')    { primary = -dy; cross = Math.abs(dx) }
+      else                      { primary = dy;  cross = Math.abs(dx) }
+      if (primary < 8) continue               // must actually be in that direction
+      const score = primary + cross * 2       // bias against sideways drift
+      if (score < bestScore) { bestScore = score; best = el }
+    }
+    return best
   }
+  const best = pick(true) || pick(false)
   if (best) { setFocus(best); return }
   // Left from a flyout with nothing further left: back to its parent menu.
   if (dir === 'left' && document.querySelectorAll('[role="menu"]').length > 1) pressEscape()
@@ -197,7 +210,10 @@ function openOptions() {
   const el = _focused?.closest?.('[data-gpnav]') || _focused
   if (!el || !document.contains(el)) return
   const r = el.getBoundingClientRect()
-  el.dispatchEvent(new MouseEvent('contextmenu', {
+  // Events only bubble up: a card whose menu handler sits on its inner click
+  // target (GameCard in Library / Game List grids) needs it dispatched there.
+  const target = (el.matches('[data-gpnav]') && el.querySelector('[data-gpclick]')) || el
+  target.dispatchEvent(new MouseEvent('contextmenu', {
     bubbles: true, cancelable: true, button: 2,
     clientX: Math.round(r.left + r.width / 2), clientY: Math.round(r.top + Math.min(r.height / 2, 80)),
   }))
@@ -350,6 +366,9 @@ export function initGamepadNav({ navigate }) {
   document.addEventListener('visibilitychange', onVisibilityChange)
   window.addEventListener('blur', onHidden)
   window.addEventListener('focus', onVisible)
+  // A pad already in use (a reload, or setup running again) gets no new
+  // gamepadconnected event, so pick polling back up here.
+  if (_padSeen && connected() && document.visibilityState === 'visible') startPolling()
 
   return () => {
     stopPolling()

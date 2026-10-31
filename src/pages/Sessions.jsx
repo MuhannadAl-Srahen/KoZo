@@ -184,7 +184,7 @@ export default function Sessions() {
             <div className={s.summaryStrip}>
               <div className={s.summaryItem}>
                 <span className={s.summaryValue}>{sessions.length}{hasMore ? '+' : ''}</span>
-                <span className={s.summaryLabel}>sessions</span>
+                <span className={s.summaryLabel}>{sessions.length === 1 && !hasMore ? 'session' : 'sessions'}</span>
               </div>
               <div className={s.summaryDivider} />
               <div className={s.summaryItem}>
@@ -196,7 +196,7 @@ export default function Sessions() {
                   <div className={s.summaryDivider} />
                   <div className={s.summaryItem}>
                     <span className={s.summaryValue}>{totalAchs}</span>
-                    <span className={s.summaryLabel}>achievements</span>
+                    <span className={s.summaryLabel}>{totalAchs === 1 ? 'achievement' : 'achievements'}</span>
                   </div>
                 </>
               )}

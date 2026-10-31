@@ -193,11 +193,15 @@ html[data-wallpaper] aside { background: color-mix(in srgb, var(--surface-1) 72%
   .confetti { display: none !important; }
 }
 
-/* KoZo is hidden or behind another window: stop every animation (see App.jsx). */
+/* KoZo is hidden or behind another window: stop every animation (see App.jsx).
+   The negative delay parks one-shot entrances (fade-ins starting at opacity 0)
+   on their finished frame; paused alone froze anything that appeared while
+   KoZo was unfocused on its invisible first frame. */
 html[data-inactive] *,
 html[data-inactive] *::before,
 html[data-inactive] *::after {
   animation-play-state: paused !important;
+  animation-delay: -60s !important;
 }
 
 /* Ctrl + mouse wheel UI scale readout (App.jsx CtrlWheelZoom) */

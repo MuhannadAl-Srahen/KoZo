@@ -34,7 +34,7 @@ function FinishedCard({ g, onRate, onOpen, onContextMenu }) {
   const src = coverOf(g)
   return (
     <div className={s.card} data-gpnav="" onContextMenu={(e) => { e.preventDefault(); onContextMenu(e) }}>
-      <button className={s.cover} onClick={onOpen} title={g.name}>
+      <button className={s.cover} onClick={onOpen} title={g.name} data-gpclick="">
         {src && !failed
           ? <img src={src} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} />
           : <GeneratedCover name={g.name} />}
