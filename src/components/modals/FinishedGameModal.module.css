@@ -23,10 +23,23 @@
 .cover img { width: 100%; height: 100%; object-fit: cover; }
 .heroText { min-width: 0; padding-bottom: var(--sp-4); }
 .name { font-size: var(--fs-2xl); font-weight: 800; color: var(--text-primary); line-height: 1.2; text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6); }
-.ratingLine { display: flex; align-items: center; gap: var(--sp-6); margin-top: var(--sp-6); color: var(--text-secondary); font-size: var(--fs-md); }
-.ratingLine svg { color: #fbbf24; }
-.ratingLine strong { font-size: var(--fs-xl); color: var(--text-primary); }
-.noRating { color: var(--text-muted); }
+.ratingBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  margin-top: var(--sp-8);
+  padding: var(--sp-4) var(--sp-12);
+  border-radius: var(--r-pill);
+  background: rgba(8, 8, 14, 0.55);
+  border: 1px solid color-mix(in srgb, var(--rc, var(--text-muted)) 55%, transparent);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  --rc: var(--text-muted);
+}
+.ratingBadge svg { color: var(--rc); }
+.ratingBadge strong { font-size: var(--fs-lg); color: var(--text-primary); }
+.ratingBadge span { color: var(--rc); font-weight: 700; margin-left: var(--sp-4); }
+.genres { margin-top: var(--sp-6); font-size: var(--fs-xs); color: var(--text-secondary); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6); }
 
 .sectionLabel {
   margin-bottom: var(--sp-8);
@@ -36,23 +49,15 @@
   text-transform: uppercase;
   color: var(--text-muted);
 }
-.scale { display: grid; grid-template-columns: repeat(10, 1fr); gap: var(--sp-6); margin-bottom: var(--sp-20); }
-.point {
-  height: 38px;
+.ratingBox {
+  margin-bottom: var(--sp-16);
+  padding: var(--sp-12) var(--sp-16) var(--sp-10);
   border: 1px solid var(--neutral-border);
-  border-radius: var(--r-md);
+  border-radius: var(--r-card);
   background: var(--surface-3);
-  color: var(--text-secondary);
-  font-family: inherit;
-  font-size: var(--fs-md);
-  font-weight: 700;
-  cursor: pointer;
-  transition: background 0.1s ease, color 0.1s ease, border-color 0.1s ease;
 }
-.pointOn { background: color-mix(in srgb, var(--a) 30%, var(--surface-3)); border-color: var(--ab); color: var(--text-primary); }
-.pointPicked { background: var(--a); border-color: var(--a); color: var(--accent-ink); }
 
-.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: var(--sp-10); margin-bottom: var(--sp-16); }
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-10); margin-bottom: var(--sp-16); }
 .stat {
   display: flex;
   flex-direction: column;
@@ -64,6 +69,7 @@
   color: var(--text-muted);
 }
 .statValue { font-size: var(--fs-lg); font-weight: 700; color: var(--text-primary); }
+.statNone { font-size: var(--fs-sm); font-weight: 500; color: var(--text-muted); }
 .statLabel { font-size: var(--fs-xs); }
 
 .ach { padding: var(--sp-12); border: 1px solid var(--neutral-border); border-radius: var(--r-card); background: var(--surface-3); }

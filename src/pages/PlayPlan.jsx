@@ -13,6 +13,7 @@ import Modal, { modalStyles as ms } from '../components/ui/Modal'
 import EditGameListModal from '../components/modals/EditGameListModal'
 import PlanMonthModal from '../components/modals/PlanMonthModal'
 import useCardZoom from '../lib/useCardZoom'
+import { ratingColor } from '../components/ui/RatingPicker'
 import s from './PlayPlan.module.css'
 
 // Play Plan: what you mean to play, month by month. A month is a board with
@@ -65,42 +66,41 @@ function dragProps(item) {
   }
 }
 
-// One game on the board: poster, name, what's going on with it, Play.
+// One game on the board: a poster with its name over the art, a status tag
+// (On hold, Upcoming, Dropped), this month's hours or the rating, and a Play
+// button on hover for library games.
 function LaneCard({ item, onOpen, onContextMenu, onPlay }) {
   const st = LIST_STATUSES[item.status]
   const extraTag = ['on_hold', 'upcoming', 'dropped'].includes(item.status) ? st : null
+  const canPlay = item.game_id && item.status !== 'finished' && item.status !== 'dropped'
   return (
     <div
-      className={`${s.laneCard} ${item.status === 'dropped' ? s.laneCardDropped : ''}`}
+      className={`${s.tile} ${item.status === 'dropped' ? s.tileDropped : ''}`}
       {...dragProps(item)}
       onClick={() => onOpen(item)}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, item) }}
       data-gpnav=""
       title={item.name}
     >
-      <div className={s.laneThumb}><Thumb item={item} /></div>
-      <div className={s.laneInfo}>
-        <div className={s.laneName}>{item.name}</div>
-        <div className={s.laneMeta}>
-          {extraTag && <span className={s.tag} style={{ color: extraTag.color }}>{extraTag.label}</span>}
-          {item.status === 'finished' && item.rating > 0 && (
-            <span className={s.stars}><IconStarFilled size={11} /> {Math.round(item.rating)}/10</span>
-          )}
-          {item.month_seconds > 0 && (
-            <span className={s.hours}><IconClock size={11} /> {formatPlaytime(item.month_seconds)} this month</span>
-          )}
-        </div>
-      </div>
-      {item.game_id && item.status !== 'finished' && item.status !== 'dropped' && (
+      <Thumb item={item} />
+      <span className={s.tileShade} />
+      {extraTag && <span className={s.tileTag} style={{ '--tc': extraTag.color }}>{extraTag.label}</span>}
+      {canPlay && (
         <button
-          className={s.playBtn}
+          className={s.tilePlay}
           title="Play"
           aria-label={`Play ${item.name}`}
           onClick={(e) => { e.stopPropagation(); onPlay(item) }}
         >
-          <IconPlayerPlayFilled size={13} />
+          <IconPlayerPlayFilled size={18} />
         </button>
       )}
+      <div className={s.tileInfo}>
+        <div className={s.tileName}>{item.name}</div>
+        {item.status === 'finished' && item.rating > 0
+          ? <span className={s.tileMeta} style={{ '--rc': ratingColor(Math.round(item.rating)) }}><IconStarFilled size={11} className={s.tileStar} /> {Math.round(item.rating)}/10</span>
+          : item.month_seconds > 0 && <span className={s.tileMeta}><IconClock size={11} /> {formatPlaytime(item.month_seconds)}</span>}
+      </div>
     </div>
   )
 }
@@ -187,7 +187,7 @@ export default function PlayPlan() {
   const [moveIds, setMoveIds] = useState(null)
   const [adding, setAdding] = useState(false)
   const [launchError, setLaunchError] = useState(null)
-  const zoomStyle = useCardZoom('plan', month === 'none' ? 'grid' : 'board', { grid: 200, board: 72 }, month === 'none' ? { min: 140, max: 380 } : { min: 48, max: 140 })   // Ctrl + mouse wheel
+  const zoomStyle = useCardZoom('plan', month === 'none' ? 'grid' : 'board', { grid: 200, board: 130 }, month === 'none' ? { min: 140, max: 380 } : { min: 96, max: 240 })   // Ctrl + mouse wheel
 
   // The 13-month window, plus any other month that has plans (an old one).
   const months = useMemo(() => [...new Set([...monthsAround(), ...Object.keys(summary)])].sort(), [summary])
@@ -331,6 +331,7 @@ export default function PlayPlan() {
                 <div className={s.progress}><span style={{ width: `${pct}%` }} /></div>
                 <div className={s.heroStats}>
                   <span><strong>{done}</strong> of <strong>{total}</strong> done</span>
+                  {total > 0 && <span className={s.pct}>{pct}%</span>}
                   {playedSec > 0 && <span><IconClock size={13} /> {formatPlaytime(playedSec)} played this month</span>}
                   {total > 0 && done === total && <span className={s.allDone}><IconCheck size={13} /> All done</span>}
                 </div>
@@ -389,6 +390,7 @@ export default function PlayPlan() {
                         <div className={s.aheadCovers}>
                           {rows.slice(0, 5).map(r => <span key={r.id} className={s.aheadCover}><Thumb item={r} /></span>)}
                           {rows.length > 5 && <span className={s.aheadMore}>+{rows.length - 5}</span>}
+                          {rows.length === 0 && <span className={s.aheadEmpty}>Drop a game here to plan it</span>}
                         </div>
                       </button>
                     )

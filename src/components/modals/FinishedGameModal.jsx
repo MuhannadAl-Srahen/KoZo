@@ -4,7 +4,8 @@ import { IconFlag, IconStarFilled, IconClock, IconTrophy, IconCalendar, IconHist
 import Modal, { modalStyles as ms } from '../ui/Modal'
 import GeneratedCover from '../GeneratedCover'
 import InfoModal from '../ui/InfoModal'
-import { fileUrl, formatPlaytime, formatDate } from '../../lib/utils'
+import RatingPicker, { RATING_WORDS, ratingColor } from '../ui/RatingPicker'
+import { fileUrl, formatPlaytime, formatDate, parseGenres } from '../../lib/utils'
 import s from './FinishedGameModal.module.css'
 
 // The Finished tab's popup for one game: big art, your rating (click a number
@@ -14,7 +15,6 @@ import s from './FinishedGameModal.module.css'
 export default function FinishedGameModal({ g, onClose, onChanged }) {
   const navigate = useNavigate()
   const [rating, setRating] = useState(g.rating ? Math.round(g.rating) : null)
-  const [hover, setHover] = useState(null)
   const [heroUrl, setHeroUrl] = useState(null)
   const [failed, setFailed] = useState(false)
   const [launching, setLaunching] = useState(false)
@@ -36,7 +36,7 @@ export default function FinishedGameModal({ g, onClose, onChanged }) {
 
   const hero = localHero || heroUrl
   const started = g.first_session_at || g.first_played_at
-  const shown = hover ?? rating
+  const genres = parseGenres(g).slice(0, 4)
   const achPct = g.ach_total > 0 ? Math.round((g.ach_unlocked / g.ach_total) * 100) : 0
 
   async function rate(n) {
@@ -53,12 +53,13 @@ export default function FinishedGameModal({ g, onClose, onChanged }) {
     else onClose()
   }
 
+  // Always the same four tiles; what KoZo doesn't know reads "Not tracked".
   const stats = [
-    g.total_playtime_seconds > 0 && { Icon: IconClock, label: 'Playtime', value: formatPlaytime(g.total_playtime_seconds) },
-    g.session_count > 0 && { Icon: IconHistory, label: 'Sessions', value: g.session_count },
-    started && { Icon: IconCalendar, label: 'Started', value: formatDate(started) },
-    g.finished_at && { Icon: IconFlag, label: 'Finished', value: formatDate(g.finished_at) },
-  ].filter(Boolean)
+    { Icon: IconClock,    label: 'Playtime', value: g.total_playtime_seconds > 0 ? formatPlaytime(g.total_playtime_seconds) : null },
+    { Icon: IconHistory,  label: 'Sessions', value: g.session_count > 0 ? g.session_count : null },
+    { Icon: IconCalendar, label: 'Started',  value: started ? formatDate(started) : null },
+    { Icon: IconFlag,     label: 'Finished', value: g.finished_at ? formatDate(g.finished_at) : null },
+  ]
 
   return (
     <Modal
@@ -96,42 +97,26 @@ export default function FinishedGameModal({ g, onClose, onChanged }) {
           </div>
           <div className={s.heroText}>
             <div className={s.name}>{g.name}</div>
-            <div className={s.ratingLine}>
-              <IconStarFilled size={18} />
-              {shown ? <><strong>{shown}</strong>/10</> : <span className={s.noRating}>Not rated yet</span>}
-            </div>
+            {rating
+              ? <div className={s.ratingBadge} style={{ '--rc': ratingColor(rating) }}><IconStarFilled size={15} /> <strong>{rating}</strong>/10 <span>{RATING_WORDS[rating]}</span></div>
+              : <div className={s.ratingBadge}><IconStarFilled size={15} /> Not rated yet</div>}
+            {genres.length > 0 && <div className={s.genres}>{genres.join(' · ')}</div>}
           </div>
         </div>
       </div>
 
       <div className={s.sectionLabel}>Your rating</div>
-      <div className={s.scale} onMouseLeave={() => setHover(null)} role="radiogroup" aria-label="Rating from 1 to 10">
-        {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
-          <button
-            key={n}
-            type="button"
-            role="radio"
-            aria-checked={rating === n}
-            className={`${s.point} ${shown != null && n <= shown ? s.pointOn : ''} ${rating === n ? s.pointPicked : ''}`}
-            onMouseEnter={() => setHover(n)}
-            onClick={() => rate(n)}
-          >
-            {n}
-          </button>
+      <div className={s.ratingBox}><RatingPicker value={rating} onChange={rate} /></div>
+
+      <div className={s.stats}>
+        {stats.map(st => (
+          <div key={st.label} className={s.stat}>
+            <st.Icon size={16} />
+            <span className={`${s.statValue} ${st.value == null ? s.statNone : ''}`}>{st.value ?? 'Not tracked'}</span>
+            <span className={s.statLabel}>{st.label}</span>
+          </div>
         ))}
       </div>
-
-      {stats.length > 0 && (
-        <div className={s.stats}>
-          {stats.map(st => (
-            <div key={st.label} className={s.stat}>
-              <st.Icon size={16} />
-              <span className={s.statValue}>{st.value}</span>
-              <span className={s.statLabel}>{st.label}</span>
-            </div>
-          ))}
-        </div>
-      )}
 
       {g.ach_total > 0 && (
         <div className={s.ach}>
@@ -146,7 +131,7 @@ export default function FinishedGameModal({ g, onClose, onChanged }) {
       )}
 
       {!g.game_id && (
-        <p className={s.note}>This game is only on your Game List, so KoZo has no playtime or sessions for it.</p>
+        <p className={s.note}>Only on your Game List: add it to your Library to track playtime and sessions.</p>
       )}
       {launchError && <InfoModal variant="error" title="Couldn't start the game" message={launchError} onClose={() => setLaunchError(null)} />}
     </Modal>

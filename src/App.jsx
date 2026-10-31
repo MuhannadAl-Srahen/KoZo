@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { HashRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { AccentColorProvider } from './context/AccentColorContext'
 import { AppearanceProvider, useAppearance } from './context/AppearanceContext'
 import { fileUrl } from './lib/utils'
-import { cardZoomActive } from './lib/useCardZoom'
+import { zoomGridAt } from './lib/useCardZoom'
 import { initGamepadNav } from './lib/gamepadNav'
 import Sidebar from './components/Sidebar'
 import Library from './pages/Library'
@@ -46,21 +46,22 @@ function StartPage() {
 // cards (lib/useCardZoom); everywhere else it changes the whole UI scale in 5%
 // steps (80 to 150%), the same setting as Settings → Appearance → UI scale.
 function CtrlWheelZoom() {
-  const { setPrefs } = useAppearance()
+  const { prefs, setPrefs } = useAppearance()
   const [pill, setPill] = useState(null)
+  const scaleRef = useRef(prefs.scale || 1)
+  scaleRef.current = prefs.scale || 1
   useEffect(() => {
     let hideT
     const onWheel = (e) => {
       if (!e.ctrlKey) return
       e.preventDefault()   // never Chromium's own page zoom
-      if (cardZoomActive() || document.querySelector('[role="dialog"]')) return
-      setPrefs(p => {
-        const next = Math.round(Math.min(1.5, Math.max(0.8, (p.scale || 1) + (e.deltaY < 0 ? 0.05 : -0.05))) * 100) / 100
-        setPill(Math.round(next * 100))
-        clearTimeout(hideT)
-        hideT = setTimeout(() => setPill(null), 1200)
-        return { ...p, scale: next }
-      })
+      if (zoomGridAt(e.target) || document.querySelector('[role="dialog"]')) return   // over a card grid: useCardZoom resizes it
+      const next = Math.round(Math.min(1.5, Math.max(0.8, scaleRef.current + (e.deltaY < 0 ? 0.05 : -0.05))) * 100) / 100
+      scaleRef.current = next
+      setPrefs({ scale: next })
+      setPill(Math.round(next * 100))
+      clearTimeout(hideT)
+      hideT = setTimeout(() => setPill(null), 1200)
     }
     window.addEventListener('wheel', onWheel, { passive: false })
     return () => { clearTimeout(hideT); window.removeEventListener('wheel', onWheel) }

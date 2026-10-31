@@ -617,7 +617,7 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
   return (
     <div className={s.wrap} style={zoomStyle}>
       {/* Top bar: the layout picker, the TBA shelf, and loading more games */}
-      <div className={s.nav}>
+      <div className={s.nav} data-zoom-ignore="">
         <div className={s.viewToggle} role="tablist" aria-label="Calendar layout">
           {VIEWS.map(v => (
             <button key={v.key} role="tab" aria-selected={view === v.key}
