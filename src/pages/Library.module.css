@@ -336,3 +336,27 @@
   contain: layout style;
   max-width: var(--content-max);
 }
+
+/* "N games found in your launchers" (Import from launchers) */
+.launcherStrip {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  margin-bottom: var(--sp-12);
+  padding: var(--sp-10) var(--sp-12);
+  border: 1px solid var(--ab);
+  border-radius: var(--r-card);
+  background: color-mix(in srgb, var(--a) 10%, var(--surface-2));
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+}
+.launcherStrip > svg { color: var(--a); flex-shrink: 0; }
+.launcherStrip > span { flex: 1; min-width: 0; }
+.launcherReview { composes: btn btnPrimary btnSm from '../styles/controls.module.css'; }
+.launcherClose {
+  display: inline-flex;
+  padding: var(--sp-4);
+  border-radius: var(--r-sm);
+  color: var(--text-muted);
+}
+.launcherClose:hover { color: var(--text-primary); background: var(--surface-3); }

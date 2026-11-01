@@ -175,5 +175,141 @@ console.log('\nbuildCandidates')
   check('manual_appid keys emulator folders', cands2.some(c => c.path.includes('1234')))
 }
 
-console.log(`\n${pass} passed, ${fail} failed`)
-if (fail > 0) process.exitCode = 1
+// ── Launcher import (Epic / GOG / Xbox) ───────────────────────────────────────
+const li = require(path.join(__dirname, '..', 'electron', 'services', 'launcherImport.js'))
+console.log('\nlauncherImport')
+{
+  const epic = li.parseEpicManifest(JSON.stringify({
+    DisplayName: 'Hades', InstallLocation: 'D:\\Epic Games\\Hades', LaunchExecutable: 'x64\\Hades.exe',
+    AppName: 'Min', CatalogNamespace: 'ns1', CatalogItemId: 'item1', MainGameAppName: 'Min',
+    AppCategories: ['public', 'games', 'applications'], bIsIncompleteInstall: false,
+  }))
+  check('Epic: name and folder', epic?.name === 'Hades' && epic.install_path === 'D:\\Epic Games\\Hades')
+  check('Epic: watched exe is the basename', epic?.exe_name === 'Hades.exe')
+  check('Epic: launcher URI', epic?.launch_uri === 'com.epicgames.launcher://apps/ns1%3Aitem1%3AMin?action=launch&silent=true', epic?.launch_uri)
+  check('Epic: DLC skipped', li.parseEpicManifest({ DisplayName: 'Pack', InstallLocation: 'D:\\x', AppName: 'Dlc1', MainGameAppName: 'Min', AppCategories: ['addons'] }) === null)
+  check('Epic: unfinished install skipped', li.parseEpicManifest({ DisplayName: 'A', InstallLocation: 'D:\\a', bIsIncompleteInstall: true }) === null)
+  check('Epic: broken JSON is null, not a crash', li.parseEpicManifest('{nope') === null)
+
+  const reg = [
+    'HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\GOG.com\\Games\\1207658924',
+    '    gameID    REG_SZ    1207658924',
+    '    gameName    REG_SZ    The Witcher: Enhanced Edition',
+    '    exe    REG_SZ    C:\\GOG Games\\The Witcher\\System\\witcher.exe',
+    '    path    REG_SZ    C:\\GOG Games\\The Witcher',
+    '',
+    'HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\GOG.com\\Games\\1400000001',
+    '    gameName    REG_SZ    Some DLC',
+    '    path    REG_SZ    C:\\GOG Games\\The Witcher',
+    '    dependsOn    REG_SZ    1207658924',
+  ].join('\r\n')
+  const gog = li.parseGogRegistry(reg)
+  check('GOG: one game, DLC skipped', gog.length === 1, JSON.stringify(gog))
+  check('GOG: name, folder, exe', gog[0]?.name === 'The Witcher: Enhanced Edition' && gog[0]?.install_path === 'C:\\GOG Games\\The Witcher' && gog[0]?.exe_name === 'witcher.exe')
+  const info = li.parseGogInfo({ gameId: '1', rootGameId: '1', name: 'Gwent', playTasks: [{ isPrimary: true, path: 'bin\\Gwent.exe' }] }, 'C:\\GOG Games\\Gwent')
+  check('GOG .info: primary play task', info?.exe_name === 'Gwent.exe' && info.install_path === 'C:\\GOG Games\\Gwent')
+
+  const xbox = li.parseXboxPackage({
+    name: 'Microsoft.Forza5', familyName: 'Microsoft.Forza5_8wekyb3d8bbwe', installLocation: 'C:\\XboxGames\\Forza\\Content',
+    gameConfig: '<Game><ExecutableList><Executable Name="ForzaHorizon5.exe" Id="Game" /></ExecutableList><ShellVisuals DefaultDisplayName="Forza Horizon 5" /></Game>',
+    appxManifest: '<Package><Applications><Application Id="Game" Executable="GameLaunchHelper.exe"/></Applications></Package>',
+  })
+  check('Xbox: name from MicrosoftGame.config', xbox?.name === 'Forza Horizon 5')
+  check('Xbox: watched exe', xbox?.exe_name === 'ForzaHorizon5.exe')
+  check('Xbox: shell:AppsFolder URI', xbox?.launch_uri === 'shell:AppsFolder\\Microsoft.Forza5_8wekyb3d8bbwe!Game', xbox?.launch_uri)
+  const xbox2 = li.parseXboxPackage({
+    name: 'Studio.CoolGame', familyName: 'Studio.CoolGame_abc', installLocation: 'C:\\x',
+    gameConfig: '<Game><ShellVisuals DefaultDisplayName="ms-resource:Name" /></Game>',
+    appxManifest: '<Package><Properties><DisplayName>Cool Game</DisplayName></Properties></Package>',
+  })
+  check('Xbox: ms-resource name falls back to the manifest', xbox2?.name === 'Cool Game')
+}
+
+// ── Pick for me ───────────────────────────────────────────────────────────────
+// src/lib/pickForMe.js is an ES module; load it as a plain function body.
+console.log('\npickForMe')
+{
+  const src = require('fs').readFileSync(path.join(__dirname, '..', 'src', 'lib', 'pickForMe.js'), 'utf8')
+    .replace(/export function/g, 'function')
+  const { scoreCandidates, pickWeighted } = new Function(src + '; return { scoreCandidates, pickWeighted }')()
+  const items = [
+    { id: 1, name: 'Shooter', genres: '["Action","Shooter"]', game_id: 10 },
+    { id: 2, name: 'Farm', genres: '["Simulation"]', game_id: null },
+    { id: 3, name: 'Fav', genres: '[]', is_favorite: 1 },
+  ]
+  const sc = scoreCandidates(items, { action: 1, shooter: 0.5 }, { playableIds: new Set([10]) })
+  check('taste + playable weight', Math.abs(sc[0].weight - (1 + 3 * 1.5 + 1)) < 1e-9, String(sc[0].weight))
+  check('no taste match keeps base weight', sc[1].weight === 1)
+  check('favourite bonus', sc[2].weight === 1.5)
+  check('"because" lists the best genres', sc[0].because.join() === 'Action,Shooter')
+  check('weighted pick follows rand', pickWeighted(sc, () => 0)?.item.id === 1 && pickWeighted(sc, () => 0.999)?.item.id === 3)
+  check('Roll again never repeats the last pick', [0, 0.3, 0.6, 0.99].every(r => pickWeighted(sc, () => r, 1).item.id !== 1))
+  check('empty list picks nothing', pickWeighted([], () => 0.5) === null)
+}
+
+// ── Discord Rich Presence (against a fake Discord pipe) ──────────────────────
+async function discordTests() {
+  console.log('\ndiscordPresence')
+  const stub = (rel, exports) => {
+    const p = require.resolve(path.join(__dirname, '..', 'electron', rel))
+    require.cache[p] = { id: p, filename: p, loaded: true, exports }
+  }
+  const settings = { discord_presence: '1', discord_client_id: '123456789' }
+  stub('db/queries/settings.js', { getSetting: (k) => settings[k] ?? null, setSetting() {} })
+  const sessions = new Map()
+  let onChange = null
+  stub('services/processWatcher.js', { getActiveSessions: () => sessions, onChange: (cb) => { onChange = cb } })
+  stub('db/queries/games.js', { getGame: () => ({ name: 'Hades', total_playtime_seconds: 7 * 3600, banner_url: 'https://cdn.example/h.jpg' }) })
+  stub('services/xp.js', { computeXp: () => ({ level: 15 }) })
+  const dp = require(path.join(__dirname, '..', 'electron', 'services', 'discordPresence.js'))
+
+  const [frames] = dp._decode(Buffer.concat([dp._encode(1, { a: 1 }), dp._encode(2, { b: 2 }), Buffer.from([1, 0])]))
+  check('frames round-trip, partial frame held back', frames.length === 2 && frames[0].op === 1 && frames[1].data.b === 2)
+
+  const net = require('net')
+  const got = []
+  const server = net.createServer((sock) => {
+    let buf = Buffer.alloc(0)
+    sock.on('data', (chunk) => {
+      const [fs, rest] = dp._decode(Buffer.concat([buf, chunk]))
+      buf = rest
+      for (const f of fs) {
+        got.push(f)
+        if (f.op === 0) sock.write(dp._encode(1, { cmd: 'DISPATCH', evt: 'READY', data: {} }))
+      }
+    })
+    sock.on('error', () => {})
+  })
+  const listening = await new Promise((res) => {
+    server.once('error', () => res(false))
+    server.listen('\\\\?\\pipe\\discord-ipc-0', () => res(true))
+  })
+  if (!listening) { console.log('  SKIP  Discord is running here (pipe in use)'); return }
+  const wait = (ms) => new Promise(r => setTimeout(r, ms))
+
+  dp.start()
+  sessions.set(1, { game_id: 1, started_at: new Date(Date.now() - 60000).toISOString(), game_name: 'Hades' })
+  onChange()
+  await wait(400)
+  const hello = got.find(f => f.op === 0)
+  check('handshake sends the Application ID', hello?.data?.client_id === '123456789')
+  const act = got.filter(f => f.data?.cmd === 'SET_ACTIVITY').pop()?.data?.args?.activity
+  check('activity shows the game name', act?.details === 'Hades', JSON.stringify(act))
+  check('activity shows level and hours', act?.state === 'KoZo level 15 · 7h played', act?.state)
+  check('member list shows the game, not the app', act?.status_display_type === 2)
+  check('status is connected', dp.getStatus() === 'connected')
+
+  sessions.clear()
+  onChange()
+  await wait(300)
+  const last = got.filter(f => f.data?.cmd === 'SET_ACTIVITY').pop()?.data?.args?.activity
+  check('activity cleared when play stops', last === null)
+  dp.stop()
+  server.close()
+}
+
+;(async () => {
+  try { await discordTests() } catch (e) { check('discord tests ran', false, e.message) }
+  console.log(`\n${pass} passed, ${fail} failed`)
+  if (fail > 0) process.exitCode = 1
+})()

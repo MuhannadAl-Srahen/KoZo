@@ -387,6 +387,22 @@ async function doLaunch(id) {
     return { launched: 'launcher', path: game.launch_file }
   }
 
+  // A store launcher starts the game itself (Epic needs its sign-in; Xbox
+  // games live in protected WindowsApps folders). services/launcherImport.js.
+  if (game.launch_uri) {
+    if (/^shell:AppsFolder\\/i.test(game.launch_uri)) {
+      const { spawn } = require('child_process')
+      const child = spawn('explorer.exe', [game.launch_uri], { detached: true, stdio: 'ignore', windowsHide: true })
+      child.on('error', (e) => logger.warn(`store launch failed for "${game.name}": ${e.message}`))
+      child.unref()
+      return { launched: 'store', uri: game.launch_uri }
+    }
+    if (/^(com\.epicgames\.launcher|goggalaxy):\/\//i.test(game.launch_uri)) {
+      await shell.openExternal(game.launch_uri)
+      return { launched: 'store', uri: game.launch_uri }
+    }
+  }
+
   if (hasUsableLocalExe) {
     const fullPath = path.join(game.install_path, game.exe_name)
     const { spawn } = require('child_process')
@@ -1285,6 +1301,82 @@ handle('scanner:scan', async (paths) => {
   return results
 })
 
+// ── Import from launchers (Epic, GOG, Xbox) ───────────────────────────────────
+// Reads each launcher's own records (services/launcherImport.js), flags what
+// the Library already has, and name-matches the rest to Steam for covers and
+// genres, the same way Scan PC treats cracked games.
+async function scanLaunchers({ match = true } = {}) {
+  const li = require('./services/launcherImport')
+  const { findAppByName } = require('./services/steamApi')
+  const db = require('./db/database').getDb()
+  const found = await li.readAll()
+  const rows = db.prepare('SELECT install_path, name, launch_uri, steam_app_id FROM games').all()
+  const paths = new Set(rows.filter(r => r.install_path).map(r => r.install_path.toLowerCase().replace(/[\\/]+$/, '')))
+  const names = new Set(rows.map(r => String(r.name || '').trim().toLowerCase()))
+  const uris = new Set(rows.filter(r => r.launch_uri).map(r => r.launch_uri.toLowerCase()))
+  const appIds = new Set(rows.filter(r => r.steam_app_id).map(r => String(r.steam_app_id)))
+  for (const g of found) {
+    g.key = li.keyOf(g)
+    g.alreadyInLibrary = paths.has(g.install_path.toLowerCase().replace(/[\\/]+$/, '')) ||
+      names.has(g.name.toLowerCase()) || (g.launch_uri && uris.has(g.launch_uri.toLowerCase()))
+  }
+  const timeout = (ms) => new Promise(r => setTimeout(() => r(null), ms))
+  const toMatch = match ? found.filter(g => !g.alreadyInLibrary) : []
+  let i = 0
+  async function worker() {
+    while (i < toMatch.length) {
+      const g = toMatch[i++]
+      try {
+        const k = g.name.toLowerCase()
+        let match = scanMatchCache.get(k)
+        if (match === undefined) {
+          match = await Promise.race([findAppByName(g.name).catch(() => null), timeout(6000)])
+          scanMatchCache.set(k, match || null)
+        }
+        if (match) {
+          g.steam_app_id = match.steam_app_id
+          if (appIds.has(String(match.steam_app_id))) g.alreadyInLibrary = true
+        }
+      } catch {}
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(6, toMatch.length) }, worker))
+  return found
+}
+
+handle('launchers:scan', () => scanLaunchers())
+
+// Found games the user hasn't added or dismissed yet (the Library strip).
+function launcherSeen() {
+  try { return new Set(JSON.parse(settingsQ.getSetting('launcher_seen') || '[]')) } catch { return new Set() }
+}
+let launcherPending = []
+handle('launchers:pending', () => launcherPending)
+handle('launchers:dismiss', (keys) => {
+  const seen = launcherSeen()
+  for (const k of (keys || [])) seen.add(k)
+  settingsQ.setSetting('launcher_seen', JSON.stringify([...seen].slice(-2000)))
+  launcherPending = launcherPending.filter(g => !seen.has(g.key))
+  return true
+})
+
+// "Found automatically": on each launch, once nothing is playing, look for
+// new launcher games and tell the Library. Local reads only (no Steam
+// lookups; the review dialog does those). Nothing is added without the user.
+setTimeout(() => {
+  require('./services/processWatcher').runWhenIdle('launcherScan', async () => {
+    try {
+      const seen = launcherSeen()
+      const found = await scanLaunchers({ match: false })
+      launcherPending = found.filter(g => !g.alreadyInLibrary && !seen.has(g.key))
+      if (launcherPending.length) {
+        logger.info(`launchers: ${launcherPending.length} new game(s) found`)
+        broadcast('launchers:found', launcherPending.length)
+      }
+    } catch (e) { logger.warn('launchers: scan failed', { message: e.message }) }
+  })
+}, 50000)
+
 // Map the scanner's detected launcher to the persisted `source` so the library
 // shows a correct Steam/Epic/GOG/Xbox/EA/Ubisoft badge (not a generic "Manual").
 const TYPE_TO_SOURCE = {
@@ -1317,6 +1409,7 @@ handle('scanner:addGames', async (games) => {
         source: TYPE_TO_SOURCE[g.detected_type] || (g.steam_app_id ? 'steam' : 'manual'),
         is_cracked: g.is_cracked ? 1 : 0,
         is_installed: g.isInstalled === false ? 0 : 1,
+        launch_uri: g.launch_uri || null,
         banner_url: g.steam_app_id
           ? `https://cdn.akamai.steamstatic.com/steam/apps/${g.steam_app_id}/library_600x900_2x.jpg`
           : null,
