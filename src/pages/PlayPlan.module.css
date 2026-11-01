@@ -157,6 +157,7 @@
   border: 1px solid var(--border);
   border-top: 3px solid var(--lane);
   border-radius: var(--r-card);
+  container-type: inline-size;   /* the posters size from the lane's width */
   background: color-mix(in srgb, var(--surface-2) 70%, transparent);
   transition: border-color 0.15s ease, background 0.15s ease;
 }
@@ -186,7 +187,10 @@
 .laneBody {
   flex: 1;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 130px), 1fr));
+  /* At least two posters per row whatever the window or the saved Ctrl+wheel
+     size: a narrow lane used to show one huge poster. (34px = the lane's side
+     padding plus one gap.) */
+  grid-template-columns: repeat(auto-fill, minmax(min(var(--card-min, 130px), calc((100cqw - 34px) / 2)), 1fr));
   align-content: start;
   gap: var(--sp-10);
   padding: 0 var(--sp-12) var(--sp-12);
