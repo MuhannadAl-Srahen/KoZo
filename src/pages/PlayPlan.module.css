@@ -4,6 +4,7 @@
 .content { composes: content from '../styles/page.module.css'; display: flex; flex-direction: column; gap: var(--sp-16); }
 .spacer { flex: 1; }
 .btnPrimary { composes: btn btnPrimary btnMd from '../styles/controls.module.css'; }
+.btnSecondary { composes: btn btnSecondary btnMd from '../styles/controls.module.css'; }
 .muted { color: var(--text-muted); font-size: var(--fs-sm); padding: var(--sp-12); }
 
 /* ── Month strip ─────────────────────────────────────────────── */

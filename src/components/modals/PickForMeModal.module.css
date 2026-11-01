@@ -1,0 +1,43 @@
+.stage { display: flex; gap: var(--sp-16); align-items: center; }
+.cover {
+  position: relative;
+  flex-shrink: 0;
+  width: 150px;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--r-card);
+  overflow: hidden;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+}
+.cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.coverWait { position: absolute; inset: 0; }
+/* The pick lands with a small pop and an accent glow. */
+.landed {
+  border-color: var(--a);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--a) 25%, transparent), 0 14px 32px rgba(0, 0, 0, 0.45);
+  animation: land 0.35s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+@keyframes land {
+  from { transform: scale(0.92); }
+  to   { transform: scale(1); }
+}
+.info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-8); }
+.name { font-size: var(--fs-xl, 20px); font-weight: 800; line-height: 1.2; color: var(--text-primary); }
+.because { font-size: var(--fs-sm); color: var(--text-secondary); }
+.because strong { color: var(--a); }
+.tags { display: flex; flex-wrap: wrap; gap: var(--sp-4); }
+.tag, .tagReady {
+  padding: 1px var(--sp-8);
+  border-radius: var(--r-pill);
+  background: var(--neutral-bg);
+  color: var(--text-secondary);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+}
+.tagReady { background: color-mix(in srgb, var(--status-playing) 18%, transparent); color: var(--status-playing); }
+.from { font-size: var(--fs-2xs); color: var(--text-muted); }
+.rolling { font-size: var(--fs-md); color: var(--text-muted); font-weight: 600; }
+
+.empty { display: flex; flex-direction: column; align-items: center; gap: var(--sp-8); padding: var(--sp-16) var(--sp-8); text-align: center; color: var(--text-muted); }
+.emptyTitle { font-size: var(--fs-md); font-weight: 700; color: var(--text-primary); }
+.emptyText { font-size: var(--fs-sm); }

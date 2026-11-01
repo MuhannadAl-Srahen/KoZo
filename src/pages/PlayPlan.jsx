@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import {
   IconCalendarEvent, IconPlus, IconSearch, IconCalendarOff, IconCheck, IconChevronLeft, IconChevronRight,
   IconPlayerPlayFilled, IconListCheck, IconDeviceGamepad2, IconFlag, IconStarFilled, IconClock,
-  IconPencil, IconBrandSteam, IconX, IconArrowRight, IconCalendarMonth,
+  IconPencil, IconBrandSteam, IconX, IconArrowRight, IconCalendarMonth, IconDice5,
 } from '@tabler/icons-react'
 import { fileUrl, formatMonthKey, formatPlaytime, monthKey } from '../lib/utils'
 import { LIST_STATUSES } from '../lib/cardModel'
@@ -14,6 +14,7 @@ import Modal, { modalStyles as ms } from '../components/ui/Modal'
 import EditGameListModal from '../components/modals/EditGameListModal'
 import PlanMonthModal from '../components/modals/PlanMonthModal'
 import RateGameModal from '../components/modals/RateGameModal'
+import PickForMeModal from '../components/modals/PickForMeModal'
 import useCardZoom from '../lib/useCardZoom'
 import { ratingColor } from '../components/ui/RatingPicker'
 import s from './PlayPlan.module.css'
@@ -189,6 +190,7 @@ export default function PlayPlan() {
   const [rateItem, setRateItem] = useState(null)
   const [moveIds, setMoveIds] = useState(null)
   const [adding, setAdding] = useState(false)
+  const [picking, setPicking] = useState(false)
   const [launchError, setLaunchError] = useState(null)
   const zoomStyle = useCardZoom('plan', month === 'none' ? 'grid' : 'board', { grid: 200, board: 130 }, month === 'none' ? { min: 140, max: 380 } : { min: 96, max: 240 })   // Ctrl + mouse wheel
 
@@ -301,6 +303,9 @@ export default function PlayPlan() {
       <div className={s.toolbar}>
         <h1 className={s.pageTitle}><IconCalendarEvent size={16} stroke={1.7} /> Play Plan</h1>
         <div className={s.spacer} />
+        <button className={s.btnSecondary} onClick={() => setPicking(true)} title="Let KoZo choose your next game from Up next">
+          <IconDice5 size={14} stroke={1.8} /> Pick for me
+        </button>
         {month !== 'none' && (
           <button className={s.btnPrimary} onClick={() => setAdding(true)}>
             <IconPlus size={14} stroke={2} /> Add games
@@ -496,6 +501,7 @@ export default function PlayPlan() {
         <AddToMonthModal month={month} onClose={() => setAdding(false)} onAdded={() => { setAdding(false); reload() }} />
       )}
       {launchError && <InfoModal variant="error" title="Couldn't start the game" message={launchError} onClose={() => setLaunchError(null)} />}
+      {picking && <PickForMeModal onClose={() => setPicking(false)} onChanged={reload} />}
     </div>
   )
 }
