@@ -230,7 +230,8 @@
   font-size: clamp(11px, 0.75vw, 14px);
   font-weight: 800;
 }
-.card[data-gpfocus] { box-shadow: 0 0 0 3px var(--a), 0 18px 44px rgba(0, 0, 0, 0.55); }
+.card[data-gpfocus] { outline: none; box-shadow: 0 0 0 3px var(--a), 0 0 30px color-mix(in srgb, var(--a) 40%, transparent), 0 18px 44px rgba(0, 0, 0, 0.55); }
+.card[data-gpfocus] .cardBtn img { transform: scale(1.05); transition: transform 0.35s var(--ease-out); }
 
 /* Short windows: a smaller hero so a whole row of posters still fits. */
 @media (max-height: 820px) {
@@ -245,7 +246,9 @@
 @keyframes bpInfoIn { from { opacity: 0; transform: translateY(8px); } }
 @keyframes bpInfoInHv { from { opacity: 0; transform: translateX(-28px); filter: blur(6px); } }
 @keyframes bpCoverIn { from { opacity: 0; transform: scale(0.9) rotate(-2deg); } }
-@keyframes bpArtDrift { from { transform: scale(1.02); } to { transform: scale(1.1) translateX(-1.5%); } }
+/* Starts at the blurred backdrop's own scale-up (.backdropSoft) so its soft
+   edges never show while it drifts. */
+@keyframes bpArtDrift { from { transform: scale(1.12); } to { transform: scale(1.2) translateX(-1.5%); } }
 @keyframes bpRowIn { from { opacity: 0; transform: translateX(60px); } }
 @keyframes bpEnter { from { opacity: 0; transform: scale(1.04); } }
 :global(html[data-motion="soft"]) .heroRow { animation: bpInfoIn 0.28s var(--ease-out) backwards; }

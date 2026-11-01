@@ -182,3 +182,7 @@
   .cell { font-size: var(--fs-2xs); gap: 3px; padding: var(--sp-6) var(--sp-4); }
   .score strong { font-size: 15px; }
 }
+
+/* Animations: a stronger art zoom on Heavy, none on Off (styles/motion.css). */
+:global(html[data-motion="heavy"]) .card:hover .cover img { transform: scale(1.08); }
+:global(html[data-motion="off"]) .card:hover .cover img { transform: none; }

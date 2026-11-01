@@ -701,3 +701,18 @@
 :global(html[data-hide-stats][data-hide-progress]) .gameInfo { display: none; }
 :global(html[data-hide-status-dot]) .statusLed { display: none; }
 :global(html[data-hide-plan-chip]) .planChip { display: none; }
+
+/* ── Animations (Settings → Appearance → Animations, styles/motion.css) ── */
+/* The art zooms inside its frame; the card itself never moves (it sits in a
+   scrolling grid that would cut a lifted card). */
+.bannerImg { transition: transform 0.45s var(--ease-out); }
+:global(html[data-motion="soft"]) .card:hover .bannerImg,
+:global(html[data-motion="soft"]) .card[data-gpfocus] .bannerImg { transform: scale(1.04); }
+:global(html[data-motion="heavy"]) .card:hover .bannerImg,
+:global(html[data-motion="heavy"]) .card[data-gpfocus] .bannerImg { transform: scale(1.08); }
+/* Controller ring: the card keeps its glow under the inset ring. */
+.card[data-gpfocus] { border-color: var(--a); box-shadow: var(--elev-2), 0 0 0 1px color-mix(in srgb, var(--a) 35%, transparent), 0 0 26px color-mix(in srgb, var(--a) 42%, transparent); }
+:global(html[data-motion="heavy"]) .card:hover:not(.cardLive) {
+  border-color: var(--ab);
+  box-shadow: var(--elev-2), 0 0 0 1px color-mix(in srgb, var(--a) 45%, transparent), 0 0 18px color-mix(in srgb, var(--a) 28%, transparent);
+}
