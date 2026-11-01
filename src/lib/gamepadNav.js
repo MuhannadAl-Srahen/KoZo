@@ -126,6 +126,11 @@ function syncScope() {
 // top-left control in view inside the page, not the first sidebar link.
 function firstTarget(targets) {
   if (_scopeEl) return targets[0]
+  // Big Picture: start on the first game, not on Exit in the top bar.
+  if (document.querySelector('[data-bigpicture-root]')) {
+    const card = targets.find(el => el.matches('[data-gpnav][data-game-id]'))
+    if (card) return card
+  }
   const inView = targets.filter(el => {
     if (!el.closest('.app-main, [data-bigpicture-root]')) return false
     const r = el.getBoundingClientRect()

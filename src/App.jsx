@@ -16,6 +16,7 @@ import Finished from './pages/Finished'
 import RateGameModal from './components/modals/RateGameModal'
 import MakePlayableModal from './components/modals/MakePlayableModal'
 import Profile from './pages/Profile'
+import BigPicture from './pages/BigPicture'
 import Settings from './pages/Settings'
 import UnknownGamePrompt from './components/UnknownGamePrompt'
 import Tour from './components/Tour'
@@ -30,8 +31,46 @@ function GamepadNav() {
   const navigate = useNavigate()
   const navRef = useRef(navigate)
   navRef.current = navigate
-  useEffect(() => initGamepadNav({ navigate: (...a) => navRef.current(...a) }), [])
+  useEffect(() => initGamepadNav({
+    // B with nothing to go back to (KoZo opened straight onto a page) goes Home.
+    navigate: (to, ...rest) => (to === -1 && (window.history.state?.idx ?? 0) === 0)
+      ? navRef.current('/')
+      : navRef.current(to, ...rest),
+    // View + Menu held on a controller opens Big Picture.
+    onBigPicture: () => navRef.current('/big'),
+  }), [])
   return null
+}
+
+// Big Picture takes the whole window (no sidebar); every other page sits in
+// the normal layout.
+function Shell() {
+  const location = useLocation()
+  if (location.pathname === '/big') return <BigPicture />
+  return (
+    <div className="app-layout">
+      <Sidebar />
+      <div className="app-main">
+        <UpdateBanner />
+        <Routes>
+          <Route path="/" element={<Library />} />
+          <Route path="/game/:id" element={<GameDetail />} />
+          <Route path="/game-list" element={<GameList />} />
+          <Route path="/plan" element={<PlayPlan />} />
+          <Route path="/finished" element={<Finished />} />
+          <Route path="/upcoming" element={<Upcoming />} />
+          <Route path="/activity" element={<Activity />} />
+          {/* The three pages Activity combined: old links land on their section. */}
+          <Route path="/statistics" element={<Navigate to="/activity?tab=overview" replace />} />
+          <Route path="/sessions" element={<Navigate to="/activity?tab=sessions" replace />} />
+          <Route path="/achievements" element={<Navigate to="/activity?tab=achievements" replace />} />
+          <Route path="/profile" element={<Profile />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </div>
+    </div>
+  )
 }
 
 // Settings → Appearance → Start page: open there once, on launch.
@@ -168,28 +207,7 @@ export default function App() {
         <StartPage />
         <CtrlWheelZoom />
         <Wallpaper />
-        <div className="app-layout">
-          <Sidebar />
-          <div className="app-main">
-            <UpdateBanner />
-            <Routes>
-              <Route path="/" element={<Library />} />
-              <Route path="/game/:id" element={<GameDetail />} />
-              <Route path="/game-list" element={<GameList />} />
-              <Route path="/plan" element={<PlayPlan />} />
-              <Route path="/finished" element={<Finished />} />
-              <Route path="/upcoming" element={<Upcoming />} />
-              <Route path="/activity" element={<Activity />} />
-              {/* The three pages Activity combined: old links land on their section. */}
-              <Route path="/statistics" element={<Navigate to="/activity?tab=overview" replace />} />
-              <Route path="/sessions" element={<Navigate to="/activity?tab=sessions" replace />} />
-              <Route path="/achievements" element={<Navigate to="/activity?tab=achievements" replace />} />
-              <Route path="/profile" element={<Profile />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </div>
-        </div>
+        <Shell />
         {/* Achievement/level-up toasts come ONLY from the always-on-top overlay
             window — an in-app copy here would show duplicates. */}
         <GamepadNav />

@@ -7,7 +7,7 @@ import {
   IconCalendarEvent,
   IconFlag,
   IconChartBar,
-  IconSettings,
+  IconSettings, IconDeviceTv,
 } from '@tabler/icons-react'
 import HoneycombLogo from './HoneycombLogo'
 import { fileUrl } from '../lib/utils'
@@ -233,6 +233,16 @@ export default function Sidebar() {
               <span className={s.profileLink}>View profile</span>
             )}
           </span>
+        </NavLink>
+
+        <NavLink
+          to="/big"
+          data-gpnav=""
+          className={s.settingsLink}
+          title="Full screen for the TV and the controller (or hold View + Menu)"
+        >
+          <span className={s.navIcon}><IconDeviceTv size={17} stroke={1.6} /></span>
+          Big Picture
         </NavLink>
 
         <NavLink

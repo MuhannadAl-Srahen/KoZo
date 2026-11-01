@@ -108,6 +108,7 @@ function setupTray(processWatcher) {
     // ── Quick destinations ──
     items.push({ type: 'separator' })
     items.push({ label: 'Open KoZo', click: () => show() })
+    items.push({ label: 'Big Picture', click: () => openAt('/big') })
     items.push({ label: 'Statistics', click: () => openAt('/statistics') })
     items.push({ label: 'Profile', click: () => openAt('/profile') })
     items.push({ type: 'separator' })

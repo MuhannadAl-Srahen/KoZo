@@ -1,0 +1,170 @@
+/* Big Picture: TV-sized type and posters. Sizes use clamp() so the same page
+   reads from a laptop to a 4K television across the room. */
+.root {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text-primary);
+  --bp-poster: clamp(150px, 12vw, 260px);
+}
+
+.backdrop { position: absolute; inset: 0; z-index: -1; overflow: hidden; }
+.backdropImg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 72%;
+  object-fit: cover;
+  object-position: center 25%;
+  animation: bpFade 0.45s ease;
+}
+@keyframes bpFade { from { opacity: 0; } to { opacity: 1; } }
+.backdropShade {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(8, 8, 14, 0.92) 0%, rgba(8, 8, 14, 0.55) 45%, rgba(8, 8, 14, 0.2) 100%),
+    linear-gradient(0deg, var(--bg) 30%, color-mix(in srgb, var(--bg) 70%, transparent) 55%, transparent 80%);
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  gap: clamp(12px, 1.4vw, 28px);
+  padding: clamp(14px, 2vh, 28px) clamp(20px, 3vw, 56px);
+}
+.brand { display: inline-flex; align-items: center; gap: 10px; font-size: clamp(18px, 1.5vw, 28px); font-weight: 800; letter-spacing: 0.02em; }
+.topSpacer { flex: 1; }
+.level {
+  padding: 4px 14px;
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--a) 22%, rgba(8, 8, 14, 0.6));
+  border: 1px solid var(--ab);
+  font-size: clamp(14px, 1.05vw, 20px);
+  font-weight: 700;
+}
+.clock { font-size: clamp(18px, 1.5vw, 28px); font-weight: 600; font-variant-numeric: tabular-nums; }
+.exitBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  font-size: clamp(14px, 1.05vw, 20px);
+  font-weight: 600;
+}
+.exitBtn:hover { background: rgba(255, 255, 255, 0.16); }
+
+.hero {
+  flex-shrink: 0;
+  min-height: clamp(180px, 30vh, 420px);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: clamp(8px, 1.2vh, 18px);
+  padding: 0 clamp(20px, 3vw, 56px) clamp(12px, 2vh, 28px);
+}
+.heroName {
+  max-width: 60%;
+  font-size: clamp(32px, 3.6vw, 72px);
+  font-weight: 800;
+  line-height: 1.05;
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
+}
+.heroMeta { display: flex; flex-wrap: wrap; gap: clamp(14px, 1.6vw, 32px); font-size: clamp(15px, 1.15vw, 22px); color: rgba(255, 255, 255, 0.85); }
+.heroMeta span { display: inline-flex; align-items: center; gap: 8px; }
+.heroMeta svg { color: var(--a); }
+.heroActions { display: flex; gap: 12px; margin-top: 6px; }
+.playBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: clamp(10px, 1.2vh, 16px) clamp(26px, 2.4vw, 44px);
+  border-radius: var(--r-pill);
+  background: var(--a);
+  color: var(--accent-ink);
+  font-size: clamp(17px, 1.3vw, 24px);
+  font-weight: 800;
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--a) 40%, transparent);
+}
+.playBtn:hover { filter: brightness(1.1); }
+
+.rows {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: clamp(20px, 4vh, 60px);
+  scroll-behavior: smooth;
+}
+.row { padding: clamp(8px, 1.4vh, 18px) 0; }
+.rowTitle {
+  padding: 0 clamp(20px, 3vw, 56px) 10px;
+  font-size: clamp(18px, 1.45vw, 28px);
+  font-weight: 700;
+}
+.rowScroll {
+  display: flex;
+  gap: clamp(12px, 1.2vw, 24px);
+  overflow-x: auto;
+  /* Room for the focus ring and the scaled-up card. */
+  padding: 12px clamp(20px, 3vw, 56px) 18px;
+  scroll-padding-inline: clamp(20px, 3vw, 56px);
+  scrollbar-width: none;
+}
+.rowScroll::-webkit-scrollbar { display: none; }
+
+.card {
+  position: relative;
+  flex: 0 0 var(--bp-poster);
+  aspect-ratio: 2 / 3;
+  border-radius: var(--r-card);
+  overflow: hidden;
+  background: var(--surface-3);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.card:hover { transform: scale(1.04); box-shadow: 0 14px 36px rgba(0, 0, 0, 0.5); }
+.cardBtn {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  text-align: center;
+}
+.cardBtn img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.cardName {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  padding: 28px 12px 12px;
+  background: linear-gradient(to top, rgba(8, 8, 14, 0.92), transparent);
+  font-size: clamp(13px, 0.95vw, 18px);
+  font-weight: 700;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.card:hover .cardName, .card[data-gpfocus] .cardName { opacity: 1; }
+
+.pickCard {
+  background: linear-gradient(160deg, color-mix(in srgb, var(--a) 35%, var(--surface-2)), var(--surface-2));
+  border-color: var(--ab);
+  color: var(--text-primary);
+}
+.pickCard svg { color: var(--a); }
+.pickLabel { font-size: clamp(16px, 1.25vw, 24px); font-weight: 800; }
+.pickSub { padding: 0 12px; font-size: clamp(12px, 0.85vw, 16px); color: var(--text-secondary); }
