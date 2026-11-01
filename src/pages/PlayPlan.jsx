@@ -2,9 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react'
 import {
   IconCalendarEvent, IconPlus, IconSearch, IconCalendarOff, IconCheck, IconChevronLeft, IconChevronRight,
   IconPlayerPlayFilled, IconListCheck, IconDeviceGamepad2, IconFlag, IconStarFilled, IconClock,
-  IconPencil, IconBrandSteam, IconX, IconArrowRight, IconCalendarMonth, IconDice5,
+  IconPencil, IconBrandSteam, IconX, IconArrowRight, IconCalendarMonth, IconGripVertical, IconDots,
 } from '@tabler/icons-react'
-import { fileUrl, formatMonthKey, formatPlaytime, monthKey } from '../lib/utils'
+import { fileUrl, formatMonthKey, formatPlaytime, monthKey, parseGenres } from '../lib/utils'
 import { LIST_STATUSES } from '../lib/cardModel'
 import GeneratedCover from '../components/GeneratedCover'
 import ContextMenu from '../components/ui/ContextMenu'
@@ -14,16 +14,17 @@ import Modal, { modalStyles as ms } from '../components/ui/Modal'
 import EditGameListModal from '../components/modals/EditGameListModal'
 import PlanMonthModal from '../components/modals/PlanMonthModal'
 import RateGameModal from '../components/modals/RateGameModal'
-import PickForMeModal from '../components/modals/PickForMeModal'
 import useCardZoom from '../lib/useCardZoom'
 import { ratingColor } from '../components/ui/RatingPicker'
 import s from './PlayPlan.module.css'
 
-// Play Plan: what you mean to play, month by month. A month is a board with
-// three lanes (Up next, Playing, Done): drag a card across lanes to change its
-// status (Done marks it Finished, which asks for a rating), or onto a month
-// chip to move it. The plan lives on the Game List row (planned_month), the
-// same field Plan for month sets from the Library and the Game List.
+// Play Plan: what you mean to play, month by month. A month reads top to
+// bottom: what you're Playing now (wide cards), the Up next queue (numbered,
+// drag to reorder), and what you finished. Drag a game between the three to
+// change its status (Done marks it Finished, which asks for a rating), or onto
+// a month pill to move it. The plan lives on the Game List row
+// (planned_month), the same field Plan for month sets from the Library and the
+// Game List; the queue order is the row's display_order.
 
 const LANES = [
   { key: 'next',    label: 'Up next', Icon: IconListCheck,      status: 'want_to_play' },
@@ -69,41 +70,128 @@ function dragProps(item) {
   }
 }
 
-// One game on the board: a poster with its name over the art, a status tag
-// (On hold, Upcoming, Dropped), this month's hours or the rating, and a Play
-// button on hover for library games.
-function LaneCard({ item, onOpen, onContextMenu, onPlay }) {
-  const st = LIST_STATUSES[item.status]
-  const extraTag = ['on_hold', 'upcoming', 'dropped'].includes(item.status) ? st : null
-  const canPlay = item.game_id && item.status !== 'finished' && item.status !== 'dropped'
+// Wide art for the Playing cards: Steam's hero/header (asked once per game,
+// remembered), else the cover blurred behind itself.
+const wideArt = new Map()
+function useWideArt(item) {
+  const [, bump] = useState(0)
+  const id = item.steam_app_id
+  useEffect(() => {
+    if (!id || wideArt.has(id)) return
+    wideArt.set(id, null)
+    window.kozo?.api?.steam?.appAssets?.([id]).then(res => {
+      const a = res?.ok ? res.data?.[id] : null
+      wideArt.set(id, a?.hero || a?.header || null)
+      bump(n => n + 1)
+    }).catch(() => {})
+  }, [id])
+  return (id && wideArt.get(id)) || null
+}
+
+// What you're playing this month: a wide card with the game's art.
+function PlayingCard({ item, onOpen, onContextMenu, onPlay, onDone }) {
+  const wide = useWideArt(item)
+  const cover = coverOf(item)
   return (
     <div
-      className={`${s.tile} ${item.status === 'dropped' ? s.tileDropped : ''}`}
+      className={s.playCard}
       {...dragProps(item)}
       onClick={() => onOpen(item)}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, item) }}
       data-gpnav=""
       title={item.name}
     >
-      <Thumb item={item} />
-      <span className={s.tileShade} />
-      {extraTag && <span className={s.tileTag} style={{ '--tc': extraTag.color }}>{extraTag.label}</span>}
-      {canPlay && (
-        <button
-          className={s.tilePlay}
-          title="Play"
-          aria-label={`Play ${item.name}`}
-          onClick={(e) => { e.stopPropagation(); onPlay(item) }}
-        >
-          <IconPlayerPlayFilled size={18} />
-        </button>
-      )}
-      <div className={s.tileInfo}>
-        <div className={s.tileName}>{item.name}</div>
-        {item.status === 'finished' && item.rating > 0
-          ? <span className={s.tileMeta} style={{ '--rc': ratingColor(Math.round(item.rating)) }}><IconStarFilled size={11} className={s.tileStar} /> {Math.round(item.rating)}/10</span>
-          : item.month_seconds > 0 && <span className={s.tileMeta}><IconClock size={11} /> {formatPlaytime(item.month_seconds)}</span>}
+      {wide ? <img className={s.playArt} src={wide} alt="" />
+        : cover ? <img className={`${s.playArt} ${s.playArtSoft}`} src={cover} alt="" />
+        : <GeneratedCover name={item.name} />}
+      <span className={s.playShade} />
+      <div className={s.playBody}>
+        <span className={s.playCover}><Thumb item={item} /></span>
+        <div className={s.playText}>
+          <span className={s.playName}>{item.name}</span>
+          <span className={s.playMeta}>
+            <IconClock size={13} /> {item.month_seconds > 0 ? `${formatPlaytime(item.month_seconds)} this month` : 'Not played this month yet'}
+          </span>
+        </div>
+        <div className={s.playActions} onClick={e => e.stopPropagation()}>
+          {item.game_id && (
+            <button type="button" className={s.playBtn} onClick={() => onPlay(item)} data-gpclick="">
+              <IconPlayerPlayFilled size={14} /> Play
+            </button>
+          )}
+          <button type="button" className={s.doneBtn} onClick={() => onDone(item)} title="Finished it">
+            <IconFlag size={14} /> Done
+          </button>
+        </div>
       </div>
+    </div>
+  )
+}
+
+// One game in the Up next queue: its place, cover, name and genres, then
+// Start (moves it to Playing) and Play.
+function QueueRow({ item, n, dropMark, onOpen, onContextMenu, onPlay, onStart, onDragOverRow, onDropRow }) {
+  const st = LIST_STATUSES[item.status]
+  const tag = ['on_hold', 'upcoming'].includes(item.status) ? st : null
+  const genres = parseGenres(item).slice(0, 3)
+  return (
+    <div
+      className={`${s.qRow} ${dropMark === 'before' ? s.qDropBefore : ''} ${dropMark === 'after' ? s.qDropAfter : ''}`}
+      {...dragProps(item)}
+      onDragOver={(e) => onDragOverRow(e, item)}
+      onDrop={(e) => onDropRow(e, item)}
+      onClick={() => onOpen(item)}
+      onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, item) }}
+      data-gpnav=""
+    >
+      <span className={s.qGrip} aria-hidden="true"><IconGripVertical size={15} /></span>
+      <span className={s.qNum}>{n}</span>
+      <span className={s.qCover}><Thumb item={item} /></span>
+      <span className={s.qText}>
+        <span className={s.qName}>{item.name}</span>
+        <span className={s.qSub}>
+          {tag && <span className={s.qTag} style={{ '--tc': tag.color }}>{tag.label}</span>}
+          {genres.length > 0 ? genres.join(' · ') : 'No genres yet'}
+        </span>
+      </span>
+      <span className={s.qActions} onClick={e => e.stopPropagation()}>
+        <button type="button" className={s.qStart} onClick={() => onStart(item)} title="Move to Playing">
+          <IconDeviceGamepad2 size={14} /> Start
+        </button>
+        {item.game_id && (
+          <button type="button" className={s.qIcon} onClick={() => onPlay(item)} title="Play" aria-label={`Play ${item.name}`}>
+            <IconPlayerPlayFilled size={14} />
+          </button>
+        )}
+        <button type="button" className={s.qIcon} onClick={(e) => onContextMenu(e, item)} title="More" aria-label="More">
+          <IconDots size={15} />
+        </button>
+      </span>
+    </div>
+  )
+}
+
+// Finished this month: a small cover with the score.
+function DoneTile({ item, onOpen, onContextMenu }) {
+  const score = item.rating ? Math.round(item.rating) : null
+  return (
+    <div
+      className={`${s.doneTile} ${item.status === 'dropped' ? s.doneDropped : ''}`}
+      {...dragProps(item)}
+      onClick={() => onOpen(item)}
+      onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, item) }}
+      data-gpnav=""
+      title={item.name}
+    >
+      <span className={s.doneCover}><Thumb item={item} /></span>
+      <span className={s.doneText}>
+        <span className={s.doneName}>{item.name}</span>
+        {item.status === 'dropped'
+          ? <span className={s.doneSub}>Dropped</span>
+          : score
+            ? <span className={s.doneScore} style={{ '--rc': ratingColor(score) }}><IconStarFilled size={11} /> {score}/10</span>
+            : <span className={s.doneSub}>Not rated</span>}
+      </span>
     </div>
   )
 }
@@ -190,9 +278,9 @@ export default function PlayPlan() {
   const [rateItem, setRateItem] = useState(null)
   const [moveIds, setMoveIds] = useState(null)
   const [adding, setAdding] = useState(false)
-  const [picking, setPicking] = useState(false)
+  const [queueMark, setQueueMark] = useState(null)   // { id, pos } drop line in the queue
   const [launchError, setLaunchError] = useState(null)
-  const zoomStyle = useCardZoom('plan', month === 'none' ? 'grid' : 'board', { grid: 200, board: 130 }, month === 'none' ? { min: 140, max: 380 } : { min: 96, max: 240 })   // Ctrl + mouse wheel
+  const zoomStyle = useCardZoom('plan', 'grid', { grid: 200 }, { min: 140, max: 380 })   // Ctrl + mouse wheel (Not planned grid)
 
   // The 13-month window, plus any other month that has plans (an old one).
   const months = useMemo(() => [...new Set([...monthsAround(), ...Object.keys(summary)])].sort(), [summary])
@@ -244,6 +332,46 @@ export default function PlayPlan() {
     await window.kozo?.api?.gameList?.update?.(id, { status })
     reload()
   }
+
+  // Up next queue order = display_order. The whole month is rewritten in its
+  // shown order (Playing, then the queue, then Done) so nothing else moves.
+  async function saveQueue(nextIds) {
+    const byLane = (k) => (items || []).filter(i => laneOf(i.status) === k).map(i => i.id)
+    const all = [...byLane('playing'), ...nextIds, ...byLane('done')]
+    await window.kozo?.api?.gameList?.reorderPage?.({ month }, 0, all)
+    reload()
+  }
+  function onDragOverRow(e, target) {
+    e.preventDefault()
+    e.stopPropagation()
+    const r = e.currentTarget.getBoundingClientRect()
+    const pos = e.clientY < r.top + r.height / 2 ? 'before' : 'after'
+    setQueueMark(m => (m?.id === target.id && m.pos === pos ? m : { id: target.id, pos }))
+    setDropOn('lane:next')
+  }
+  async function onDropRow(e, target) {
+    e.preventDefault()
+    e.stopPropagation()
+    const id = dropId(e)
+    const mark = queueMark
+    setQueueMark(null); setDropOn(null)
+    if (!id || id === target.id) return
+    const queue = (items || []).filter(i => laneOf(i.status) === 'next').map(i => i.id).filter(x => x !== id)
+    let at = queue.indexOf(target.id)
+    if (mark?.pos === 'after') at += 1
+    queue.splice(Math.max(0, at), 0, id)
+    const item = (items || []).find(i => i.id === id)
+    if (item && laneOf(item.status) !== 'next') {
+      setItems(prev => prev.map(i => (i.id === id ? { ...i, status: 'want_to_play' } : i)))
+      await window.kozo?.api?.gameList?.update?.(id, { status: 'want_to_play' })
+    }
+    saveQueue(queue)
+  }
+  const laneDrop = (key) => ({
+    onDragOver: (e) => { e.preventDefault(); setDropOn('lane:' + key) },
+    onDragLeave: (e) => { if (!e.currentTarget.contains(e.relatedTarget)) { setDropOn(d => (d === 'lane:' + key ? null : d)); setQueueMark(null) } },
+    onDrop: (e) => { e.preventDefault(); setDropOn(null); setQueueMark(null); const id = dropId(e); if (id) dropInLane(id, key) },
+  })
 
   async function play(item) {
     const res = await window.kozo?.api?.games?.launch?.(item.game_id)
@@ -303,9 +431,6 @@ export default function PlayPlan() {
       <div className={s.toolbar}>
         <h1 className={s.pageTitle}><IconCalendarEvent size={16} stroke={1.7} /> Play Plan</h1>
         <div className={s.spacer} />
-        <button className={s.btnSecondary} onClick={() => setPicking(true)} title="Let KoZo choose your next game from Up next">
-          <IconDice5 size={14} stroke={1.8} /> Pick for me
-        </button>
         {month !== 'none' && (
           <button className={s.btnPrimary} onClick={() => setAdding(true)}>
             <IconPlus size={14} stroke={2} /> Add games
@@ -362,21 +487,20 @@ export default function PlayPlan() {
         ) : (
           <>
             {/* The month at a glance */}
-            <div className={s.hero}>
+            <div className={s.monthHead}>
               <button className={s.navBtn} onClick={() => setMonth(shiftMonth(month, -1))} aria-label="Previous month"><IconChevronLeft size={18} /></button>
-              <div className={s.heroMain}>
+              <div className={s.monthHeadMain}>
                 <div className={s.heroTitle}>
                   {label}
                   {month === thisMonth && <span className={s.nowTag}>This month</span>}
                 </div>
-                <div className={s.progress}><span style={{ width: `${pct}%` }} /></div>
                 <div className={s.heroStats}>
                   <span><strong>{done}</strong> of <strong>{total}</strong> done</span>
-                  {total > 0 && <span className={s.pct}>{pct}%</span>}
-                  {playedSec > 0 && <span><IconClock size={13} /> {formatPlaytime(playedSec)} played this month</span>}
+                  {playedSec > 0 && <span><IconClock size={13} /> {formatPlaytime(playedSec)} played</span>}
                   {total > 0 && done === total && <span className={s.allDone}><IconCheck size={13} /> All done</span>}
                 </div>
               </div>
+              <div className={s.ring} style={{ '--pct': `${pct}%` }} title={`${pct}% done`}><span>{pct}%</span></div>
               <button className={s.navBtn} onClick={() => setMonth(shiftMonth(month, 1))} aria-label="Next month"><IconChevronRight size={18} /></button>
             </div>
 
@@ -388,32 +512,69 @@ export default function PlayPlan() {
                 action={{ label: 'Add games', Icon: IconPlus, onClick: () => setAdding(true) }}
               />
             ) : (
-              <div className={s.board} style={zoomStyle}>
-                {lanes.map(l => (
-                  <section
-                    key={l.key}
-                    className={`${s.lane} ${s['lane_' + l.key]} ${dropOn === 'lane:' + l.key ? s.laneDrop : ''}`}
-                    onDragOver={(e) => { e.preventDefault(); setDropOn('lane:' + l.key) }}
-                    onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropOn(d => (d === 'lane:' + l.key ? null : d)) }}
-                    onDrop={(e) => { e.preventDefault(); setDropOn(null); const id = dropId(e); if (id) dropInLane(id, l.key) }}
-                  >
-                    <div className={s.laneHead}>
-                      <l.Icon size={15} />
-                      <span>{l.label}</span>
-                      <span className={s.laneCount}>{l.items.length}</span>
+              <>
+                {/* Playing now */}
+                <section className={`${s.block} ${dropOn === 'lane:playing' ? s.blockDrop : ''}`} {...laneDrop('playing')}>
+                  <div className={s.blockHead}>
+                    <IconDeviceGamepad2 size={15} className={s.iconPlaying} />
+                    <span>Playing now</span>
+                    <span className={s.laneCount}>{lanes[1].items.length}</span>
+                  </div>
+                  {lanes[1].items.length ? (
+                    <div className={s.playGrid}>
+                      {lanes[1].items.map(i => (
+                        <PlayingCard key={i.id} item={i} onOpen={setEdit} onContextMenu={openCtx} onPlay={play}
+                          onDone={(it) => dropInLane(it.id, 'done')} />
+                      ))}
                     </div>
-                    <div className={s.laneBody}>
-                      {items === null && <div className={s.muted}>Loading…</div>}
-                      {l.items.map(i => <LaneCard key={i.id} item={i} onOpen={setEdit} onContextMenu={openCtx} onPlay={play} />)}
-                      {items && l.items.length === 0 && (
-                        <div className={s.laneEmpty}>
-                          {l.key === 'next' ? 'Nothing waiting' : l.key === 'playing' ? 'Drag a game here when you start it' : 'Drag a game here when you finish it'}
-                        </div>
-                      )}
+                  ) : (
+                    <div className={s.emptyDrop}>
+                      {items === null ? 'Loading…' : 'Nothing started yet. Press Start on a game below, or drag one here.'}
                     </div>
-                  </section>
-                ))}
-              </div>
+                  )}
+                </section>
+
+                {/* Up next queue */}
+                <section className={`${s.block} ${dropOn === 'lane:next' ? s.blockDrop : ''}`} {...laneDrop('next')}>
+                  <div className={s.blockHead}>
+                    <IconListCheck size={15} className={s.iconNext} />
+                    <span>Up next</span>
+                    <span className={s.laneCount}>{lanes[0].items.length}</span>
+                    <span className={s.blockHint}>Drag to change the order</span>
+                  </div>
+                  {lanes[0].items.length ? (
+                    <div className={s.queue}>
+                      {lanes[0].items.map((i, n) => (
+                        <QueueRow key={i.id} item={i} n={n + 1}
+                          dropMark={queueMark?.id === i.id ? queueMark.pos : null}
+                          onOpen={setEdit} onContextMenu={openCtx} onPlay={play}
+                          onStart={(it) => dropInLane(it.id, 'playing')}
+                          onDragOverRow={onDragOverRow} onDropRow={onDropRow} />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className={s.emptyDrop}>
+                      {items === null ? 'Loading…' : <>Nothing waiting. <button type="button" className={s.linkBtn} onClick={() => setAdding(true)}>Add games</button></>}
+                    </div>
+                  )}
+                </section>
+
+                {/* Done this month */}
+                <section className={`${s.block} ${dropOn === 'lane:done' ? s.blockDrop : ''}`} {...laneDrop('done')}>
+                  <div className={s.blockHead}>
+                    <IconFlag size={15} className={s.iconDone} />
+                    <span>Done this month</span>
+                    <span className={s.laneCount}>{lanes[2].items.length}</span>
+                  </div>
+                  {lanes[2].items.length ? (
+                    <div className={s.doneRow}>
+                      {lanes[2].items.map(i => <DoneTile key={i.id} item={i} onOpen={setEdit} onContextMenu={openCtx} />)}
+                    </div>
+                  ) : (
+                    <div className={s.emptyDrop}>Drag a game here when you finish it.</div>
+                  )}
+                </section>
+              </>
             )}
 
             <div className={s.lower}>
@@ -501,7 +662,6 @@ export default function PlayPlan() {
         <AddToMonthModal month={month} onClose={() => setAdding(false)} onAdded={() => { setAdding(false); reload() }} />
       )}
       {launchError && <InfoModal variant="error" title="Couldn't start the game" message={launchError} onClose={() => setLaunchError(null)} />}
-      {picking && <PickForMeModal onClose={() => setPicking(false)} onChanged={reload} />}
     </div>
   )
 }
