@@ -265,35 +265,6 @@
   color: var(--a);
 }
 
-/* ── Save row ── */
-.saveRow {
-  display: flex;
-  justify-content: flex-end;
-  padding-top: var(--sp-8);
-  border-top: 1px solid var(--border-subtle);
-}
-
-.saveRowBare {
-  composes: saveRow;
-  border-top: none;
-  padding-top: 0;
-}
-
-.saveBtn {
-  composes: btn btnPrimary btnMd from '../styles/controls.module.css';
-}
-
-.saveBtn.saveBtn { padding: 9px var(--sp-24); }
-
-.saveBtnSaved.saveBtnSaved {
-  background: var(--success);
-  color: var(--accent-ink);
-}
-
-.saveBtnSaved.saveBtnSaved:hover:not(:disabled):not([aria-disabled='true']) {
-  opacity: 1;
-}
-
 /* ── Steam profile card ── */
 .profileCard {
   display: flex;
@@ -372,6 +343,9 @@
 }
 
 .toggleRow:hover { background: var(--surface-3); }
+/* Not available right now (Start minimized without Launch on startup). */
+.toggleRowOff { cursor: default; filter: saturate(0.3) brightness(0.75); }
+.toggleRowOff:hover { background: var(--surface-2); }
 
 .toggleInfo { flex: 1; min-width: 0; }
 
@@ -902,3 +876,14 @@
   color: var(--accent-ink);
 }
 .artNone { font-size: var(--fs-sm); color: var(--text-muted); }
+
+/* Numbered how-to steps (Discord setup) */
+.steps {
+  list-style: decimal;
+  padding-left: var(--sp-20);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}

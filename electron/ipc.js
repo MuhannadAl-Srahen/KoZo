@@ -1732,16 +1732,92 @@ handle('app:getStartup', () => {
   }
 })
 
+// The command Windows runs at logon. In a packaged build process.execPath is
+// KoZo.exe → launching it bare starts the app. In dev it is electron.exe, and
+// launching THAT bare opens Electron's default welcome window, so dev also
+// passes the app directory. --startup tells main.js it was Windows that
+// started KoZo (Start minimized applies only then).
+function startupCommand() {
+  const { app } = require('electron')
+  return { execPath: process.execPath, args: [...(app.isPackaged ? [] : [app.getAppPath()]), '--startup'] }
+}
+
+function xmlEsc(v) { return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') }
+
+// A plain `schtasks /create /sc ONLOGON` keeps Task Scheduler's defaults: it
+// won't start on battery, kills KoZo after 72 hours and runs it at below
+// normal priority. The XML form sets all of that explicitly.
+function startupTaskXml({ execPath, args }, runLevel = 'HighestAvailable') {
+  const user = [process.env.USERDOMAIN, process.env.USERNAME].filter(Boolean).join('\\')
+  const argStr = args.map(a => (/\s/.test(a) ? `"${a}"` : a)).join(' ')
+  return `<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>Start KoZo when you sign in to Windows.</Description></RegistrationInfo>
+  <Triggers><LogonTrigger><Enabled>true</Enabled>${user ? `<UserId>${xmlEsc(user)}</UserId>` : ''}</LogonTrigger></Triggers>
+  <Principals><Principal id="Author">${user ? `<UserId>${xmlEsc(user)}</UserId>` : ''}<LogonType>InteractiveToken</LogonType><RunLevel>${runLevel}</RunLevel></Principal></Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>false</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle></IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>5</Priority>
+  </Settings>
+  <Actions Context="Author"><Exec><Command>${xmlEsc(execPath)}</Command>${argStr ? `<Arguments>${xmlEsc(argStr)}</Arguments>` : ''}</Exec></Actions>
+</Task>`
+}
+
+// Task Scheduler first (works even when KoZo runs as administrator, no UAC at
+// boot), the Run key as a fallback. Both start KoZo with --startup.
+function registerStartup(taskName = TASK_NAME) {
+  const { app } = require('electron')
+  const { execSync } = require('child_process')
+  const fs = require('fs')
+  const os = require('os')
+  const cmd = startupCommand()
+  const tmp = path.join(os.tmpdir(), `kozo-startup-${process.pid}.xml`)
+  try {
+    // schtasks wants the XML as UTF-16 (with a BOM) to match its declaration.
+    // The highest run level only registers while KoZo itself runs as
+    // administrator (otherwise "Access is denied"), so a normal-level task is
+    // the next try before falling all the way back to the Run key.
+    for (const level of ['HighestAvailable', 'LeastPrivilege']) {
+      fs.writeFileSync(tmp, '\ufeff' + startupTaskXml(cmd, level), 'utf16le')
+      try {
+        execSync(`schtasks /create /tn "${taskName}" /xml "${tmp}" /f`, { stdio: 'pipe', timeout: 5000 })
+        break
+      } catch (e) {
+        if (level === 'LeastPrivilege') throw e
+      }
+    }
+    // An older Run value would start a second copy next to the task.
+    for (const name of findRunEntries()) {
+      try { execSync(`reg delete "${RUN_KEY}" /v "${name}" /f`, { stdio: 'pipe' }) } catch {}
+    }
+    return { ok: true, method: 'task_scheduler' }
+  } catch (taskErr) {
+    try {
+      app.setLoginItemSettings({ openAtLogin: true, path: cmd.execPath, args: cmd.args })
+      return { ok: true, method: 'registry' }
+    } catch (regErr) {
+      return { ok: false, error: regErr.message }
+    }
+  } finally {
+    try { fs.unlinkSync(tmp) } catch {}
+  }
+}
+
 handle('app:setStartup', (enable) => {
   const { app } = require('electron')
   const { execSync } = require('child_process')
-
-  // In a packaged build process.execPath is KoZo.exe → launching it bare starts
-  // the app. In dev it is electron.exe, and launching THAT bare opens Electron's
-  // default "run a local app" welcome window (a confusing ghost window at boot).
-  // So in dev we must also pass the app directory as an argument.
-  const execPath = process.execPath
-  const launchArgs = app.isPackaged ? [] : [app.getAppPath()]
+  const { execPath, args: launchArgs } = startupCommand()
 
   if (!enable) {
     // Remove EVERY entry that is actually there, then verify BOTH mechanisms.
@@ -1749,7 +1825,9 @@ handle('app:setStartup', (enable) => {
     // so a surviving scheduled task — or a Run value under a name it didn't
     // guess — reported "off" while Windows kept starting the app.
     try { execSync(`schtasks /delete /tn "${TASK_NAME}" /f`, { stdio: 'pipe' }) } catch {}
-    try { app.setLoginItemSettings({ openAtLogin: false, path: execPath, args: launchArgs }) } catch {}
+    for (const args of [launchArgs, launchArgs.filter(a => a !== '--startup')]) {
+      try { app.setLoginItemSettings({ openAtLogin: false, path: execPath, args }) } catch {}
+    }
     for (const name of findRunEntries()) {
       try { execSync(`reg delete "${RUN_KEY}" /v "${name}" /f`, { stdio: 'pipe' }) } catch {}
     }
@@ -1773,25 +1851,39 @@ handle('app:setStartup', (enable) => {
     }
   }
 
-  // Try Task Scheduler — works even when app runs as admin, no UAC at boot.
-  try {
-    // The /tr value is "<exe>" "<arg>" — each path independently quoted, with the
-    // surrounding schtasks quotes escaped.
-    const tr = [execPath, ...launchArgs].map(p => `\\"${p.replace(/"/g, '')}\\"`).join(' ')
-    execSync(
-      `schtasks /create /tn "${TASK_NAME}" /tr "${tr}" /sc ONLOGON /rl HIGHEST /f`,
-      { stdio: 'pipe', timeout: 5000 }
-    )
-    return { ok: true, method: 'task_scheduler' }
-  } catch (taskErr) {
-    // Fall back to the standard Electron registry approach
+  settingsQ.setSetting('startup_v2', '1')
+  return registerStartup()
+})
+
+// One-time: startup entries made before --startup and the XML task existed
+// are re-registered, so they gain the argument and the battery/time-limit fix.
+setTimeout(() => {
+  require('./services/processWatcher').runWhenIdle('startupUpgrade', () => {
     try {
-      app.setLoginItemSettings({ openAtLogin: true, path: execPath, args: launchArgs })
-      return { ok: true, method: 'registry' }
-    } catch (regErr) {
-      return { ok: false, error: regErr.message }
-    }
-  }
+      if (settingsQ.getSetting('startup_v2') === '1') return
+      if (hasScheduledTask() || findRunEntries().length) {
+        const r = registerStartup()
+        logger.info('startup entry upgraded', r)
+      }
+      settingsQ.setSetting('startup_v2', '1')
+    } catch (e) { logger.warn('startup upgrade failed', { message: e.message }) }
+  })
+}, 30000)
+
+// Big Picture runs the main window full screen while it's open.
+handle('app:setFullScreen', (on) => {
+  const win = require('./main').getMainWindow()
+  if (win && !win.isDestroyed()) win.setFullScreen(!!on)
+  return !!on
+})
+
+// ── Discord Rich Presence ─────────────────────────────────────────────────────
+handle('discord:status', () => require('./services/discordPresence').getStatus())
+handle('discord:apply', () => {
+  const d = require('./services/discordPresence')
+  d.stop()
+  d.refresh()
+  return d.getStatus()
 })
 
 handle('app:getStartMinimized', () => {

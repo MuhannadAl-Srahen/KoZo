@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useId } from 'react'
+import React, { useState, useEffect, useId, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   IconKey, IconCheck, IconX, IconLoader2, IconClock, IconEye, IconEyeOff, IconLayoutGrid,
   IconUser, IconRefresh, IconExternalLink, IconAlertTriangle,
   IconPalette, IconInfoCircle, IconRocket, IconDeviceGamepad2,
-  IconBrandSteam,
+  IconBrandSteam, IconBrandDiscord,
   IconSearch, IconPlus, IconMinus, IconFolder, IconTrophy,
   IconDownload, IconUpload, IconDeviceFloppy, IconArchive, IconCloud,
   IconHistory, IconList, IconChartBar, IconBell, IconBolt,
@@ -126,11 +126,11 @@ function RestrictedContent() {
   )
 }
 
-function ToggleRow({ label, desc, checked, onChange, busy = false }) {
+function ToggleRow({ label, desc, checked, onChange, busy = false, disabled = false }) {
   const labelId = useId()
-  const toggle = () => { if (!busy) onChange(!checked) }
+  const toggle = () => { if (!busy && !disabled) onChange(!checked) }
   return (
-    <div className={s.toggleRow} onClick={toggle}>
+    <div className={`${s.toggleRow} ${disabled ? s.toggleRowOff : ''}`} onClick={toggle} aria-disabled={disabled || undefined}>
       <div className={s.toggleInfo}>
         <div className={s.toggleLabel} id={labelId}>{label}</div>
         <div className={s.toggleDesc}>{desc}</div>
@@ -143,6 +143,7 @@ function ToggleRow({ label, desc, checked, onChange, busy = false }) {
           role="switch"
           aria-checked={checked}
           aria-labelledby={labelId}
+          disabled={disabled}
           className={`${s.toggle} ${checked ? s.toggleOn : ''}`}
           onClick={e => { e.stopPropagation(); toggle() }}
         >
@@ -161,7 +162,6 @@ let generalTabCache = null
 
 function GeneralTab() {
   const [idlePause, setIdlePause]     = useState(generalTabCache?.idlePause ?? '5')      // minutes, 0 = off
-  const [saved, setSaved]             = useState(false)
   const [openAtLogin, setOpenAtLogin]     = useState(generalTabCache?.openAtLogin ?? false)
   const [startMinimized, setStartMinimized] = useState(generalTabCache?.startMinimized ?? false)
   const [startupLoaded, setStartupLoaded] = useState(!!generalTabCache)   // avoids off→on flicker on open
@@ -186,12 +186,11 @@ function GeneralTab() {
     load()
   }, [])
 
-  async function save() {
-    if (!window.kozo?.api) return
-    await window.kozo.api.settings.set('idle_pause_min', String(parseInt(idlePause) || 0))
-    generalTabCache = { ...(generalTabCache || {}), idlePause }
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+  // Every setting on this page saves the moment it changes.
+  function pickIdle(v) {
+    setIdlePause(v)
+    generalTabCache = { ...(generalTabCache || {}), idlePause: v }
+    window.kozo?.api?.settings?.set('idle_pause_min', String(parseInt(v) || 0))
   }
 
   async function toggleStartup(val) {
@@ -254,9 +253,12 @@ function GeneralTab() {
           />
           <ToggleRow
             label="Start minimized to tray"
-            desc="Hide the window on startup, only show tray icon"
+            desc={openAtLogin
+              ? 'When KoZo starts with Windows, keep it in the tray. Opening it yourself always shows the window.'
+              : 'Turn on Launch on startup to use this.'}
             checked={startMinimized}
             busy={!startupLoaded}
+            disabled={!openAtLogin}
             onChange={toggleStartMinimized}
           />
         </div>
@@ -279,19 +281,105 @@ function GeneralTab() {
               type="button"
               aria-pressed={idlePause === v}
               className={`${s.sensitivityBtn} ${idlePause === v ? s.sensitivityActive : ''}`}
-              onClick={() => setIdlePause(v)}>
+              onClick={() => pickIdle(v)}>
               {label}
             </button>
           ))}
         </div>
+        <p className={s.sectionDescQuiet}>Sessions shorter than a minute aren't kept.</p>
       </section>
 
-      <div className={s.saveRow}>
-        <button type="button" className={`${s.saveBtn} ${saved ? s.saveBtnSaved : ''}`} onClick={save}>
-          {saved ? <><IconCheck size={14} stroke={2.5} /> Saved</> : 'Save Settings'}
-        </button>
-      </div>
+      <DiscordSection />
     </div>
+  )
+}
+
+// Discord Rich Presence (services/discordPresence.js). Discord shows a game
+// under the name of a Discord "application", so the user makes a free one and
+// pastes its Application ID here. Everything saves as it changes.
+const DISCORD_STATUS = {
+  off:         null,
+  no_id:       { type: 'warning', text: 'Paste your Application ID to finish.' },
+  idle:        { type: 'success', text: 'Ready. Discord shows your game while you play.' },
+  connecting:  { type: 'pending', text: 'Connecting to Discord…' },
+  connected:   { type: 'success', text: 'Connected. Discord is showing your game.' },
+  not_running: { type: 'info',    text: 'Discord isn\'t open. KoZo connects when it is.' },
+  bad_id:      { type: 'error',   text: 'Discord refused this Application ID. Check it and paste it again.' },
+}
+function DiscordSection() {
+  const [on, setOn] = useState(false)
+  const [id, setId] = useState('')
+  const [status, setStatus] = useState('off')
+  const loaded = useRef(false)
+
+  async function refreshStatus() {
+    const r = await window.kozo?.api?.discord?.apply?.()
+    if (r?.ok) setStatus(r.data)
+  }
+  useEffect(() => {
+    window.kozo?.api?.settings?.getAll?.().then(res => {
+      if (res?.ok) { setOn(res.data?.discord_presence === '1'); setId(res.data?.discord_client_id || '') }
+      loaded.current = true
+    })
+    window.kozo?.api?.discord?.status?.().then(r => { if (r?.ok) setStatus(r.data) })
+  }, [])
+  // The ID saves a moment after typing stops.
+  useEffect(() => {
+    if (!loaded.current) return
+    const t = setTimeout(async () => {
+      await window.kozo?.api?.settings?.set?.('discord_client_id', id.trim())
+      refreshStatus()
+    }, 600)
+    return () => clearTimeout(t)
+  }, [id])
+
+  async function toggle(v) {
+    setOn(v)
+    await window.kozo?.api?.settings?.set?.('discord_presence', v ? '1' : '0')
+    refreshStatus()
+  }
+
+  const msg = on ? DISCORD_STATUS[status] : null
+  return (
+    <section className={s.section}>
+      <div className={s.sectionHeader}>
+        <IconBrandDiscord size={15} stroke={1.6} />
+        <span>Discord</span>
+      </div>
+      <div className={s.toggleList}>
+        <ToggleRow
+          label="Show my game on Discord"
+          desc="While you play, Discord shows the game's name, your KoZo level and your hours in it."
+          checked={on}
+          onChange={toggle}
+        />
+      </div>
+      {on && (
+        <>
+          <ol className={s.steps}>
+            <li>
+              Open the{' '}
+              <button type="button" className={s.linkBtn}
+                onClick={() => window.kozo?.api?.shell?.openExternal?.('https://discord.com/developers/applications')}>
+                Discord Developer Portal
+              </button>{' '}
+              and click New Application. Name it KoZo.
+            </li>
+            <li>Copy its Application ID (General Information page).</li>
+            <li>Paste it below. That's it.</li>
+          </ol>
+          <div className={s.keyRow}>
+            <div className={`${s.keyInputWrap} hasRing`}>
+              <input className={s.keyInput} placeholder="Application ID" value={id}
+                aria-label="Discord Application ID" inputMode="numeric"
+                onChange={e => setId(e.target.value.replace(/\D/g, ''))}
+                spellCheck={false} autoComplete="off" />
+            </div>
+          </div>
+          {msg && <StatusLine type={msg.type}>{msg.text}</StatusLine>}
+        </>
+      )}
+    </section>
   )
 }
 
@@ -307,6 +395,7 @@ function SteamTab() {
   const [testMsg, setTestMsg]       = useState('')
   const [steamUserId, setSteamUserId] = useState(steamTabCache?.steamUserId ?? '')
   const [saved, setSaved]           = useState(false)
+  const savedKeyRef                 = useRef(steamTabCache?.apiKey ?? null)   // what the DB holds
   const [bannerRefreshing, setBannerRefreshing] = useState(false)
   const [bannerMsg, setBannerMsg]   = useState(null)   // { type, text }
   const [profile, setProfile]       = useState(steamTabCache?.profile ?? null)
@@ -333,6 +422,7 @@ function SteamTab() {
         const key = res.data?.steam_api_key || ''
         const sid = res.data?.steam_user_id || ''
         const persona = res.data?.steam_persona || ''
+        savedKeyRef.current = key
         setApiKey(key)
         setSteamUserId(sid)
         setSteamPersona(persona)
@@ -405,14 +495,23 @@ function SteamTab() {
     }
   }
 
+  // The key saves on its own a moment after typing stops (and on blur). The
+  // Steam ID is managed by detect / sign-in.
   async function save() {
     if (!window.kozo?.api) return
-    // The Steam ID is managed by detect / sign-in — Save only stores the key.
-    await window.kozo.api.settings.set('steam_api_key', apiKey.trim())
+    const key = apiKey.trim()
+    if (savedKeyRef.current === null || key === savedKeyRef.current) return
+    savedKeyRef.current = key
+    await window.kozo.api.settings.set('steam_api_key', key)
+    steamTabCache = { ...(steamTabCache || {}), apiKey: key, profile: null }
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
-    if (apiKey.trim() && steamUserId) loadProfile(apiKey.trim(), steamUserId)
+    if (key && steamUserId) loadProfile(key, steamUserId)
   }
+  useEffect(() => {
+    const t = setTimeout(save, 700)
+    return () => clearTimeout(t)
+  }, [apiKey])
 
   async function doRefreshBanners() {
     setBannerRefreshing(true)
@@ -495,6 +594,7 @@ function SteamTab() {
               placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" value={apiKey}
               aria-label="Steam Web API key"
               onChange={e => { setApiKey(e.target.value); setTestState('idle') }}
+              onBlur={save}
               spellCheck={false} autoComplete="off" />
             <button type="button" className={s.keyToggle} onClick={() => setShowKey(v => !v)}
               aria-label={showKey ? 'Hide API key' : 'Show API key'}>
@@ -508,6 +608,7 @@ function SteamTab() {
         {testState !== 'idle' && testState !== 'testing' && (
           <StatusLine type={testState === 'valid' ? 'success' : 'error'}>{testMsg}</StatusLine>
         )}
+        {saved && testState === 'idle' && <StatusLine type="success">{apiKey.trim() ? 'Key saved.' : 'Key removed.'}</StatusLine>}
       </section>
 
       {/* User ID + Profile */}
@@ -597,13 +698,6 @@ function SteamTab() {
         )}
       </section>
 
-      {/* Save */}
-      <div className={s.saveRowBare}>
-        <button type="button" className={`${s.saveBtn} ${saved ? s.saveBtnSaved : ''}`} onClick={save}>
-          {saved ? <><IconCheck size={14} stroke={2.5} /> Saved</> : 'Save'}
-        </button>
-      </div>
-
       {/* Refresh cover images (moved here from the Library toolbar) */}
       <section className={s.section}>
         <div className={s.sectionHeader}>
@@ -643,8 +737,17 @@ function SteamGridDbSection() {
         setKey(res.data); setSaved(res.data)
         setState('ok'); setMsg('Key saved. Covers for games without one are filled in automatically.')
       }
+      loadedRef.current = true
     })
   }, [])
+
+  // Saves (and checks) a moment after typing stops; the button re-checks.
+  const loadedRef = useRef(false)
+  useEffect(() => {
+    if (!loadedRef.current || key.trim() === saved) return
+    const t = setTimeout(save, 800)
+    return () => clearTimeout(t)
+  }, [key])
 
   async function save() {
     // A main process older than this screen has no SteamGridDB support yet:
@@ -694,8 +797,8 @@ function SteamGridDbSection() {
             {show ? <IconEyeOff size={14} stroke={1.6} /> : <IconEye size={14} stroke={1.6} />}
           </button>
         </div>
-        <button type="button" className={s.testBtn} onClick={save} disabled={state === 'saving' || (!key.trim() && !saved)}>
-          {state === 'saving' ? <IconLoader2 size={13} stroke={1.8} className="spin" /> : (key.trim() && key.trim() === saved ? 'Check' : 'Save')}
+        <button type="button" className={s.testBtn} onClick={save} disabled={state === 'saving' || !key.trim()}>
+          {state === 'saving' ? <IconLoader2 size={13} stroke={1.8} className="spin" /> : 'Check'}
         </button>
       </div>
       {(state === 'ok' || state === 'error') && (
@@ -1116,9 +1219,6 @@ function AppearanceTab() {
   const [customHex, setCustomHex] = useState(accent)
   useEffect(() => { setCustomHex(accent) }, [accent])
   const validHex = /^#[0-9A-Fa-f]{6}$/.test(customHex.trim())
-  function applyCustom() {
-    if (validHex) setAccent(customHex.trim())
-  }
 
   return (
     <div className={s.tabContent}>
@@ -1148,10 +1248,12 @@ function AppearanceTab() {
             style={{ background: validHex ? customHex.trim() : 'var(--surface-3)' }} />
           <input className={s.customColorInput} value={customHex} maxLength={7}
             aria-label="Custom accent hex"
-            onChange={e => setCustomHex(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && applyCustom()}
+            onChange={e => {
+              const v = e.target.value
+              setCustomHex(v)
+              if (/^#[0-9A-Fa-f]{6}$/.test(v.trim())) setAccent(v.trim())   // applies as you type
+            }}
             placeholder="#a78bfa" spellCheck={false} />
-          <button type="button" className={s.testBtn} onClick={applyCustom} disabled={!validHex}>Apply</button>
         </div>
         <p className={s.sectionDescQuiet}>
           Enter any hex color. Very dark colors are automatically brightened for readability.

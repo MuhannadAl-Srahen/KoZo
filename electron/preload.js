@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 10,
+  rev: 11,
   // Settings → Appearance → UI scale.
   ui: {
     setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
@@ -192,6 +192,16 @@ contextBridge.exposeInMainWorld('kozo', {
       updateState: () => ipcRenderer.invoke('app:updateState'),
       installUpdate: () => ipcRenderer.invoke('app:installUpdate'),
       whatsNew: () => ipcRenderer.invoke('app:whatsNew'),
+      setFullScreen: (on) => ipcRenderer.invoke('app:setFullScreen', on),
+    },
+    discord: {
+      status: () => ipcRenderer.invoke('discord:status'),
+      apply: () => ipcRenderer.invoke('discord:apply'),
+    },
+    launchers: {
+      scan: () => ipcRenderer.invoke('launchers:scan'),
+      pending: () => ipcRenderer.invoke('launchers:pending'),
+      dismiss: (keys) => ipcRenderer.invoke('launchers:dismiss', keys),
     },
   },
 
@@ -208,6 +218,8 @@ contextBridge.exposeInMainWorld('kozo', {
     const pass = (cb, payload) => cb(payload)
     return {
       onGamepadWake: sub('gamepad:wake', pass),
+      onLaunchersFound: sub('launchers:found', pass),
+      onSessionDiscarded: sub('session:discarded', pass),
       onSessionStarted: sub('session:started', pass),
       onSessionEnded: sub('session:ended', pass),
       onSessionIdle: sub('session:idle', pass),

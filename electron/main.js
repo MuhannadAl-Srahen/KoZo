@@ -93,10 +93,17 @@ function createWindow() {
   // Resolve "start minimized to tray" BEFORE loading so we can also skip opening
   // DevTools in dev — openDevTools() force-shows the (otherwise hidden) window,
   // which is exactly why start-minimized appeared not to work during development.
+  // Only when Windows started KoZo: opening it yourself always shows the
+  // window. The startup entries pass --startup; the uptime check covers
+  // entries registered before they did.
   let startMin = false
-  try { startMin = require('./db/queries/settings').getSetting('start_minimized') === '1' } catch {}
+  try {
+    const atBoot = process.argv.includes('--startup') || require('os').uptime() < 180
+    startMin = atBoot && require('./db/queries/settings').getSetting('start_minimized') === '1'
+  } catch {}
 
-  if (!app.isPackaged) {
+  // scripts/smoke-test.js runs the built renderer without packaging.
+  if (!app.isPackaged && process.env.KOZO_RENDERER !== 'dist') {
     mainWindow.loadURL('http://localhost:5173')
     if (!startMin) mainWindow.webContents.openDevTools()
   } else {
@@ -141,7 +148,7 @@ function createWindow() {
   // Never navigate the window itself away from the app bundle — a remote page
   // there would get the full preload API.
   mainWindow.webContents.on('will-navigate', (e, url) => {
-    const isApp = app.isPackaged ? url.startsWith('file://') : url.startsWith('http://localhost:5173')
+    const isApp = (app.isPackaged || process.env.KOZO_RENDERER === 'dist') ? url.startsWith('file://') : url.startsWith('http://localhost:5173')
     if (!isApp) e.preventDefault()
   })
   // Windows shutdown / logoff skips before-quit + will-quit entirely.
@@ -194,7 +201,8 @@ function showFromAnywhere({ gamepad = false } = {}) {
       win.focus()
       setTimeout(() => { if (!win.isDestroyed()) win.setAlwaysOnTop(false) }, 400)
     } catch {}
-    if (gamepad) { try { win.webContents.send('gamepad:wake') } catch {} }
+    // A controller wake opens Big Picture (the renderer navigates there).
+    if (gamepad) { try { win.webContents.send('gamepad:wake', { bigPicture: true }) } catch {} }
   })
 }
 
@@ -300,6 +308,8 @@ Close any program that may be using it and start KoZo again.`)
   try { require('./services/crackWatcher').myDocsDir?.() } catch {}
 
   watcher.start()
+  // Discord Rich Presence (off unless enabled in Settings; idle costs nothing).
+  try { require('./services/discordPresence').start() } catch {}
 
   // The overlay window is created lazily on the first session-start / achievement
   // (overlayWindow.sendX queues the message until it finishes loading), so there's
@@ -442,6 +452,7 @@ function flushOnExit() {
   try { require('./services/processWatcher').stop() } catch {}
   try { require('./services/crackWatcher').stopWatching() } catch {}
   try { require('./services/controllerWake').stop() } catch {}
+  try { require('./services/discordPresence').stop() } catch {}
   try { require('./services/autoBackup').flush() } catch {}
   // Save snapshots deferred to idle would otherwise die with the process.
   try { require('./services/autoSaveBackup').flushPending() } catch {}
