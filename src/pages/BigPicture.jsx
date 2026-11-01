@@ -197,7 +197,7 @@ export default function BigPicture() {
       <button type="button" className={s.cardBtn} data-gpclick="" onClick={() => setPicking(true)}>
         <IconDice5 size={48} stroke={1.4} />
         <span className={s.pickLabel}>Pick for me</span>
-        <span className={s.pickSub}>KoZo chooses from Up next</span>
+        <span className={s.pickSub}>KoZo chooses your next game</span>
       </button>
     </div>
   )

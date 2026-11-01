@@ -3,7 +3,7 @@ import {
   IconPlus, IconLayoutGrid, IconList, IconLayoutColumns,
   IconDeviceGamepad2, IconPencil, IconSearch,
   IconCheckbox, IconSquare, IconTrash, IconX, IconCheck, IconStar, IconLoader2,
-  IconBooks, IconCalendarEvent,
+  IconBooks, IconCalendarEvent, IconDice5,
 } from '@tabler/icons-react'
 import { getBannerBg, parseGenres, formatMonthKey, fileUrl } from '../lib/utils'
 import { LIST_STATUSES, LIST_STATUS_ORDER } from '../lib/cardModel'
@@ -18,6 +18,7 @@ import EmptyState from '../components/ui/EmptyState'
 import GeneratedCover from '../components/GeneratedCover'
 import useCardZoom from '../lib/useCardZoom'
 import InfoModal from '../components/ui/InfoModal'
+import PickForMeModal from '../components/modals/PickForMeModal'
 import { CardSkeletonGrid } from '../components/ui/Skeleton'
 import s from './GameList.module.css'
 
@@ -225,6 +226,7 @@ export default function GameList() {
   useEffect(() => { itemsRef.current = items }, [items])
 
   const [showAdd, setShowAdd]   = useState(false)
+  const [picking, setPicking]   = useState(false)   // Pick for me
   const [listModal, setListModal] = useState(null)   // 'new' | list object | null
   const [editItem, setEditItem] = useState(null)
   const [ctxMenu, setCtxMenu]   = useState(null)     // null | { x, y, item }
@@ -534,6 +536,11 @@ export default function GameList() {
             ))}
           </div>
 
+          <button className={s.btnSecondary} onClick={() => setPicking(true)} title="Let KoZo choose your next game from Want to play, weighted by your favourite genres">
+            <IconDice5 size={14} stroke={1.7} />
+            Pick for me
+          </button>
+
           <button className={s.btnPrimary} onClick={() => setShowAdd(true)}>
             <IconPlus size={15} stroke={2} />
             Add Game
@@ -741,6 +748,8 @@ export default function GameList() {
           </div>
         )}
       </div>
+
+      {picking && <PickForMeModal onClose={() => setPicking(false)} onChanged={() => loadItems(page, { silent: true })} />}
 
       {showAdd && (
         <AddGameToListModal

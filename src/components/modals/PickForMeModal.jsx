@@ -8,9 +8,10 @@ import { fileUrl, monthKey } from '../../lib/utils'
 import { scoreCandidates, pickWeighted } from '../../lib/pickForMe'
 import s from './PickForMeModal.module.css'
 
-// "Pick for me": one game from Up next (this month's first, else all of Want
-// to play), weighted by your favourite genres. A short shuffle of covers lands
-// on the pick; Play now starts it, Start playing moves it to Playing.
+// "Pick for me" (Game List toolbar, Big Picture): one game you want to play,
+// weighted by your favourite genres, with a boost for games planned this
+// month. A short shuffle of covers lands on the pick; Play now starts it,
+// Start playing moves it to Playing.
 
 function coverOf(item) {
   return item.banner_url || (item.game_banner_local_path ? fileUrl(item.game_banner_local_path) : null)
@@ -45,12 +46,12 @@ export default function PickForMeModal({ onClose, onChanged }) {
       ])
       if (!alive) return
       const rows = listRes?.ok ? (listRes.data?.items || listRes.data || []) : []
-      const thisMonth = rows.filter(r => r.planned_month === monthKey(new Date()))
-      const pool = thisMonth.length ? thisMonth : rows
+      const now = monthKey(new Date())
       const playableIds = new Set((gamesRes?.ok ? gamesRes.data || [] : [])
         .filter(g => !g.is_archived && g.is_installed !== 0 && (g.exe_name || g.launch_file || g.launch_uri || g.steam_app_id))
         .map(g => g.id))
-      const sc = scoreCandidates(pool, tasteRes?.ok ? tasteRes.data?.weights || {} : {}, { playableIds })
+      const sc = scoreCandidates(rows, tasteRes?.ok ? tasteRes.data?.weights || {} : {}, { playableIds })
+        .map(c => (c.item.planned_month === now ? { ...c, weight: c.weight + 1 } : c))
       setScored(sc)
       roll(sc, null)
     })()
@@ -122,8 +123,8 @@ export default function PickForMeModal({ onClose, onChanged }) {
       {empty ? (
         <div className={s.empty}>
           <IconDice5 size={36} stroke={1.4} />
-          <div className={s.emptyTitle}>Nothing in Up next yet</div>
-          <div className={s.emptyText}>Add games you want to play to your Game List and KoZo picks one for you.</div>
+          <div className={s.emptyTitle}>Nothing in Want to play yet</div>
+          <div className={s.emptyText}>Set games to Want to play on your Game List and KoZo picks one for you.</div>
         </div>
       ) : (
         <div className={s.stage}>
@@ -144,7 +145,7 @@ export default function PickForMeModal({ onClose, onChanged }) {
                   {pick.item.planned_month === monthKey(new Date()) && <span className={s.tag}>Planned this month</span>}
                   {!!pick.item.is_favorite && <span className={s.tag}>Favourite</span>}
                 </div>
-                <div className={s.from}>Picked from {scored.length} game{scored.length === 1 ? '' : 's'} in Up next</div>
+                <div className={s.from}>Picked from {scored.length} game{scored.length === 1 ? '' : 's'} you want to play</div>
               </>
             ) : (
               <div className={s.rolling}>Picking…</div>

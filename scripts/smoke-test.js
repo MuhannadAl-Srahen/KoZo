@@ -206,7 +206,7 @@ app.whenReady().then(async () => {
   // ── Pick for me ──
   {
     const before = errors.length
-    await go('#/plan', 1500)
+    await go('#/game-list', 1500)
     await ev(`[...document.querySelectorAll('button')].find(b => /Pick for me/.test(b.innerText))?.click(); true`)
     await sleep(2500)
     const txt = await ev(`document.querySelector('[role=dialog]')?.innerText || ''`)

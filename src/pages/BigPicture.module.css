@@ -9,7 +9,9 @@
   overflow: hidden;
   background: var(--bg);
   color: var(--text-primary);
-  --bp-poster: clamp(150px, 12vw, 260px);
+  /* Width follows the window's width AND height, so a whole row of posters
+     always fits under the hero, on a TV or in a short window. */
+  --bp-poster: clamp(110px, min(12vw, 26vh), 260px);
 }
 
 .backdrop { position: absolute; inset: 0; z-index: -1; overflow: hidden; }
@@ -101,8 +103,14 @@
   overflow-y: auto;
   padding-bottom: clamp(20px, 4vh, 60px);
   scroll-behavior: smooth;
+  /* Rows snap whole into view: a row never sits sliced in half under the
+     hero. The top edge fades instead of cutting hard. */
+  scroll-snap-type: y mandatory;
+  mask-image: linear-gradient(to bottom, transparent 0, #000 18px);
+  scrollbar-width: none;
 }
-.row { padding: clamp(8px, 1.4vh, 18px) 0; }
+.rows::-webkit-scrollbar { display: none; }
+.row { padding: clamp(8px, 1.4vh, 18px) 0; scroll-snap-align: start; }
 .rowTitle {
   padding: 0 clamp(20px, 3vw, 56px) 10px;
   font-size: clamp(18px, 1.45vw, 28px);
@@ -223,3 +231,11 @@
   font-weight: 800;
 }
 .card[data-gpfocus] { box-shadow: 0 0 0 3px var(--a), 0 18px 44px rgba(0, 0, 0, 0.55); }
+
+/* Short windows: a smaller hero so a whole row of posters still fits. */
+@media (max-height: 820px) {
+  .hero { min-height: 0; padding-bottom: 10px; }
+  .heroCover { width: clamp(80px, 6.5vw, 120px); }
+  .heroName { font-size: clamp(26px, 2.8vw, 48px); }
+  .top { padding-top: 10px; padding-bottom: 6px; }
+}
