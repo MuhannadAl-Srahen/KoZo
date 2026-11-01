@@ -256,6 +256,9 @@
 }
 
 .gameInfoSmall .achTrack { height: 2px; }
+/* No achievements: the empty track still shows, a plain line, so every card
+   keeps the same height. */
+.achTrackNone { opacity: 0.6; }
 
 /* Three fixed zones — trophies | last-played date | playtime — so the date
    sits dead-centre on every card. Tabular figures stop number jitter. */
