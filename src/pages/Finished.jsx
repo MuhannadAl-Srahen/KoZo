@@ -12,6 +12,7 @@ import FinishedGameModal from '../components/modals/FinishedGameModal'
 import ContextMenu from '../components/ui/ContextMenu'
 import InfoModal from '../components/ui/InfoModal'
 import useCardZoom from '../lib/useCardZoom'
+import { ratingColor } from '../components/ui/RatingPicker'
 import s from './Finished.module.css'
 
 // Every game you've finished, Library and Game List together, grouped by the
@@ -29,9 +30,16 @@ function coverOf(g) {
   return g.list_banner || g.banner_url || null
 }
 
+// A finished game as a trophy: the cover with your score as a big coloured
+// badge (click it to rate), a medal for 100% achievements, then three fixed
+// cells (playtime, achievements, finish date) and the achievement bar along
+// the bottom edge. Every cell is always there, so every card is the same size.
 function FinishedCard({ g, onRate, onOpen, onContextMenu }) {
   const [failed, setFailed] = useState(false)
   const src = coverOf(g)
+  const score = g.rating ? Math.round(g.rating) : null
+  const achPct = g.ach_total > 0 ? Math.min(100, Math.round((g.ach_unlocked / g.ach_total) * 100)) : 0
+  const perfect = g.ach_total > 0 && g.ach_unlocked >= g.ach_total
   return (
     <div className={s.card} data-gpnav="" onContextMenu={(e) => { e.preventDefault(); onContextMenu(e) }}>
       <button className={s.cover} onClick={onOpen} title={g.name} data-gpclick="">
@@ -39,19 +47,34 @@ function FinishedCard({ g, onRate, onOpen, onContextMenu }) {
           ? <img src={src} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} />
           : <GeneratedCover name={g.name} />}
         <span className={s.shade} />
-        <span className={s.name}>{g.name}</span>
+        {perfect && <span className={s.perfect}><IconTrophy size={12} stroke={2} /> 100%</span>}
+        <span className={s.artInfo}>
+          <span className={s.name}>{g.name}</span>
+          <span className={s.finishedOn}>
+            <IconFlag size={11} stroke={2} />
+            {g.finished_at ? `Finished ${formatDate(g.finished_at)}` : 'Finished'}
+          </span>
+        </span>
       </button>
-      <div className={s.info}>
-        <button className={`${s.rating} ${g.rating ? '' : s.ratingEmpty}`} onClick={onRate} title="Rate this game">
-          <IconStarFilled size={13} />
-          {g.rating ? <><strong>{Math.round(g.rating)}</strong>/10</> : 'Rate'}
-        </button>
-        <div className={s.stats}>
-          {g.total_playtime_seconds > 0 && <span><IconClock size={12} /> {formatPlaytime(g.total_playtime_seconds)}</span>}
-          {g.ach_total > 0 && <span><IconTrophy size={12} /> {g.ach_unlocked}/{g.ach_total}</span>}
-          {g.finished_at && <span className={s.date}>{formatDate(g.finished_at)}</span>}
-        </div>
+      <button
+        className={`${s.score} ${score ? '' : s.scoreEmpty}`}
+        style={score ? { '--score': ratingColor(score) } : undefined}
+        onClick={onRate}
+        title={score ? `Your rating: ${score}/10. Click to change` : 'Rate this game'}
+      >
+        {score ? <><strong>{score}</strong><span>/10</span></> : <><IconStarFilled size={12} /> Rate</>}
+      </button>
+      <div className={s.cells}>
+        <span className={`${s.cell} ${g.total_playtime_seconds > 0 ? '' : s.cellEmpty}`} title="Time played">
+          <IconClock size={13} stroke={1.7} />
+          {g.total_playtime_seconds > 0 ? formatPlaytime(g.total_playtime_seconds) : 'No time'}
+        </span>
+        <span className={`${s.cell} ${g.ach_total > 0 ? '' : s.cellEmpty}`} title="Achievements">
+          <IconTrophy size={13} stroke={1.7} />
+          {g.ach_total > 0 ? `${g.ach_unlocked}/${g.ach_total}` : 'None'}
+        </span>
       </div>
+      <span className={s.achBar} aria-hidden="true"><span style={{ width: `${achPct}%` }} /></span>
     </div>
   )
 }
