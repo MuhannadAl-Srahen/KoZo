@@ -3,7 +3,7 @@ import {
   IconCalendarEvent, IconPlus, IconSearch, IconCalendarOff, IconCheck, IconChevronLeft, IconChevronRight,
   IconPlayerPlayFilled, IconListCheck, IconDeviceGamepad2, IconFlag, IconStarFilled, IconClock,
   IconPencil, IconBrandSteam, IconX, IconArrowRight, IconCalendarMonth, IconTimeline, IconLayoutColumns,
-  IconList, IconChevronDown, IconHistory, IconDots,
+  IconList, IconChevronDown, IconHistory, IconDots, IconCarouselHorizontal, IconLayoutCards,
 } from '@tabler/icons-react'
 import { fileUrl, formatMonthKey, formatPlaytime, monthKey, parseGenres } from '../lib/utils'
 import { LIST_STATUSES } from '../lib/cardModel'
@@ -18,9 +18,10 @@ import useCardZoom from '../lib/useCardZoom'
 import { ratingColor } from '../components/ui/RatingPicker'
 import s from './PlayPlan.module.css'
 
-// Play Plan: what you mean to play, month by month, in three views (saved per
-// user): Timeline (months down a glowing line, posters beside each), Roadmap
-// (months side by side, this one wide) and List (a table per month). Every
+// Play Plan: what you mean to play, month by month, in five views (saved per
+// user): Timeline (months down a glowing line, posters beside each), Shelves
+// (a sliding row of big posters per month), Showcase (wide art cards),
+// Roadmap (months side by side, this one wide) and List (a table). Every
 // view shows each month's games in play order: Playing, Up next (numbered),
 // Done. Drag a game onto another in the same month to reorder (taking that
 // game's state, so Done marks it Finished and asks for a rating), or onto
@@ -41,6 +42,8 @@ function laneOf(status) {
 
 const VIEWS = [
   { key: 'timeline', label: 'Timeline', Icon: IconTimeline },
+  { key: 'shelves',  label: 'Shelves',  Icon: IconCarouselHorizontal },
+  { key: 'showcase', label: 'Showcase', Icon: IconLayoutCards },
   { key: 'roadmap',  label: 'Roadmap',  Icon: IconLayoutColumns },
   { key: 'list',     label: 'List',     Icon: IconList },
 ]
@@ -207,6 +210,90 @@ function MiniCard({ item, n, dropMark, h }) {
         </span>
       </span>
       <span className={s.miniActions} onClick={e => e.stopPropagation()}><Actions item={item} h={h} compact /></span>
+    </div>
+  )
+}
+
+// Wide art for the Showcase cards: Steam's hero/header (asked once per game,
+// remembered), else the cover blurred behind itself.
+const wideArt = new Map()
+function useWideArt(item) {
+  const [, bump] = useState(0)
+  const id = item?.steam_app_id
+  useEffect(() => {
+    if (!id || wideArt.has(id)) return
+    wideArt.set(id, null)
+    window.kozo?.api?.steam?.appAssets?.([id]).then(res => {
+      const a = res?.ok ? res.data?.[id] : null
+      wideArt.set(id, a?.header || a?.hero || null)
+      bump(n => n + 1)
+    }).catch(() => {})
+  }, [id])
+  return (id && wideArt.get(id)) || null
+}
+
+// A wide card for the Showcase view: the game's landscape art, its state,
+// the month's hours and the actions.
+function ShowCard({ item, n, maxSec, dropMark, h }) {
+  const lane = laneOf(item.status)
+  const wide = useWideArt(item)
+  const cover = coverOf(item)
+  const score = item.rating ? Math.round(item.rating) : null
+  const genres = parseGenres(item).slice(0, 3)
+  const state = item.status === 'dropped' ? { label: 'Dropped', color: 'var(--status-dropped)', Icon: IconX }
+    : lane === 'playing' ? { label: 'Playing', color: 'var(--status-playing)', Icon: IconDeviceGamepad2 }
+    : lane === 'done' ? { label: 'Done', color: '#fbbf24', Icon: IconCheck }
+    : { label: `Up next #${n}`, color: 'var(--a)', Icon: IconListCheck }
+  return (
+    <div {...itemProps(item, h, dropMark, `${s.sc} ${s['sc_' + lane]} ${item.status === 'dropped' ? s.scDropped : ''}`)} style={{ '--stc': state.color }}>
+      <div className={s.scArt}>
+        {wide ? <img src={wide} alt="" loading="lazy" />
+          : cover ? <img src={cover} alt="" loading="lazy" className={s.scSoft} />
+          : <GeneratedCover name={item.name} />}
+        <span className={s.scShade} />
+        <span className={s.scState}><state.Icon size={12} stroke={2.2} /> {state.label}</span>
+        {score && <span className={s.luScore} style={{ '--score': ratingColor(score) }}><strong>{score}</strong><span>/10</span></span>}
+        <div className={s.scOver}>
+          <span className={s.scCover}><Thumb item={item} /></span>
+          <span className={s.scText}>
+            <span className={s.scName}>{item.name}</span>
+            <span className={s.scSub}>{genres.length ? genres.join(' · ') : subLine(item)}</span>
+          </span>
+        </div>
+      </div>
+      <div className={s.scFoot}>
+        <span className={s.scHours}>
+          <IconClock size={13} />
+          {item.month_seconds > 0 ? `${formatPlaytime(item.month_seconds)} this month` : lane === 'done' ? subLine(item) : 'Not played this month'}
+        </span>
+        {lane === 'playing' && maxSec > 0 && <span className={s.scBar}><span style={{ width: `${Math.round(((item.month_seconds || 0) / maxSec) * 100)}%` }} /></span>}
+        <span className={s.scActions} onClick={e => e.stopPropagation()}><Actions item={item} h={h} /></span>
+      </div>
+    </div>
+  )
+}
+
+// One month as a sliding shelf of big posters with arrows on the sides.
+function Shelf({ children }) {
+  const ref = useRef(null)
+  const [edges, setEdges] = useState({ start: true, end: true })
+  function measure() {
+    const el = ref.current
+    if (!el) return
+    setEdges({ start: el.scrollLeft < 4, end: el.scrollLeft + el.clientWidth >= el.scrollWidth - 4 })
+  }
+  useEffect(() => {
+    measure()
+    const ro = new ResizeObserver(measure)
+    if (ref.current) ro.observe(ref.current)
+    return () => ro.disconnect()
+  }, [])
+  const slide = (dir) => ref.current?.scrollBy({ left: dir * ref.current.clientWidth * 0.8, behavior: 'smooth' })
+  return (
+    <div className={s.shelfWrap}>
+      {!edges.start && <button type="button" className={`${s.shelfArrow} ${s.shelfPrev}`} onClick={() => slide(-1)} aria-label="Scroll left"><IconChevronLeft size={22} /></button>}
+      <div ref={ref} className={s.shelf} data-axis="x" onScroll={measure}>{children}</div>
+      {!edges.end && <button type="button" className={`${s.shelfArrow} ${s.shelfNext}`} onClick={() => slide(1)} aria-label="Scroll right"><IconChevronRight size={22} /></button>}
     </div>
   )
 }
@@ -407,7 +494,7 @@ export default function PlayPlan() {
     e.preventDefault()
     e.stopPropagation()
     const r = e.currentTarget.getBoundingClientRect()
-    const across = getComputedStyle(e.currentTarget.parentElement).display === 'grid' && r.width < r.height
+    const across = e.currentTarget.parentElement?.dataset.axis === 'x'   // side by side: drop left or right
     const pos = across ? (e.clientX < r.left + r.width / 2 ? 'before' : 'after') : (e.clientY < r.top + r.height / 2 ? 'before' : 'after')
     setDropMark(m => (m?.id === target.id && m.pos === pos ? m : { id: target.id, pos, across }))
     setDropOn(target.planned_month)
@@ -504,8 +591,50 @@ export default function PlayPlan() {
               <MonthTitle m={m} model={model} isNow={m === thisMonth} onAdd={openAdd} />
               {boards[m] === undefined ? <div className={s.muted}>Loading…</div>
                 : model.total ? (
-                  <div className={s.posterGrid} style={zoomStyle}>
+                  <div className={s.posterGrid} style={zoomStyle} data-axis="x">
                     {model.order.map(i => <PlanPoster key={i.id} item={i} n={model.num(i)} maxSec={model.maxSec} dropMark={markOf(i)} h={h} />)}
+                  </div>
+                ) : <EmptyMonth m={m} onAdd={openAdd} />}
+            </section>
+          )
+        })}
+      </div>
+    )
+  }
+
+  function shelves() {
+    return (
+      <div className={s.shelves}>
+        {flowMonths.map(m => {
+          const model = monthModel(boards[m])
+          return (
+            <section key={m} className={`${s.shelfMonth} ${m === thisMonth ? s.shelfNow : ''} ${dropOn === m ? s.isDrop : ''}`} {...monthDrop(m)}>
+              <MonthTitle m={m} model={model} isNow={m === thisMonth} onAdd={openAdd} />
+              {boards[m] === undefined ? <div className={s.muted}>Loading…</div>
+                : model.total ? (
+                  <Shelf>
+                    {model.order.map(i => <PlanPoster key={i.id} item={i} n={model.num(i)} maxSec={model.maxSec} dropMark={markOf(i)} h={h} />)}
+                  </Shelf>
+                ) : <EmptyMonth m={m} onAdd={openAdd} />}
+            </section>
+          )
+        })}
+      </div>
+    )
+  }
+
+  function showcase() {
+    return (
+      <div className={s.lv}>
+        {flowMonths.map(m => {
+          const model = monthModel(boards[m])
+          return (
+            <section key={m} className={`${s.lgroup} ${dropOn === m ? s.isDrop : ''}`} {...monthDrop(m)}>
+              <MonthTitle m={m} model={model} isNow={m === thisMonth} onAdd={openAdd} />
+              {boards[m] === undefined ? <div className={s.muted}>Loading…</div>
+                : model.total ? (
+                  <div className={s.scGrid} data-axis="x">
+                    {model.order.map(i => <ShowCard key={i.id} item={i} n={model.num(i)} maxSec={model.maxSec} dropMark={markOf(i)} h={h} />)}
                   </div>
                 ) : <EmptyMonth m={m} onAdd={openAdd} />}
             </section>
@@ -535,7 +664,7 @@ export default function PlayPlan() {
                 {boards[m] === undefined ? <div className={s.muted}>Loading…</div>
                   : !model.total ? <EmptyMonth m={m} onAdd={openAdd} />
                   : wide ? (
-                    <div className={s.posterGrid} style={zoomStyle}>
+                    <div className={s.posterGrid} style={zoomStyle} data-axis="x">
                       {model.order.map(i => <PlanPoster key={i.id} item={i} n={model.num(i)} maxSec={model.maxSec} dropMark={markOf(i)} h={h} />)}
                     </div>
                   ) : (
@@ -584,8 +713,8 @@ export default function PlayPlan() {
         <div className={s.views} role="tablist" aria-label="Play Plan view">
           {VIEWS.map(v => (
             <button key={v.key} type="button" role="tab" aria-selected={view === v.key}
-              className={`${s.viewBtn} ${view === v.key ? s.viewOn : ''}`} onClick={() => setView(v.key)}>
-              <v.Icon size={15} stroke={1.8} /> {v.label}
+              className={`${s.viewBtn} ${view === v.key ? s.viewOn : ''}`} onClick={() => setView(v.key)} title={v.label}>
+              <v.Icon size={15} stroke={1.8} /> <span className={s.viewLabel}>{v.label}</span>
             </button>
           ))}
         </div>
@@ -597,6 +726,8 @@ export default function PlayPlan() {
 
       <div className={s.content}>
         {view === 'timeline' && timeline()}
+        {view === 'shelves' && shelves()}
+        {view === 'showcase' && showcase()}
         {view === 'roadmap' && roadmap()}
         {view === 'list' && list()}
 

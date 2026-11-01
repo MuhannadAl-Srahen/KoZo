@@ -475,3 +475,113 @@
   .lhead, .lrow { grid-template-columns: 26px 34px minmax(0, 1fr) 80px 90px; }
   .ltime, .lscore { display: none; }
 }
+
+/* ── Shelves: a sliding row of big posters per month ─────────── */
+.shelves { display: flex; flex-direction: column; gap: 30px; }
+.shelfMonth { display: flex; flex-direction: column; gap: var(--sp-12); border-radius: var(--r-card); min-width: 0; }
+.shelfWrap { position: relative; min-width: 0; }
+.shelf {
+  display: flex;
+  gap: var(--sp-16);
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: 4px;
+  /* Room for hover lift and the drop bars. */
+  padding: 10px 4px 14px;
+  margin: -10px -4px -14px;
+  scrollbar-width: none;
+}
+.shelf::-webkit-scrollbar { display: none; }
+.shelf > .lu { flex: 0 0 clamp(150px, 15vw, 230px); scroll-snap-align: start; }
+.shelf > .dropBefore::before { top: 0; bottom: 0; width: 4px; left: -10px; }
+.shelf > .dropAfter::after { top: 0; bottom: 0; width: 4px; right: -10px; }
+.shelfArrow {
+  position: absolute;
+  top: calc(50% - 40px);
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 50%;
+  background: rgba(8, 8, 14, 0.78);
+  color: #fff;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+.shelfArrow:hover { background: var(--a); border-color: var(--a); color: var(--accent-ink); }
+.shelfPrev { left: -10px; }
+.shelfNext { right: -10px; }
+/* Fade the edge where more posters wait. */
+.shelfWrap:has(.shelfNext)::after, .shelfWrap:has(.shelfPrev)::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 40px;
+  width: 60px;
+  z-index: 3;
+  pointer-events: none;
+}
+.shelfWrap:has(.shelfNext)::after { right: 0; background: linear-gradient(to left, var(--bg), transparent); }
+.shelfWrap:has(.shelfPrev)::before { left: 0; background: linear-gradient(to right, var(--bg), transparent); }
+
+/* ── Showcase: wide art cards ────────────────────────────────── */
+.scGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: var(--sp-16); }
+.scGrid > .dropBefore::before { top: 0; bottom: 0; width: 4px; left: -10px; }
+.scGrid > .dropAfter::after { top: 0; bottom: 0; width: 4px; right: -10px; }
+.sc {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  overflow: hidden;
+  background: var(--surface-2);
+  cursor: pointer;
+}
+.sc:hover { border-color: color-mix(in srgb, var(--stc) 60%, var(--border)); box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45); }
+.sc_playing { border-color: color-mix(in srgb, var(--status-playing) 60%, var(--border)); box-shadow: 0 8px 28px color-mix(in srgb, var(--status-playing) 18%, transparent); }
+.scDropped { filter: saturate(0.35) brightness(0.8); }
+.scArt { position: relative; aspect-ratio: 460 / 215; overflow: hidden; background: var(--surface-3); }
+.scArt > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.sc_done .scArt > img { filter: saturate(0.6) brightness(0.8); }
+.scSoft { filter: blur(16px) saturate(1.2) brightness(0.7); transform: scale(1.2); }
+.scShade { position: absolute; inset: 0; background: linear-gradient(to top, rgba(8, 8, 14, 0.92) 0%, rgba(8, 8, 14, 0.25) 55%, transparent 80%); pointer-events: none; }
+.scState {
+  position: absolute;
+  top: var(--sp-8);
+  left: var(--sp-8);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 var(--sp-8);
+  border-radius: var(--r-pill);
+  background: rgba(8, 8, 14, 0.72);
+  border: 1px solid color-mix(in srgb, var(--stc) 70%, transparent);
+  color: var(--stc);
+  font-size: var(--fs-2xs);
+  font-weight: 800;
+}
+.sc_playing .scState { background: var(--status-playing); color: #06120a; border-color: transparent; }
+.scOver { position: absolute; left: var(--sp-10); right: var(--sp-10); bottom: var(--sp-10); display: flex; align-items: flex-end; gap: var(--sp-10); color: #fff; }
+.scCover { position: relative; flex-shrink: 0; width: 46px; aspect-ratio: 2 / 3; border-radius: var(--r-sm); overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.2); box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5); }
+.scCover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.scText { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.scName { font-size: var(--fs-lg); font-weight: 800; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6); }
+.scSub { font-size: var(--fs-xs); color: rgba(255, 255, 255, 0.75); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scFoot { position: relative; display: flex; align-items: center; gap: var(--sp-8); min-height: 46px; padding: var(--sp-8) var(--sp-10); }
+.scHours { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-xs); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scBar { position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--neutral-bg); }
+.scBar span { display: block; height: 100%; background: var(--status-playing); box-shadow: 0 0 8px var(--status-playing); }
+.scActions { display: flex; gap: var(--sp-6); flex-shrink: 0; }
+.scActions .luBtn { flex: 0 0 auto; height: 30px; background: var(--neutral-bg); border-color: var(--neutral-border); color: var(--text-primary); }
+.scActions .luBtnMain { background: var(--a); border-color: var(--a); color: var(--accent-ink); }
+.scActions .luBtnPlay { width: 30px; }
+
+/* Narrow windows: the view switch shows icons, plus the name of the one in use. */
+@media (max-width: 1150px) {
+  .viewBtn:not(.viewOn) .viewLabel { display: none; }
+}
