@@ -4,7 +4,7 @@ import {
   IconKey, IconCheck, IconX, IconLoader2, IconClock, IconEye, IconEyeOff, IconLayoutGrid,
   IconUser, IconRefresh, IconExternalLink, IconAlertTriangle,
   IconPalette, IconInfoCircle, IconRocket, IconDeviceGamepad2,
-  IconBrandSteam, IconBrandDiscord, IconDeviceTv,
+  IconBrandSteam, IconBrandDiscord, IconDeviceTv, IconKeyboard, IconSettings,
   IconSearch, IconPlus, IconMinus, IconFolder, IconTrophy,
   IconDownload, IconUpload, IconDeviceFloppy, IconArchive, IconCloud,
   IconHistory, IconList, IconChartBar, IconBell, IconBolt,
@@ -161,7 +161,6 @@ function ToggleRow({ label, desc, checked, onChange, busy = false, disabled = fa
 let generalTabCache = null
 
 function GeneralTab() {
-  const [idlePause, setIdlePause]     = useState(generalTabCache?.idlePause ?? '5')      // minutes, 0 = off
   const [openAtLogin, setOpenAtLogin]     = useState(generalTabCache?.openAtLogin ?? false)
   const [startMinimized, setStartMinimized] = useState(generalTabCache?.startMinimized ?? false)
   const [startupLoaded, setStartupLoaded] = useState(!!generalTabCache)   // avoids off→on flicker on open
@@ -172,10 +171,6 @@ function GeneralTab() {
       if (!window.kozo?.api) return
       const res = await window.kozo.api.settings.getAll()
       const c = generalTabCache || {}
-      if (res?.ok) {
-        c.idlePause   = res.data?.idle_pause_min || '5'
-        setIdlePause(c.idlePause)
-      }
       const startup = await window.kozo.api.app?.getStartup?.()
       if (startup?.ok) { c.openAtLogin = startup.data?.openAtLogin ?? false; setOpenAtLogin(c.openAtLogin) }
       const minRes = await window.kozo.api.app?.getStartMinimized?.()
@@ -186,12 +181,6 @@ function GeneralTab() {
     load()
   }, [])
 
-  // Every setting on this page saves the moment it changes.
-  function pickIdle(v) {
-    setIdlePause(v)
-    generalTabCache = { ...(generalTabCache || {}), idlePause: v }
-    window.kozo?.api?.settings?.set('idle_pause_min', String(parseInt(v) || 0))
-  }
 
   async function toggleStartup(val) {
     setOpenAtLogin(val)
@@ -266,6 +255,28 @@ function GeneralTab() {
       </section>
 
 
+      <GraphicsSection />
+      <ShortcutsSection />
+    </div>
+  )
+}
+
+// Idle / AFK: stop counting playtime after this long with no input.
+let idleCache = null
+function IdleSection() {
+  const [idlePause, setIdlePause] = useState(idleCache ?? '5')      // minutes, 0 = off
+  useEffect(() => {
+    window.kozo?.api?.settings?.get?.('idle_pause_min').then(r => {
+      if (r?.ok) { idleCache = r.data || '5'; setIdlePause(idleCache) }
+    })
+  }, [])
+  // Saves the moment it changes.
+  function pickIdle(v) {
+    setIdlePause(v)
+    idleCache = v
+    window.kozo?.api?.settings?.set('idle_pause_min', String(parseInt(v) || 0))
+  }
+  return (
       <section className={s.section}>
         <div className={s.sectionHeader}>
           <IconClock size={15} stroke={1.6} />
@@ -288,10 +299,33 @@ function GeneralTab() {
         </div>
         <p className={s.sectionDescQuiet}>Sessions shorter than a minute aren't kept.</p>
       </section>
+  )
+}
 
-      <DiscordSection />
-      <GraphicsSection />
-    </div>
+// Every global shortcut in one place.
+const SHORTCUTS = [
+  ['Alt + K', 'Show the current game\'s time and achievements over the game'],
+  ['Alt + J', 'Show the current game\'s achievement list over the game'],
+  ['Ctrl + Shift + K', 'Open KoZo from anywhere, even closed to the tray'],
+  ['View + Menu (hold)', 'On a controller: open KoZo in Big Picture'],
+  ['Ctrl + mouse wheel', 'Card size over a grid, UI size anywhere else'],
+]
+function ShortcutsSection() {
+  return (
+    <section className={s.section}>
+      <div className={s.sectionHeader}>
+        <IconKeyboard size={15} stroke={1.6} />
+        <span>Shortcuts</span>
+      </div>
+      <div className={s.shortcutList}>
+        {SHORTCUTS.map(([keys, what]) => (
+          <div key={keys} className={s.shortcutRow}>
+            <span className={s.shortcutKeys}>{keys.split(' + ').map((k, i) => <React.Fragment key={k}>{i > 0 && <span className={s.shortcutPlus}>+</span>}<kbd>{k}</kbd></React.Fragment>)}</span>
+            <span className={s.shortcutWhat}>{what}</span>
+          </div>
+        ))}
+      </div>
+    </section>
   )
 }
 
@@ -426,7 +460,7 @@ function DiscordSection() {
 // instead of flashing empty fields + reloading the profile card every time.
 let steamTabCache = null
 
-function SteamTab() {
+function SteamTab({ children }) {
   const [apiKey, setApiKey]         = useState(steamTabCache?.apiKey ?? '')
   const [showKey, setShowKey]       = useState(false)
   const [testState, setTestState]   = useState('idle')
@@ -606,49 +640,6 @@ function SteamTab() {
 
   return (
     <div className={s.tabContent}>
-      {/* API Key */}
-      <section className={s.section}>
-        <div className={s.sectionHeader}>
-          <IconKey size={15} stroke={1.6} />
-          <span>Steam Web API Key</span>
-        </div>
-        <p className={s.sectionDesc}>
-          <strong className={s.strong}>Optional</strong>, KoZo syncs achievements
-          without a key as long as your Steam profile's Game details are public. A key adds support for
-          private profiles and owned-games data. Get yours at{' '}
-          <button
-            type="button"
-            className={s.linkBtn}
-            onClick={() => window.kozo?.api?.shell?.openExternal('https://steamcommunity.com/dev/apikey')}
-          >
-            steamcommunity.com/dev/apikey
-          </button>
-        </p>
-        <div className={s.keyRow}>
-          {/* hasRing: the bordered wrapper is the control, so the focus ring is
-              drawn once around the whole row rather than around the bare input. */}
-          <div className={`${s.keyInputWrap} hasRing`}>
-            <input type={showKey ? 'text' : 'password'} className={s.keyInput}
-              placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" value={apiKey}
-              aria-label="Steam Web API key"
-              onChange={e => { setApiKey(e.target.value); setTestState('idle') }}
-              onBlur={save}
-              spellCheck={false} autoComplete="off" />
-            <button type="button" className={s.keyToggle} onClick={() => setShowKey(v => !v)}
-              aria-label={showKey ? 'Hide API key' : 'Show API key'}>
-              {showKey ? <IconEyeOff size={14} stroke={1.6} /> : <IconEye size={14} stroke={1.6} />}
-            </button>
-          </div>
-          <button type="button" className={s.testBtn} onClick={testKey} disabled={!apiKey.trim() || testState === 'testing'}>
-            {testState === 'testing' ? <IconLoader2 size={13} stroke={1.8} className="spin" /> : 'Test'}
-          </button>
-        </div>
-        {testState !== 'idle' && testState !== 'testing' && (
-          <StatusLine type={testState === 'valid' ? 'success' : 'error'}>{testMsg}</StatusLine>
-        )}
-        {saved && testState === 'idle' && <StatusLine type="success">{apiKey.trim() ? 'Key saved.' : 'Key removed.'}</StatusLine>}
-      </section>
-
       {/* User ID + Profile */}
       <section className={s.section}>
         <div className={s.sectionHeader}>
@@ -736,6 +727,53 @@ function SteamTab() {
         )}
       </section>
 
+      {/* API Key */}
+      <section className={s.section}>
+        <div className={s.sectionHeader}>
+          <IconKey size={15} stroke={1.6} />
+          <span>Steam Web API Key</span>
+        </div>
+        <p className={s.sectionDesc}>
+          <strong className={s.strong}>Optional</strong>, KoZo syncs achievements
+          without a key as long as your Steam profile's Game details are public. A key adds support for
+          private profiles and owned-games data. Get yours at{' '}
+          <button
+            type="button"
+            className={s.linkBtn}
+            onClick={() => window.kozo?.api?.shell?.openExternal('https://steamcommunity.com/dev/apikey')}
+          >
+            steamcommunity.com/dev/apikey
+          </button>
+        </p>
+        <div className={s.keyRow}>
+          {/* hasRing: the bordered wrapper is the control, so the focus ring is
+              drawn once around the whole row rather than around the bare input. */}
+          <div className={`${s.keyInputWrap} hasRing`}>
+            <input type={showKey ? 'text' : 'password'} className={s.keyInput}
+              placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" value={apiKey}
+              aria-label="Steam Web API key"
+              onChange={e => { setApiKey(e.target.value); setTestState('idle') }}
+              onBlur={save}
+              spellCheck={false} autoComplete="off" />
+            <button type="button" className={s.keyToggle} onClick={() => setShowKey(v => !v)}
+              aria-label={showKey ? 'Hide API key' : 'Show API key'}>
+              {showKey ? <IconEyeOff size={14} stroke={1.6} /> : <IconEye size={14} stroke={1.6} />}
+            </button>
+          </div>
+          <button type="button" className={s.testBtn} onClick={testKey} disabled={!apiKey.trim() || testState === 'testing'}>
+            {testState === 'testing' ? <IconLoader2 size={13} stroke={1.8} className="spin" /> : 'Test'}
+          </button>
+        </div>
+        {testState !== 'idle' && testState !== 'testing' && (
+          <StatusLine type={testState === 'valid' ? 'success' : 'error'}>{testMsg}</StatusLine>
+        )}
+        {saved && testState === 'idle' && <StatusLine type="success">{apiKey.trim() ? 'Key saved.' : 'Key removed.'}</StatusLine>}
+      </section>
+
+      {children}
+
+      <SteamGridDbSection />
+
       {/* Refresh cover images (moved here from the Library toolbar) */}
       <section className={s.section}>
         <div className={s.sectionHeader}>
@@ -755,7 +793,6 @@ function SteamTab() {
         <Message msg={bannerMsg} />
       </section>
 
-      <SteamGridDbSection />
     </div>
   )
 }
@@ -992,7 +1029,7 @@ function ScanPCTab() {
   }
 
   return (
-    <div className={s.tabContent}>
+    <>
       <section className={s.section}>
         <div className={s.sectionHeader}>
           <IconFolder size={15} stroke={1.6} />
@@ -1047,6 +1084,15 @@ function ScanPCTab() {
           }}
         />
       )}
+    </>
+  )
+}
+
+function TrackingTab() {
+  return (
+    <div className={s.tabContent}>
+      <IdleSection />
+      <ScanPCTab />
     </div>
   )
 }
@@ -1147,39 +1193,11 @@ function AppearanceCustomize() {
     <>
       <section className={s.section}>
         <div className={s.sectionHeader}>
-          <IconTextSize size={15} stroke={1.6} />
-          <span>Size and density</span>
-        </div>
-        <div className={s.segList}>
-          <Segmented label={`UI scale ${Math.round((prefs.scale || 1) * 100)}%`} value={prefs.scale} onChange={v => setPrefs({ scale: v })}
-            options={[{ value: 0.9, label: '90%' }, { value: 1, label: '100%' }, { value: 1.1, label: '110%' }, { value: 1.25, label: '125%' }]} />
-          <Segmented label="Spacing" value={prefs.density} onChange={v => setPrefs({ density: v })}
-            options={[{ value: 'comfortable', label: 'Comfortable' }, { value: 'compact', label: 'Compact' }]} />
-          <Segmented label="Corners" value={prefs.corners} onChange={v => setPrefs({ corners: v })}
-            options={[{ value: 'sharp', label: 'Sharp' }, { value: 'default', label: 'Default' }, { value: 'round', label: 'Round' }]} />
-        </div>
-      </section>
-
-      <section className={s.section}>
-        <div className={s.sectionHeader}>
-          <IconLayoutCards size={15} stroke={1.6} />
-          <span>Card details</span>
-        </div>
-        <p className={s.sectionDesc}>Choose what game cards show in the Library and the Game List.</p>
-        <div className={s.toggleList}>
-          <ToggleRow label="Genres" desc="The genre line under the game name." checked={prefs.cards.genres} onChange={v => setCard('genres', v)} />
-          <ToggleRow label="Stats row" desc="Achievements, last played and playtime in the Library; the status in the Game List." checked={prefs.cards.stats} onChange={v => setCard('stats', v)} />
-          <ToggleRow label="Achievement progress bar" desc="The thin bar above the stats in the Library." checked={prefs.cards.progress} onChange={v => setCard('progress', v)} />
-          <ToggleRow label="Status dot" desc="The colored dot in the corner of the cover." checked={prefs.cards.statusDot} onChange={v => setCard('statusDot', v)} />
-          <ToggleRow label="Play plan month" desc="The month chip on games you planned to play." checked={prefs.cards.planChip} onChange={v => setCard('planChip', v)} />
-        </div>
-      </section>
-
-      <section className={s.section}>
-        <div className={s.sectionHeader}>
           <IconLayoutSidebar size={15} stroke={1.6} />
           <span>Sidebar and start page</span>
         </div>
+        <Segmented label="Style" value={prefs.sidebar || 'full'} onChange={v => setPrefs({ sidebar: v })}
+          options={[{ value: 'full', label: 'Full' }, { value: 'rail', label: 'Slim (icons only)' }]} />
         <p className={s.sectionDesc}>Reorder the sidebar tabs or hide the ones you don't use. Library always stays.</p>
         <div className={s.navList}>
           {prefs.nav.map((n, i) => {
@@ -1203,6 +1221,21 @@ function AppearanceCustomize() {
         </div>
         <Segmented label="Start page" value={prefs.startPage || '/'} onChange={v => setPrefs({ startPage: v })}
           options={START_PAGES} wrap />
+      </section>
+
+      <section className={s.section}>
+        <div className={s.sectionHeader}>
+          <IconTextSize size={15} stroke={1.6} />
+          <span>Size and density</span>
+        </div>
+        <div className={s.segList}>
+          <Segmented label={`UI scale ${Math.round((prefs.scale || 1) * 100)}%`} value={prefs.scale} onChange={v => setPrefs({ scale: v })}
+            options={[{ value: 0.9, label: '90%' }, { value: 1, label: '100%' }, { value: 1.1, label: '110%' }, { value: 1.25, label: '125%' }]} />
+          <Segmented label="Spacing" value={prefs.density} onChange={v => setPrefs({ density: v })}
+            options={[{ value: 'comfortable', label: 'Comfortable' }, { value: 'compact', label: 'Compact' }]} />
+          <Segmented label="Corners" value={prefs.corners} onChange={v => setPrefs({ corners: v })}
+            options={[{ value: 'sharp', label: 'Sharp' }, { value: 'default', label: 'Default' }, { value: 'round', label: 'Round' }]} />
+        </div>
       </section>
 
       <section className={s.section}>
@@ -1241,6 +1274,21 @@ function AppearanceCustomize() {
           )}
         </div>
       </section>
+      <section className={s.section}>
+        <div className={s.sectionHeader}>
+          <IconLayoutCards size={15} stroke={1.6} />
+          <span>Card details</span>
+        </div>
+        <p className={s.sectionDesc}>Choose what game cards show in the Library and the Game List.</p>
+        <div className={s.toggleList}>
+          <ToggleRow label="Genres" desc="The genre line under the game name." checked={prefs.cards.genres} onChange={v => setCard('genres', v)} />
+          <ToggleRow label="Stats row" desc="Achievements, last played and playtime in the Library; the status in the Game List." checked={prefs.cards.stats} onChange={v => setCard('stats', v)} />
+          <ToggleRow label="Achievement progress bar" desc="The thin bar above the stats in the Library." checked={prefs.cards.progress} onChange={v => setCard('progress', v)} />
+          <ToggleRow label="Status dot" desc="The colored dot in the corner of the cover." checked={prefs.cards.statusDot} onChange={v => setCard('statusDot', v)} />
+          <ToggleRow label="Play plan month" desc="The month chip on games you planned to play." checked={prefs.cards.planChip} onChange={v => setCard('planChip', v)} />
+        </div>
+      </section>
+
 
       <div>
         <button type="button" className={s.testBtn} onClick={() => setPrefs(DEFAULT_APPEARANCE)}>
@@ -1546,7 +1594,7 @@ const FEATURE_GROUPS = [
     items: [
       { Icon: IconClock,    name: 'Automatic playtime', go: '/activity?tab=sessions', desc: 'Detects running games and records sessions, no manual timers.' },
       { Icon: IconHistory,  name: 'Sessions timeline', go: '/activity?tab=sessions',  desc: 'Every play session grouped by day with durations and unlocks.' },
-      { Icon: IconBolt,     name: 'Idle / AFK pause', go: 'tab:general',   desc: 'Stops counting when you step away so overnight idling doesn’t inflate stats.' },
+      { Icon: IconBolt,     name: 'Idle / AFK pause', go: 'tab:tracking',   desc: 'Stops counting when you step away so overnight idling doesn’t inflate stats.' },
     ],
   },
   {
@@ -1590,12 +1638,12 @@ const FEATURE_GROUPS = [
     title: 'Insights & App',
     items: [
       { Icon: IconChartBar,  name: 'Statistics', go: '/activity?tab=overview',    desc: 'Playtime trends with an hourly 24h view, daily/monthly charts, and click-a-day (or hour) to focus it.' },
-      { Icon: IconBell,      name: 'In-game status (Alt+K)', go: 'tab:about', desc: 'Press Alt+K while playing to flash your live session time and achievement progress over the game.' },
-      { Icon: IconTrophy,    name: 'Achievement list (Alt+J)', go: 'tab:about', desc: 'Press Alt+J while playing to flash your progress and the rarest achievements you still have left, right over the game.' },
+      { Icon: IconBell,      name: 'In-game status (Alt+K)', go: 'tab:general', desc: 'Press Alt+K while playing to flash your live session time and achievement progress over the game.' },
+      { Icon: IconTrophy,    name: 'Achievement list (Alt+J)', go: 'tab:general', desc: 'Press Alt+J while playing to flash your progress and the rarest achievements you still have left, right over the game.' },
       { Icon: IconRocket,    name: 'Tray & startup', go: 'tab:general',desc: 'Runs quietly in the system tray and can launch with Windows.' },
       { Icon: IconRocket,    name: 'Open KoZo from anywhere', go: 'tab:general', desc: 'Press Ctrl+Shift+K, or hold View and Menu on a controller for a second, to bring KoZo up (in Big Picture) even when it is closed to the tray.' },
       { Icon: IconDeviceTv,  name: 'Big Picture', go: '/big', desc: 'Full screen for the TV: big posters, your recent games and Up next, made for the controller.' },
-      { Icon: IconBrandDiscord, name: 'Discord status', go: 'tab:general', desc: 'Discord shows the game you are playing, your KoZo level and your hours in it.' },
+      { Icon: IconBrandDiscord, name: 'Discord status', go: 'tab:accounts', desc: 'Discord shows the game you are playing, your KoZo level and your hours in it.' },
       { Icon: IconDeviceGamepad2, name: 'Controller control', go: '/', desc: 'Drive the whole app with a controller: D-pad to move, A to select, B to go back, X for options, Y to search, LB and RB to switch tabs.' },
     ],
   },
@@ -1805,39 +1853,52 @@ function AboutTab() {
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
+// Grouped like the sidebar: the app itself, your games, your data, help.
 const TABS = [
-  { key: 'features',   label: 'Features' },
-  { key: 'general',    label: 'General' },
-  { key: 'steam',      label: 'Steam' },
-  { key: 'scan',       label: 'Scan PC' },
-  { key: 'appearance', label: 'Appearance' },
-  { key: 'data',       label: 'Backups' },
-  { key: 'about',      label: 'About' },
+  { key: 'general',    label: 'General',    group: 'App',   Icon: IconSettings,   desc: 'Starting with Windows, graphics and keyboard shortcuts.' },
+  { key: 'appearance', label: 'Appearance', group: 'App',   Icon: IconPalette,    desc: 'Colors, the sidebar, sizes, a background picture and what cards show.' },
+  { key: 'tracking',   label: 'Tracking',   group: 'Games', Icon: IconClock,      desc: 'How playtime is counted, and where KoZo looks for your games.' },
+  { key: 'accounts',   label: 'Accounts',   group: 'Games', Icon: IconUser,       desc: 'Steam, Discord and where covers come from.' },
+  { key: 'data',       label: 'Backups',    group: 'Data',  Icon: IconArchive,    desc: 'Back up and move your KoZo data and your game saves.' },
+  { key: 'features',   label: 'Features',   group: 'Help',  Icon: IconLayoutGrid, desc: 'Everything KoZo can do, with a link to each.' },
+  { key: 'about',      label: 'About',      group: 'Help',  Icon: IconInfoCircle, desc: 'Version, updates, diagnostics and the walkthrough.' },
 ]
+// Old tab names (links from other pages) land on their new home.
+const TAB_ALIASES = { steam: 'accounts', scan: 'tracking' }
 
 export default function Settings() {
-  const [tab, setTab] = useState('general')
+  const [tab, setTabRaw] = useState('general')
+  const setTab = (t) => setTabRaw(TAB_ALIASES[t] || t)
+  const current = TABS.find(t => t.key === tab) || TABS[0]
   const [saveGame, setSaveGame] = useState(null)   // game whose saves are being managed
   return (
     <div className={s.page}>
       <div className={s.toolbar}><h1 className={s.pageTitle}>Settings</h1></div>
       <div className={s.layout}>
         <nav className={s.nav} aria-label="Settings sections">
-          {TABS.map(t => (
-            <button key={t.key}
-              type="button"
-              aria-current={tab === t.key ? 'page' : undefined}
-              className={`${s.navItem} ${tab === t.key ? s.navActive : ''}`}
-              onClick={() => setTab(t.key)}>
-              {t.label}
-            </button>
+          {TABS.map((t, i) => (
+            <React.Fragment key={t.key}>
+              {(i === 0 || TABS[i - 1].group !== t.group) && <div className={s.navGroup}>{t.group}</div>}
+              <button
+                type="button"
+                aria-current={tab === t.key ? 'page' : undefined}
+                className={`${s.navItem} ${tab === t.key ? s.navActive : ''}`}
+                onClick={() => setTab(t.key)}>
+                <t.Icon size={15} stroke={1.7} className={s.navItemIcon} />
+                {t.label}
+              </button>
+            </React.Fragment>
           ))}
         </nav>
         <div className={s.panel}>
+          <div className={s.tabIntro}>
+            <h2 className={s.tabTitle}>{current.label}</h2>
+            <p className={s.tabDesc}>{current.desc}</p>
+          </div>
           {tab === 'features'   && <FeaturesTab setTab={setTab} />}
           {tab === 'general'    && <GeneralTab />}
-          {tab === 'steam'      && <SteamTab />}
-          {tab === 'scan'       && <ScanPCTab />}
+          {tab === 'accounts'   && <SteamTab><DiscordSection /></SteamTab>}
+          {tab === 'tracking'   && <TrackingTab />}
           {tab === 'appearance' && <AppearanceTab />}
           {tab === 'data'       && <DataTab onManageSaves={setSaveGame} />}
           {tab === 'about'      && <AboutTab />}

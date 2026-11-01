@@ -75,12 +75,12 @@ src/                 renderer (React)
 | `/` | Library |
 | `/game/:id` | GameDetail |
 | `/game-list` | GameList (paged, 20 per page) |
-| `/plan` | PlayPlan: month board with lanes Up next / Playing / Done (drag across lanes sets the status; Done = finished, which opens the rating), progress and hours this month (`gameList:planBoard`), coming months and past recap (`gameList:planSummary`); drag a card onto a month chip to re-plan |
+| `/plan` | PlayPlan: month pills, a month header (progress ring), then Playing now (wide art cards, Play / Done), the Up next queue (numbered rows; drag to reorder = `display_order` via `gameList:reorderPage({ month })`, Start moves to Playing) and Done this month. Drag between blocks sets the status (Done = finished, opens the rating); drag onto a month pill to re-plan. Data: `gameList:planBoard`, `gameList:planSummary` |
 | `/finished` | Finished (Library + Game List finished games by year, with ratings; `games:finished`); a card opens `FinishedGameModal` (stats, rating, game page, Play again) |
 | `/upcoming` | Upcoming = `components/SteamCalendar.jsx` only (data from `steam:comingSoon`). Layouts Steam (default, day columns from today), Strip, Week, Month; TBA and Tracked shelves; "Picked for you" keeps 4 per day scored by taste (`steam:tasteProfile` + GetItems tag ids) and popularity (`wishRank`/`popRank`) |
 | `/activity` | Activity: `?tab=overview` (Statistics), `sessions` (Sessions), `achievements` (AchievementsHub). `/statistics`, `/sessions`, `/achievements` redirect here |
 | `/profile` | Profile |
-| `/settings` | Settings (tabs); every setting saves as it changes (no Save buttons) |
+| `/settings` | Settings, tabs grouped App (General, Appearance) / Games (Tracking, Accounts) / Data (Backups) / Help (Features, About); old tab names `steam`/`scan` alias to `accounts`/`tracking`. Every setting saves as it changes (no Save buttons) |
 | `/big` | BigPicture: full screen, no sidebar (`Shell` in App.jsx), rows Continue playing / Up next (+ Pick for me) / All games; hero follows `data-gpfocus`. Sidebar, tray and View + Menu (`gamepad:wake` `{ bigPicture }`) open it |
 
 - Pages keep **module-level caches** (`libraryCache`, `pageCache`, `profileCache`, `*TabCache`) so a revisit paints instantly, then refetch. Invalidate them when you change data.
@@ -110,7 +110,8 @@ src/                 renderer (React)
 - Games start through `shellStart` (PowerShell Start-Process = ShellExecute), never a direct `spawn()`: a spawned game inherited KoZo's handles (sockets, pipes) and held them after KoZo quit.
 - Settings → General → Graphics acceleration writes `gpu.json` in userData; main.js reads it before ready and calls `app.disableHardwareAcceleration()` (the fix for graphics drivers timing out with KoZo open). Big Picture minimizes KoZo after Play.
 - Windows startup passes `--startup`; "Start minimized" applies only then (or uptime < 3 min). The task is created from XML (battery, no time limit, normal priority; HighestAvailable, falling back to LeastPrivilege). The one-time `startup_v2` upgrade runs only when packaged.
-- Pick for me = `lib/pickForMe.js` (pure) + `PickForMeModal` (Play Plan header, Big Picture).
+- Pick for me = `lib/pickForMe.js` (pure) + `PickForMeModal` (Game List toolbar, Big Picture): all Want to play rows, +1 weight when planned this month.
+- Sidebar: Play / Discover group titles (only while the tab order keeps groups together), live Now Playing card with the game's art, XP ring on the avatar. Appearance `sidebar: 'full' | 'rail'` (slim, icons only); the button by the logo switches.
 - Release tracking is `game_list.release_watch` (not the status); a game released over 14 days ago is never watched or announced (`releaseWatch.isLongReleased`): Track / status Upcoming set it, other statuses keep it, `gameList:untrack` clears it (deleting the row only if still Upcoming). releaseWatch selects `release_watch = 1`.
 - Marking a game Finished (statusSync `setGameStatus` or `gameList:update`) broadcasts `game:finished`; App.jsx opens `RateGameModal` (1 to 10, `gameList:rate`, stored on the Game List row).
 - Ctrl + mouse wheel depends on the pointer: over a card grid (any element with the `useCardZoom` style, which always sets `--zoom-grid`) it resizes the cards; anywhere else, or over `[data-zoom-ignore]`, it changes the UI scale (`CtrlWheelZoom` in App.jsx, 80 to 150% in 5% steps). Ratings use `ui/RatingPicker` (fixed heights, hover from pointer x) in RateGameModal and FinishedGameModal.

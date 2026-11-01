@@ -16,7 +16,7 @@
 
 /* ── Sidebar nav ── */
 .nav {
-  width: 140px;
+  width: 170px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -26,6 +26,9 @@
 
 .navItem {
   position: relative;   /* anchors the active tab's accent rail */
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
   padding: var(--sp-8) var(--sp-12);
   border-radius: var(--r-input);
   font-size: var(--fs-md);
@@ -887,3 +890,38 @@
   font-size: var(--fs-sm);
   color: var(--text-secondary);
 }
+
+/* ── Grouped tab menu, tab intro ── */
+.navGroup {
+  padding: var(--sp-12) var(--sp-12) var(--sp-4);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.navGroup:first-child { padding-top: 0; }
+.navItemIcon { flex-shrink: 0; opacity: 0.8; }
+.navActive .navItemIcon { opacity: 1; }
+.tabIntro { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--sp-16); }
+.tabTitle { font-size: var(--fs-xl, 20px); font-weight: 800; color: var(--text-primary); letter-spacing: -0.01em; }
+.tabDesc { font-size: var(--fs-sm); color: var(--text-muted); }
+
+/* ── Shortcuts ── */
+.shortcutList { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--r-card); overflow: hidden; }
+.shortcutRow { display: flex; align-items: center; gap: var(--sp-16); padding: var(--sp-10) var(--sp-16); background: var(--surface-2); }
+.shortcutRow + .shortcutRow { border-top: 1px solid var(--border); }
+.shortcutKeys { flex: 0 0 200px; display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.shortcutKeys kbd {
+  padding: 2px 8px;
+  border: 1px solid var(--neutral-border);
+  border-bottom-width: 2px;
+  border-radius: var(--r-sm);
+  background: var(--surface-3);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+}
+.shortcutPlus { color: var(--text-muted); font-size: var(--fs-xs); }
+.shortcutWhat { font-size: var(--fs-sm); color: var(--text-secondary); }
