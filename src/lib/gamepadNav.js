@@ -122,12 +122,28 @@ function syncScope() {
   }
 }
 
+// Where the ring lands when nothing has it (a fresh page after LB/RB): the
+// top-left control in view inside the page, not the first sidebar link.
+function firstTarget(targets) {
+  if (_scopeEl) return targets[0]
+  const inView = targets.filter(el => {
+    if (!el.closest('.app-main, [data-bigpicture-root]')) return false
+    const r = el.getBoundingClientRect()
+    return r.bottom > 0 && r.top < innerHeight
+  })
+  if (!inView.length) return targets[0]
+  return inView.reduce((best, el) => {
+    const a = el.getBoundingClientRect(), b = best.getBoundingClientRect()
+    return (a.top < b.top - 8 || (Math.abs(a.top - b.top) <= 8 && a.left < b.left)) ? el : best
+  })
+}
+
 // Geometric nearest neighbour in `dir` from the current focus rect.
 function moveFocus(dir) {
   const targets = visibleTargets()
   if (!targets.length) return
   if (!_focused || !document.contains(_focused) || !targets.includes(_focused)) {
-    setFocus(targets[0])
+    setFocus(firstTarget(targets))
     return
   }
   const from = _focused.getBoundingClientRect()
@@ -323,7 +339,9 @@ function stopPolling() {
   _heldDir = null
 }
 
-export function initGamepadNav({ navigate }) {
+export function isGamepadActive() { return _active }
+
+export function initGamepadNav({ navigate, onBigPicture }) {
   _navigate = navigate
 
   const onConnect = () => { _padSeen = true; if (document.visibilityState === 'visible') startPolling() }
@@ -344,15 +362,22 @@ export function initGamepadNav({ navigate }) {
   // controller stays connected; no reason to poll for navigation nobody can
   // see. Pause on hide/blur, resume on show/focus (only if a pad is there).
   const onHidden = () => stopPolling()
-  const onVisible = () => { if (_padSeen && connected()) startPolling() }
+  const onVisible = () => {
+    if (!_padSeen || !connected()) return
+    // A button still held from before the switch must not fire again.
+    const gp = Array.from(navigator.getGamepads?.() || []).find(g => g && g.connected)
+    startPolling()
+    if (gp) _prevButtons = gp.buttons.map(x => !!x?.pressed)
+  }
   const onVisibilityChange = () => {
     if (document.visibilityState === 'visible') onVisible()
     else onHidden()
   }
   // View + Menu held while KoZo was in the tray (main process): the pad is
   // certainly there, so start driving at once.
-  const offWake = window.kozo?.events?.onGamepadWake?.(() => {
+  const offWake = window.kozo?.events?.onGamepadWake?.((info) => {
     _padSeen = true
+    if (info?.bigPicture) onBigPicture?.()
     startPolling()
     setActive(true)
     setTimeout(() => { if (!_focused) moveFocus('down') }, 300)
