@@ -256,7 +256,6 @@ function GeneralTab() {
 
 
       <GraphicsSection />
-      <ShortcutsSection />
     </div>
   )
 }
@@ -302,30 +301,140 @@ function IdleSection() {
   )
 }
 
-// Every global shortcut in one place.
-const SHORTCUTS = [
-  ['Alt + K', 'Show the current game\'s time and achievements over the game'],
-  ['Alt + J', 'Show the current game\'s achievement list over the game'],
-  ['Ctrl + Shift + K', 'Open KoZo from anywhere, even closed to the tray'],
-  ['View + Menu (hold)', 'On a controller: open KoZo in Big Picture'],
-  ['Ctrl + mouse wheel', 'Card size over a grid, UI size anywhere else'],
+// Settings → Shortcuts: every keyboard shortcut and controller button.
+const KEYBOARD_GROUPS = [
+  { title: 'Anywhere in Windows', rows: [
+    ['Ctrl + Shift + K', 'Open KoZo, even when it is closed to the tray'],
+    ['Alt + K', 'While playing: show your session time and achievements over the game'],
+    ['Alt + J', 'While playing: show the achievements you still have left over the game'],
+  ] },
+  { title: 'Inside KoZo', rows: [
+    ['Ctrl + mouse wheel', 'Over a card grid: card size. Anywhere else: the size of the whole app'],
+    ['Esc', 'Close the open menu or dialog; in Big Picture, leave it'],
+    ['Right click', 'The options menu for a game, a row or a card'],
+    ['Enter', 'Open or start the focused item'],
+  ] },
 ]
-function ShortcutsSection() {
+
+// Xbox layout, which is what Chromium reports for every XInput pad.
+const PAD_GROUPS = [
+  { title: 'Moving around', rows: [
+    [['D-pad', 'L stick'], 'Move between cards, buttons and tabs'],
+    [['R stick'], 'Scroll the page or the open dialog'],
+    [['LB', 'RB'], 'Previous / next page in the sidebar'],
+    [['LT', 'RT'], 'Previous / next tab inside the page (Play Plan views, Activity)'],
+  ] },
+  { title: 'Doing things', rows: [
+    [['A'], 'Select: open the game, press the button, type in the field'],
+    [['B'], 'Close the menu or dialog, else go back'],
+    [['X'], 'Options: the right-click menu of the focused game'],
+    [['Y'], 'Jump to the search box'],
+    [['Menu'], 'Open Settings'],
+  ] },
+  { title: 'From anywhere', rows: [
+    [['View + Menu'], 'Hold for a second: bring KoZo up in Big Picture, even from the tray or a game'],
+  ] },
+]
+const PAD_COLORS = { A: '#3fb950', B: '#f85149', X: '#4493f8', Y: '#e3b341' }
+
+function Keys({ keys }) {
   return (
-    <section className={s.section}>
-      <div className={s.sectionHeader}>
-        <IconKeyboard size={15} stroke={1.6} />
-        <span>Shortcuts</span>
-      </div>
-      <div className={s.shortcutList}>
-        {SHORTCUTS.map(([keys, what]) => (
-          <div key={keys} className={s.shortcutRow}>
-            <span className={s.shortcutKeys}>{keys.split(' + ').map((k, i) => <React.Fragment key={k}>{i > 0 && <span className={s.shortcutPlus}>+</span>}<kbd>{k}</kbd></React.Fragment>)}</span>
-            <span className={s.shortcutWhat}>{what}</span>
+    <span className={s.shortcutKeys}>
+      {keys.split(' + ').map((k, i) => (
+        <React.Fragment key={k}>{i > 0 && <span className={s.shortcutPlus}>+</span>}<kbd>{k}</kbd></React.Fragment>
+      ))}
+    </span>
+  )
+}
+
+function PadKeys({ keys }) {
+  return (
+    <span className={s.shortcutKeys}>
+      {keys.map((k, i) => (
+        <React.Fragment key={k}>
+          {i > 0 && <span className={s.shortcutPlus}>{'/'}</span>}
+          {k.split(' + ').map((p, j) => (
+            <React.Fragment key={p}>
+              {j > 0 && <span className={s.shortcutPlus}>+</span>}
+              <kbd className={PAD_COLORS[p] ? s.padFace : s.padKey} style={PAD_COLORS[p] ? { '--pad': PAD_COLORS[p] } : undefined}>{p}</kbd>
+            </React.Fragment>
+          ))}
+        </React.Fragment>
+      ))}
+    </span>
+  )
+}
+
+// Whether a controller is connected right now (Chromium only lists a pad
+// after a button press, so "not seen" tells you to press one).
+function usePadName() {
+  const [name, setName] = useState(null)
+  useEffect(() => {
+    const read = () => {
+      const gp = Array.from(navigator.getGamepads?.() || []).find(g => g && g.connected)
+      setName(gp ? gp.id.replace(/\s*\(.*$/, '') || 'Controller' : null)
+    }
+    read()
+    window.addEventListener('gamepadconnected', read)
+    window.addEventListener('gamepaddisconnected', read)
+    const t = setInterval(read, 2000)
+    return () => {
+      window.removeEventListener('gamepadconnected', read)
+      window.removeEventListener('gamepaddisconnected', read)
+      clearInterval(t)
+    }
+  }, [])
+  return name
+}
+
+function ShortcutsTab() {
+  const pad = usePadName()
+  return (
+    <div className={s.tabContent}>
+      <section className={s.section}>
+        <div className={s.sectionHeader}>
+          <IconKeyboard size={15} stroke={1.6} />
+          <span>Keyboard and mouse</span>
+        </div>
+        {KEYBOARD_GROUPS.map(g => (
+          <div key={g.title} className={s.shortcutGroup}>
+            <div className={s.shortcutGroupTitle}>{g.title}</div>
+            <div className={s.shortcutList}>
+              {g.rows.map(([keys, what]) => (
+                <div key={keys} className={s.shortcutRow}>
+                  <Keys keys={keys} />
+                  <span className={s.shortcutWhat}>{what}</span>
+                </div>
+              ))}
+            </div>
           </div>
         ))}
-      </div>
-    </section>
+      </section>
+
+      <section className={s.section}>
+        <div className={s.sectionHeader}>
+          <IconDeviceGamepad2 size={15} stroke={1.6} />
+          <span>Controller</span>
+          <span className={`${s.padStatus} ${pad ? s.padOn : ''}`}>
+            <span className={s.padDot} /> {pad ? `${pad} connected` : 'No controller seen yet. Press any button on it.'}
+          </span>
+        </div>
+        <p className={s.sectionDesc}>An Xbox controller (or any controller Windows sees as one) drives every page and Big Picture. A ring shows where you are; moving the mouse hides it.</p>
+        {PAD_GROUPS.map(g => (
+          <div key={g.title} className={s.shortcutGroup}>
+            <div className={s.shortcutGroupTitle}>{g.title}</div>
+            <div className={s.shortcutList}>
+              {g.rows.map(([keys, what]) => (
+                <div key={keys.join()} className={s.shortcutRow}>
+                  <PadKeys keys={keys} />
+                  <span className={s.shortcutWhat}>{what}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </section>
+    </div>
   )
 }
 
@@ -1654,13 +1763,13 @@ const FEATURE_GROUPS = [
     title: 'Insights & App',
     items: [
       { Icon: IconChartBar,  name: 'Statistics', go: '/activity?tab=overview',    desc: 'Playtime trends with an hourly 24h view, daily/monthly charts, and click-a-day (or hour) to focus it.' },
-      { Icon: IconBell,      name: 'In-game status (Alt+K)', go: 'tab:general', desc: 'Press Alt+K while playing to flash your live session time and achievement progress over the game.' },
-      { Icon: IconTrophy,    name: 'Achievement list (Alt+J)', go: 'tab:general', desc: 'Press Alt+J while playing to flash your progress and the rarest achievements you still have left, right over the game.' },
+      { Icon: IconBell,      name: 'In-game status (Alt+K)', go: 'tab:shortcuts', desc: 'Press Alt+K while playing to flash your live session time and achievement progress over the game.' },
+      { Icon: IconTrophy,    name: 'Achievement list (Alt+J)', go: 'tab:shortcuts', desc: 'Press Alt+J while playing to flash your progress and the rarest achievements you still have left, right over the game.' },
       { Icon: IconRocket,    name: 'Tray & startup', go: 'tab:general',desc: 'Runs quietly in the system tray and can launch with Windows.' },
-      { Icon: IconRocket,    name: 'Open KoZo from anywhere', go: 'tab:general', desc: 'Press Ctrl+Shift+K, or hold View and Menu on a controller for a second, to bring KoZo up (in Big Picture) even when it is closed to the tray.' },
+      { Icon: IconRocket,    name: 'Open KoZo from anywhere', go: 'tab:shortcuts', desc: 'Press Ctrl+Shift+K, or hold View and Menu on a controller for a second, to bring KoZo up (in Big Picture) even when it is closed to the tray.' },
       { Icon: IconDeviceTv,  name: 'Big Picture', go: '/big', desc: 'Full screen for the TV: big posters, your recent games and Up next, made for the controller.' },
       { Icon: IconBrandDiscord, name: 'Discord status', go: 'tab:accounts', desc: 'Discord shows the game you are playing, your KoZo level and your hours in it.' },
-      { Icon: IconDeviceGamepad2, name: 'Controller control', go: '/', desc: 'Drive the whole app with a controller: D-pad to move, A to select, B to go back, X for options, Y to search, LB and RB to switch tabs.' },
+      { Icon: IconDeviceGamepad2, name: 'Controller control', go: 'tab:shortcuts', desc: 'Drive the whole app with a controller: D-pad to move, A to select, B to go back, X for options, Y to search, LB and RB to switch tabs.' },
     ],
   },
 ]
@@ -1871,8 +1980,9 @@ function AboutTab() {
 // ── Main ─────────────────────────────────────────────────────────────────────
 // Grouped like the sidebar: the app itself, your games, your data, help.
 const TABS = [
-  { key: 'general',    label: 'General',    group: 'App',   Icon: IconSettings,   desc: 'Starting with Windows, graphics and keyboard shortcuts.' },
+  { key: 'general',    label: 'General',    group: 'App',   Icon: IconSettings,   desc: 'Starting with Windows and graphics.' },
   { key: 'appearance', label: 'Appearance', group: 'App',   Icon: IconPalette,    desc: 'Colors, the sidebar, sizes, animations, a background picture and what cards show.' },
+  { key: 'shortcuts',  label: 'Shortcuts',  group: 'App',   Icon: IconKeyboard,   desc: 'Every keyboard shortcut and controller button.' },
   { key: 'tracking',   label: 'Tracking',   group: 'Games', Icon: IconClock,      desc: 'How playtime is counted, and where KoZo looks for your games.' },
   { key: 'accounts',   label: 'Accounts',   group: 'Games', Icon: IconUser,       desc: 'Steam, Discord and where covers come from.' },
   { key: 'data',       label: 'Backups',    group: 'Data',  Icon: IconArchive,    desc: 'Back up and move your KoZo data and your game saves.' },
@@ -1913,6 +2023,7 @@ export default function Settings() {
           </div>
           {tab === 'features'   && <FeaturesTab setTab={setTab} />}
           {tab === 'general'    && <GeneralTab />}
+          {tab === 'shortcuts'  && <ShortcutsTab />}
           {tab === 'accounts'   && <SteamTab><DiscordSection /></SteamTab>}
           {tab === 'tracking'   && <TrackingTab />}
           {tab === 'appearance' && <AppearanceTab />}

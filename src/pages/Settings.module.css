@@ -924,4 +924,25 @@
   font-weight: 700;
 }
 .shortcutPlus { color: var(--text-muted); font-size: var(--fs-xs); }
+.shortcutGroup { display: flex; flex-direction: column; gap: var(--sp-6); }
+.shortcutGroup + .shortcutGroup { margin-top: var(--sp-8); }
+.shortcutGroupTitle { font-size: var(--fs-2xs); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+/* Controller buttons: face buttons are round in their Xbox colours. */
+.shortcutKeys kbd.padFace {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--pad) 70%, transparent);
+  background: color-mix(in srgb, var(--pad) 22%, var(--surface-3));
+  color: var(--pad);
+  font-weight: 800;
+}
+.shortcutKeys kbd.padKey { border-radius: var(--r-pill); }
+.padStatus { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); font-weight: 500; color: var(--text-muted); }
+.padDot { width: 8px; height: 8px; border-radius: 50%; background: var(--neutral-border); }
+.padOn { color: var(--success); }
+.padOn .padDot { background: var(--success); box-shadow: 0 0 8px var(--success); }
 .shortcutWhat { font-size: var(--fs-sm); color: var(--text-secondary); }
