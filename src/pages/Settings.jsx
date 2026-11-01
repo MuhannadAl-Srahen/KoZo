@@ -290,7 +290,45 @@ function GeneralTab() {
       </section>
 
       <DiscordSection />
+      <GraphicsSection />
     </div>
+  )
+}
+
+// Graphics acceleration: on by default; off fixes graphics drivers that time
+// out with KoZo open. Applies after a restart (main.js reads gpu.json).
+function GraphicsSection() {
+  const [state, setState] = useState(null)   // { acceleration, active }
+  useEffect(() => { window.kozo?.api?.app?.getGpu?.().then(r => { if (r?.ok) setState(r.data) }) }, [])
+  if (!state) return null
+  const pending = state.acceleration !== state.active
+  async function toggle(v) {
+    setState(st => ({ ...st, acceleration: v }))
+    await window.kozo?.api?.app?.setGpu?.(v)
+  }
+  return (
+    <section className={s.section}>
+      <div className={s.sectionHeader}>
+        <IconBolt size={15} stroke={1.6} />
+        <span>Graphics</span>
+      </div>
+      <div className={s.toggleList}>
+        <ToggleRow
+          label="Graphics acceleration"
+          desc="Smoother animations. If your graphics driver times out or crashes while KoZo is open (seen with some AMD cards), turn this off."
+          checked={state.acceleration}
+          onChange={toggle}
+        />
+      </div>
+      {pending && (
+        <div className={s.keyRow}>
+          <StatusLine type="info">Restart KoZo to apply this.</StatusLine>
+          <button type="button" className={s.testBtn} onClick={() => window.kozo?.api?.app?.relaunch?.()}>
+            <IconRefresh size={13} stroke={1.8} /> Restart now
+          </button>
+        </div>
+      )}
+    </section>
   )
 }
 

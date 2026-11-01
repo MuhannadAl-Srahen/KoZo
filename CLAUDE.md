@@ -107,6 +107,8 @@ src/                 renderer (React)
 ## Gotchas
 - Sessions under 60 s (`MIN_SESSION_SEC`, queries/sessions.js) are deleted with their playtime at end and in orphan recovery, and send `session:discarded` (no toast, XP or notification).
 - Launch order in `doLaunch`: `launch_file`, then `launch_uri` (Epic URI / `shell:AppsFolder\...` for Xbox), then the exe, then Steam.
+- Games start through `shellStart` (PowerShell Start-Process = ShellExecute), never a direct `spawn()`: a spawned game inherited KoZo's handles (sockets, pipes) and held them after KoZo quit.
+- Settings → General → Graphics acceleration writes `gpu.json` in userData; main.js reads it before ready and calls `app.disableHardwareAcceleration()` (the fix for graphics drivers timing out with KoZo open). Big Picture minimizes KoZo after Play.
 - Windows startup passes `--startup`; "Start minimized" applies only then (or uptime < 3 min). The task is created from XML (battery, no time limit, normal priority; HighestAvailable, falling back to LeastPrivilege). The one-time `startup_v2` upgrade runs only when packaged.
 - Pick for me = `lib/pickForMe.js` (pure) + `PickForMeModal` (Play Plan header, Big Picture).
 - Release tracking is `game_list.release_watch` (not the status); a game released over 14 days ago is never watched or announced (`releaseWatch.isLongReleased`): Track / status Upcoming set it, other statuses keep it, `gameList:untrack` clears it (deleting the row only if still Upcoming). releaseWatch selects `release_watch = 1`.

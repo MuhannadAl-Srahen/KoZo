@@ -193,6 +193,10 @@ contextBridge.exposeInMainWorld('kozo', {
       installUpdate: () => ipcRenderer.invoke('app:installUpdate'),
       whatsNew: () => ipcRenderer.invoke('app:whatsNew'),
       setFullScreen: (on) => ipcRenderer.invoke('app:setFullScreen', on),
+      minimize: () => ipcRenderer.invoke('app:minimize'),
+      getGpu: () => ipcRenderer.invoke('app:getGpu'),
+      setGpu: (on) => ipcRenderer.invoke('app:setGpu', on),
+      relaunch: () => ipcRenderer.invoke('app:relaunch'),
     },
     discord: {
       status: () => ipcRenderer.invoke('discord:status'),

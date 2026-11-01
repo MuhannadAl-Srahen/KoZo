@@ -357,6 +357,39 @@ handle('games:launch', async (id) => {
   } finally { launchInFlight.delete(id) }
 })
 
+// Start a program the way Explorer does (ShellExecute via Start-Process).
+// A direct spawn() from KoZo hands the game every inheritable handle KoZo has
+// open (sockets, pipes, files), so they stayed held for as long as the game
+// ran, even after KoZo itself quit. ShellExecute passes none. Resolves with
+// { pid } once the program has stayed up for `holdMs`, or { exitedCode } if it
+// was already gone by then (a launcher stub, or a game that died at once).
+function shellStart(file, cwd, { holdMs = 1200 } = {}) {
+  const { spawn } = require('child_process')
+  const q = (v) => String(v).replace(/'/g, "''")
+  const script =
+    `$ErrorActionPreference='Stop'; ` +
+    `try { ` +
+      `$p = Start-Process -FilePath '${q(file)}' -WorkingDirectory '${q(cwd)}' -PassThru; ` +
+      `if (${holdMs} -gt 0 -and $p) { Start-Sleep -Milliseconds ${holdMs}; ` +
+        `if ($p.HasExited) { $c = ''; try { $c = $p.ExitCode } catch {}; [Console]::Out.WriteLine('KOZO_EXITED=' + $c); exit 0 } }; ` +
+      `if ($p) { [Console]::Out.WriteLine('KOZO_PID=' + $p.Id) }; exit 0 ` +
+    `} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }`
+  return new Promise((resolve, reject) => {
+    const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', script], { windowsHide: true })
+    let out = '', err = ''
+    ps.stdout.on('data', d => { out += d })
+    ps.stderr.on('data', d => { err += d })
+    ps.once('error', reject)
+    ps.once('close', (code) => {
+      if (code !== 0) return reject(Object.assign(new Error(String(err).trim() || `Start-Process exited with ${code}`), { code: 'SHELL_START' }))
+      const exited = out.match(/KOZO_EXITED=(-?\d*)/)
+      if (exited) return resolve({ exitedCode: exited[1] === '' ? null : Number(exited[1]) })
+      const pid = out.match(/KOZO_PID=(\d+)/)?.[1]
+      resolve({ pid: pid ? Number(pid) : undefined })
+    })
+  })
+}
+
 async function doLaunch(id) {
   const game = gamesQ.getGame(id)
   if (!game) throw new Error('Game not found')
@@ -378,12 +411,8 @@ async function doLaunch(id) {
   // copy on disk expects to be started. Run from its own folder, like a
   // double-click; processWatcher picks the game up by exe_name as usual.
   if (game.launch_file && fs.existsSync(game.launch_file)) {
-    const { spawn } = require('child_process')
-    const child = spawn('cmd.exe', ['/c', 'start', '""', '/d', path.dirname(game.launch_file), game.launch_file], {
-      cwd: path.dirname(game.launch_file), detached: true, stdio: 'ignore', windowsHide: true,
-    })
-    child.on('error', (e) => logger.warn(`launcher start failed for "${game.name}": ${e.message}`))
-    child.unref()
+    // A .bat exits once it has started the game, so don't wait on it.
+    await shellStart(game.launch_file, path.dirname(game.launch_file), { holdMs: 0 })
     return { launched: 'launcher', path: game.launch_file }
   }
 
@@ -473,46 +502,28 @@ async function doLaunch(id) {
     if (game.run_as_admin) return await launchElevated()
 
     try {
-      await new Promise((resolve, reject) => {
-        const child = spawn(fullPath, [], {
-          detached: true,
-          stdio: 'ignore',
-          cwd: game.install_path,
-        })
-        let settled = false
-        child.once('spawn', () => {
-          // Don't resolve yet — an elevation-requiring exe can still spawn
-          // "successfully" via CreateProcess and then exit right back out
-          // with no window ever shown and no 'error' event. Give it a beat
-          // to prove it's actually staying up.
-          setTimeout(() => {
-            if (!settled) { settled = true; child.unref(); resolve() }
-          }, 1200)
-        })
-        child.once('exit', async (code) => {
-          if (settled) return
-          settled = true
-          // It exited within 1.2s. That's either (a) a launcher stub that
-          // handed off to the real game exe and quit — completely normal, lots
-          // of repacks do this — or (b) the game dying instantly because it
-          // couldn't write where it needed to without admin. Exit code doesn't
-          // distinguish them (a silent admin-death is usually code 0), so ask
-          // Windows whether anything named like this game is actually running.
-          const alive = await isExeRunning(game.exe_name).catch(() => null)
-          child.unref()
-          if (alive !== false) resolve()   // running, or we couldn't tell — assume fine
-          else reject(Object.assign(
-            new Error(`exited immediately (code ${code}) and no "${game.exe_name}" process is running`),
-            { code: 'EARLY_EXIT' }))
-        })
-        child.once('error', (e) => {
-          if (settled) return
-          settled = true
-          reject(e)
-        })
-      })
+      const r = await shellStart(fullPath, game.install_path)
+      if (r.exitedCode !== undefined) {
+        // It exited within 1.2s. That's either (a) a launcher stub that
+        // handed off to the real game exe and quit — completely normal, lots
+        // of repacks do this — or (b) the game dying instantly because it
+        // couldn't write where it needed to without admin. Exit code doesn't
+        // distinguish them (a silent admin-death is usually code 0), so ask
+        // Windows whether anything named like this game is actually running.
+        const alive = await isExeRunning(game.exe_name).catch(() => null)
+        if (alive === false) {
+          throw Object.assign(
+            new Error(`exited immediately (code ${r.exitedCode}) and no "${game.exe_name}" process is running`),
+            { code: 'EARLY_EXIT' })
+        }
+      }
       return { launched: 'spawn', path: fullPath }
     } catch (e) {
+      // ShellExecute shows the admin prompt itself for exes that ask for it;
+      // a dismissed prompt is the user's answer, not a reason to ask again.
+      if (/cancell?ed by the user|operation was cancell?ed/i.test(e.message)) {
+        throw new Error(`"${game.name}" needs administrator rights, and the Windows permission prompt was dismissed. Click Play again and choose Yes.`)
+      }
       // EACCES/EPERM/EARLY_EXIT all point the same way here: the exe needs
       // admin rights. Fall back to the elevated launch now, and remember it
       // so future Play clicks go straight there.
@@ -1967,6 +1978,34 @@ setTimeout(() => {
 }, 30000)
 
 // Big Picture runs the main window full screen while it's open.
+// Graphics acceleration (read at startup by main.js from gpu.json).
+function gpuFile() { return path.join(require('electron').app.getPath('userData'), 'gpu.json') }
+handle('app:getGpu', () => {
+  let saved = true
+  try { saved = JSON.parse(require('fs').readFileSync(gpuFile(), 'utf8')).acceleration !== false } catch {}
+  let active = true
+  try { active = require('electron').app.getGPUFeatureStatus().gpu_compositing?.startsWith('enabled') ?? true } catch {}
+  return { acceleration: saved, active }
+})
+handle('app:setGpu', (on) => {
+  require('fs').writeFileSync(gpuFile(), JSON.stringify({ acceleration: !!on }))
+  return !!on
+})
+handle('app:relaunch', () => {
+  const { app } = require('electron')
+  app.relaunch()
+  app.isQuitting = true
+  app.quit()
+  return true
+})
+
+// Big Picture gets out of the way once a game starts (like Steam's does).
+handle('app:minimize', () => {
+  const win = require('./main').getMainWindow()
+  if (win && !win.isDestroyed()) win.minimize()
+  return true
+})
+
 handle('app:setFullScreen', (on) => {
   const win = require('./main').getMainWindow()
   if (win && !win.isDestroyed()) win.setFullScreen(!!on)

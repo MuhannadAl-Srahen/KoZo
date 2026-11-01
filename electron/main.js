@@ -29,6 +29,15 @@ if (!gotLock) {
   process.exit(0)
 }
 
+// Settings → General → Graphics acceleration. Off is the fix for graphics
+// drivers that time out or crash with KoZo open (seen with some AMD cards and
+// a transparent overlay over a full-screen game). It must be decided before
+// the app is ready, so it lives in a tiny file next to the DB, not in the DB.
+try {
+  const gpu = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'gpu.json'), 'utf8'))
+  if (gpu?.acceleration === false) app.disableHardwareAcceleration()
+} catch {}
+
 // Suppress Chrome DevTools Autofill warnings (not implemented in Electron)
 app.commandLine.appendSwitch('disable-features', 'AutofillServerCommunication')
 
