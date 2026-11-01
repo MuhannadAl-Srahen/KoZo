@@ -75,7 +75,7 @@ src/                 renderer (React)
 | `/` | Library |
 | `/game/:id` | GameDetail |
 | `/game-list` | GameList (paged, 20 per page) |
-| `/plan` | PlayPlan: month pills, a month header (progress ring), then Playing now (wide art cards, Play / Done), the Up next queue (numbered rows; drag to reorder = `display_order` via `gameList:reorderPage({ month })`, Start moves to Playing) and Done this month. Drag between blocks sets the status (Done = finished, opens the rating); drag onto a month pill to re-plan. Data: `gameList:planBoard`, `gameList:planSummary` |
+| `/plan` | PlayPlan: month pills, a month hero (the focus game's wide art: first Playing, else Up next #1; progress, Play / Start / Done), then one Lineup poster grid in play order: Playing (glow), Up next (numbered), Done (score). Drag a poster onto another to reorder (`display_order` via `gameList:reorderPage({ month })`); landing among another state's posters sets that status (Done = finished, opens the rating). Drag onto a month pill to re-plan. Data: `gameList:planBoard`, `gameList:planSummary` |
 | `/finished` | Finished (Library + Game List finished games by year, with ratings; `games:finished`); a card opens `FinishedGameModal` (stats, rating, game page, Play again) |
 | `/upcoming` | Upcoming = `components/SteamCalendar.jsx` only (data from `steam:comingSoon`). Layouts Steam (default, day columns from today), Strip, Week, Month; TBA and Tracked shelves; "Picked for you" keeps 4 per day scored by taste (`steam:tasteProfile` + GetItems tag ids) and popularity (`wishRank`/`popRank`) |
 | `/activity` | Activity: `?tab=overview` (Statistics), `sessions` (Sessions), `achievements` (AchievementsHub). `/statistics`, `/sessions`, `/achievements` redirect here |
