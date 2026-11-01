@@ -139,6 +139,23 @@ function runMigrations() {
       }
     } catch (_) {}
 
+    // Games started from a store launcher (Epic URI, Xbox shell:AppsFolder).
+    try { db.exec('ALTER TABLE games ADD COLUMN launch_uri TEXT') } catch (_) {}
+    // One-time: sessions under a minute aren't kept any more (see
+    // MIN_SESSION_SEC in queries/sessions.js); drop the old ones with their time.
+    try {
+      const done = db.prepare("SELECT value FROM settings WHERE key = 'cleaned_short_sessions_v1'").get()
+      if (!done) {
+        db.transaction(() => {
+          const short = db.prepare('SELECT id, game_id, COALESCE(duration_seconds, 0) AS d FROM sessions WHERE ended_at IS NOT NULL AND COALESCE(duration_seconds, 0) < 60').all()
+          const sub = db.prepare('UPDATE games SET total_playtime_seconds = MAX(0, total_playtime_seconds - ?) WHERE id = ?')
+          const del = db.prepare('DELETE FROM sessions WHERE id = ?')
+          for (const r of short) { sub.run(r.d, r.game_id); del.run(r.id) }
+          db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('cleaned_short_sessions_v1', '1')").run()
+        })()
+      }
+    } catch (_) {}
+
     relaxUnlockedAtNotNull()
     migrateCategoriesToCustomLists()
     dedupeGameList()
