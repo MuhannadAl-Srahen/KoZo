@@ -14,7 +14,8 @@
     "geticon": "node scripts/gen-icon.js",
     "build": "node scripts/gen-icon.js && vite build && electron-builder",
     "rebuild": "cd node_modules/better-sqlite3 && npx prebuild-install --runtime electron --target 41.7.1 --arch x64 --tag-prefix v",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "electron-builder install-app-deps",
+    "test": "node scripts/test-parsers.js && vite build && electron scripts/smoke-test.js"
   },
   "build": {
     "appId": "com.kozo.gametracker",

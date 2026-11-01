@@ -7,7 +7,8 @@ Local-first Windows game tracker: Electron 41 (main, CommonJS) + React 19 / Vite
 - `npm run rebuild`: rebuild better-sqlite3 for Electron 41.7.1. Run it after `npm install` or the DB won't load.
 - `npm run build`: `scripts/gen-icon.js`, then `vite build` (into `renderer-dist/`), then electron-builder (into `release/`).
 - The builder config is `package.json` `"build"` (the only one; it sets the NSIS desktop shortcut and the GitHub publish target that electron-updater reads).
-- `node scripts/test-parsers.js`: unit checks for the crack and achievement file parsers.
+- `node scripts/test-parsers.js`: unit checks for the crack and achievement file parsers, the Epic/GOG/Xbox parsers, Pick for me scoring and Discord (against a fake pipe).
+- `npm test` = parsers + `vite build` + `electron scripts/smoke-test.js`: the real app on a throwaway profile (own userData, `KOZO_RENDERER=dist` loads `renderer-dist`): every page, right-click menus, narrow width, controller across page changes, Pick for me, Big Picture. CI runs it before publishing.
 - CI: `.github/workflows/release.yml`. Runs on `v*` tags, using bun on windows-latest, and publishes a GitHub release that electron-updater reads.
 
 ## Layout
@@ -62,6 +63,8 @@ src/                 renderer (React)
 | releaseWatch | Refreshes tracked upcoming games' Steam dates (delays), then flags released ones: overlay toast once, plus the `unseen_releases` setting behind the "Now out" panel (`ReleasedPanel`) and the Upcoming sidebar badge. Runs at startup, every 6h, and when the main window is shown. |
 | statusFlash (Alt+K), achievementListFlash (Alt+J) | Overlay info panels. |
 | controllerInput | PowerShell XInput probe, so controller play doesn't count as AFK. AFK (`idle_pause_min`, default 5) is applied in `processWatcher.heartbeatSession`: the tick that first flags AFK subtracts the whole quiet span since the last input, not only the part past the threshold. |
+| discordPresence | Discord Rich Presence over the local pipe (no package), settings `discord_presence` + `discord_client_id` (the user's own Discord app). Driven by `processWatcher.onChange`; connects only while a session is active, retries at most once a minute. |
+| launcherImport | Reads Epic manifests, the GOG registry (or `goggame-*.info`) and Xbox packages (`powershell.exe` Get-AppxPackage + MicrosoftGame.config). `launchers:scan`; on launch an idle background pass broadcasts `launchers:found` for the Library strip (`launcher_seen` = reviewed keys). |
 | controllerWake | Always-on PowerShell XInput loop (120 ms): View + Menu held 1s calls `showFromAnywhere({ gamepad: true })` in main.js (also bound to Ctrl+Shift+K), which brings KoZo to front and sends `gamepad:wake`. |
 | appUpdater | electron-updater: broadcasts `app:update` state for `UpdateBanner`, and `app:whatsNew` shows release notes once after an update. |
 | trackingSelfTest, notifications | Settings → "Test achievement tracking"; notifications is a no-op. |
@@ -77,7 +80,8 @@ src/                 renderer (React)
 | `/upcoming` | Upcoming = `components/SteamCalendar.jsx` only (data from `steam:comingSoon`). Layouts Steam (default, day columns from today), Strip, Week, Month; TBA and Tracked shelves; "Picked for you" keeps 4 per day scored by taste (`steam:tasteProfile` + GetItems tag ids) and popularity (`wishRank`/`popRank`) |
 | `/activity` | Activity: `?tab=overview` (Statistics), `sessions` (Sessions), `achievements` (AchievementsHub). `/statistics`, `/sessions`, `/achievements` redirect here |
 | `/profile` | Profile |
-| `/settings` | Settings (tabs) |
+| `/settings` | Settings (tabs); every setting saves as it changes (no Save buttons) |
+| `/big` | BigPicture: full screen, no sidebar (`Shell` in App.jsx), rows Continue playing / Up next (+ Pick for me) / All games; hero follows `data-gpfocus`. Sidebar, tray and View + Menu (`gamepad:wake` `{ bigPicture }`) open it |
 
 - Pages keep **module-level caches** (`libraryCache`, `pageCache`, `profileCache`, `*TabCache`) so a revisit paints instantly, then refetch. Invalidate them when you change data.
 - Live updates come from `window.kozo.events.on*` inside `useEffect`. Always return the unsubscribe.
@@ -101,6 +105,10 @@ src/                 renderer (React)
 **Styling:** CSS Modules next to each component. Layout composes from `styles/page.module.css`, controls from `styles/controls.module.css`, surfaces from `styles/surface.module.css`. All tokens live in `styles/variables.css` (`--a` accent, `--status-*`, `--rarity-*`, `--sp-*`, `--r-*`, `--fs-*`, `--z-*`). For accent-derived colours use `color-mix(in srgb, var(--a) N%, transparent)`; never append hex alpha to a `var()`. No UI framework; icons come from `@tabler/icons-react`.
 
 ## Gotchas
+- Sessions under 60 s (`MIN_SESSION_SEC`, queries/sessions.js) are deleted with their playtime at end and in orphan recovery, and send `session:discarded` (no toast, XP or notification).
+- Launch order in `doLaunch`: `launch_file`, then `launch_uri` (Epic URI / `shell:AppsFolder\...` for Xbox), then the exe, then Steam.
+- Windows startup passes `--startup`; "Start minimized" applies only then (or uptime < 3 min). The task is created from XML (battery, no time limit, normal priority; HighestAvailable, falling back to LeastPrivilege). The one-time `startup_v2` upgrade runs only when packaged.
+- Pick for me = `lib/pickForMe.js` (pure) + `PickForMeModal` (Play Plan header, Big Picture).
 - Release tracking is `game_list.release_watch` (not the status); a game released over 14 days ago is never watched or announced (`releaseWatch.isLongReleased`): Track / status Upcoming set it, other statuses keep it, `gameList:untrack` clears it (deleting the row only if still Upcoming). releaseWatch selects `release_watch = 1`.
 - Marking a game Finished (statusSync `setGameStatus` or `gameList:update`) broadcasts `game:finished`; App.jsx opens `RateGameModal` (1 to 10, `gameList:rate`, stored on the Game List row).
 - Ctrl + mouse wheel depends on the pointer: over a card grid (any element with the `useCardZoom` style, which always sets `--zoom-grid`) it resizes the cards; anywhere else, or over `[data-zoom-ignore]`, it changes the UI scale (`CtrlWheelZoom` in App.jsx, 80 to 150% in 5% steps). Ratings use `ui/RatingPicker` (fixed heights, hover from pointer x) in RateGameModal and FinishedGameModal.

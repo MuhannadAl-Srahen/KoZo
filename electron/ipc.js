@@ -1953,6 +1953,9 @@ handle('app:setStartup', (enable) => {
 setTimeout(() => {
   require('./services/processWatcher').runWhenIdle('startupUpgrade', () => {
     try {
+      // Only the installed app: a dev or smoke-test run must never point
+      // Windows startup at electron.exe.
+      if (!require('electron').app.isPackaged) return
       if (settingsQ.getSetting('startup_v2') === '1') return
       if (hasScheduledTask() || findRunEntries().length) {
         const r = registerStartup()
