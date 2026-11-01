@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import {
   IconFlag, IconStarFilled, IconClock, IconTrophy, IconPlayerPlayFilled, IconExternalLink, IconInfoCircle,
   IconBrandSteam, IconListCheck, IconDeviceGamepad2, IconPlayerPause, IconClockHour4, IconX,
-  IconCalendarStats, IconMedal,
 } from '@tabler/icons-react'
 import { fileUrl, formatPlaytime, formatDate } from '../lib/utils'
 import GeneratedCover from '../components/GeneratedCover'
@@ -35,7 +34,7 @@ function coverOf(g) {
 // badge (click it to rate), a medal for 100% achievements, then three fixed
 // cells (playtime, achievements, finish date) and the achievement bar along
 // the bottom edge. Every cell is always there, so every card is the same size.
-function FinishedCard({ g, onRate, onOpen, onContextMenu, onPlay }) {
+function FinishedCard({ g, onRate, onOpen, onContextMenu }) {
   const [failed, setFailed] = useState(false)
   const src = coverOf(g)
   const score = g.rating ? Math.round(g.rating) : null
@@ -57,11 +56,6 @@ function FinishedCard({ g, onRate, onOpen, onContextMenu, onPlay }) {
           </span>
         </span>
       </button>
-      {g.game_id && (
-        <button type="button" className={s.playAgain} onClick={onPlay} title="Play again">
-          <IconPlayerPlayFilled size={14} /> Play again
-        </button>
-      )}
       <button
         className={`${s.score} ${score ? '' : s.scoreEmpty}`}
         style={score ? { '--score': ratingColor(score) } : undefined}
@@ -82,75 +76,6 @@ function FinishedCard({ g, onRate, onOpen, onContextMenu, onPlay }) {
       </div>
       <span className={s.achBar} aria-hidden="true"><span style={{ width: `${achPct}%` }} /></span>
     </div>
-  )
-}
-
-// The top of the page: what you've finished, at a glance.
-function Summary({ games }) {
-  const year = new Date().getFullYear()
-  const rated = games.filter(g => g.rating)
-  const avg = rated.length ? rated.reduce((a, g) => a + g.rating, 0) / rated.length : null
-  const hours = games.reduce((a, g) => a + (g.total_playtime_seconds || 0), 0)
-  const tiles = [
-    { Icon: IconFlag,          value: games.length, label: 'Games finished' },
-    { Icon: IconCalendarStats, value: games.filter(g => g.finished_at && new Date(g.finished_at).getFullYear() === year).length, label: `In ${year}` },
-    { Icon: IconStarFilled,    value: avg ? avg.toFixed(1) : '·', label: 'Average score', color: avg ? ratingColor(Math.round(avg)) : null },
-    { Icon: IconClock,         value: hours > 0 ? formatPlaytime(hours) : '·', label: 'Time to the credits' },
-    { Icon: IconMedal,         value: games.filter(g => g.ach_total > 0 && g.ach_unlocked >= g.ach_total).length, label: '100% completed' },
-  ]
-  return (
-    <div className={s.summary}>
-      {tiles.map(t => (
-        <div key={t.label} className={s.sumTile} style={t.color ? { '--tile': t.color } : undefined}>
-          <t.Icon size={18} stroke={1.7} className={s.sumIcon} />
-          <span className={s.sumValue}>{t.value}</span>
-          <span className={s.sumLabel}>{t.label}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-// The most recent finish, big: wide art, score, the run in numbers.
-function Spotlight({ g, onOpen, onPlay, onRate, onContextMenu }) {
-  const [hero, setHero] = useState(g.hero_local_path ? fileUrl(g.hero_local_path) : null)
-  useEffect(() => {
-    setHero(g.hero_local_path ? fileUrl(g.hero_local_path) : null)
-    if (g.hero_local_path || !g.steam_app_id) return
-    let alive = true
-    window.kozo?.api?.steam?.appAssets?.([g.steam_app_id]).then(res => {
-      const a = res?.ok ? res.data?.[g.steam_app_id] : null
-      if (alive && (a?.hero || a?.header)) setHero(a.hero || a.header)
-    }).catch(() => {})
-    return () => { alive = false }
-  }, [g.game_id, g.list_id])
-  const cover = coverOf(g)
-  const score = g.rating ? Math.round(g.rating) : null
-  return (
-    <section className={s.spot} data-gpnav="" onClick={onOpen} onContextMenu={(e) => { e.preventDefault(); onContextMenu(e) }}>
-      {(hero || cover) && <img className={s.spotArt} src={hero || cover} alt="" />}
-      <div className={s.spotShade} />
-      <div className={s.spotBody}>
-        <div className={s.spotCover}>{cover ? <img src={cover} alt="" /> : <GeneratedCover name={g.name} compact />}</div>
-        <div className={s.spotText}>
-          <span className={s.spotKicker}><IconFlag size={12} stroke={2} /> Latest finish{g.finished_at ? `, ${formatDate(g.finished_at)}` : ''}</span>
-          <h2 className={s.spotName}>{g.name}</h2>
-          <div className={s.spotStats}>
-            {g.total_playtime_seconds > 0 && <span><IconClock size={14} /> {formatPlaytime(g.total_playtime_seconds)}</span>}
-            {g.session_count > 0 && <span>{g.session_count} session{g.session_count === 1 ? '' : 's'}</span>}
-            {g.ach_total > 0 && <span><IconTrophy size={14} /> {g.ach_unlocked}/{g.ach_total}</span>}
-          </div>
-          <div className={s.spotActions} onClick={e => e.stopPropagation()}>
-            <button type="button" className={s.spotRate} style={score ? { '--score': ratingColor(score) } : undefined} onClick={onRate}>
-              <IconStarFilled size={14} /> {score ? <><strong>{score}</strong>/10</> : 'Rate it'}
-            </button>
-            {g.game_id && (
-              <button type="button" className={s.spotPlay} onClick={onPlay}><IconPlayerPlayFilled size={14} /> Play again</button>
-            )}
-          </div>
-        </div>
-      </div>
-    </section>
   )
 }
 
@@ -190,8 +115,6 @@ export default function Finished() {
     return [...byYear.entries()].map(([key, gs]) => ({ key, label: key, games: gs }))
   }, [games, sort])
 
-  const latest = useMemo(() => [...(games || [])].filter(g => g.finished_at)
-    .sort((a, b) => new Date(b.finished_at) - new Date(a.finished_at))[0] || null, [games])
   const rated = (games || []).filter(g => g.rating)
   const avg = rated.length ? (rated.reduce((a, g) => a + g.rating, 0) / rated.length).toFixed(1) : null
 
@@ -250,36 +173,20 @@ export default function Finished() {
           <EmptyState Icon={IconFlag} title="No finished games yet"
             desc="Mark a game as Finished in the Library or the Game List and it shows up here with your rating." />
         )}
-        {games && games.length > 0 && (
-          <>
-            <Summary games={games} />
-            {latest && <Spotlight g={latest} onOpen={() => setSummary(latest)} onPlay={() => play(latest)} onRate={() => setRating(rateOf(latest))} onContextMenu={(e) => setCtx({ x: e.clientX, y: e.clientY, g: latest })} />}
-          </>
-        )}
         {groups.map(gr => (
           <section key={gr.key} className={s.section}>
-            {gr.label && (() => {
-              const sec = gr.games.reduce((a, g) => a + (g.total_playtime_seconds || 0), 0)
-              const r = gr.games.filter(g => g.rating)
-              const ya = r.length ? (r.reduce((a, g) => a + g.rating, 0) / r.length).toFixed(1) : null
-              return (
-                <div className={s.sectionHead}>
-                  <span className={s.sectionTitle}>{gr.label}</span>
-                  <span className={s.sectionChips}>
-                    <span>{gr.games.length} game{gr.games.length === 1 ? '' : 's'}</span>
-                    {sec > 0 && <span><IconClock size={12} /> {formatPlaytime(sec)}</span>}
-                    {ya && <span><IconStarFilled size={12} style={{ color: '#fbbf24' }} /> {ya} average</span>}
-                  </span>
-                </div>
-              )
-            })()}
+            {gr.label && (
+              <div className={s.sectionHead}>
+                <span className={s.sectionTitle}>{gr.label}</span>
+                <span className={s.sectionCount}>{gr.games.length}</span>
+              </div>
+            )}
             <div className={s.grid} style={zoomStyle}>
               {gr.games.map(g => (
                 <FinishedCard
                   key={(g.game_id ? 'g' : 'l') + (g.game_id || g.list_id)}
                   g={g}
                   onOpen={() => setSummary(g)}
-                  onPlay={() => play(g)}
                   onRate={() => setRating(rateOf(g))}
                   onContextMenu={(e) => setCtx({ x: e.clientX, y: e.clientY, g })}
                 />
