@@ -1,0 +1,74 @@
+/* ── Animations: Settings → Appearance → Animations ──────────────────────
+   html[data-motion] is 'heavy', 'soft' (default) or 'off' (AppearanceContext).
+   Entrances use fill-mode backwards, so once they end no transform is left on
+   the element (a lingering transform would trap position: fixed children).
+   html[data-inactive] (global.css) still parks every animation while KoZo is
+   hidden or unfocused, and the OS "reduce motion" setting still wins. */
+
+@keyframes kzPageIn   { from { opacity: 0; transform: translateY(var(--kz-rise, 6px)); } }
+@keyframes kzPageInHv { from { opacity: 0; transform: translateY(18px) scale(0.985); filter: blur(4px); } }
+@keyframes kzRise     { from { opacity: 0; transform: translateY(14px) scale(0.96); } }
+@keyframes kzFade     { from { opacity: 0; } }
+@keyframes kzPop      { from { opacity: 0; transform: scale(0.92) translateY(10px); } }
+@keyframes kzSlideL   { from { opacity: 0; transform: translateX(-14px); } }
+
+/* Page changes: the new page fades (soft) or rises into place (heavy). */
+html[data-motion="soft"] .app-main > :not(.no-page-anim) {
+  animation: kzPageIn 0.22s var(--ease-out) backwards;
+}
+html[data-motion="heavy"] .app-main > :not(.no-page-anim) {
+  animation: kzPageInHv 0.42s var(--ease-out) backwards;
+}
+
+/* Heavy: cards and rows rise in one after another when a page or list shows. */
+html[data-motion="heavy"] .app-main [data-gpnav] {
+  animation: kzRise 0.45s var(--ease-out) backwards;
+}
+html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(2)  { animation-delay: 30ms; }
+html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(3)  { animation-delay: 60ms; }
+html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(4)  { animation-delay: 90ms; }
+html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(5)  { animation-delay: 120ms; }
+html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(6)  { animation-delay: 150ms; }
+html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(7)  { animation-delay: 180ms; }
+html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(8)  { animation-delay: 210ms; }
+html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(9)  { animation-delay: 240ms; }
+html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(10) { animation-delay: 270ms; }
+html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(11) { animation-delay: 300ms; }
+html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(n+12) { animation-delay: 330ms; }
+
+/* Heavy: hover lifts and springs. */
+html[data-motion="heavy"] .app-main [data-gpnav] {
+  transition: transform 0.28s var(--ease-spring), box-shadow 0.28s ease, border-color 0.2s ease, background 0.2s ease;
+}
+html[data-motion="heavy"] .app-main [data-gpnav]:hover { transform: translateY(-4px); }
+html[data-motion="heavy"] .app-main [data-gpnav]:active { transform: translateY(-1px) scale(0.985); }
+
+/* Heavy: dialogs and menus pop in; sidebar items slide in on launch. */
+html[data-motion="heavy"] [role="dialog"] { animation: kzPop 0.34s var(--ease-spring) backwards; }
+html[data-motion="heavy"] [role="menu"]   { animation: kzPop 0.2s var(--ease-out) backwards; }
+html[data-motion="heavy"] .app-layout > aside nav a { animation: kzSlideL 0.4s var(--ease-out) backwards; }
+html[data-motion="heavy"] .app-layout > aside nav a:nth-of-type(2) { animation-delay: 40ms; }
+html[data-motion="heavy"] .app-layout > aside nav a:nth-of-type(3) { animation-delay: 80ms; }
+html[data-motion="heavy"] .app-layout > aside nav a:nth-of-type(4) { animation-delay: 120ms; }
+html[data-motion="heavy"] .app-layout > aside nav a:nth-of-type(5) { animation-delay: 160ms; }
+html[data-motion="heavy"] .app-layout > aside nav a:nth-of-type(n+6) { animation-delay: 200ms; }
+
+/* Soft: menus fade in. */
+html[data-motion="soft"] [role="menu"] { animation: kzFade 0.14s ease backwards; }
+
+/* Off: nothing moves. Spinners keep turning (slowly) so progress still shows. */
+html[data-motion="off"] *,
+html[data-motion="off"] *::before,
+html[data-motion="off"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  animation-delay: 0s !important;
+  transition-duration: 0.01ms !important;
+  transition-delay: 0s !important;
+  scroll-behavior: auto !important;
+}
+html[data-motion="off"] .spin {
+  animation-duration: 1.6s !important;
+  animation-iteration-count: infinite !important;
+}
+html[data-motion="off"] .confetti { display: none !important; }

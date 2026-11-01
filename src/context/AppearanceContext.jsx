@@ -4,7 +4,8 @@ import React, { createContext, useContext, useEffect, useState } from 'react'
 // what game cards show, sidebar order and start page, and a background
 // picture. Stored as one JSON setting (`appearance`) and applied to <html> as
 // data attributes the stylesheets react to (styles/variables.css,
-// GameCard.module.css, GameList.module.css), plus the preload zoom factor.
+// GameCard.module.css, GameList.module.css, motion.css), plus the preload
+// zoom factor.
 
 export const NAV_PATHS = ['/', '/game-list', '/plan', '/finished', '/upcoming', '/activity']
 
@@ -16,6 +17,7 @@ export const DEFAULT_APPEARANCE = {
   nav: NAV_PATHS.map(path => ({ path, hidden: false })),
   startPage: '/',
   sidebar: 'full',                // 'full' | 'rail' (icons only; the button by the logo switches)
+  motion: 'soft',                 // 'heavy' | 'soft' | 'off' (styles/motion.css)
   bg: { mode: 'off', image: null, gameId: null, gameArt: null, blur: 8, dim: 55 },
 }
 
@@ -51,6 +53,7 @@ function apply(p) {
     else el.dataset[attr] = ''
   }
   el.dataset.sidebar = p.sidebar
+  el.dataset.motion = ['heavy', 'soft', 'off'].includes(p.motion) ? p.motion : 'soft'
   window.kozo?.ui?.setZoom?.(p.scale)
 }
 

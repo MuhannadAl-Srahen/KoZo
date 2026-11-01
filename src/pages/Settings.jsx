@@ -4,7 +4,7 @@ import {
   IconKey, IconCheck, IconX, IconLoader2, IconClock, IconEye, IconEyeOff, IconLayoutGrid,
   IconUser, IconRefresh, IconExternalLink, IconAlertTriangle,
   IconPalette, IconInfoCircle, IconRocket, IconDeviceGamepad2,
-  IconBrandSteam, IconBrandDiscord, IconDeviceTv, IconKeyboard, IconSettings,
+  IconBrandSteam, IconBrandDiscord, IconDeviceTv, IconKeyboard, IconSettings, IconSparkles,
   IconSearch, IconPlus, IconMinus, IconFolder, IconTrophy,
   IconDownload, IconUpload, IconDeviceFloppy, IconArchive, IconCloud,
   IconHistory, IconList, IconChartBar, IconBell, IconBolt,
@@ -1240,6 +1240,22 @@ function AppearanceCustomize() {
 
       <section className={s.section}>
         <div className={s.sectionHeader}>
+          <IconSparkles size={15} stroke={1.6} />
+          <span>Animations</span>
+        </div>
+        <p className={s.sectionDesc}>
+          {prefs.motion === 'heavy' ? 'Pages rise in, cards arrive one after another, hovers lift and dialogs pop. Big Picture too.'
+            : prefs.motion === 'off' ? 'Nothing moves. Pages and cards show at once.'
+            : 'Quick fades and small movements. Big Picture keeps a gentle cross fade.'}
+        </p>
+        <div className={s.segList}>
+          <Segmented label="Motion" value={prefs.motion || 'soft'} onChange={v => setPrefs({ motion: v })}
+            options={[{ value: 'heavy', label: 'Heavy' }, { value: 'soft', label: 'Soft' }, { value: 'off', label: 'Off' }]} />
+        </div>
+      </section>
+
+      <section className={s.section}>
+        <div className={s.sectionHeader}>
           <IconPhoto size={15} stroke={1.6} />
           <span>Background</span>
         </div>
@@ -1856,7 +1872,7 @@ function AboutTab() {
 // Grouped like the sidebar: the app itself, your games, your data, help.
 const TABS = [
   { key: 'general',    label: 'General',    group: 'App',   Icon: IconSettings,   desc: 'Starting with Windows, graphics and keyboard shortcuts.' },
-  { key: 'appearance', label: 'Appearance', group: 'App',   Icon: IconPalette,    desc: 'Colors, the sidebar, sizes, a background picture and what cards show.' },
+  { key: 'appearance', label: 'Appearance', group: 'App',   Icon: IconPalette,    desc: 'Colors, the sidebar, sizes, animations, a background picture and what cards show.' },
   { key: 'tracking',   label: 'Tracking',   group: 'Games', Icon: IconClock,      desc: 'How playtime is counted, and where KoZo looks for your games.' },
   { key: 'accounts',   label: 'Accounts',   group: 'Games', Icon: IconUser,       desc: 'Steam, Discord and where covers come from.' },
   { key: 'data',       label: 'Backups',    group: 'Data',  Icon: IconArchive,    desc: 'Back up and move your KoZo data and your game saves.' },

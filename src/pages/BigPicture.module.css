@@ -239,3 +239,35 @@
   .heroName { font-size: clamp(26px, 2.8vw, 48px); }
   .top { padding-top: 10px; padding-bottom: 6px; }
 }
+
+/* ── Animations (Settings → Appearance → Animations, motion.css) ───────── */
+/* Soft: the hero text eases in when the focus moves; the art cross fades. */
+@keyframes bpInfoIn { from { opacity: 0; transform: translateY(8px); } }
+@keyframes bpInfoInHv { from { opacity: 0; transform: translateX(-28px); filter: blur(6px); } }
+@keyframes bpCoverIn { from { opacity: 0; transform: scale(0.9) rotate(-2deg); } }
+@keyframes bpArtDrift { from { transform: scale(1.02); } to { transform: scale(1.1) translateX(-1.5%); } }
+@keyframes bpRowIn { from { opacity: 0; transform: translateX(60px); } }
+@keyframes bpEnter { from { opacity: 0; transform: scale(1.04); } }
+:global(html[data-motion="soft"]) .heroRow { animation: bpInfoIn 0.28s var(--ease-out) backwards; }
+:global(html[data-motion="soft"]) .card[data-gpfocus] { transform: scale(1.05); }
+
+/* Heavy: the page zooms in, rows slide in one after another, the art drifts
+   slowly, the hero slides in with its cover, and the focused poster springs. */
+:global(html[data-motion="heavy"]) .root { animation: bpEnter 0.5s var(--ease-out) backwards; }
+:global(html[data-motion="heavy"]) .backdropImg {
+  animation: bpFade 0.7s ease, bpArtDrift 24s ease-in-out infinite alternate;
+}
+:global(html[data-motion="heavy"]) .heroInfo { animation: bpInfoInHv 0.45s var(--ease-out) backwards; }
+:global(html[data-motion="heavy"]) .heroCover { animation: bpCoverIn 0.5s var(--ease-spring) backwards; }
+:global(html[data-motion="heavy"]) .row { animation: bpRowIn 0.6s var(--ease-out) backwards; }
+:global(html[data-motion="heavy"]) .row:nth-child(2) { animation-delay: 0.1s; }
+:global(html[data-motion="heavy"]) .row:nth-child(3) { animation-delay: 0.2s; }
+:global(html[data-motion="heavy"]) .card { transition: transform 0.35s var(--ease-spring), box-shadow 0.25s ease; }
+:global(html[data-motion="heavy"]) .card[data-gpfocus] {
+  transform: scale(1.07);
+  box-shadow: 0 0 0 3px var(--a), 0 0 34px color-mix(in srgb, var(--a) 45%, transparent), 0 22px 50px rgba(0, 0, 0, 0.6);
+}
+:global(html[data-motion="heavy"]) .playBtn { transition: transform 0.25s var(--ease-spring), filter 0.2s ease; }
+:global(html[data-motion="heavy"]) .playBtn:hover, :global(html[data-motion="heavy"]) .playBtn[data-gpfocus] { transform: scale(1.06); }
+/* Off: the backdrop just swaps. */
+:global(html[data-motion="off"]) .backdropImg { animation: none; }

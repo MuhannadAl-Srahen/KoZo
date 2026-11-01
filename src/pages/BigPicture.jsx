@@ -228,7 +228,7 @@ export default function BigPicture() {
 
       <section className={s.hero}>
         {focus ? (
-          <div className={s.heroRow}>
+          <div key={focus.id} className={s.heroRow}>
             <div className={s.heroCover}><Poster g={focus} /></div>
             <div className={s.heroInfo}>
               {focusLive && <span className={s.livePill}><span className={s.liveDot} /> Playing now{liveMin ? `, ${liveMin} min` : ''}</span>}
