@@ -64,7 +64,7 @@ export default function PickForMeModal({ onClose, onChanged }) {
     timers.current = []
     setMoved(false)
     const chosen = pickWeighted(sc, Math.random, avoid)
-    const quick = document.documentElement.hasAttribute('data-inactive') || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    const quick = document.documentElement.hasAttribute('data-inactive') || document.documentElement.dataset.motion === 'off'
     if (quick || sc.length < 2) { setShuffle(null); setPick(chosen); return }
     setPick(null)
     // Flash a few random covers, slowing down, then land on the pick.

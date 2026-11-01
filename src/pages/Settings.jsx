@@ -1244,9 +1244,9 @@ function AppearanceCustomize() {
           <span>Animations</span>
         </div>
         <p className={s.sectionDesc}>
-          {prefs.motion === 'heavy' ? 'Pages rise in, cards arrive one after another, hovers lift and dialogs pop. Big Picture too.'
+          {prefs.motion === 'heavy' ? 'Pages rise in, cards spring in one after another and lift with a glow, dialogs pop. Big Picture zooms, slides and drifts.'
             : prefs.motion === 'off' ? 'Nothing moves. Pages and cards show at once.'
-            : 'Quick fades and small movements. Big Picture keeps a gentle cross fade.'}
+            : 'Pages fade in, cards rise in and lift when you point at them, buttons press in. Big Picture eases between games.'}
         </p>
         <div className={s.segList}>
           <Segmented label="Motion" value={prefs.motion || 'soft'} onChange={v => setPrefs({ motion: v })}

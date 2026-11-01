@@ -172,25 +172,29 @@ html[data-wallpaper] aside { --sidebar-bg: color-mix(in srgb, var(--surface-1) 7
 .app-wallpaper-dim { position: absolute; inset: 0; background: var(--bg); }
 
 /* ── Reduced motion ──────────────────────────────────────────────────── */
+/* Only where Settings → Appearance → Animations isn't applied (the overlay and
+   tray windows): in the main window html[data-motion] decides, and "Off"
+   there does the same as this (motion.css). Windows "Show animations" off
+   used to switch every animation and hover transition off with no way back. */
 /* !important is load-bearing, not stylistic: a dozen spinners are inline
    `style={{ animation: … }}`, and only an important declaration outranks an
    inline style. Every animation's final keyframe is a sensible resting state
    (live dots land at opacity 1, entrances land at their end position), so
    collapsing the duration leaves the UI correct rather than half-drawn. */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  html:not([data-motion]) *, html:not([data-motion]) *::before, html:not([data-motion]) *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
   /* A spinner communicates progress — slow it, never freeze it. */
-  .spin {
+  html:not([data-motion]) .spin {
     animation-duration: 1.6s !important;
     animation-iteration-count: infinite !important;
   }
   /* Skip the confetti nodes outright rather than snapping them. */
-  .confetti { display: none !important; }
+  html:not([data-motion]) .confetti { display: none !important; }
 }
 
 /* KoZo is hidden or behind another window: stop every animation (see App.jsx).

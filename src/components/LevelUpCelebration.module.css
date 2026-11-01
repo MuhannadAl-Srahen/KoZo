@@ -199,8 +199,6 @@
 
 /* Respect the OS "reduce motion" setting — the celebration still appears, it
    just doesn't fly around. */
-@media (prefers-reduced-motion: reduce) {
-  .card, .backdrop, .ringFill { animation: none; }
-  .ringFill { stroke-dashoffset: 0; }
-  .confetti { display: none; }
-}
+:global(html[data-motion="off"]) .card, :global(html[data-motion="off"]) .backdrop, :global(html[data-motion="off"]) .ringFill { animation: none; }
+:global(html[data-motion="off"]) .ringFill { stroke-dashoffset: 0; }
+:global(html[data-motion="off"]) .confetti { display: none; }

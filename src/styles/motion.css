@@ -1,62 +1,81 @@
 /* ── Animations: Settings → Appearance → Animations ──────────────────────
    html[data-motion] is 'heavy', 'soft' (default) or 'off' (AppearanceContext).
+   This setting decides on its own: Windows "Show animations" no longer turns
+   KoZo's motion off (global.css applies it only where data-motion isn't set).
    Entrances use fill-mode backwards, so once they end no transform is left on
    the element (a lingering transform would trap position: fixed children).
    html[data-inactive] (global.css) still parks every animation while KoZo is
-   hidden or unfocused, and the OS "reduce motion" setting still wins. */
+   hidden or unfocused. */
 
-@keyframes kzPageIn   { from { opacity: 0; transform: translateY(var(--kz-rise, 6px)); } }
-@keyframes kzPageInHv { from { opacity: 0; transform: translateY(18px) scale(0.985); filter: blur(4px); } }
-@keyframes kzRise     { from { opacity: 0; transform: translateY(14px) scale(0.96); } }
+@keyframes kzPageIn   { from { opacity: 0; transform: translateY(10px); } }
+@keyframes kzPageInHv { from { opacity: 0; transform: translateY(26px) scale(0.98); filter: blur(6px); } }
+@keyframes kzRiseSoft { from { opacity: 0; transform: translateY(10px); } }
+@keyframes kzRise     { from { opacity: 0; transform: translateY(26px) scale(0.92); } }
 @keyframes kzFade     { from { opacity: 0; } }
-@keyframes kzPop      { from { opacity: 0; transform: scale(0.92) translateY(10px); } }
-@keyframes kzSlideL   { from { opacity: 0; transform: translateX(-14px); } }
+@keyframes kzPopSoft  { from { opacity: 0; transform: scale(0.97); } }
+@keyframes kzPop      { from { opacity: 0; transform: scale(0.88) translateY(14px); } }
+@keyframes kzSlideL   { from { opacity: 0; transform: translateX(-18px); } }
 
-/* Page changes: the new page fades (soft) or rises into place (heavy). */
-html[data-motion="soft"] .app-main > :not(.no-page-anim) {
-  animation: kzPageIn 0.22s var(--ease-out) backwards;
-}
-html[data-motion="heavy"] .app-main > :not(.no-page-anim) {
-  animation: kzPageInHv 0.42s var(--ease-out) backwards;
-}
+/* ── Page changes ── */
+html[data-motion="soft"] .app-main > * { animation: kzPageIn 0.3s var(--ease-out) backwards; }
+html[data-motion="heavy"] .app-main > * { animation: kzPageInHv 0.5s var(--ease-out) backwards; }
 
-/* Heavy: cards and rows rise in one after another when a page or list shows. */
+/* ── Cards and rows arrive one after another ── */
+html[data-motion="soft"] .app-main [data-gpnav] { animation: kzRiseSoft 0.32s var(--ease-out) backwards; }
+html[data-motion="heavy"] .app-main [data-gpnav] { animation: kzRise 0.55s var(--ease-spring) backwards; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(2),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(2)  { animation-delay: 35ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(3),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(3)  { animation-delay: 70ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(4),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(4)  { animation-delay: 105ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(5),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(5)  { animation-delay: 140ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(6),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(6)  { animation-delay: 175ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(7),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(7)  { animation-delay: 210ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(8),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(8)  { animation-delay: 245ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(9),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(9)  { animation-delay: 280ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(10), html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(10) { animation-delay: 315ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(n+11), html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(n+11) { animation-delay: 350ms; }
+
+/* ── Hover: cards lift (soft) or lift and spring with a glow (heavy) ── */
+html[data-motion="soft"] .app-main [data-gpnav] {
+  transition: transform 0.2s var(--ease-out), box-shadow 0.2s ease, border-color 0.15s ease, background 0.15s ease, filter 0.2s ease;
+}
+html[data-motion="soft"] .app-main [data-gpnav]:hover { transform: translateY(-3px); }
 html[data-motion="heavy"] .app-main [data-gpnav] {
-  animation: kzRise 0.45s var(--ease-out) backwards;
+  transition: transform 0.35s var(--ease-spring), box-shadow 0.3s ease, border-color 0.2s ease, background 0.2s ease, filter 0.25s ease;
 }
-html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(2)  { animation-delay: 30ms; }
-html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(3)  { animation-delay: 60ms; }
-html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(4)  { animation-delay: 90ms; }
-html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(5)  { animation-delay: 120ms; }
-html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(6)  { animation-delay: 150ms; }
-html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(7)  { animation-delay: 180ms; }
-html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(8)  { animation-delay: 210ms; }
-html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(9)  { animation-delay: 240ms; }
-html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(10) { animation-delay: 270ms; }
-html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(11) { animation-delay: 300ms; }
-html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(n+12) { animation-delay: 330ms; }
-
-/* Heavy: hover lifts and springs. */
-html[data-motion="heavy"] .app-main [data-gpnav] {
-  transition: transform 0.28s var(--ease-spring), box-shadow 0.28s ease, border-color 0.2s ease, background 0.2s ease;
+html[data-motion="heavy"] .app-main [data-gpnav]:hover {
+  transform: translateY(-7px) scale(1.03);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px color-mix(in srgb, var(--a) 45%, transparent), 0 0 26px color-mix(in srgb, var(--a) 22%, transparent);
+  z-index: 2;
 }
-html[data-motion="heavy"] .app-main [data-gpnav]:hover { transform: translateY(-4px); }
-html[data-motion="heavy"] .app-main [data-gpnav]:active { transform: translateY(-1px) scale(0.985); }
+html[data-motion="heavy"] .app-main [data-gpnav]:active { transform: translateY(-2px) scale(0.98); }
+/* Cover art zooms a little inside its frame. */
+html[data-motion="soft"] .app-main [data-gpnav] img,
+html[data-motion="heavy"] .app-main [data-gpnav] img { transition: transform 0.45s var(--ease-out); }
+html[data-motion="heavy"] .app-main [data-gpnav]:hover img { transform: scale(1.07); }
+html[data-motion="soft"] .app-main [data-gpnav]:hover img { transform: scale(1.03); }
 
-/* Heavy: dialogs and menus pop in; sidebar items slide in on launch. */
-html[data-motion="heavy"] [role="dialog"] { animation: kzPop 0.34s var(--ease-spring) backwards; }
-html[data-motion="heavy"] [role="menu"]   { animation: kzPop 0.2s var(--ease-out) backwards; }
-html[data-motion="heavy"] .app-layout > aside nav a { animation: kzSlideL 0.4s var(--ease-out) backwards; }
-html[data-motion="heavy"] .app-layout > aside nav a:nth-of-type(2) { animation-delay: 40ms; }
-html[data-motion="heavy"] .app-layout > aside nav a:nth-of-type(3) { animation-delay: 80ms; }
-html[data-motion="heavy"] .app-layout > aside nav a:nth-of-type(4) { animation-delay: 120ms; }
-html[data-motion="heavy"] .app-layout > aside nav a:nth-of-type(5) { animation-delay: 160ms; }
-html[data-motion="heavy"] .app-layout > aside nav a:nth-of-type(n+6) { animation-delay: 200ms; }
+/* ── Buttons press in ── */
+html[data-motion="soft"] button, html[data-motion="heavy"] button { transition: transform 0.15s var(--ease-out), background 0.15s ease, color 0.15s ease, border-color 0.15s ease, filter 0.15s ease, box-shadow 0.15s ease; }
+html[data-motion="soft"] button:active, html[data-motion="heavy"] button:active { transform: scale(0.96); }
 
-/* Soft: menus fade in. */
-html[data-motion="soft"] [role="menu"] { animation: kzFade 0.14s ease backwards; }
+/* ── Dialogs and menus ── */
+html[data-motion="soft"] [role="dialog"] { animation: kzPopSoft 0.2s var(--ease-out) backwards; }
+html[data-motion="heavy"] [role="dialog"] { animation: kzPop 0.4s var(--ease-spring) backwards; }
+html[data-motion="soft"] [role="menu"]   { animation: kzFade 0.15s ease backwards; }
+html[data-motion="heavy"] [role="menu"]  { animation: kzPop 0.24s var(--ease-out) backwards; }
 
-/* Off: nothing moves. Spinners keep turning (slowly) so progress still shows. */
+/* ── Sidebar: items slide in on launch; hover nudges them ── */
+html[data-motion="heavy"] .app-layout > aside nav a { animation: kzSlideL 0.45s var(--ease-out) backwards; }
+html[data-motion="heavy"] .app-layout > aside nav a:nth-of-type(2) { animation-delay: 50ms; }
+html[data-motion="heavy"] .app-layout > aside nav a:nth-of-type(3) { animation-delay: 100ms; }
+html[data-motion="heavy"] .app-layout > aside nav a:nth-of-type(4) { animation-delay: 150ms; }
+html[data-motion="heavy"] .app-layout > aside nav a:nth-of-type(5) { animation-delay: 200ms; }
+html[data-motion="heavy"] .app-layout > aside nav a:nth-of-type(n+6) { animation-delay: 250ms; }
+html[data-motion="soft"] .app-layout > aside nav a, html[data-motion="heavy"] .app-layout > aside nav a { transition: transform 0.2s var(--ease-out), background 0.15s ease, color 0.15s ease; }
+html[data-motion="soft"] .app-layout > aside nav a:hover { transform: translateX(2px); }
+html[data-motion="heavy"] .app-layout > aside nav a:hover { transform: translateX(5px); }
+
+/* ── Off: nothing moves. Spinners keep turning (slowly) so progress shows. ── */
 html[data-motion="off"] *,
 html[data-motion="off"] *::before,
 html[data-motion="off"] *::after {
