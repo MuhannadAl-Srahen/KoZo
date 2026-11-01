@@ -15,6 +15,7 @@ export const DEFAULT_APPEARANCE = {
   cards: { genres: true, stats: true, progress: true, statusDot: true, planChip: true },
   nav: NAV_PATHS.map(path => ({ path, hidden: false })),
   startPage: '/',
+  sidebar: 'full',                // 'full' | 'rail' (icons only; the button by the logo switches)
   bg: { mode: 'off', image: null, gameId: null, gameArt: null, blur: 8, dim: 55 },
 }
 
@@ -49,6 +50,7 @@ function apply(p) {
     if (p.cards[k]) delete el.dataset[attr]
     else el.dataset[attr] = ''
   }
+  el.dataset.sidebar = p.sidebar
   window.kozo?.ui?.setZoom?.(p.scale)
 }
 

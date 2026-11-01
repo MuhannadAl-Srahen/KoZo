@@ -160,7 +160,7 @@ ul, ol { list-style: none; }
 html[data-wallpaper] .app-main {
   background: radial-gradient(1100px 420px at 16% -8%, var(--ad), transparent 62%);
 }
-html[data-wallpaper] aside { background: color-mix(in srgb, var(--surface-1) 72%, transparent); }
+html[data-wallpaper] aside { --sidebar-bg: color-mix(in srgb, var(--surface-1) 72%, transparent); }
 .app-wallpaper { position: fixed; inset: 0; z-index: -1; overflow: hidden; background: var(--bg); pointer-events: none; }
 .app-wallpaper-img {
   position: absolute;
