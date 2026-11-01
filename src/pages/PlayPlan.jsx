@@ -411,7 +411,9 @@ export default function PlayPlan() {
   const [view, setViewRaw] = useState(() => {
     try { const v = localStorage.getItem(VIEW_KEY); return VIEWS.some(x => x.key === v) ? v : 'timeline' } catch { return 'timeline' }
   })
-  const setView = (v) => { setViewRaw(v); try { localStorage.setItem(VIEW_KEY, v) } catch {} }
+  const contentRef = useRef(null)
+  // A new view starts at its top (and the controller ring with it).
+  const setView = (v) => { setViewRaw(v); try { localStorage.setItem(VIEW_KEY, v) } catch {} ; contentRef.current?.scrollTo({ top: 0 }) }
   const [summary, setSummary] = useState({})   // 'YYYY-MM' → { total, done }
   const [boards, setBoards] = useState({})     // 'YYYY-MM' → rows (play order)
   const [opened, setOpened] = useState([])     // earlier months shown on request
@@ -724,7 +726,7 @@ export default function PlayPlan() {
         </button>
       </div>
 
-      <div className={s.content}>
+      <div className={s.content} ref={contentRef}>
         {view === 'timeline' && timeline()}
         {view === 'shelves' && shelves()}
         {view === 'showcase' && showcase()}

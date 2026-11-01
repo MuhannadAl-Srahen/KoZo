@@ -174,18 +174,64 @@ function moveFocus(dir) {
       const cy = r.top + r.height / 2
       const dx = cx - fx
       const dy = cy - fy
+      // Sideways drift is the distance to the target's span, not its centre:
+      // a wide row straight below (Play Plan List) is 0 off, so a small
+      // sidebar link next door no longer wins.
+      const offX = Math.max(0, r.left - fx, fx - r.right)
+      const offY = Math.max(0, r.top - fy, fy - r.bottom)
       let primary, cross
-      if (dir === 'left')       { primary = -dx; cross = Math.abs(dy) }
-      else if (dir === 'right') { primary = dx;  cross = Math.abs(dy) }
-      else if (dir === 'up')    { primary = -dy; cross = Math.abs(dx) }
-      else                      { primary = dy;  cross = Math.abs(dx) }
+      if (dir === 'left')       { primary = -dx; cross = offY }
+      else if (dir === 'right') { primary = dx;  cross = offY }
+      else if (dir === 'up')    { primary = -dy; cross = offX }
+      else                      { primary = dy;  cross = offX }
       if (primary < 8) continue               // must actually be in that direction
-      const score = primary + cross * 2       // bias against sideways drift
+      let score = primary + cross * 2         // bias against sideways drift
+      // Up / down stay in the page or in the sidebar; LB / RB and left / right
+      // cross between them.
+      if ((dir === 'up' || dir === 'down') && !!el.closest('aside') !== !!_focused.closest('aside')) score += 600
       if (score < bestScore) { bestScore = score; best = el }
     }
     return best
   }
-  const best = pick(true) || pick(false)
+  // Row-first, like a TV: up / down go to the nearest row that has something
+  // within reach sideways (a lone poster starting the next row beats a wide
+  // panel two rows down; a far-right button alone in a header row is passed
+  // over), and left / right stay on the same line when they can.
+  const REACH = 480
+  const pickAligned = () => {
+    const inAside = !!_focused.closest('aside')
+    const vertical = dir === 'up' || dir === 'down'
+    let cands = targets.filter(el => {
+      if (el === _focused || !!el.closest('aside') !== inAside) return false
+      const r = el.getBoundingClientRect()
+      if (dir === 'down')  return r.top >= from.bottom - 4
+      if (dir === 'up')    return r.bottom <= from.top + 4
+      if (dir === 'right') return r.left >= from.right - 4
+      return r.right <= from.left + 4
+    }).map(el => {
+      const r = el.getBoundingClientRect()
+      const gap = dir === 'down' ? r.top - from.bottom : dir === 'up' ? from.top - r.bottom
+        : dir === 'right' ? r.left - from.right : from.left - r.right
+      const off = vertical ? Math.max(0, r.left - fx, fx - r.right) : Math.max(0, r.top - fy, fy - r.bottom)
+      return { el, gap, off }
+    })
+    // Inside a vertical menu (Settings sections), stay in it until its end.
+    const group = vertical && _focused.closest('nav, [role="tablist"][aria-orientation="vertical"]')
+    if (group && cands.some(x => group.contains(x.el))) cands = cands.filter(x => group.contains(x.el))
+    if (!vertical) {
+      const line = cands.filter(x => x.off <= 4).sort((a, b) => a.gap - b.gap)
+      return line[0]?.el || null
+    }
+    cands.sort((a, b) => a.gap - b.gap)
+    while (cands.length) {
+      const nearest = cands[0].gap
+      const band = cands.filter(x => x.gap <= nearest + 24).sort((a, b) => a.off - b.off || a.gap - b.gap)
+      if (band[0].off <= REACH) return band[0].el
+      cands = cands.filter(x => x.gap > nearest + 24)
+    }
+    return null
+  }
+  const best = pickAligned() || pick(true) || pick(false)
   if (best) { setFocus(best); return }
   // Left from a flyout with nothing further left: back to its parent menu.
   if (dir === 'left' && document.querySelectorAll('[role="menu"]').length > 1) pressEscape()

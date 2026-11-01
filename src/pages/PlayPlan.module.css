@@ -585,3 +585,26 @@
 @media (max-width: 1150px) {
   .viewBtn:not(.viewOn) .viewLabel { display: none; }
 }
+
+/* Controller ring on a poster: around the art only, not the title under it. */
+.lu[data-gpfocus] { outline: none; box-shadow: none; }
+.lu[data-gpfocus] .luArt {
+  outline: 3px solid var(--a);
+  outline-offset: -3px;
+  box-shadow: 0 0 22px color-mix(in srgb, var(--a) 40%, transparent);
+}
+.lu[data-gpfocus] .luName { color: var(--a); }
+.lu[data-gpfocus] .luShade { opacity: 1; }
+
+/* ── Animations (Settings → Appearance → Animations, styles/motion.css) ── */
+/* Art zooms inside its frame, which has overflow hidden. */
+.luArt > img, .scArt > img:not(.scSoft) { transition: transform 0.45s var(--ease-out); }
+:global(html[data-motion="soft"]) .lu:hover .luArt > img,
+:global(html[data-motion="soft"]) .lu[data-gpfocus] .luArt > img,
+:global(html[data-motion="soft"]) .sc:hover .scArt > img:not(.scSoft) { transform: scale(1.04); }
+:global(html[data-motion="heavy"]) .lu:hover .luArt > img,
+:global(html[data-motion="heavy"]) .lu[data-gpfocus] .luArt > img,
+:global(html[data-motion="heavy"]) .sc:hover .scArt > img:not(.scSoft) { transform: scale(1.08); }
+:global(html[data-motion="heavy"]) .lu:hover .luArt { box-shadow: 0 14px 30px rgba(0, 0, 0, 0.45), 0 0 0 1px color-mix(in srgb, var(--a) 45%, transparent), 0 0 18px color-mix(in srgb, var(--a) 28%, transparent); }
+:global(html[data-motion="heavy"]) .luPlaying:hover .luArt { box-shadow: 0 14px 30px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--status-playing), 0 0 22px color-mix(in srgb, var(--status-playing) 40%, transparent); }
+:global(html[data-motion="off"]) .lu:hover .luArt { transform: none; }
