@@ -149,7 +149,7 @@ export default function UpcomingHero({ games, isTracked, onOpen, renderTrack }) 
   const go = (d) => setI(n => (n + d + featured.length) % featured.length)
 
   return (
-    <div className={s.wrap} data-zoom-ignore="">
+    <div className={s.wrap} data-zoom-ignore="" data-upcoming-hero="">
       {featured.length > 0 && (
         <section
           className={s.hero}

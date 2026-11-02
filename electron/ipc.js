@@ -1573,6 +1573,7 @@ handle('steam:comingSoon', (feed, page) => require('./services/steamApi').getCom
 // appIds → { [appid]: { portrait, hero, header, capsule } } real store art URLs.
 handle('steam:tasteProfile', () => require('./services/steamApi').getTasteProfile())
 handle('steam:picks', () => require('./services/steamApi').getPicks())
+handle('steam:reviews', (appId) => require('./services/steamApi').getReviews(Number(appId)))
 handle('steam:appAssets', async (appIds) => Object.fromEntries(await require('./services/steamApi').getAppAssets(appIds)))
 
 // Called when the Upcoming tab opens: warms the store-details cache for every

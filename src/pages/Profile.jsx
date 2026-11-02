@@ -116,11 +116,81 @@ function buildHeatmap(daily) {
       if (seconds) { total += seconds; daysPlayed++ }
       if (d === 0 && dt.getMonth() !== lastMonth) { month = dt.toLocaleDateString(undefined, { month: 'short' }); lastMonth = dt.getMonth() }
       const level = !seconds ? 0 : seconds < 1800 ? 1 : seconds < 3600 ? 2 : seconds < 7200 ? 3 : 4
-      days.push({ seconds, level, future, label: dt.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) })
+      days.push({ seconds, level, future, date: new Date(dt), label: dt.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) })
     }
     weeks.push({ month, days })
   }
   return { weeks, total, daysPlayed }
+}
+
+// One day of play, from the heatmap: every game played (time, sessions) and
+// the achievements unlocked that day.
+function DayModal({ date, onClose }) {
+  const navigate = useNavigate()
+  const [data, setData] = useState(null)
+  useEffect(() => {
+    const from = new Date(date); from.setHours(0, 0, 0, 0)
+    const to = new Date(from); to.setDate(to.getDate() + 1)
+    Promise.all([
+      window.kozo?.api?.sessions?.list?.({ from: from.toISOString(), to: new Date(to.getTime() - 1).toISOString() }),
+      window.kozo?.api?.achievements?.listAll?.({ status: 'unlocked', unlockedFrom: from.toISOString(), unlockedTo: to.toISOString(), sort: 'recent' }),
+    ]).then(([sRes, aRes]) => {
+      const sessions = sRes?.ok ? sRes.data || [] : []
+      const byGame = new Map()
+      for (const x of sessions) {
+        const g = byGame.get(x.game_id) || { id: x.game_id, name: x.game_name, cover: x.banner_local_path ? fileUrl(x.banner_local_path) : x.banner_url, seconds: 0, sessions: [] }
+        g.seconds += x.duration_seconds || 0
+        g.sessions.push(x)
+        byGame.set(x.game_id, g)
+      }
+      setData({
+        games: [...byGame.values()].sort((a, b) => b.seconds - a.seconds),
+        total: sessions.reduce((a, x) => a + (x.duration_seconds || 0), 0),
+        achievements: aRes?.ok ? aRes.data || [] : [],
+      })
+    })
+  }, [date])
+  const time = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  return (
+    <Modal title={date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+      icon={<IconCalendar size={17} stroke={1.6} />} onClose={onClose} width={620}>
+      {!data ? <div className={s.dayLoading}><IconLoader2 size={16} className="spin" /> Loading…</div> : (
+        <div className={s.dayBody}>
+          <div className={s.dayStats}>
+            <div><strong>{formatPlaytime(data.total)}</strong><span>played</span></div>
+            <div><strong>{data.games.length}</strong><span>game{data.games.length === 1 ? '' : 's'}</span></div>
+            <div><strong>{data.achievements.length}</strong><span>achievement{data.achievements.length === 1 ? '' : 's'}</span></div>
+          </div>
+          {data.games.map(g => (
+            <button key={g.id} type="button" className={s.dayGame} onClick={() => { onClose(); navigate(`/game/${g.id}`) }}>
+              <span className={s.dayCover} style={{ background: getBannerBg(g.id) }}>{g.cover && <img src={g.cover} alt="" />}</span>
+              <span className={s.dayGameText}>
+                <strong>{g.name}</strong>
+                <span>{g.sessions.map(x => `${time(x.started_at)} to ${time(x.ended_at)}`).join(' · ')}</span>
+              </span>
+              <span className={s.dayGameTime}>{formatPlaytime(g.seconds)}</span>
+            </button>
+          ))}
+          {data.achievements.length > 0 && (
+            <>
+              <div className={s.dayHead}><IconTrophy size={14} /> Unlocked this day</div>
+              <div className={s.dayAchs}>
+                {data.achievements.map(a => (
+                  <div key={a.unlock_id || a.id} className={s.dayAch}>
+                    {a.icon_url ? <img src={a.icon_url} alt="" /> : <span className={s.dayAchBlank} />}
+                    <span className={s.dayGameText}>
+                      <strong>{a.display_name}</strong>
+                      <span>{a.game_name} · {time(a.unlocked_at)}</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </Modal>
+  )
 }
 
 // Compact "when" for XP history rows: "2m ago", "3h ago", "Yesterday", "Jun 12".
@@ -206,6 +276,7 @@ export default function Profile() {
   const [xp, setXp] = useState(profileCache?.xp ?? null)
   const [xpHistory, setXpHistory] = useState(profileCache?.xpHistory ?? [])
   const [xpModalOpen, setXpModalOpen] = useState(false)
+  const [dayOpen, setDayOpen] = useState(null)   // Date of the heatmap day being shown
 
   const load = useCallback(async () => {
     if (!window.kozo?.api) return
@@ -690,12 +761,19 @@ export default function Profile() {
                   {heat.weeks.map((w, i) => <span key={i}>{w.month || ''}</span>)}
                 </div>
                 <div className={s.heat} style={{ '--weeks': heat.weeks.length }}>
-                  {heat.weeks.flatMap((w, wi) => w.days.map((d, di) => (
+                  {heat.weeks.flatMap((w, wi) => w.days.map((d, di) => (d.seconds ? (
+                    <button key={`${wi}-${di}`} type="button"
+                      className={`${s.heatCell} ${s.heatBtn}`}
+                      data-l={d.level} data-gpnav=""
+                      onClick={() => setDayOpen(d.date)}
+                      title={`${d.label}: ${formatPlaytime(d.seconds)}. Click for details`}
+                      aria-label={`${d.label}: ${formatPlaytime(d.seconds)}`} />
+                  ) : (
                     <span key={`${wi}-${di}`}
                       className={`${s.heatCell} ${d.future ? s.heatFuture : ''}`}
                       data-l={d.level}
-                      title={d.future ? undefined : `${d.label}: ${d.seconds ? formatPlaytime(d.seconds) : 'no play'}`} />
-                  )))}
+                      title={d.future ? undefined : `${d.label}: no play`} />
+                  ))))}
                 </div>
                 <div className={s.heatLegend}>
                   Less
@@ -811,6 +889,7 @@ export default function Profile() {
         </div>
       </div>
 
+      {dayOpen && <DayModal date={dayOpen} onClose={() => setDayOpen(null)} />}
       {crop && (
         <ImageCropModal
           src={crop.src}

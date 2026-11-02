@@ -11,7 +11,7 @@ import {
   IconStar, IconStethoscope, IconLock, IconCode, IconChevronRight, IconArrowUp, IconArrowDown, IconPhoto, IconLayoutCards, IconTextSize, IconLayoutSidebar,
 } from '@tabler/icons-react'
 import { useAccentColor } from '../context/AccentColorContext'
-import { useAppearance, DEFAULT_APPEARANCE } from '../context/AppearanceContext'
+import { useAppearance, DEFAULT_APPEARANCE, FONTS } from '../context/AppearanceContext'
 import { NAV_ITEMS } from '../components/Sidebar'
 import { fileUrl, timeAgo } from '../lib/utils'
 import HoneycombLogo from '../components/HoneycombLogo'
@@ -1322,6 +1322,139 @@ const START_PAGES = [
 
 // Settings → Appearance: size and density, card details, sidebar and start
 // page, background picture. Every change applies at once (AppearanceContext).
+// Theme, text, cards, layout, effects, what's shown, and sharing a look.
+const THEMES = [
+  { value: 'midnight', label: 'Midnight', bg: '#10101a', s2: '#161624' },
+  { value: 'oled',     label: 'OLED black', bg: '#000000', s2: '#0b0b0f' },
+  { value: 'slate',    label: 'Slate', bg: '#11151b', s2: '#19202a' },
+  { value: 'nord',     label: 'Nord', bg: '#1d2230', s2: '#272e3d' },
+  { value: 'mocha',    label: 'Mocha', bg: '#181412', s2: '#231d1a' },
+  { value: 'forest',   label: 'Forest', bg: '#0e1411', s2: '#151f1a' },
+  { value: 'crimson',  label: 'Crimson', bg: '#150e10', s2: '#201618' },
+]
+
+function LookCustomize() {
+  const { prefs, setPrefs } = useAppearance()
+  const { accent, setAccent } = useAccentColor()
+  const [code, setCode] = useState('')
+  const [codeMsg, setCodeMsg] = useState(null)
+  function exportLook() {
+    const json = JSON.stringify({ v: 1, accent, prefs: { ...prefs, nav: undefined, bg: { ...prefs.bg, image: null, gameArt: null, gameId: null } } })
+    const out = 'KOZO-' + btoa(unescape(encodeURIComponent(json)))
+    navigator.clipboard?.writeText(out).then(() => setCodeMsg({ type: 'success', text: 'Copied. Paste it on another PC, or send it to a friend.' }))
+      .catch(() => { setCode(out); setCodeMsg({ type: 'info', text: 'Copy the code from the box.' }) })
+  }
+  function importLook() {
+    try {
+      const raw = code.trim().replace(/^KOZO-/, '')
+      const data = JSON.parse(decodeURIComponent(escape(atob(raw))))
+      if (!data?.prefs) throw new Error()
+      setPrefs(p => ({ ...p, ...data.prefs, nav: p.nav, bg: { ...p.bg, ...data.prefs.bg, image: p.bg.image, gameArt: p.bg.gameArt, gameId: p.bg.gameId } }))
+      if (data.accent) setAccent(data.accent)
+      setCode(''); setCodeMsg({ type: 'success', text: 'Look applied.' })
+    } catch { setCodeMsg({ type: 'error', text: "That code doesn't look right." }) }
+  }
+  return (
+    <>
+      {/* Live preview */}
+      <div className={s.lookPreview} aria-hidden="true">
+        <div className={s.lookCard}>
+          <div className={s.lookArt} />
+          <div className={s.lookCardBody}><strong>Game name</strong><span>Action · Adventure</span></div>
+        </div>
+        <div className={s.lookSide}>
+          <span className={s.lookTitle}>Preview</span>
+          <span className={s.lookText}>Text looks like this, with <span className={s.lookAccent}>the accent</span>.</span>
+          <div className={s.lookRow}><span className={s.lookBtn}>Play</span><span className={s.lookChip}>Playing</span><span className={s.lookChipMuted}>12h 40m</span></div>
+        </div>
+      </div>
+
+      <section className={s.section}>
+        <div className={s.sectionHeader}><IconPalette size={15} stroke={1.6} /><span>Theme</span></div>
+        <div className={s.themeGrid}>
+          {THEMES.map(t => (
+            <button key={t.value} type="button" aria-pressed={prefs.theme === t.value}
+              className={`${s.themeBtn} ${prefs.theme === t.value ? s.themeOn : ''}`} onClick={() => setPrefs({ theme: t.value })}
+              style={{ '--tbg': t.bg, '--ts2': t.s2 }}>
+              <span className={s.themeSwatch}><span /><span /></span>
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <div className={s.segRow}>
+          <span className={s.segLabel}>Second accent</span>
+          <input type="color" className={s.colorInput} value={prefs.accent2 || accent} aria-label="Second accent color"
+            onChange={e => setPrefs({ accent2: e.target.value })} />
+          {prefs.accent2 && <button type="button" className={s.linkBtn} onClick={() => setPrefs({ accent2: null })}>Same as accent</button>}
+          <span className={s.sectionDescQuiet}>Used by the moving background glow.</span>
+        </div>
+      </section>
+
+      <section className={s.section}>
+        <div className={s.sectionHeader}><IconTextSize size={15} stroke={1.6} /><span>Text</span></div>
+        <div className={s.segList}>
+          <Segmented label="Font" value={prefs.font} wrap onChange={v => setPrefs({ font: v })}
+            options={Object.entries(FONTS).map(([value, f]) => ({ value, label: <span style={{ fontFamily: f.css }}>{f.label}</span> }))} />
+          <Segmented label={`Text size ${Math.round((prefs.textScale || 1) * 100)}%`} value={prefs.textScale} onChange={v => setPrefs({ textScale: v })}
+            options={[0.9, 1, 1.05, 1.1, 1.2].map(v => ({ value: v, label: `${Math.round(v * 100)}%` }))} />
+        </div>
+        <p className={s.sectionDescQuiet}>Text size changes only the letters; UI scale (below) zooms everything.</p>
+      </section>
+
+      <section className={s.section}>
+        <div className={s.sectionHeader}><IconLayoutCards size={15} stroke={1.6} /><span>Card style</span></div>
+        <div className={s.segList}>
+          <Segmented label="Border" value={prefs.cardBorder} onChange={v => setPrefs({ cardBorder: v })}
+            options={[{ value: 'none', label: 'None' }, { value: 'subtle', label: 'Subtle' }, { value: 'accent', label: 'Accent' }]} />
+          <Segmented label="Hover glow" value={prefs.cardGlow} onChange={v => setPrefs({ cardGlow: v })}
+            options={[{ value: 'off', label: 'Off' }, { value: 'soft', label: 'Soft' }, { value: 'strong', label: 'Strong' }]} />
+          <Segmented label="Shadow" value={prefs.cardShadow} onChange={v => setPrefs({ cardShadow: v })}
+            options={[{ value: 'flat', label: 'Flat' }, { value: 'normal', label: 'Normal' }, { value: 'deep', label: 'Deep' }]} />
+          <Segmented label="Accent glow" value={prefs.glow} onChange={v => setPrefs({ glow: v })}
+            options={[{ value: 'off', label: 'Off' }, { value: 'soft', label: 'Soft' }, { value: 'strong', label: 'Strong' }]} />
+        </div>
+      </section>
+
+      <section className={s.section}>
+        <div className={s.sectionHeader}><IconLayoutSidebar size={15} stroke={1.6} /><span>Layout and effects</span></div>
+        <div className={s.segList}>
+          <Segmented label="Sidebar side" value={prefs.sidebarSide} onChange={v => setPrefs({ sidebarSide: v })}
+            options={[{ value: 'left', label: 'Left' }, { value: 'right', label: 'Right' }]} />
+          <Segmented label="Sidebar width" value={prefs.sidebarWidth} onChange={v => setPrefs({ sidebarWidth: v })}
+            options={[{ value: 180, label: 'Narrow' }, { value: 205, label: 'Normal' }, { value: 240, label: 'Wide' }]} />
+          <Segmented label="Page width" value={prefs.pageWidth} onChange={v => setPrefs({ pageWidth: v })}
+            options={[{ value: 'full', label: 'Full window' }, { value: 'centered', label: 'Centered' }]} />
+          <Segmented label="Moving glow" value={prefs.ambient} onChange={v => setPrefs({ ambient: v })}
+            options={[{ value: 'off', label: 'Off' }, { value: 'on', label: 'On' }]} />
+          <Segmented label="Scrollbars" value={prefs.scrollbar} onChange={v => setPrefs({ scrollbar: v })}
+            options={[{ value: 'thin', label: 'Thin' }, { value: 'wide', label: 'Wide' }, { value: 'hidden', label: 'Hidden' }]} />
+        </div>
+      </section>
+
+      <section className={s.section}>
+        <div className={s.sectionHeader}><IconEye size={15} stroke={1.6} /><span>Show or hide</span></div>
+        <div className={s.toggleList}>
+          <ToggleRow label="Library numbers" desc="The Games, Playtime, Achievements and This week boxes above the Library." checked={!prefs.hideLibraryStats} onChange={v => setPrefs({ hideLibraryStats: !v })} />
+          <ToggleRow label="Upcoming banner" desc="The big rotating banner and This week row on Upcoming." checked={!prefs.hideUpcomingHero} onChange={v => setPrefs({ hideUpcomingHero: !v })} />
+        </div>
+      </section>
+
+      <section className={s.section}>
+        <div className={s.sectionHeader}><IconCopy size={15} stroke={1.6} /><span>Share your look</span></div>
+        <p className={s.sectionDesc}>Copy your whole look (colors, theme, fonts, cards, layout) as a code, or paste one to use it.</p>
+        <div className={s.keyRow}>
+          <button type="button" className={s.testBtn} onClick={exportLook}><IconCopy size={13} /> Copy my look</button>
+          <div className={`${s.keyInputWrap} hasRing`}>
+            <input className={s.keyInput} placeholder="Paste a KOZO- code" value={code} onChange={e => setCode(e.target.value)} spellCheck={false} aria-label="Look code" />
+          </div>
+          <button type="button" className={s.testBtn} onClick={importLook} disabled={!code.trim()}>Use it</button>
+        </div>
+        {codeMsg && <StatusLine type={codeMsg.type}>{codeMsg.text}</StatusLine>}
+      </section>
+    </>
+  )
+}
+
 function AppearanceCustomize() {
   const { prefs, setPrefs } = useAppearance()
   const [games, setGames] = useState([])
@@ -1530,6 +1663,7 @@ function AppearanceTab() {
         </div>
       </section>
 
+      <LookCustomize />
       <AppearanceCustomize />
     </div>
   )
@@ -1647,10 +1781,8 @@ function DataTab({ onManageSaves }) {
           <span>Your KoZo data: library, playtime, lists</span>
         </div>
         <p className={s.sectionDesc}>
-          No account needed, sync KoZo to <strong className={s.strong}>any folder</strong>:
-          a cloud-synced folder (OneDrive/Drive/Dropbox), a network drive, or a USB stick. It keeps your
-          library, playtime, achievements, lists AND game-save backups mirrored there. On a new PC:
-          install KoZo, choose the same folder, hit Restore.
+          Keep a copy of your library, playtime, achievements and lists in <strong className={s.strong}>any folder</strong>:
+          another drive, a USB stick, or a cloud folder. On a new PC: install KoZo, choose the same folder, press Restore.
         </p>
         <div className={s.keyRow}>
           <button type="button" className={s.testBtn} onClick={doSyncSetup}>

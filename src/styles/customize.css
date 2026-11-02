@@ -1,0 +1,93 @@
+/* Settings → Appearance customization (context/AppearanceContext.jsx sets
+   these attributes and variables on <html>). Imported after motion.css. */
+
+/* Fonts you can pick (each loads only when used: @font-face is lazy). */
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/600.css';
+@import '@fontsource/inter/700.css';
+@import '@fontsource/poppins/400.css';
+@import '@fontsource/poppins/600.css';
+@import '@fontsource/poppins/700.css';
+@import '@fontsource/nunito/400.css';
+@import '@fontsource/nunito/600.css';
+@import '@fontsource/nunito/700.css';
+@import '@fontsource/jetbrains-mono/400.css';
+@import '@fontsource/jetbrains-mono/600.css';
+@import '@fontsource/jetbrains-mono/700.css';
+@import '@fontsource/atkinson-hyperlegible/400.css';
+@import '@fontsource/atkinson-hyperlegible/700.css';
+
+/* ── Themes (all dark; "Match background to accent" still wins) ─────── */
+:root[data-theme="oled"] {
+  --bg: #000000; --surface-1: #060608; --surface-2: #0b0b0f; --surface-3: #121217;
+  --border: rgba(255, 255, 255, 0.08); --border-subtle: rgba(255, 255, 255, 0.05);
+}
+:root[data-theme="slate"] {
+  --bg: #11151b; --surface-1: #151a21; --surface-2: #19202a; --surface-3: #202834;
+  --text-primary: #e8edf4; --text-secondary: #a3b0c2; --text-muted: #74839a;
+}
+:root[data-theme="nord"] {
+  --bg: #1d2230; --surface-1: #222836; --surface-2: #272e3d; --surface-3: #2e3647;
+  --text-primary: #eceff4; --text-secondary: #b6bfce; --text-muted: #8a94a8;
+}
+:root[data-theme="mocha"] {
+  --bg: #181412; --surface-1: #1e1916; --surface-2: #231d1a; --surface-3: #2b2420;
+  --text-primary: #f3ebe4; --text-secondary: #c6b6a9; --text-muted: #94857a;
+}
+:root[data-theme="forest"] {
+  --bg: #0e1411; --surface-1: #121a16; --surface-2: #151f1a; --surface-3: #1b2721;
+  --text-primary: #e7f1eb; --text-secondary: #a9c0b3; --text-muted: #7a9285;
+}
+:root[data-theme="crimson"] {
+  --bg: #150e10; --surface-1: #1b1214; --surface-2: #201618; --surface-3: #281c1f;
+  --text-primary: #f4e9eb; --text-secondary: #c8adb2; --text-muted: #957c81;
+}
+
+/* ── Cards ──────────────────────────────────────────────────────────── */
+:root[data-card-border="none"]   { --card-border: transparent; }
+:root[data-card-border="accent"] { --card-border: color-mix(in srgb, var(--a) 35%, transparent); }
+:root[data-card-glow="off"]      { --card-hover-glow: 0 0 0 transparent; }
+:root[data-card-glow="strong"]   { --card-hover-glow: 0 0 40px -6px color-mix(in srgb, var(--a) 75%, transparent); }
+:root[data-card-shadow="flat"]   { --elev-2: 0 2px 6px rgba(0, 0, 0, 0.25); }
+:root[data-card-shadow="deep"]   { --elev-2: 0 14px 40px rgba(0, 0, 0, 0.6); }
+
+/* ── Accent glow everywhere ─────────────────────────────────────────── */
+:root[data-glow="off"]    { --glow-1: 0 0 0 transparent; --glow-2: 0 0 0 transparent; --elev-accent: 0 0 0 transparent; }
+:root[data-glow="strong"] {
+  --glow-1: 0 0 30px -4px color-mix(in srgb, var(--a) 65%, transparent);
+  --glow-2: 0 0 48px -4px color-mix(in srgb, var(--a) 80%, transparent);
+}
+
+/* ── Layout ─────────────────────────────────────────────────────────── */
+:root[data-sidebar-side="right"] .app-layout { flex-direction: row-reverse; }
+:root[data-page-width="centered"] .app-main { padding-inline: max(0px, calc((100% - 1400px) / 2)); }
+
+/* ── Scrollbars ─────────────────────────────────────────────────────── */
+:root[data-scrollbar="wide"] ::-webkit-scrollbar { width: 10px; height: 10px; }
+:root[data-scrollbar="wide"] ::-webkit-scrollbar-thumb { border-radius: 6px; }
+:root[data-scrollbar="hidden"] ::-webkit-scrollbar { width: 0; height: 0; }
+
+/* ── Ambient: a slow accent glow drifting behind the app ────────────── */
+:root[data-ambient="on"] body::before {
+  content: '';
+  position: fixed;
+  inset: -20%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(40% 40% at 20% 25%, color-mix(in srgb, var(--a) 16%, transparent), transparent 70%),
+    radial-gradient(35% 35% at 80% 70%, color-mix(in srgb, var(--accent-2, var(--a)) 12%, transparent), transparent 70%);
+  animation: kzAmbient 40s ease-in-out infinite alternate;
+}
+@keyframes kzAmbient {
+  from { transform: translate(0, 0) rotate(0deg); }
+  to   { transform: translate(4%, -3%) rotate(8deg); }
+}
+:root[data-ambient="on"][data-motion="off"] body::before,
+:root[data-ambient="on"][data-inactive] body::before { animation-play-state: paused; }
+:root[data-ambient="on"] body { background: var(--bg); }
+:root[data-ambient="on"] .app-main { background: transparent; }
+
+/* ── Show / hide parts ──────────────────────────────────────────────── */
+:root[data-hide-library-stats] [data-tour="library-stats"] { display: none; }
+:root[data-hide-upcoming-hero] [data-upcoming-hero] { display: none; }

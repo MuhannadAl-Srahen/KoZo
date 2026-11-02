@@ -7,6 +7,7 @@ import ErrorBoundary from './components/ErrorBoundary'
 import './styles/variables.css'
 import './styles/global.css'
 import './styles/motion.css'
+import './styles/customize.css'
 
 const params = new URLSearchParams(window.location.search)
 const isOverlay = params.get('overlay') === '1'

@@ -19,6 +19,32 @@ export const DEFAULT_APPEARANCE = {
   sidebar: 'full',                // 'full' | 'rail' (icons only; the button by the logo switches)
   motion: 'soft',                 // 'heavy' | 'soft' | 'off' (styles/motion.css)
   bg: { mode: 'off', image: null, gameId: null, gameArt: null, blur: 8, dim: 55 },
+  theme: 'midnight',              // midnight | oled | slate | nord | mocha | forest | crimson (styles/customize.css)
+  font: 'dm',                     // FONTS key
+  textScale: 1,                   // 0.9 to 1.2, scales every --fs-* token
+  accent2: null,                  // second accent for the ambient glow (hex) or null
+  cardBorder: 'subtle',           // none | subtle | accent
+  cardGlow: 'soft',               // off | soft | strong (hover glow)
+  cardShadow: 'normal',           // flat | normal | deep
+  glow: 'soft',                   // accent glow everywhere: off | soft | strong
+  sidebarSide: 'left',            // left | right
+  sidebarWidth: 205,              // px, full sidebar
+  pageWidth: 'full',              // full | centered
+  scrollbar: 'thin',              // thin | wide | hidden
+  ambient: 'off',                 // off | on (slow accent glow behind the app)
+  hideLibraryStats: false,
+  hideUpcomingHero: false,
+}
+
+// Fonts you can pick (bundled with @fontsource, styles/customize.css).
+export const FONTS = {
+  dm:       { label: 'DM Sans', css: "'DM Sans', system-ui, sans-serif" },
+  inter:    { label: 'Inter', css: "'Inter', system-ui, sans-serif" },
+  poppins:  { label: 'Poppins', css: "'Poppins', system-ui, sans-serif" },
+  nunito:   { label: 'Nunito', css: "'Nunito', system-ui, sans-serif" },
+  atkinson: { label: 'Atkinson (easy to read)', css: "'Atkinson Hyperlegible', system-ui, sans-serif" },
+  mono:     { label: 'JetBrains Mono', css: "'JetBrains Mono', ui-monospace, monospace" },
+  system:   { label: 'Windows (Segoe UI)', css: "'Segoe UI', system-ui, sans-serif" },
 }
 
 // Old or partial saved values never break the app: fill in every missing key.
@@ -54,6 +80,20 @@ function apply(p) {
   }
   el.dataset.sidebar = p.sidebar
   el.dataset.motion = ['heavy', 'soft', 'off'].includes(p.motion) ? p.motion : 'soft'
+  // Customization (styles/customize.css): attributes for the switches,
+  // variables for the values.
+  const attrs = { theme: p.theme, cardBorder: p.cardBorder, cardGlow: p.cardGlow, cardShadow: p.cardShadow, glow: p.glow, sidebarSide: p.sidebarSide, pageWidth: p.pageWidth, scrollbar: p.scrollbar, ambient: p.ambient }
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v && v !== DEFAULT_APPEARANCE[k]) el.dataset[k] = v
+    else delete el.dataset[k]
+  }
+  if (p.hideLibraryStats) el.dataset.hideLibraryStats = ''; else delete el.dataset.hideLibraryStats
+  if (p.hideUpcomingHero) el.dataset.hideUpcomingHero = ''; else delete el.dataset.hideUpcomingHero
+  const font = FONTS[p.font] || FONTS.dm
+  if (p.font && p.font !== 'dm') el.style.setProperty('--font', font.css); else el.style.removeProperty('--font')
+  if (p.textScale && p.textScale !== 1) el.style.setProperty('--text-scale', String(p.textScale)); else el.style.removeProperty('--text-scale')
+  if (p.sidebarWidth && p.sidebarWidth !== 205) el.style.setProperty('--sidebar-width', `${p.sidebarWidth}px`); else el.style.removeProperty('--sidebar-width')
+  if (p.accent2) el.style.setProperty('--accent-2', p.accent2); else el.style.removeProperty('--accent-2')
   window.kozo?.ui?.setZoom?.(p.scale)
 }
 

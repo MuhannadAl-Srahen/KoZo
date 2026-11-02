@@ -142,15 +142,15 @@
   /* One step larger across the whole scale : the user runs a 2K
      monitor and the old 15px-base scale read too small on it. Anything still
      hardcoding the OLD values (10–15px literals) should migrate to these. */
-  --fs-2xs:  11px;   /* micro-labels */
-  --fs-xs:   12px;   /* meta / badges, lower band */
-  --fs-sm:   13px;   /* meta / badges, upper band */
-  --fs-md:   14px;   /* all control, button and input text */
-  --fs-base: 16px;   /* body; card names */
-  --fs-lg:   17px;   /* page titles */
-  --fs-xl:   21px;   /* stat values */
-  --fs-2xl:  24px;
-  --fs-3xl:  36px;
+  --fs-2xs:  calc(11px * var(--text-scale, 1));   /* micro-labels */
+  --fs-xs:   calc(12px * var(--text-scale, 1));   /* meta / badges, lower band */
+  --fs-sm:   calc(13px * var(--text-scale, 1));   /* meta / badges, upper band */
+  --fs-md:   calc(14px * var(--text-scale, 1));   /* all control, button and input text */
+  --fs-base: calc(16px * var(--text-scale, 1));   /* body; card names */
+  --fs-lg:   calc(17px * var(--text-scale, 1));   /* page titles */
+  --fs-xl:   calc(21px * var(--text-scale, 1));   /* stat values */
+  --fs-2xl:  calc(24px * var(--text-scale, 1));
+  --fs-3xl:  calc(36px * var(--text-scale, 1));
 
   --lh-tight: 1.2;
   --lh-snug:  1.35;

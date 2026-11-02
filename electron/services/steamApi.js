@@ -333,6 +333,21 @@ function trailerOf(movies) {
   return webm || mp4 ? { webm: webm || null, mp4: mp4 || null, poster: m.thumbnail || null } : null
 }
 
+// Steam review summary: "Very Positive", 92% of 12,400. Cached 6h.
+const reviewsCache = new Map()
+async function getReviews(appId) {
+  const hit = reviewsCache.get(appId)
+  if (hit && Date.now() - hit.at < 6 * 3600000) return hit.data
+  let data = null
+  try {
+    const r = await getJSON(`https://store.steampowered.com/appreviews/${appId}`, { json: 1, num_per_page: 0, language: 'all', purchase_type: 'all' })
+    const q = r?.query_summary
+    if (q) data = { label: q.review_score_desc || null, total: q.total_reviews || 0, positive: q.total_positive || 0 }
+  } catch {}
+  capSet(reviewsCache, appId, { at: Date.now(), data })
+  return data
+}
+
 const _detailsCache = new Map()
 async function getStoreDetails(appId) {
   const hit = _detailsCache.get(appId)
@@ -360,6 +375,26 @@ async function getStoreDetails(appId) {
         categories: (d.categories || []).map(c => c.description).filter(Boolean).slice(0, 6),
         website: d.website || null,
         trailer: trailerOf(d.movies),
+        videos: (d.movies || []).slice(0, 8).map(m => ({
+          name: m.name || '',
+          thumb: m.thumbnail || null,
+          hls: m.hls_h264 || null,
+          mp4: m.mp4?.['480'] || m.mp4?.max || null,
+          webm: m.webm?.['480'] || m.webm?.max || null,
+        })).filter(v => v.hls || v.mp4 || v.webm),
+        about: d.about_the_game || d.detailed_description || null,
+        requirements: {
+          minimum: d.pc_requirements?.minimum || null,
+          recommended: d.pc_requirements?.recommended || null,
+        },
+        languages: d.supported_languages || null,
+        platforms: Object.entries(d.platforms || {}).filter(([, v]) => v).map(([k]) => k),
+        controller: d.controller_support || null,
+        achievements: d.achievements?.total || 0,
+        dlc: (d.dlc || []).length,
+        metacritic: d.metacritic?.score || null,
+        recommendations: d.recommendations?.total || 0,
+        ageRating: d.required_age ? Number(d.required_age) : null,
       }
     }
   } catch (e) {
@@ -1147,7 +1182,7 @@ async function getComingSoon(feed = 'soon', page = 0) {
 }
 
 module.exports = {
-  shrinkCover, getTasteProfile, clearTasteProfile, getPicks, scorePicks,
+  shrinkCover, getTasteProfile, clearTasteProfile, getPicks, scorePicks, getReviews,
   getBannersDir, downloadFile,
   getAppAssets, downloadHero,
   getComingSoon, parseComingSoonHtml,

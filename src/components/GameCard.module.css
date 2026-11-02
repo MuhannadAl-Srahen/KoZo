@@ -11,7 +11,7 @@
   flex-direction: column;
   background: var(--surface-2);
   border-radius: var(--r-card);
-  border: 1px solid var(--border);
+  border: 1px solid var(--card-border, var(--border));
   overflow: hidden;
   cursor: pointer;
   transition: var(--t-border), box-shadow var(--dur-base) var(--ease);
@@ -29,7 +29,7 @@
    The press transform on :active stays; that one is documented. */
 /* Hover carries a faint accent glow on top of the lift — the user liked the
    glow language and asked for more of it. */
-.card:hover { border-color: var(--border-accent-soft); box-shadow: var(--elev-2), var(--glow-1); }
+.card:hover { border-color: var(--border-accent-soft); box-shadow: var(--elev-2), var(--card-hover-glow, var(--glow-1)); }
 
 /* Unavailable/hidden games dim the ARTWORK IMAGES only — the overlaid name and
    the stats strip keep full contrast so half this library (not installed)

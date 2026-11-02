@@ -11,6 +11,7 @@ import ContextMenu from '../components/ui/ContextMenu'
 import InfoModal from '../components/ui/InfoModal'
 import PickForMeModal from '../components/modals/PickForMeModal'
 import RateGameModal from '../components/modals/RateGameModal'
+import OnScreenKeyboard from '../components/OnScreenKeyboard'
 import { ratingColor } from '../components/ui/RatingPicker'
 import s from './BigPicture.module.css'
 
@@ -266,6 +267,7 @@ export default function BigPicture() {
   const [focus, setFocus] = useState(null)
   const [tab, setTab] = useState('home')
   const [query, setQuery] = useState('')
+  const [keyboard, setKeyboard] = useState(false)   // on-screen keyboard (controller search)
   const [installedOnly, setInstalledOnly] = useState(false)
   const [ctx, setCtx] = useState(null)
   const [msg, setMsg] = useState(null)
@@ -490,7 +492,11 @@ export default function BigPicture() {
           <label className={s.search}>
             <IconSearch size={20} />
             <input ref={searchRef} type="search" placeholder="Search games" value={query}
-              onChange={e => { setQuery(e.target.value); if (e.target.value) setTab('library') }} aria-label="Search games" />
+              onChange={e => { setQuery(e.target.value); if (e.target.value) setTab('library') }} aria-label="Search games"
+              onFocus={(e) => {
+                // A controller can't type: Y (or A on the box) opens the on-screen keyboard.
+                if (document.documentElement.hasAttribute('data-gamepad')) { e.target.blur(); setTab('library'); setKeyboard(true) }
+              }} />
           </label>
         )}
         {level != null && <span className={s.level}>Level {level}</span>}
@@ -581,6 +587,7 @@ export default function BigPicture() {
         />
       )}
       {msg && <InfoModal {...msg} onClose={() => setMsg(null)} />}
+      {keyboard && <OnScreenKeyboard value={query} onChange={setQuery} onClose={() => setKeyboard(false)} />}
     </div>
   )
 }
