@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { IconHistory, IconFolder, IconBrandGoogleDrive, IconLoader2, IconCheck } from '@tabler/icons-react'
+import { IconHistory, IconFolder, IconBrandGoogleDrive, IconLoader2, IconCheck, IconFileZip } from '@tabler/icons-react'
 import Modal, { modalStyles as ms } from './ui/Modal'
 import { timeAgo } from '../lib/utils'
 import b from './BackupsTab.module.css'
@@ -18,6 +18,13 @@ export default function RestoreOffer({ found, drive, onClose }) {
     setBusy('')
     if (r?.ok) setDone(r.data?.data?.games ?? 0)
     else setError(r?.error || 'Restore failed')
+  }
+  async function fromFile() {
+    setBusy('file'); setError(null)
+    const r = await window.kozo?.api?.pack?.importAll?.()
+    setBusy('')
+    if (r?.ok && r.data) setDone(r.data.data?.games ?? 0)
+    else if (r?.ok === false) setError(r.error || 'That file could not be opened')
   }
   async function fromDrive() {
     setBusy('drive'); setError(null)
@@ -54,6 +61,10 @@ export default function RestoreOffer({ found, drive, onClose }) {
                 <span><strong>From Google Drive</strong><small>Sign in and download your backup</small></span>
               </button>
             )}
+            <button type="button" className={b.action} disabled={!!busy} onClick={fromFile}>
+              {busy === 'file' ? <IconLoader2 size={18} className="spin" /> : <IconFileZip size={18} />}
+              <span><strong>From a KoZo file</strong><small>A .kozo file you saved on your old PC</small></span>
+            </button>
           </div>
           {error && <p className={`${b.msg} ${b.msgErr}`} style={{ marginTop: 10 }}>{error}</p>}
         </>

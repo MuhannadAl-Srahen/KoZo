@@ -10,6 +10,8 @@ import Library from './pages/Library'
 import GameDetail from './pages/GameDetail'
 import GameList from './pages/GameList'
 import Upcoming from './pages/Upcoming'
+import GamesLike from './pages/GamesLike'
+import Deals from './pages/Deals'
 import Activity from './pages/Activity'
 import PlayPlan from './pages/PlayPlan'
 import Finished from './pages/Finished'
@@ -60,6 +62,8 @@ function Shell() {
           <Route path="/plan" element={<PlayPlan />} />
           <Route path="/finished" element={<Finished />} />
           <Route path="/upcoming" element={<Upcoming />} />
+          <Route path="/like" element={<GamesLike />} />
+          <Route path="/deals" element={<Deals />} />
           <Route path="/activity" element={<Activity />} />
           {/* The three pages Activity combined: old links land on their section. */}
           <Route path="/statistics" element={<Navigate to="/activity?tab=overview" replace />} />

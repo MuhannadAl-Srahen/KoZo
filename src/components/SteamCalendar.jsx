@@ -318,7 +318,7 @@ function StripView({ buckets, todayKey, wide, dayPick, onMore }) {
 // One column per day that has releases: a header, then the day's capsules
 // (art only; hover for Track). In "Picked for you" a day shows its best few
 // with "+N more" for the rest.
-function SteamView({ days, todayKey, dayPick, picked, isTracked, renderTrack, onOpen, onMenu, onMore }) {
+function SteamView({ days, todayKey, dayPick, picked, loadingPicks, isTracked, renderTrack, onOpen, onMenu, onMore }) {
   if (!days.length) return <div className={s.muted}>No dated releases ahead among the loaded games yet.</div>
   return (
     <>
@@ -333,7 +333,11 @@ function SteamView({ days, todayKey, dayPick, picked, isTracked, renderTrack, on
               {k === todayKey ? `Today, ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : label}
             </div>
             <div className={s.steamDayList}>
-              {list.map(g => (
+              {/* Picks still on their way: shimmering caps, not "No picks". */}
+              {loadingPicks && full.length > 0 && Array.from({ length: Math.min(2, full.length) }, (_, i) => (
+                <div key={`sk${i}`} className={s.steamCap}><div className={`${s.steamCapFrame} ${s.capSkeleton}`} /></div>
+              ))}
+              {!loadingPicks && list.map(g => (
                 <div key={g.appid} className={`${s.steamCap} ${isTracked(g) ? s.steamCapTracked : ''}`} onContextMenu={(e) => { e.preventDefault(); onMenu(e, g) }}>
                   <div className={s.steamCapFrame}>
                     <button className={s.steamCapHit} onClick={() => onOpen(g)} title={g.name}>
@@ -345,7 +349,7 @@ function SteamView({ days, todayKey, dayPick, picked, isTracked, renderTrack, on
                   {picked && reasonText(g) && <div className={s.capReason} title={reasonText(g)}>{reasonText(g)}</div>}
                 </div>
               ))}
-              {full.length > list.length && (
+              {!loadingPicks && full.length > list.length && (
                 <button className={s.steamMore} onClick={() => onMore(d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }), full)}>
                   {picked && !list.length ? `No picks, ${full.length} release${full.length !== 1 ? 's' : ''}` : `+${full.length - list.length} more`}
                 </button>
@@ -850,7 +854,7 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
       {loading && !games.length && <PanelSkeleton lines={6} />}
 
       {games.length > 0 && view === 'steam' && (
-        <SteamView days={steamRun} todayKey={todayKey} dayPick={dayPick} picked={pickMode === 'picked'} isTracked={isTracked}
+        <SteamView days={steamRun} todayKey={todayKey} dayPick={dayPick} picked={pickMode === 'picked'} loadingPicks={pickMode === 'picked' && !picks} isTracked={isTracked}
           renderTrack={renderTrack} onOpen={setDetail} onMenu={openMenu} onMore={openMore} />
       )}
       {hasSentinel && (

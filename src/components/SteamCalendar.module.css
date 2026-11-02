@@ -620,3 +620,11 @@
 .tcardStatus { padding: 1px var(--sp-8); border-radius: var(--r-pill); background: var(--ad); color: var(--a); font-weight: 700; text-transform: capitalize; }
 .tcardActions { display: flex; align-items: center; gap: var(--sp-8); margin-top: var(--sp-4); }
 .tcardActions .iconBtn { margin-left: auto; }
+
+/* Picks loading: a shimmering cap the size of a real one. */
+.capSkeleton {
+  aspect-ratio: 616 / 353; border-radius: var(--r-md);
+  background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 50%, var(--surface-2) 100%);
+  background-size: 200% 100%; animation: capShimmer 1.2s ease-in-out infinite;
+}
+@keyframes capShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }

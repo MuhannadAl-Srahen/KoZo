@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 15,
+  rev: 16,
   // Settings → Appearance → UI scale.
   ui: {
     setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
@@ -88,6 +88,7 @@ contextBridge.exposeInMainWorld('kozo', {
       storeDetails: (appId) => ipcRenderer.invoke('steam:storeDetails', appId),
       comingSoon: (feed, page) => ipcRenderer.invoke('steam:comingSoon', feed, page),
       appAssets: (appIds) => ipcRenderer.invoke('steam:appAssets', appIds),
+      similar: (appId) => ipcRenderer.invoke('steam:similar', appId),
       tasteProfile: () => ipcRenderer.invoke('steam:tasteProfile'),
       picks: () => ipcRenderer.invoke('steam:picks'),
       reviews: (appId) => ipcRenderer.invoke('steam:reviews', appId),
@@ -169,6 +170,15 @@ contextBridge.exposeInMainWorld('kozo', {
       setBudget: (gb) => ipcRenderer.invoke('drive:setBudget', gb),
       setClient: (c) => ipcRenderer.invoke('drive:setClient', c),
       restore: () => ipcRenderer.invoke('drive:restore'),
+    },
+    deals: {
+      list: (opts) => ipcRenderer.invoke('deals:list', opts),
+      markSeen: () => ipcRenderer.invoke('deals:markSeen'),
+      unseen: () => ipcRenderer.invoke('deals:unseen'),
+    },
+    pack: {
+      exportAll: () => ipcRenderer.invoke('pack:export'),
+      importAll: () => ipcRenderer.invoke('pack:import'),
     },
     backup: {
       findExisting: () => ipcRenderer.invoke('backup:findExisting'),
@@ -279,6 +289,9 @@ contextBridge.exposeInMainWorld('kozo', {
       onAppUpdate: sub('app:update', pass),
       onReleasesChanged: sub('releases:changed', pass),
       onDriveStatus: sub('drive:status', pass),
+      onPackProgress: sub('pack:progress', pass),
+      onDealsChanged: sub('deals:changed', pass),
+      onDealsUpdated: sub('deals:updated', pass),
       onTrayRefresh: sub('tray:refresh', pass),
       onAccentChanged: sub('accent:changed', pass),
       onUnknownProcessAdd: sub('unknown-process:add', pass),

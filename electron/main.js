@@ -449,6 +449,7 @@ Close any program that may be using it and start KoZo again.`)
 
   // "It's out now!" — notify when a tracked upcoming game's release date passes.
   try { require('./services/releaseWatch').start() } catch {}
+  try { require('./services/deals').start() } catch {}
 
   // Auto-update from GitHub Releases (packaged builds only; silent when the
   // release repo isn't configured yet).

@@ -8,8 +8,6 @@ import {
 import { getBannerBg, parseGenres, formatMonthKey, fileUrl } from '../lib/utils'
 import { LIST_STATUSES, LIST_STATUS_ORDER } from '../lib/cardModel'
 import AddGameToListModal from '../components/modals/AddGameToListModal'
-import AddGamesToCustomListModal from '../components/modals/AddGamesToCustomListModal'
-import CreateEditListModal from '../components/modals/CreateEditListModal'
 import EditGameListModal from '../components/modals/EditGameListModal'
 import PlanMonthModal from '../components/modals/PlanMonthModal'
 import SearchableSelect from '../components/ui/SearchableSelect'
@@ -239,10 +237,8 @@ export default function GameList() {
 
   const [showAdd, setShowAdd]   = useState(false)
   const [picking, setPicking]   = useState(false)   // Pick for me
-  const [listModal, setListModal] = useState(null)   // 'new' | list object | null
   const [editItem, setEditItem] = useState(null)
   const [ctxMenu, setCtxMenu]   = useState(null)     // null | { x, y, item }
-  const [addToList, setAddToList] = useState(false)  // add-games picker for the active custom list
   const [dragOverId, setDragOverId] = useState(null) // drop-target highlight
   const dragIdRef = useRef(null)
 
@@ -597,10 +593,15 @@ export default function GameList() {
         </div>
       )}
 
-      {/* Custom lists — one slim row of chips (genre filtering moved into the
-          toolbar dropdown, so the header stays compact) */}
+      {/* Status tabs. Custom lists were removed from the page (the user found
+          them clutter); the lists in the database stay untouched. */}
       {!selectionMode && (
-        <div className={s.listsBar}>
+        <div className={s.listsBar} onWheel={(e) => {
+          // One row that scrolls sideways in a narrow window instead of
+          // wrapping over the cards; the wheel scrolls it.
+          const el = e.currentTarget
+          if (el.scrollWidth > el.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) el.scrollLeft += e.deltaY
+        }}>
           <div className={s.statusTabs} role="tablist" aria-label="Status">
             <button type="button" role="tab" aria-selected={!statusFilter}
               className={`${s.statusTab} ${!statusFilter ? s.statusTabOn : ''}`} onClick={() => handleStatusChange('')}>
@@ -614,48 +615,6 @@ export default function GameList() {
               </button>
             ))}
           </div>
-          <span className={s.listsDivider} />
-          <button
-            className={`${s.listChip} ${activeListId == null ? s.listChipActive : ''}`}
-            onClick={() => handleListChange(null)}
-          >
-            Whole list
-          </button>
-          {customLists.map(l => (
-            <button
-              key={l.id}
-              className={`${s.listChip} ${activeListId === l.id ? s.listChipActive : ''}`}
-              onClick={() => handleListChange(l.id)}
-              style={activeListId === l.id && l.color
-                ? { borderColor: l.color, background: l.color + '22', color: l.color }
-                : undefined}
-            >
-              {l.color && <span className={s.listChipDot} style={{ background: l.color }} />}
-              {l.emoji ? `${l.emoji} ` : ''}{l.name}
-              <span className={s.listChipCount}>{l.game_count}</span>
-              <span
-                className={s.listChipEdit}
-                title="Edit list"
-                onClick={(e) => { e.stopPropagation(); setListModal(l) }}
-              >
-                <IconPencil size={12} stroke={1.8} />
-              </span>
-            </button>
-          ))}
-          <button className={s.listChipNew} onClick={() => setListModal('new')}>
-            <IconPlus size={13} stroke={2} />
-            New list
-          </button>
-          {activeList && (
-            <button
-              className={s.addToListBtn}
-              onClick={() => setAddToList(true)}
-              title={`Pick games from your Game List to add to "${activeList.name}"`}
-            >
-              <IconPlus size={14} stroke={2} />
-              Add games to "{activeList.name.length > 16 ? activeList.name.slice(0, 16) + '…' : activeList.name}"
-            </button>
-          )}
         </div>
       )}
 
@@ -671,11 +630,8 @@ export default function GameList() {
         {!loading && items.length === 0 && (
           <EmptyState
             Icon={IconDeviceGamepad2}
-            title={activeList ? `Nothing in "${activeList.name}" yet` : 'No games here yet'}
-            desc={activeList
-              ? 'Pick games from your Game List, or open any game and tick this list.'
-              : "Add games to your backlog, wishlist, or track what you're playing."}
-            action={activeList ? { label: 'Add games', Icon: IconPlus, onClick: () => setAddToList(true) } : undefined}
+            title="No games here yet"
+            desc="Add games to your backlog, wishlist, or track what you're playing."
           />
         )}
 
@@ -786,32 +742,6 @@ export default function GameList() {
           onClose={() => setEditItem(null)}
           onSaved={afterSave}
           onDeleted={afterDelete}
-        />
-      )}
-
-      {listModal && (
-        <CreateEditListModal
-          list={listModal === 'new' ? null : listModal}
-          onClose={() => setListModal(null)}
-          onSaved={() => { setListModal(null); loadLists() }}
-          onDeleted={() => {
-            setListModal(null)
-            if (listModal !== 'new' && activeListId === listModal.id) handleListChange(null)
-            loadLists()
-          }}
-        />
-      )}
-
-      {addToList && activeList && (
-        <AddGamesToCustomListModal
-          list={activeList}
-          onClose={() => setAddToList(false)}
-          onAdded={() => {
-            setAddToList(false)
-            loadItems(1, { listId: activeListId })
-            setPage(1)
-            loadLists()
-          }}
         />
       )}
 

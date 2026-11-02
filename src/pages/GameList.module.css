@@ -943,3 +943,10 @@
 }
 :global(html[data-card-style="minimal"]) .cardInfo,
 :global(html[data-card-style="minimal"]) .cardGenresLine { display: none; }
+
+/* Status tabs and lists stay ONE row that scrolls sideways (the Upcoming
+   This week strip): many lists used to wrap into rows that covered the cards. */
+.listsBar { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.listsBar > * { flex-shrink: 0; }
+.listsBar .statusTabs { flex-wrap: nowrap; }
+.listsBar .statusTab { white-space: nowrap; }

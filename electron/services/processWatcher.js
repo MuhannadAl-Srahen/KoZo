@@ -1146,20 +1146,25 @@ function runWhenIdle(key, fn) {
   if (!isSessionActive()) { fn(); return }
   deferredJobs.set(key, fn)
 }
-emitter.on('idle', () => {
-  if (!deferredJobs.size) return
-  // Let the session-end work settle before starting disk-heavy jobs, and
-  // re-check: another game may have been detected in the meantime, in which
-  // case everything stays queued for the next idle.
-  setTimeout(() => {
-    if (isSessionActive()) return
-    const jobs = [...deferredJobs.entries()]
-    deferredJobs.clear()
-    for (const [key, fn] of jobs) {
-      try { fn() } catch (e) { logger.warn(`deferred job "${key}" failed`, { message: e.message }) }
-    }
-  }, 3000)
-})
+// Released one at a time, a few seconds apart, starting 20s after the game
+// closed: running them all in the same instant the game was unloading (crack
+// scans, backups, the catch-up sweep) made the whole PC stutter on exit.
+const IDLE_START_MS = 20000
+const IDLE_GAP_MS = 4000
+let draining = false
+function drainDeferred() {
+  if (draining) return
+  draining = true
+  const step = () => {
+    if (isSessionActive() || !deferredJobs.size) { draining = false; return }
+    const [key, fn] = deferredJobs.entries().next().value
+    deferredJobs.delete(key)
+    try { fn() } catch (e) { logger.warn(`deferred job "${key}" failed`, { message: e.message }) }
+    setTimeout(step, IDLE_GAP_MS)
+  }
+  setTimeout(step, IDLE_START_MS)
+}
+emitter.on('idle', () => { if (deferredJobs.size) drainDeferred() })
 
 /**
  * Returns all running .exe processes with their disk paths.

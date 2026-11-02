@@ -1,0 +1,129 @@
+.page { composes: page from '../styles/page.module.css'; }
+.toolbar { composes: toolbar from '../styles/page.module.css'; flex-wrap: wrap; }
+.pageTitle { composes: pageTitle from '../styles/page.module.css'; }
+.content { composes: content from '../styles/page.module.css'; display: flex; flex-direction: column; gap: var(--sp-16); }
+
+/* ── Search ─────────────────────────────────────────────────────────────── */
+.searchWrap { position: relative; flex: 1; max-width: 520px; min-width: 220px; margin-left: auto; }
+.searchIcon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none; }
+.search {
+  width: 100%; height: 36px; padding: 0 34px 0 36px; border-radius: var(--r-pill);
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary);
+  font: inherit; font-size: var(--fs-sm); outline: none;
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.search:focus { border-color: color-mix(in srgb, var(--a) 60%, transparent); background: var(--surface-1); }
+.clear {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%); display: grid; place-items: center;
+  width: 22px; height: 22px; border: 0; border-radius: 50%; background: transparent; color: var(--text-muted); cursor: pointer;
+}
+.clear:hover { background: var(--surface-3); color: var(--text-primary); }
+.hits {
+  position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: var(--z-dropdown, 50);
+  padding: 6px; border-radius: var(--r-lg, 12px); border: 1px solid var(--border);
+  background: var(--surface-2); box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+  animation: likePop 0.18s var(--ease-out) backwards;
+}
+.hit {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 8px; border: 0; border-radius: var(--r-md, 8px);
+  background: transparent; color: var(--text-primary); font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer;
+}
+.hit:hover, .hit:focus-visible { background: color-mix(in srgb, var(--a) 14%, transparent); }
+.hit img { width: 92px; height: 43px; object-fit: cover; border-radius: 4px; flex-shrink: 0; }
+.hit span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hitMuted { padding: 10px; color: var(--text-muted); font-size: var(--fs-sm); }
+
+/* ── Quick seeds ───────────────────────────────────────────────────────── */
+.seeds { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.seedsLabel { font-size: var(--fs-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-right: 4px; }
+.seedChip {
+  height: 28px; padding: 0 12px; border-radius: var(--r-pill); border: 1px solid var(--border);
+  background: var(--surface-1); color: var(--text-secondary); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer;
+  max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.seedChip:hover { color: var(--text-primary); border-color: color-mix(in srgb, var(--a) 40%, var(--border)); }
+.seedOn { background: color-mix(in srgb, var(--a) 16%, transparent); border-color: color-mix(in srgb, var(--a) 55%, transparent); color: var(--a); }
+
+/* ── The game you picked ───────────────────────────────────────────────── */
+.seedCard {
+  display: flex; align-items: center; gap: var(--sp-16); padding: 14px; border-radius: var(--r-card);
+  border: 1px solid var(--border); background: var(--surface-1);
+  animation: likeUp 0.35s var(--ease-out) backwards;
+}
+.seedArt { width: 230px; aspect-ratio: 460 / 215; object-fit: cover; border-radius: 8px; flex-shrink: 0; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); }
+.seedText { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1; }
+.seedKicker { font-size: var(--fs-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--a); }
+.seedName { font-size: var(--fs-xl, 22px); font-weight: 800; line-height: 1.15; color: var(--text-primary); }
+.ghostBtn {
+  height: 34px; padding: 0 16px; border-radius: var(--r-pill); border: 1px solid var(--border); background: var(--surface-2);
+  color: var(--text-primary); font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer; flex-shrink: 0;
+}
+.ghostBtn:hover { border-color: color-mix(in srgb, var(--a) 50%, var(--border)); }
+@media (max-width: 760px) { .seedArt { width: 140px; } }
+
+/* ── Filters ───────────────────────────────────────────────────────────── */
+.results { display: flex; flex-direction: column; gap: var(--sp-12); }
+.filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-10); }
+.seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: var(--r-pill); background: var(--surface-1); border: 1px solid var(--border); }
+.segBtn {
+  height: 28px; padding: 0 12px; border: 0; border-radius: var(--r-pill); background: transparent;
+  color: var(--text-secondary); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer;
+}
+.segBtn:hover { color: var(--text-primary); }
+.segOn { background: color-mix(in srgb, var(--a) 18%, transparent); color: var(--a); }
+.toggle { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-xs); font-weight: 600; color: var(--text-secondary); cursor: pointer; user-select: none; }
+.toggle input { position: absolute; opacity: 0; pointer-events: none; }
+.toggleBox {
+  display: grid; place-items: center; width: 16px; height: 16px; border-radius: 5px; border: 1px solid var(--border);
+  background: var(--surface-2); color: var(--accent-ink, #0b0b12);
+}
+.toggle input:checked + .toggleBox { background: var(--a); border-color: var(--a); }
+.toggle input:focus-visible + .toggleBox { outline: 2px solid var(--a); outline-offset: 2px; }
+
+/* ── Cards ─────────────────────────────────────────────────────────────── */
+.grid { display: grid; gap: var(--sp-12); grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 230px), 1fr)); }
+.card {
+  display: flex; flex-direction: column; min-width: 0; padding: 0; border-radius: var(--r-card); overflow: hidden;
+  border: 1px solid var(--border); background: var(--surface-1); color: inherit; font: inherit; text-align: left; cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.card:hover { border-color: color-mix(in srgb, var(--a) 45%, var(--border)); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35); }
+.art { position: relative; aspect-ratio: 460 / 215; background: var(--surface-3); overflow: hidden; }
+.art img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.35s var(--ease-out); }
+.match {
+  position: absolute; top: 8px; right: 8px; padding: 3px 8px; border-radius: var(--r-pill);
+  font-size: var(--fs-xs); font-weight: 800; font-variant-numeric: tabular-nums; backdrop-filter: blur(6px);
+}
+.match_high { background: color-mix(in srgb, #0b0b12 55%, transparent); color: var(--success); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--success) 50%, transparent); }
+.match_mid { background: color-mix(in srgb, #0b0b12 55%, transparent); color: var(--a); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a) 50%, transparent); }
+.match_low { background: color-mix(in srgb, #0b0b12 55%, transparent); color: var(--text-secondary); }
+.owned {
+  position: absolute; left: 8px; bottom: 8px; display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px;
+  border-radius: var(--r-pill); background: color-mix(in srgb, #0b0b12 70%, transparent); color: var(--text-primary);
+  font-size: var(--fs-2xs); font-weight: 700;
+}
+.body { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px 12px; min-width: 0; }
+.name { font-size: var(--fs-sm); font-weight: 700; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meta { display: flex; align-items: center; gap: 8px; font-size: var(--fs-xs); color: var(--text-muted); min-width: 0; }
+.reviews { display: inline-flex; align-items: center; gap: 3px; color: var(--success); font-weight: 700; }
+.dev { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.tag {
+  padding: 2px 8px; border-radius: var(--r-pill); font-size: var(--fs-2xs); font-weight: 600;
+  background: var(--surface-3); color: var(--text-secondary);
+}
+
+.addBtn {
+  display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 16px; border: 0; border-radius: var(--r-pill);
+  background: var(--a); color: var(--accent-ink, #0b0b12); font: inherit; font-size: var(--fs-sm); font-weight: 700; cursor: pointer;
+}
+.addBtn:disabled { opacity: 0.6; cursor: default; }
+.addedNote { display: inline-flex; align-items: center; gap: 6px; color: var(--success); font-size: var(--fs-sm); font-weight: 700; }
+
+/* ── Motion (Settings → Appearance → Animations) ───────────────────────── */
+@keyframes likeUp { from { opacity: 0; transform: translateY(12px); } }
+@keyframes likePop { from { opacity: 0; transform: scale(0.97) translateY(-4px); } }
+:global(html[data-motion]) .card { animation: likeUp 0.35s var(--ease-out) backwards; animation-delay: calc(var(--i, 0) * 0.025s); }
+:global(html[data-motion="heavy"]) .card:hover .art img { transform: scale(1.05); }
+:global(html[data-motion="off"]) .seedCard, :global(html[data-motion="off"]) .hits { animation: none; }

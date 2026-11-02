@@ -12,7 +12,7 @@ import {
   IconPlugConnected, IconBrandGoogleDrive,
 } from '@tabler/icons-react'
 import { useAccentColor } from '../context/AccentColorContext'
-import { useAppearance, DEFAULT_APPEARANCE, FONTS } from '../context/AppearanceContext'
+import { useAppearance, DEFAULT_APPEARANCE, FONTS, bgTone } from '../context/AppearanceContext'
 import ColorPicker from '../components/ui/ColorPicker'
 import GameCard from '../components/GameCard'
 import { NAV_ITEMS } from '../components/Sidebar'
@@ -824,19 +824,21 @@ function SteamTab() {
               {bannerRefreshing ? <><IconLoader2 size={13} className="spin" /> Refreshing…</> : <><IconRefresh size={13} /> Refresh covers</>}
             </button>
           </ConnRow>
-          <ConnRow icon={<IconBrandGoogleDrive size={20} />} name="Google Drive"
-            tone={drive?.connected && !drive.error ? 'ok' : drive?.error ? 'warn' : 'muted'}
-            status={!drive ? '…' : !drive.configured ? 'Needs a one-time setup, then your saves are safe off this PC'
-              : drive.connected ? <>Backups copied to <b>{drive.email || 'your Drive'}</b>{drive.lastSync ? `, ${timeAgo(drive.lastSync)}` : ''}</>
-              : 'Keeps your saves and library safe off this PC'}>
-            {drive && !drive.configured && <button type="button" className={s.testBtn} onClick={() => setDriveSetup(true)}>Set up</button>}
-            {drive?.configured && !drive.connected && (
-              <button type="button" className={s.testBtn} onClick={connectDrive} disabled={driveBusy}>
-                {driveBusy ? <><IconLoader2 size={13} className="spin" /> Waiting…</> : 'Connect'}
-              </button>
-            )}
-            {drive?.connected && <button type="button" className={s.testBtn} onClick={() => navigate('/settings?tab=data')}>Backups</button>}
-          </ConnRow>
+          {/* Only when KoZo has a Google client (built in, or the maker's own
+              under Advanced): users never see a setup step. */}
+          {drive?.configured && (
+            <ConnRow icon={<IconBrandGoogleDrive size={20} />} name="Google Drive"
+              tone={drive.connected && !drive.error ? 'ok' : drive.error ? 'warn' : 'muted'}
+              status={drive.connected ? <>Backups copied to <b>{drive.email || 'your Drive'}</b>{drive.lastSync ? `, ${timeAgo(drive.lastSync)}` : ''}</>
+                : 'Keeps your saves and library safe off this PC'}>
+              {!drive.connected && (
+                <button type="button" className={s.testBtn} onClick={connectDrive} disabled={driveBusy}>
+                  {driveBusy ? <><IconLoader2 size={13} className="spin" /> Waiting for Google…</> : 'Sign in with Google'}
+                </button>
+              )}
+              {drive.connected && <button type="button" className={s.testBtn} onClick={() => navigate('/settings?tab=data')}>Backups</button>}
+            </ConnRow>
+          )}
         </div>
         <Message msg={detectMsg} />
         <Message msg={bannerMsg} />
@@ -916,6 +918,16 @@ function SteamTab() {
             To show another name or picture, make an app in the{' '}
             <button type="button" className={s.linkBtn} onClick={() => window.kozo?.api?.shell?.openExternal?.('https://discord.com/developers/applications')}>Discord Developer Portal</button>.
           </p>
+        </div>
+
+        <div className={s.advField}>
+          <label className={s.advLabel}>Your own Google client (for Google Drive)</label>
+          <div className={s.keyRow}>
+            <button type="button" className={s.testBtn} onClick={() => setDriveSetup(true)}>
+              <IconBrandGoogleDrive size={13} /> {drive?.configured ? 'Change Google client' : 'Use your own Google client'}
+            </button>
+          </div>
+          <p className={s.sectionDescQuiet}>Only for whoever builds KoZo: once a client is set, everyone just signs in with Google.</p>
         </div>
       </details>
     </div>
@@ -1254,6 +1266,7 @@ const START_PAGES = [
 const THEMES = [
   { value: 'midnight', label: 'Midnight', bg: '#10101a', s2: '#161624' },
   { value: 'tint',     label: 'Accent tint', tint: true },
+  { value: 'custom',   label: 'Custom', custom: true },
   { value: 'oled',     label: 'OLED black', bg: '#000000', s2: '#0b0b0f' },
   { value: 'slate',    label: 'Slate', bg: '#11151b', s2: '#19202a' },
   { value: 'nord',     label: 'Nord', bg: '#1d2230', s2: '#272e3d' },
@@ -1345,11 +1358,20 @@ function LookCustomize() {
               className={`${s.themeBtn} ${prefs.theme === t.value ? s.themeOn : ''}`} onClick={() => setPrefs({ theme: t.value })}
               style={t.tint
                 ? { '--tbg': `color-mix(in srgb, ${accent} 12%, #0b0b10)`, '--ts2': `color-mix(in srgb, ${accent} 22%, #121218)` }
-                : { '--tbg': t.bg, '--ts2': t.s2 }}>
+                : t.custom
+                  ? (() => { const c = bgTone(prefs.bgColor); return { '--tbg': `hsl(${c.h} ${c.s}% ${c.l}%)`, '--ts2': `hsl(${c.h} ${c.s}% ${c.l + 3.2}%)` } })()
+                  : { '--tbg': t.bg, '--ts2': t.s2 }}>
               <span className={s.themeSwatch}><span /><span /></span>
               {t.label}
             </button>
           ))}
+        </div>
+        <div className={s.colorRows}>
+          <div className={s.colorRow}>
+            <span className={s.segLabel}>Background color</span>
+            <ColorPicker value={prefs.bgColor} onChange={v => v && setPrefs({ bgColor: v, theme: 'custom' })} presets={presets} label="Background color" />
+            <span className={s.sectionDescQuiet}>Any color, kept dark so text and cards stay readable. Picking one switches to Custom.</span>
+          </div>
         </div>
         <p className={s.sectionDescQuiet}>Accent tint colors the background with your accent color.</p>
       </section>
@@ -1370,6 +1392,23 @@ function LookCustomize() {
         <div className={s.segList}>
           <Segmented label={`Text size ${Math.round((prefs.textScale || 1) * 100)}%`} value={prefs.textScale} onChange={v => setPrefs({ textScale: v })}
             options={[0.9, 1, 1.05, 1.1, 1.2].map(v => ({ value: v, label: `${Math.round(v * 100)}%` }))} />
+        </div>
+      </section>
+
+      <section className={s.section}>
+        <div className={s.sectionHeader}><IconLayoutCards size={15} stroke={1.6} /><span>Game page</span></div>
+        <p className={s.sectionDesc}>The layout of a game's own page. The switch at the top of every game page changes it too.</p>
+        <div className={s.cardStyles} role="radiogroup" aria-label="Game page layout">
+          {[
+            { value: 'store', label: 'Store', desc: 'Cover beside the name, your stats in a side panel' },
+            { value: 'cinematic', label: 'Cinematic', desc: 'Big art with the name and stats over it' },
+          ].map(c => (
+            <button key={c.value} type="button" role="radio" aria-checked={prefs.gamePage === c.value}
+              className={`${s.cardStyleTile} ${prefs.gamePage === c.value ? s.cardStyleOn : ''}`} onClick={() => setPrefs({ gamePage: c.value })}>
+              <span className={s.cardStyleText}><strong>{c.label}</strong><small>{c.desc}</small></span>
+              {prefs.gamePage === c.value && <IconCheck size={14} stroke={2.6} className={s.cardStyleCheck} />}
+            </button>
+          ))}
         </div>
       </section>
 
@@ -1628,6 +1667,8 @@ const FEATURE_GROUPS = [
       { Icon: IconDownload,       name: 'Import from launchers', go: '/?launchers=1', desc: 'Finds the games installed through Epic, GOG and Xbox and adds the ones you pick, with Play going through their launcher.' },
       { Icon: IconStar,           name: 'Favorites', go: '/',        desc: 'Star a game to pin it to the top of your Library and Game List.' },
       { Icon: IconList,           name: 'Game List', go: '/game-list',        desc: 'A backlog / wishlist with statuses, genres, search, and Spotify-style custom lists.' },
+      { Icon: IconStar,           name: 'Discounts', go: '/deals',         desc: 'Steam sales ranked for you: your Game List games on sale first (with a badge when one goes on sale), a deal score from the discount, reviews and your taste, and whether it is the lowest price ever.' },
+      { Icon: IconStar,           name: 'Games like', go: '/like',          desc: 'Search any game and see the games that play most like it, ranked by shared Steam tags, Steam\'s own picks and reviews, with the reasons.' },
       { Icon: IconEyeOff,         name: 'Status filter & hidden games', go: '/', desc: 'Filter the Library by Playing/Finished/Dropped/On hold; hidden games tuck into a collapsed section at the bottom (their stats still count).' },
       { Icon: IconLayoutGrid,     name: 'Drag & drop ordering', go: '/', desc: 'Pick "Custom order" and drag cards into any arrangement you like, in the Library and the Game List.' },
     ],

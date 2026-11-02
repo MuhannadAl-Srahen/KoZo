@@ -37,6 +37,15 @@
   --surface-2: hsl(var(--tint-h, 250) 24% 11.4%);
   --surface-3: hsl(var(--tint-h, 250) 21% 13.7%);
 }
+:root[data-theme="custom"] {
+  /* Custom: the picked color's hue, its saturation capped at 35% and its
+     lightness held between 4 and 13% (AppearanceContext bgTone), then the
+     stock ladder of surfaces above it. */
+  --bg:        hsl(var(--cbg-h, 250) var(--cbg-s, 24%) var(--cbg-l, 8%));
+  --surface-1: hsl(var(--cbg-h, 250) var(--cbg-s, 24%) calc(var(--cbg-l, 8%) + 2%));
+  --surface-2: hsl(var(--cbg-h, 250) var(--cbg-s, 24%) calc(var(--cbg-l, 8%) + 3.2%));
+  --surface-3: hsl(var(--cbg-h, 250) calc(var(--cbg-s, 24%) * 0.9) calc(var(--cbg-l, 8%) + 5.5%));
+}
 :root[data-theme="oled"] {
   --bg: #000000; --surface-1: #060608; --surface-2: #0b0b0f; --surface-3: #121217;
   --border: rgba(255, 255, 255, 0.08); --border-subtle: rgba(255, 255, 255, 0.05);

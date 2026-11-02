@@ -55,9 +55,14 @@ function take(game, reason, opts) {
 }
 
 // Right before a launch (and at session start): quick, never blocks long.
+// Skipped when a backup was taken in the last 2 minutes (a launch from KoZo
+// already took one, then the session start would walk the files again).
+const lastBefore = new Map()
 function beforePlay(game) {
   if (!isEnabled() || !game) return null
-  return take(game, 'before-play', { maxMs: 4000 })
+  if (Date.now() - (lastBefore.get(game.id) || 0) < 120000) return null
+  lastBefore.set(game.id, Date.now())
+  return take(game, 'before-play', { maxMs: 4000, fast: true })
 }
 
 // After a session: learn where the game saved (folders it wrote to while it
@@ -79,7 +84,13 @@ function backupGameAfterSession(game, session = null) {
       require('./saveVault').enforceCap(games)
     } catch {}
   })
-  try { require('./processWatcher').runWhenIdle(`autoSaveBackup:${game.id}`, run) } catch { run() }
+  // Never in the moment the game closes (it is still writing its saves, and
+  // Windows is busy unloading it): queue it for the quiet drain afterwards.
+  try {
+    const pw = require('./processWatcher')
+    if (pw.isSessionActive()) pw.runWhenIdle(`autoSaveBackup:${game.id}`, run)
+    else setTimeout(() => (pw.isSessionActive() ? pw.runWhenIdle(`autoSaveBackup:${game.id}`, run) : run()), 30000)
+  } catch { run() }
 }
 
 // Take every still-queued snapshot now (will-quit).

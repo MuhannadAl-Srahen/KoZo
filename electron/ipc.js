@@ -370,6 +370,36 @@ handle('drive:restore', async () => {
   try { require('./services/saveDetect').confirmAll() } catch {}
   return { files: r.files, data }
 })
+// One file with everything (services/kozoPack.js): Save everything to one
+// file / Open a KoZo file (Backups, first-run RestoreOffer).
+handle('pack:export', async () => {
+  const { app } = require('electron')
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  const day = new Date().toISOString().slice(0, 10)
+  const res = await dialog.showSaveDialog(win, {
+    title: 'Save everything to one file',
+    defaultPath: path.join(app.getPath('documents'), `KoZo backup ${day}.kozo`),
+    filters: [{ name: 'KoZo backup', extensions: ['kozo'] }],
+  })
+  if (res.canceled || !res.filePath) return null
+  const r = await require('./services/kozoPack').exportAll(res.filePath, (done, total) => broadcast('pack:progress', { done, total }))
+  shell.showItemInFolder(res.filePath)
+  return { ...r, path: res.filePath }
+})
+handle('pack:import', async () => {
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  const res = await dialog.showOpenDialog(win, {
+    title: 'Open a KoZo file', properties: ['openFile'],
+    filters: [{ name: 'KoZo backup', extensions: ['kozo'] }],
+  })
+  if (res.canceled || !res.filePaths?.[0]) return null
+  const r = require('./services/kozoPack').importAll(res.filePaths[0], (done, total) => broadcast('pack:progress', { done, total }))
+  let data = null
+  if (r.dataPath) { data = await importBackupFile(r.dataPath); try { require('fs').rmSync(r.dataPath, { force: true }) } catch {} }
+  try { require('./services/saveDetect').confirmAll() } catch {}
+  return { files: r.files, data }
+})
+
 // A "KoZo Backup" folder already on one of this PC's drives (after a reinstall).
 handle('backup:findExisting', () => {
   const fs = require('fs')
@@ -1647,6 +1677,12 @@ handle('steam:comingSoon', (feed, page) => require('./services/steamApi').getCom
 handle('steam:tasteProfile', () => require('./services/steamApi').getTasteProfile())
 handle('steam:picks', () => require('./services/steamApi').getPicks())
 handle('steam:reviews', (appId) => require('./services/steamApi').getReviews(Number(appId)))
+// Discount games (pages/Deals.jsx, services/deals.js).
+handle('deals:list', (opts) => require('./services/deals').getDeals(opts || {}))
+handle('deals:markSeen', () => require('./services/deals').markSeen())
+handle('deals:unseen', () => require('./services/deals').unseen())
+// Games like (pages/GamesLike.jsx, Game Detail): steamApi.similarGames.
+handle('steam:similar', (appId) => require('./services/steamApi').similarGames(Number(appId)))
 handle('steam:appAssets', async (appIds) => Object.fromEntries(await require('./services/steamApi').getAppAssets(appIds)))
 
 // Called when the Upcoming tab opens: warms the store-details cache for every

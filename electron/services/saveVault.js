@@ -130,13 +130,15 @@ function hashFile(abs) {
 
 // Store one file's content (if new) and return its hash. The blob is written
 // to .tmp, read back and checked before it takes its real name.
-function storeBlob(vault, abs) {
+// `fast` (right before a game starts): lighter compression, so the backup
+// never competes with the game loading; after-play backups use the strongest.
+function storeBlob(vault, abs, fast = false) {
   const data = fs.readFileSync(abs)
   const hash = crypto.createHash('sha1').update(data).digest('hex')
   const dest = blobPath(vault, hash)
   if (fs.existsSync(dest)) return hash
   const tmp = dest + '.tmp'
-  fs.writeFileSync(tmp, zlib.gzipSync(data, { level: 9 }))
+  fs.writeFileSync(tmp, zlib.gzipSync(data, { level: fast ? 5 : 9 }))
   const check = crypto.createHash('sha1').update(zlib.gunzipSync(fs.readFileSync(tmp))).digest('hex')
   if (check !== hash) { try { fs.rmSync(tmp, { force: true }) } catch {} ; throw new Error(`Backup copy of ${path.basename(abs)} did not verify`) }
   fs.renameSync(tmp, dest)
@@ -223,7 +225,7 @@ function snapshot(game, sources, reason = 'manual', opts = {}) {
     let h
     if (k && k.n === f.n && k.m === f.m && fs.existsSync(blobPath(vault, k.h))) h = k.h
     else {
-      try { h = storeBlob(vault, f.abs) }
+      try { h = storeBlob(vault, f.abs, !!opts.fast) }
       catch (e) {
         // A file the game holds locked (rare for saves): skip it, say so.
         logger.warn(`saveVault: could not read ${f.abs}`, { message: e.message })

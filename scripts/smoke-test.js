@@ -105,6 +105,7 @@ app.whenReady().then(async () => {
   const pages = [
     ['#/', 'Library', true], ['#/game-list', 'Game List', true], ['#/plan', 'Play Plan', true],
     ['#/finished', 'Finished', true], ['#/upcoming', 'Upcoming', false],
+    ['#/like', 'Games like', false], ['#/like?app=367520', 'Games like (seeded)', false], ['#/deals', 'Discounts', false],
     ['#/activity?tab=overview', 'Activity overview', false], ['#/activity?tab=sessions', 'Activity sessions', false],
     ['#/activity?tab=achievements', 'Activity achievements', false], ['#/profile', 'Profile', false],
     ['#/settings', 'Settings', false], [`#/game/${seeded?.[0]}`, 'Game page', false],

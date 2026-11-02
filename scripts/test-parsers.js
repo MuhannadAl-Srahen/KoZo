@@ -305,6 +305,73 @@ console.log('\npick sources')
   check('dropped and low-rated never', !names.includes('Hated') && !names.includes('Dropped'), names.join())
 }
 
+// Games like: tag overlap, Steam's rank and reviews; editions and DLC out.
+console.log('\ngames like')
+{
+  const { scoreSimilar, baseName } = require(path.join(__dirname, '..', 'electron', 'services', 'steamApi.js'))
+  const T = (...ids) => ids.map(id => ({ id, w: 100 }))
+  const seed = { appid: 1, name: 'Sekiro\u2122: Shadows Die Twice', tags: T(10, 11, 12, 13, 14) }
+  const cands = [
+    { appid: 2, name: 'Close', type: 0, tags: T(10, 11, 12, 13), reviews: { count: 5000, pct: 92 } },
+    { appid: 3, name: 'Far', type: 0, tags: T(50, 51, 52, 13), reviews: { count: 5000, pct: 92 } },
+    { appid: 4, name: 'Sekiro: Shadows Die Twice - GOTY Edition', type: 0, tags: T(10, 11, 12), reviews: { count: 9000, pct: 95 } },
+    { appid: 5, name: 'Close DLC', type: 4, tags: T(10, 11, 12, 13), reviews: { count: 900, pct: 95 } },
+    { appid: 6, name: 'Few reviews', type: 0, tags: T(10, 11, 12, 13), reviews: { count: 12, pct: 100 }, releasedAt: 1 },
+    { appid: 7, name: 'Close but bad', type: 0, tags: T(10, 11, 12, 13), reviews: { count: 5000, pct: 40 } },
+  ]
+  const out = scoreSimilar(seed, cands, new Map([[3, 0]]))
+  const ids = out.map(o => o.appid)
+  check('closest tags win', ids[0] === 2, ids.join())
+  check('editions of the seed left out', !ids.includes(4) && baseName('Sekiro: Shadows Die Twice - GOTY Edition') === baseName('Sekiro\u2122: Shadows Die Twice'), ids.join())
+  check('DLC and tiny review counts left out', !ids.includes(5) && !ids.includes(6), ids.join())
+  check('poor reviews pushed down', ids.indexOf(7) > ids.indexOf(2), ids.join())
+  check('shared tags given as the reason', out[0].shared.includes(10) && out[0].pct === 99)
+}
+
+// Discounts: the deal score and the price-history verdict.
+console.log('\ndeals')
+{
+  const { dealScore, lowState, tasteMatch } = require(path.join(__dirname, '..', 'electron', 'services', 'deals.js'))
+  const good = { count: 50000, pct: 95 }
+  check('deeper discount scores higher', dealScore({ pct: 80, reviews: good, match: 0.5 }) > dealScore({ pct: 20, reviews: good, match: 0.5 }))
+  check('few reviews do not beat many', dealScore({ pct: 50, reviews: { count: 15, pct: 100 }, match: 0.5 }) < dealScore({ pct: 50, reviews: good, match: 0.5 }))
+  check('your taste counts', dealScore({ pct: 50, reviews: good, match: 0.9 }) > dealScore({ pct: 50, reviews: good, match: 0.1 }))
+  check('lowest ever beats a fake sale', dealScore({ pct: 50, reviews: good, match: 0.5, low: 'lowest' }) > dealScore({ pct: 50, reviews: good, match: 0.5, low: 'above' }))
+  check('score stays 1..99', dealScore({ pct: 100, reviews: good, match: 5, low: 'lowest' }) === 99)
+  check('price history verdicts', lowState({ lowest: 4.99, steamUsd: 4.99 }) === 'lowest' && lowState({ lowest: 4.99, steamUsd: 5.99 }) === 'near' && lowState({ lowest: 4.99, steamUsd: 9.99 }) === 'above' && lowState(null) === null)
+  const vec = new Map([[1, 5], [2, 3]])
+  check('taste match prefers shared tags', tasteMatch(vec, [{ id: 1 }, { id: 2 }]) > tasteMatch(vec, [{ id: 9 }, { id: 8 }]))
+}
+
+// One file with everything: pack and unpack round trip.
+console.log('\nkozo pack')
+{
+  const os = require('os'), fs = require('fs')
+  const pack = require(path.join(__dirname, '..', 'electron', 'services', 'kozoPack.js'))
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kozo-pack-test-'))
+  try {
+    const src = path.join(dir, 'src'), dst = path.join(dir, 'dst')
+    fs.mkdirSync(path.join(src, 'Game', 'vault', 'blobs'), { recursive: true })
+    fs.writeFileSync(path.join(src, 'Game', 'vault', 'blobs', 'a.gz'), Buffer.alloc(3 * 1024 * 1024, 7))
+    fs.writeFileSync(path.join(src, 'Game', 'empty.txt'), '')
+    fs.writeFileSync(path.join(src, 'top.json'), '{"x":1}')
+    const entries = [{ p: 'data.json', data: Buffer.from('{"app":"kozo"}') },
+      ...pack.listFiles(src).map(rel => ({ p: `Saves/${rel}`, from: path.join(src, rel) })),
+      { p: 'Saves/../evil.txt', data: Buffer.from('no') }]
+    const file = path.join(dir, 'x.kozo')
+    pack.writePack(file, entries).then(() => {
+      const r = pack.readPack(file, { destFor: p => path.join(dst, ...p.slice(6).split('/')) })
+      check('pack round trip keeps every file', r.files === 3 && fs.readFileSync(path.join(dst, 'Game', 'vault', 'blobs', 'a.gz')).equals(Buffer.alloc(3 * 1024 * 1024, 7)))
+      check('pack keeps empty files and the data', fs.statSync(path.join(dst, 'Game', 'empty.txt')).size === 0 && String(r.data) === '{"app":"kozo"}')
+      check('pack refuses paths that leave the folder', !fs.existsSync(path.join(dir, 'evil.txt')) && r.skipped === 1)
+      let bad = false
+      try { fs.writeFileSync(path.join(dir, 'bad.kozo'), 'hello'); pack.readPack(path.join(dir, 'bad.kozo'), { destFor: () => null }) } catch { bad = true }
+      check('pack rejects other files', bad)
+    }).catch(e => check('pack round trip ran', false, e.message))
+      .finally(() => setTimeout(() => { try { fs.rmSync(dir, { recursive: true, force: true }) } catch {} }, 500))
+  } catch (e) { check('pack test ran', false, e.message) }
+}
+
 // Saves found on their own: junk filter and learning from a session.
 console.log('\nsave detection')
 {

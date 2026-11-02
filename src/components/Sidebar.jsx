@@ -4,6 +4,8 @@ import {
   IconLayoutGrid,
   IconList,
   IconCalendar,
+  IconSparkles,
+  IconDiscount2,
   IconCalendarEvent,
   IconFlag,
   IconChartBar,
@@ -26,6 +28,8 @@ export const NAV_ITEMS = [
   { path: '/plan',          label: 'Play Plan',    Icon: IconCalendarEvent, group: 'Play' },
   { path: '/finished',      label: 'Finished',     Icon: IconFlag,          group: 'Play' },
   { path: '/upcoming',      label: 'Upcoming',     Icon: IconCalendar,      group: 'Discover' },
+  { path: '/like',          label: 'Games like',   Icon: IconSparkles,      group: 'Discover' },
+  { path: '/deals',         label: 'Discounts',    Icon: IconDiscount2,     group: 'Discover' },
   // Statistics, Sessions and Achievements live together under Activity.
   { path: '/activity',      label: 'Activity',     Icon: IconChartBar,      group: 'Discover' },
 ]
@@ -66,6 +70,14 @@ export default function Sidebar() {
     let alive = true
     window.kozo?.api?.releases?.unseen?.().then(res => { if (alive && res?.ok) setNewReleases((res.data || []).length) })
     const off = window.kozo?.events?.onReleasesChanged?.((list) => setNewReleases((list || []).length))
+    return () => { alive = false; off?.() }
+  }, [])
+  // Game List games newly on sale (services/deals.js) → badge on "Discounts".
+  const [newDeals, setNewDeals] = useState(0)
+  useEffect(() => {
+    let alive = true
+    window.kozo?.api?.deals?.unseen?.().then(res => { if (alive && res?.ok) setNewDeals((res.data || []).length) })
+    const off = window.kozo?.events?.onDealsChanged?.((n) => setNewDeals(Number(n) || 0))
     return () => { alive = false; off?.() }
   }, [])
   const [xp, setXp] = useState(null)
@@ -218,6 +230,9 @@ export default function Sidebar() {
               <span className={s.navLabel}>{label}</span>
               {path === '/upcoming' && newReleases > 0 && (
                 <span className={s.navBadge} title={`${newReleases} tracked game${newReleases !== 1 ? 's' : ''} just released`}>{newReleases}</span>
+              )}
+              {path === '/deals' && newDeals > 0 && (
+                <span className={s.navBadge} title={`${newDeals} game${newDeals !== 1 ? 's' : ''} on your Game List just went on sale`}>{newDeals}</span>
               )}
             </NavLink>
           </React.Fragment>

@@ -539,7 +539,9 @@ function getTasteProfile() {
 // How much a Game List / Library row says about your taste: a 9/10 or a game
 // you're playing counts most, a dropped or low-rated one counts against.
 // Hours played add a little. Used to choose the "Picked for you" favourites.
-function clearTasteProfile() { picksCache = null }
+// A rating or status change makes the picks stale, not empty: the old ones
+// keep showing while new ones are worked out (getPicks).
+function clearTasteProfile() { if (picksCache) picksCache.at = 0 }
 function sourceWeight(row) {
   const r = Number(row.rating) || 0
   let w
@@ -563,6 +565,25 @@ function sourceWeight(row) {
 // what you liked, half what you want to play; dropped and low-rated never.
 let picksCache = null
 const moreLikeCache = new Map()   // appid -> { at, ids }
+// Both caches live on disk too (userData/picks-cache.json), so Upcoming shows
+// "Picked for you" at once after a restart instead of asking Steam ~16 times.
+let picksDiskLoaded = false
+function picksFile() { return path.join(require('electron').app.getPath('userData'), 'picks-cache.json') }
+function loadPicksDisk() {
+  if (picksDiskLoaded) return
+  picksDiskLoaded = true
+  try {
+    const d = JSON.parse(fs.readFileSync(picksFile(), 'utf8'))
+    if (d?.picks?.data) picksCache = d.picks
+    for (const [k, v] of Object.entries(d?.moreLike || {})) moreLikeCache.set(Number(k), v)
+  } catch {}
+}
+function savePicksDisk() {
+  try {
+    const moreLike = Object.fromEntries([...moreLikeCache].filter(([, v]) => Date.now() - v.at < 24 * 3600000))
+    fs.writeFileSync(picksFile(), JSON.stringify({ picks: picksCache, moreLike }))
+  } catch {}
+}
 async function moreLikeComingSoon(appId) {
   const hit = moreLikeCache.get(appId)
   if (hit && Date.now() - hit.at < 24 * 3600000) return hit.ids
@@ -627,8 +648,20 @@ function pickSources(rows, max = 16) {
 }
 
 const nameAppCache = new Map()   // name -> appid | null
+// Stale-while-refresh: a cached answer (memory or disk) comes back at once;
+// when it is older than 6 hours a fresh one is worked out in the background
+// and the next visit gets it. Only the very first run waits.
+let picksRun = null
 async function getPicks() {
-  if (picksCache && Date.now() - picksCache.at < 6 * 3600000) return picksCache.data
+  loadPicksDisk()
+  const fresh = picksCache && Date.now() - picksCache.at < 6 * 3600000
+  if (picksCache && !fresh && !picksRun) picksRun = computePicks().finally(() => { picksRun = null })
+  if (picksCache) return picksCache.data
+  if (!picksRun) picksRun = computePicks().finally(() => { picksRun = null })
+  return picksRun
+}
+
+async function computePicks() {
   const db = require('../db/database').getDb()
   const rows = db.prepare(`
     SELECT gl.name, gl.status, gl.rating, gl.added_at AS addedAt, COALESCE(gl.steam_app_id, g.steam_app_id) AS appid,
@@ -640,22 +673,194 @@ async function getPicks() {
   for (const g of lib) if (!byKey.has(`a${Number(g.appid)}`)) byKey.set(`a${Number(g.appid)}`, { ...g, appid: Number(g.appid), status: 'playing' })
   const chosen = pickSources([...byKey.values()])
   // Game List rows without a Steam id (added by name): find it by name.
-  let lookups = 0
-  for (const c of chosen) {
-    if (c.appid) continue
+  const unnamed = chosen.filter(c => !c.appid && !nameAppCache.has(c.name.toLowerCase())).slice(0, 8)
+  await Promise.all(unnamed.map(async (c) => {
     const k = c.name.toLowerCase()
-    if (!nameAppCache.has(k) && lookups++ < 8) {
-      try { const m = await findAppByName(c.name); capSet(nameAppCache, k, m ? Number(m.steam_app_id) : null, 500) } catch { capSet(nameAppCache, k, null, 500) }
+    try { const m = await findAppByName(c.name); capSet(nameAppCache, k, m ? Number(m.steam_app_id) : null, 500) } catch { capSet(nameAppCache, k, null, 500) }
+  }))
+  for (const c of chosen) if (!c.appid) c.appid = nameAppCache.get(c.name.toLowerCase()) || null
+  // Four at a time (it used to be one by one with a pause: ~10 seconds).
+  const withId = chosen.filter(c => c.appid)
+  const found = new Array(withId.length)
+  let next = 0
+  await Promise.all(Array.from({ length: 4 }, async () => {
+    while (next < withId.length) {
+      const i = next++
+      try { found[i] = { ...withId[i], ids: await moreLikeComingSoon(withId[i].appid) } } catch {}
     }
-    c.appid = nameAppCache.get(k) || null
-  }
-  const sources = []
-  for (const f of chosen.filter(c => c.appid)) {
-    try { sources.push({ ...f, ids: await moreLikeComingSoon(f.appid) }) } catch {}
-    await new Promise(r => setTimeout(r, 350))   // gentle on the store
-  }
+  }))
+  const sources = found.filter(Boolean)
   const data = { picks: scorePicks(sources), sources: sources.length, names: sources.map(x => x.name), wanted: sources.filter(x => x.kind === 'wanted').map(x => x.name) }
   picksCache = { at: Date.now(), data }
+  savePicksDisk()
+  return data
+}
+
+// ── Games like (the /like page and Game Detail's "Games like this") ─────────
+// Candidates: Steam's own "More like this" page (released, new and top-selling
+// sections, rank kept) plus a store search on the seed's three strongest tags,
+// best reviewed first. Every candidate's tags (with vote weights), reviews and
+// type come from GetItems; scoreSimilar ranks them.
+const TAG_TTL = 7 * 24 * 3600000
+let tagNames = null   // { at, map: Map(tagid -> name) }
+async function getTagNames() {
+  if (tagNames && Date.now() - tagNames.at < TAG_TTL) return tagNames.map
+  const data = await getJSON('https://api.steampowered.com/IStoreService/GetTagList/v1/', { language: 'english' })
+  const map = new Map((data?.response?.tags || []).map(t => [t.tagid, t.name]))
+  if (map.size) tagNames = { at: Date.now(), map }
+  return map
+}
+
+const STORE_UA = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+const MORELIKE_SECTIONS = ['released', 'newreleases', 'topsellers', 'comingsoon']
+async function moreLikeSections(appId) {
+  const res = await getAxios().get(`https://store.steampowered.com/recommended/morelike/app/${appId}/`, {
+    timeout: 15000, headers: { ...STORE_UA, ...adultSearchOpts().headers },
+  })
+  const html = String(res.data || '')
+  const out = {}
+  for (const sec of MORELIKE_SECTIONS) {
+    const at = html.indexOf(`id="${sec}"`)
+    if (at < 0) continue
+    const next = MORELIKE_SECTIONS.map(m => html.indexOf(`id="${m}"`, at + 10)).filter(i => i > at)
+    const chunk = html.slice(at, next.length ? Math.min(...next) : html.length)
+    out[sec] = [...new Set([...chunk.matchAll(/data-ds-appid="(\d+)"/g)].map(m => Number(m[1])))]
+  }
+  return out
+}
+
+async function tagSearch(tagIds) {
+  const adult = adultSearchOpts()
+  const res = await getAxios().get('https://store.steampowered.com/search/results/', {
+    timeout: 15000, headers: { ...STORE_UA, ...adult.headers },
+    params: { ...adult.params, tags: tagIds.join(','), category1: 998, sort_by: 'Reviews_DESC', infinite: 1, start: 0, count: 50, supportedlang: 'english' },
+  })
+  return [...new Set([...String(res.data?.results_html || '').matchAll(/data-ds-appid="(\d+)"/g)].map(m => Number(m[1])))]
+}
+
+// GetItems with what similarity needs (its own cache: more fields than art).
+const factsCache = new Map()   // appid -> { at, facts }
+async function getGameFacts(appIds) {
+  const ids = [...new Set(appIds.map(Number).filter(n => n > 0))]
+  const out = new Map(), missing = []
+  for (const id of ids) {
+    const hit = factsCache.get(id)
+    if (hit && Date.now() - hit.at < 24 * 3600000) out.set(id, hit.facts); else missing.push(id)
+  }
+  const batches = []
+  for (let i = 0; i < missing.length; i += 50) batches.push(missing.slice(i, i + 50))
+  await Promise.all(batches.map(async (batch) => {
+    try {
+      const input = {
+        ids: batch.map(appid => ({ appid })),
+        context: { language: 'english', country_code: 'US' },
+        data_request: { include_assets: true, include_tag_count: 20, include_reviews: true, include_basic_info: true, include_release: true },
+      }
+      const data = await getJSON('https://api.steampowered.com/IStoreBrowseService/GetItems/v1/', { input_json: JSON.stringify(input) })
+      for (const item of data?.response?.store_items || []) {
+        if (!item.appid) continue
+        const rv = item.reviews?.summary_filtered
+        const a = item.assets
+        const facts = {
+          appid: item.appid,
+          name: item.name || '',
+          type: item.type ?? null,   // 0 = game
+          tags: (item.tags || []).map(t => ({ id: t.tagid, w: t.weight || 0 })),
+          reviews: rv ? { count: rv.review_count || 0, pct: rv.percent_positive || 0, label: rv.review_score_label || '' } : null,
+          release: releaseOf(item.release),
+          releasedAt: item.release?.steam_release_date ? item.release.steam_release_date * 1000 : null,
+          header: assetUrl(a, 'header_2x', 'header'),
+          capsule: assetUrl(a, 'main_capsule_2x', 'main_capsule'),
+          portrait: assetUrl(a, 'library_capsule_2x', 'library_capsule'),
+          developers: (item.basic_info?.developers || []).map(d => d.name).filter(Boolean),
+        }
+        capSet(factsCache, item.appid, { at: Date.now(), facts }, 3000)
+        out.set(item.appid, facts)
+      }
+    } catch (e) { logger.warn('getGameFacts failed', { message: e.message, count: batch.length }) }
+  }))
+  return out
+}
+
+// "Sekiro - GOTY Edition", "Sekiro Demo" -> "sekiro": editions of the seed are
+// not games like it.
+function baseName(name) {
+  return String(name || '').toLowerCase()
+    .replace(/[™®©]/g, '')
+    .replace(/\s*[:\-–—]\s*(goty|game of the year|definitive|deluxe|complete|ultimate|gold|director.?s cut|remastered|enhanced|anniversary|special|standard|premium)\b.*$/i, '')
+    .replace(/\b(demo|playtest|prologue|soundtrack|ost)\b.*$/i, '')
+    .replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+// Pure. seed: facts; cands: [facts]; rank: Map(appid -> position on Steam's
+// More like this, 0 = first). Returns [{ appid, pct, score, shared: [tagid] }]
+// best first. Tag overlap is a cosine over the top 20 tags weighted by their
+// position (a game's first tags say most about it); Steam's rank adds its own
+// signal; reviews add quality through a Wilson lower bound (a few reviews
+// count little), and a poorly reviewed game (under 70%) is pushed down.
+function scoreSimilar(seed, cands, rank = new Map()) {
+  const vec = (tags) => { const m = new Map(); (tags || []).slice(0, 20).forEach((t, i) => m.set(t.id, (1 - i / 22) ** 2)); return m }
+  const norm = (m) => Math.sqrt([...m.values()].reduce((a, b) => a + b * b, 0)) || 1
+  const sv = vec(seed.tags), sn = norm(sv)
+  const seedBase = baseName(seed.name)
+  const out = []
+  for (const c of cands) {
+    if (!c || c.appid === seed.appid || (c.type != null && c.type !== 0)) continue
+    if (seedBase && baseName(c.name) === seedBase) continue
+    const n = c.reviews?.count || 0
+    const upcoming = !!c.release?.soon || (!n && !c.releasedAt)
+    if (n < 50 && !upcoming) continue
+    const cv = vec(c.tags)
+    let dot = 0
+    const shared = []
+    for (const [k, w] of cv) if (sv.has(k)) { const x = w * sv.get(k); dot += x; shared.push([k, x]) }
+    const cos = dot / (sn * norm(cv))
+    const p = (c.reviews?.pct || 0) / 100, z = 1.96
+    const wilson = n ? (p + z * z / (2 * n) - z * Math.sqrt((p * (1 - p) + z * z / (4 * n)) / n)) / (1 + z * z / n) : 0.6
+    const r = rank.has(c.appid) ? Math.max(0, 1 - rank.get(c.appid) / 40) : 0
+    let score = 0.55 * cos + 0.3 * r + 0.15 * wilson
+    if (n >= 50 && p < 0.7) score *= 0.85
+    out.push({ appid: c.appid, score, shared: shared.sort((a, b) => b[1] - a[1]).slice(0, 4).map(x => x[0]) })
+  }
+  out.sort((a, b) => b.score - a.score)
+  const top = out[0]?.score || 1
+  for (const o of out) o.pct = Math.round(Math.min(99, 50 + 49 * (o.score / top) ** 1.5))
+  return out
+}
+
+const similarCache = new Map()   // appid -> { at, data }
+async function similarGames(appId) {
+  const id = Number(appId)
+  if (!id) throw new Error('No Steam id')
+  const hit = similarCache.get(id)
+  if (hit && Date.now() - hit.at < 24 * 3600000) return hit.data
+  const [seedFacts, names] = await Promise.all([getGameFacts([id]), getTagNames().catch(() => new Map())])
+  const seed = seedFacts.get(id)
+  if (!seed) throw new Error('Steam has no store page for this game')
+  const [secs, byTags] = await Promise.all([
+    moreLikeSections(id).catch(() => ({})),
+    seed.tags.length >= 3 ? tagSearch(seed.tags.slice(0, 3).map(t => t.id)).catch(() => []) : [],
+  ])
+  const rank = new Map()
+  const note = (list, offset) => (list || []).forEach((x, i) => { if (!rank.has(x) || rank.get(x) > i + offset) rank.set(x, i + offset) })
+  note(secs.released, 0); note(secs.newreleases, 5); note(secs.topsellers, 5); note(secs.comingsoon, 8)
+  const ids = [...new Set([...rank.keys(), ...byTags])].filter(x => x !== id)
+  const facts = await getGameFacts(ids)
+  const scored = scoreSimilar(seed, ids.map(x => facts.get(x)).filter(Boolean), rank)
+  const tagName = (t) => names.get(t) || null
+  const data = {
+    seed: { appid: id, name: seed.name, header: seed.header, capsule: seed.capsule, portrait: seed.portrait, tags: seed.tags.slice(0, 8).map(t => tagName(t.id)).filter(Boolean) },
+    games: scored.slice(0, 60).map(o => {
+      const f = facts.get(o.appid)
+      return {
+        appid: o.appid, name: f.name, pct: o.pct, shared: o.shared.map(tagName).filter(Boolean),
+        header: f.header, capsule: f.capsule, portrait: f.portrait, reviews: f.reviews,
+        release: f.release, releasedAt: f.releasedAt, soon: !!f.release?.soon || (!f.reviews?.count && !f.releasedAt),
+        developers: f.developers,
+      }
+    }),
+  }
+  capSet(similarCache, id, { at: Date.now(), data }, 200)
   return data
 }
 
@@ -1213,7 +1418,7 @@ async function getComingSoon(feed = 'soon', page = 0) {
 module.exports = {
   shrinkCover, getTasteProfile, clearTasteProfile, getPicks, scorePicks, pickSources, getReviews,
   getBannersDir, downloadFile,
-  getAppAssets, downloadHero,
+  getAppAssets, downloadHero, similarGames, scoreSimilar, baseName, getGameFacts, getTagNames, assetUrl,
   getComingSoon, parseComingSoonHtml,
   testApiKey, searchGames, findAppByName, parentArtAppId, refreshGameData, refreshBanners, downloadBanner,
   getStoreArt, getStoreDetails, resolveBannerUrl, resolveSteamId, runGenreBackfill, storeRemoteFallback,

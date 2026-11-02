@@ -7,7 +7,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react'
 // GameCard.module.css, GameList.module.css, motion.css), plus the preload
 // zoom factor.
 
-export const NAV_PATHS = ['/', '/game-list', '/plan', '/finished', '/upcoming', '/activity']
+export const NAV_PATHS = ['/', '/game-list', '/plan', '/finished', '/upcoming', '/like', '/deals', '/activity']
 
 export const DEFAULT_APPEARANCE = {
   scale: 1,                       // 0.8 to 1.5 (Settings presets, or Ctrl + wheel in 5% steps)
@@ -19,7 +19,9 @@ export const DEFAULT_APPEARANCE = {
   sidebar: 'full',                // 'full' | 'rail' (icons only; the button by the logo switches)
   motion: 'soft',                 // 'heavy' | 'soft' | 'off' (styles/motion.css)
   bg: { mode: 'off', image: null, gameId: null, gameArt: null, blur: 8, dim: 55 },
-  theme: 'midnight',              // midnight | tint | oled | slate | nord | mocha | forest | crimson (styles/customize.css)
+  theme: 'midnight',              // midnight | tint | custom | oled | slate | nord | mocha | forest | crimson (styles/customize.css)
+  bgColor: '#1a1030',             // the Custom theme's color (any hex; made dark, see bgTone)
+  gamePage: 'store',              // Game Detail layout: store | cinematic
   font: 'dm',                     // FONTS key, the whole app
   cardStyle: 'classic',           // classic | poster | glass | minimal (GameCard / GameList css)
   textScale: 1,                   // 0.9 to 1.2, scales every --fs-* token
@@ -56,6 +58,27 @@ export const FONTS = {
   oxanium:  { label: 'Oxanium', note: 'Gaming', css: "'Oxanium', system-ui, sans-serif" },
 }
 
+// The Custom theme: any color becomes a dark background in its hue, so text,
+// cards and every page keep the same contrast as the stock themes (styles/
+// customize.css builds the surfaces from these three numbers).
+export function bgTone(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim())
+  if (!m) return { h: 250, s: 24, l: 8 }
+  const n = parseInt(m[1], 16)
+  const r = (n >> 16) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min
+  let h = 0
+  if (d) h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4
+  h = Math.round((h * 60 + 360) % 360)
+  const l = (max + min) / 2
+  const s = d ? d / (1 - Math.abs(2 * l - 1)) : 0
+  return {
+    h,
+    s: Math.round(Math.min(35, s * 100)),
+    l: Math.round(Math.min(13, Math.max(4, l * 100)) * 10) / 10,
+  }
+}
+
 // Old or partial saved values never break the app: fill in every missing key.
 function normalize(saved) {
   const d = DEFAULT_APPEARANCE
@@ -67,6 +90,7 @@ function normalize(saved) {
   if (saved?.displayFont && saved.displayFont !== 'same' && FONTS[saved.displayFont]) p.font = saved.displayFont
   delete p.displayFont
   if (!FONTS[p.font]) p.font = 'dm'
+  if (!['store', 'cinematic'].includes(p.gamePage)) p.gamePage = 'store'
   // 75% was the first default darkness and hid most of the picture.
   if (saved?.bg?.dim === 75 && !saved?.bg?.image && !saved?.bg?.gameArt) p.bg.dim = d.bg.dim
   // Saved order first; a tab added in a later version slots in right after the
@@ -128,6 +152,10 @@ function apply(p) {
   if (p.textScale && p.textScale !== 1) el.style.setProperty('--text-scale', String(p.textScale)); else el.style.removeProperty('--text-scale')
   if (p.sidebarWidth && p.sidebarWidth !== 205) el.style.setProperty('--sidebar-width', `${p.sidebarWidth}px`); else el.style.removeProperty('--sidebar-width')
   if (p.accent2) el.style.setProperty('--accent-2', p.accent2); else el.style.removeProperty('--accent-2')
+  if (p.theme === 'custom') {
+    const t = bgTone(p.bgColor)
+    el.style.setProperty('--cbg-h', String(t.h)); el.style.setProperty('--cbg-s', `${t.s}%`); el.style.setProperty('--cbg-l', `${t.l}%`)
+  } else for (const v of ['--cbg-h', '--cbg-s', '--cbg-l']) el.style.removeProperty(v)
   zoomPref = p.scale || 1
   zoomNow = 0   // force the first apply
   applyZoom()
