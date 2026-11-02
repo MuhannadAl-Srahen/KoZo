@@ -141,6 +141,8 @@ function runMigrations() {
 
     // Games started from a store launcher (Epic URI, Xbox shell:AppsFolder).
     try { db.exec('ALTER TABLE games ADD COLUMN launch_uri TEXT') } catch (_) {}
+    // Confirmed save locations (JSON array of absolute paths) for save backups.
+    try { db.exec('ALTER TABLE games ADD COLUMN save_paths TEXT') } catch (_) {}
     // One-time: sessions under a minute aren't kept any more (see
     // MIN_SESSION_SEC in queries/sessions.js); drop the old ones with their time.
     try {

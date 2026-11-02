@@ -466,4 +466,4 @@ function migrateRoot(oldDir, newDir) {
   }
 }
 
-module.exports = { backupSave, listBackups, restoreBackup, deleteBackup, autoBackupGame, rootPath, migrateRoot }
+module.exports = { backupSave, listBackups, restoreBackup, deleteBackup, autoBackupGame, rootPath, migrateRoot, gameDir }

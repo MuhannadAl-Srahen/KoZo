@@ -11,8 +11,11 @@ const logger = require('../logger')
 
 const API = 'https://www.steamgriddb.com/api/v2'
 
+// The user's own key, else KoZo's built-in one (electron/defaults.js).
 function getKey() {
-  try { return (require('../db/queries/settings').getSetting('steamgriddb_key') || '').trim() } catch { return '' }
+  let own = ''
+  try { own = (require('../db/queries/settings').getSetting('steamgriddb_key') || '').trim() } catch {}
+  return own || require('../defaults').STEAMGRIDDB_KEY || ''
 }
 
 async function call(pathname, key = getKey(), params = {}) {

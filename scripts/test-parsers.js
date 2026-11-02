@@ -271,28 +271,55 @@ console.log('\nrelease dates')
     countdownTo({ ts: 3 * 86400000 + 4 * 3600000, precision: 'day' }, 0) === 'in 3d 4h')
 }
 
-// src/lib/tasteMatch.js: "Picked for you" scores and reasons.
-console.log('\ntasteMatch')
+// Upcoming "Picked for you": Steam's More like this lists, scored.
+console.log('\npicks')
 {
-  const src = require('fs').readFileSync(path.join(__dirname, '..', 'src', 'lib', 'tasteMatch.js'), 'utf8')
-    .replace(/export (const|function)/g, '$1')
-  const { matchScore, matchReason, MATCH_MIN } = new Function(src + '; return { matchScore, matchReason, MATCH_MIN }')()
-  const profile = {
-    tagWeights: { 1: 1, 2: 0.8, 3: 0.6, 4: -0.5 },
-    sources: [
-      { name: 'Hollow Knight', appid: 10, weight: 3, tags: [1, 2, 9] },
-      { name: 'Dropped Game', appid: 11, weight: -1, tags: [4, 5] },
-    ],
-    tagNames: { 1: 'Metroidvania', 2: 'Souls-like', 3: 'Difficult', 4: 'Farming' },
-  }
-  const good = matchScore([1, 2, 3], profile), bad = matchScore([4, 7, 8], profile), none = matchScore([7, 8], profile)
-  check('shared top tags match well', good >= 70, String(good))
-  check('tags of dropped games do not match', bad === 0, String(bad))
-  check('nothing shared is 0', none === 0)
-  check('a good match passes the Picked for you cut', good >= MATCH_MIN)
-  const why = matchReason([1, 2, 3], profile)
-  check('reason names the game it is like', why?.name === 'Hollow Knight' && why.shared.join() === 'Metroidvania,Souls-like', JSON.stringify(why))
-  check('no reason from a disliked game', matchReason([4, 5], profile) === null)
+  const { scorePicks } = require(path.join(__dirname, '..', 'electron', 'services', 'steamApi.js'))
+  const p = scorePicks([
+    { name: 'Hollow Knight', weight: 3, ids: [10, 20, 30] },
+    { name: 'Dead Cells', weight: 2, ids: [20, 40] },
+  ])
+  check('a game two favourites agree on ranks first', p[20].pct > p[10].pct && p[20].pct === 99, JSON.stringify(p))
+  check('the reason names those games', p[20].because.join() === 'Hollow Knight,Dead Cells')
+  check('everything listed is a pick', [10, 20, 30, 40].every(id => p[id]?.pct >= 45))
+}
+
+// Game-save backups: the smart history and the known save locations list.
+console.log('\nsave backups')
+{
+  const vault = require(path.join(__dirname, '..', 'electron', 'services', 'saveVault.js'))
+  const DAY = 86400000, now = Date.UTC(2026, 10, 2, 12)
+  const at = (daysAgo, h = 0) => new Date(now - daysAgo * DAY - h * 3600000).toISOString()
+  const snaps = [
+    { id: 'a', createdAt: at(0), reason: 'after-play' },
+    { id: 'b', createdAt: at(3), reason: 'before-play' },
+    { id: 'c', createdAt: at(20, 1), reason: 'after-play' },
+    { id: 'd', createdAt: at(20, 3), reason: 'after-play' },   // same day as c, older
+    { id: 'e', createdAt: at(62), reason: 'after-play' },
+    { id: 'f', createdAt: at(63), reason: 'after-play' },      // same week as e
+    { id: 'g', createdAt: at(200), reason: 'after-play' },     // too old
+    { id: 'h', createdAt: at(300), reason: 'manual' },         // manual: kept
+  ]
+  const drop = vault.prunePolicy(snaps, now).sort().join()
+  check('smart history keeps recent, daily, weekly and manual', drop === 'd,f,g', drop)
+  check('the newest backup always survives', !vault.prunePolicy([{ id: 'x', createdAt: at(400), reason: 'auto' }], now).length)
+
+  const man = require(path.join(__dirname, '..', 'electron', 'services', 'saveManifest.js'))
+  const compact = man.compactManifest({
+    'Hollow Knight': {
+      files: {
+        '<winLocalAppDataLow>/Team Cherry/Hollow Knight/user*.dat': { tags: ['save'], when: [{ os: 'windows' }] },
+        '<winLocalAppDataLow>/Team Cherry/Hollow Knight/*.log': { tags: ['config'] },
+        '<home>/.config/unity3d/Team Cherry/Hollow Knight': { tags: ['save'], when: [{ os: 'linux' }] },
+      },
+      steam: { id: 367520 },
+    },
+    'No Files Game': { steam: { id: 1 } },
+  })
+  check('manifest keeps only Windows save paths', compact.length === 1 && compact[0].f.length === 1 && compact[0].s[0] === 367520, JSON.stringify(compact))
+  const ph = { '<winLocalAppDataLow>': 'C:\\Users\\Me\\AppData\\LocalLow', '<base>': null, '<storeUserId>': '*' }
+  check('placeholders fill in', man.fillPattern('<winLocalAppDataLow>/Team Cherry/x', ph) === path.join('C:\\Users\\Me\\AppData\\LocalLow', 'Team Cherry', 'x'))
+  check('a placeholder with no value drops the path', man.fillPattern('<base>/saves', ph) === null)
 }
 
 // ── Discord Rich Presence (against a fake Discord pipe) ──────────────────────

@@ -219,77 +219,144 @@ handle('games:reorder', (orderedIds) => {
 })
 
 // Locate a game's save files across the standard Windows/Steam locations.
-handle('saves:find', (gameId) => {
+// ── Game-save backups (services/saveVault.js, autoSaveBackup.js) ─────────────
+function saveGame(gameId) {
   const game = gamesQ.getGame(gameId)
   if (!game) throw new Error('Game not found')
-  const { findSaveLocations } = require('./services/saveFinder')
-  return { game: game.name, locations: findSaveLocations(game) }
-})
-
-// Save backup / restore (folders keyed by game NAME, see saveBackup.js)
-function gameNameOf(gameId) {
-  const game = gamesQ.getGame(gameId)
-  if (!game) throw new Error('Game not found')
-  return game.name
+  return game
 }
-handle('saves:backup', (gameId, sourcePath) =>
-  require('./services/saveBackup').backupSave(gameNameOf(gameId), sourcePath))
-handle('saves:listBackups', (gameId) =>
-  require('./services/saveBackup').listBackups(gameNameOf(gameId)))
-handle('saves:restore', (gameId, backupId, target) =>
-  require('./services/saveBackup').restoreBackup(gameNameOf(gameId), backupId, target))
-handle('saves:deleteBackup', (gameId, backupId) =>
-  require('./services/saveBackup').deleteBackup(gameNameOf(gameId), backupId))
+handle('saves:find', (gameId) => {
+  const game = saveGame(gameId)
+  const { findSaveLocations } = require('./services/saveFinder')
+  const { getSavePaths } = require('./services/autoSaveBackup')
+  return { game: game.name, locations: findSaveLocations(game), confirmed: getSavePaths(game) }
+})
+handle('saves:setPaths', (gameId, paths) => require('./services/autoSaveBackup').setSavePaths(saveGame(gameId).id, paths))
+// Back up now: the confirmed locations, or one given path.
+handle('saves:backup', (gameId, sourcePath) => {
+  const game = saveGame(gameId)
+  const paths = sourcePath ? [sourcePath] : require('./services/autoSaveBackup').resolvePaths(game)
+  if (!paths.length) throw new Error('Confirm where this game keeps its saves first')
+  const r = require('./services/saveVault').snapshot(game, paths, 'manual')
+  if (r.skipped) throw new Error(r.skipped === 'empty' ? 'That save folder is empty' : `Nothing backed up (${r.skipped})`)
+  return r
+})
+handle('saves:listBackups', (gameId) => {
+  const game = saveGame(gameId)
+  const vault = require('./services/saveVault')
+  return { snapshots: vault.listSnapshots(game), bytes: vault.usage(game) }
+})
+handle('saves:compare', (gameId, id) => require('./services/saveVault').compare(saveGame(gameId), id))
+handle('saves:restore', (gameId, id) => require('./services/saveVault').restore(saveGame(gameId), id))
+handle('saves:deleteBackup', (gameId, id) => require('./services/saveVault').remove(saveGame(gameId), id))
+handle('saves:export', async (gameId, id) => {
+  const { app } = require('electron')
+  const out = require('./services/saveVault').exportSnapshot(saveGame(gameId), id, path.join(app.getPath('temp'), 'KoZo save'))
+  await shell.openPath(out)
+  return out
+})
 handle('saves:backupsDir', () => require('./services/saveBackup').rootPath())
 
-// Per-game backup overview for the Backups tab — count + newest snapshot, so
-// the user can see at a glance what's protected and what isn't.
+// Every game: confirmed or not, how many restore points, newest, space used.
 handle('saves:overview', () => {
-  const { listBackups } = require('./services/saveBackup')
+  const vault = require('./services/saveVault')
+  const { getSavePaths } = require('./services/autoSaveBackup')
   const db = require('./db/database').getDb()
-  const games = db.prepare('SELECT id, name FROM games ORDER BY name COLLATE NOCASE').all()
+  const { resolvePaths } = require('./services/autoSaveBackup')
+  const games = db.prepare('SELECT * FROM games WHERE is_archived = 0 ORDER BY name COLLATE NOCASE').all()
   return games.map(g => {
-    let backups = []
-    try { backups = listBackups(g.name) } catch {}
-    return {
-      id: g.id,
-      name: g.name,
-      count: backups.length,
-      latestAt: backups[0]?.createdAt || null,
-    }
+    // A game the known-locations list covers is set up on its own.
+    let paths = getSavePaths(g)
+    let auto = false
+    if (!paths.length) { try { paths = resolvePaths(g); auto = paths.length > 0 } catch {} }
+    let list = [], bytes = 0
+    try { list = vault.listSnapshots(g); bytes = vault.usage(g) } catch {}
+    return { id: g.id, name: g.name, confirmed: paths.length > 0, autoFound: auto, paths, count: list.length, latestAt: list[0]?.createdAt || null, bytes }
   })
 })
 
-// Auto-backup of game saves after each session (mirrors the app-data auto-backup).
 handle('saves:getAutoBackup', () => settingsQ.getSetting('auto_save_backup_enabled') === '1')
 handle('saves:setAutoBackup', (enabled) => {
   settingsQ.setSetting('auto_save_backup_enabled', enabled ? '1' : '0')
   return true
 })
 
-// Back up the best-found save location for EVERY game in the library at once
-// (e.g. before formatting the PC). Returns a per-game summary.
+// Storage, second copy, history cap and the known-locations list, for the
+// Backups tab header.
+handle('saves:storage', () => {
+  const vault = require('./services/saveVault')
+  const db = require('./db/database').getDb()
+  const games = db.prepare('SELECT id, name FROM games').all()
+  let bytes = 0
+  for (const g of games) { try { bytes += vault.usage(g) } catch {} }
+  return {
+    bytes,
+    capGb: Number(settingsQ.getSetting('save_vault_cap_gb') || 0),
+    mirror: vault.mirrorRoot(),
+    mirrorLast: settingsQ.getSetting('save_mirror_last') || null,
+    manifest: require('./services/saveManifest').status(),
+  }
+})
+handle('saves:setCap', (gb) => { settingsQ.setSetting('save_vault_cap_gb', String(Number(gb) || 0)); return true })
+handle('saves:setMirror', (dir) => {
+  settingsQ.setSetting('save_mirror_dir', dir ? String(dir) : '')
+  return dir ? require('./services/saveVault').syncMirror() : { copied: 0 }
+})
+handle('saves:syncMirror', () => require('./services/saveVault').syncMirror())
+handle('saves:refreshManifest', () => require('./services/saveManifest').refresh({ force: true }))
+// Other drives (a second disk, a USB stick) for the extra copy of the save
+// backups, so a format or a dead drive can't take them.
+handle('saves:drives', () => {
+  const fs = require('fs')
+  const sys = (process.env.SystemDrive || 'C:').toUpperCase()
+  const out = []
+  for (const d of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') {
+    const root = `${d}:\\`
+    if (`${d}:` === sys) continue
+    try {
+      const st = fs.statfsSync(root)
+      out.push({ path: root, name: `${d}: drive`, free: st.bavail * st.bsize, size: st.blocks * st.bsize })
+    } catch {}
+  }
+  return out
+})
+
+// Cloud-synced folders on this PC (Google Drive, Dropbox, OneDrive).
+handle('saves:cloudFolders', () => {
+  const fs = require('fs')
+  const os = require('os')
+  const home = os.homedir()
+  const out = []
+  const add = (name, p) => { try { if (p && fs.existsSync(p) && !out.some(x => x.path.toLowerCase() === p.toLowerCase())) out.push({ name, path: p }) } catch {} }
+  add('OneDrive', process.env.OneDrive)
+  add('OneDrive', process.env.OneDriveConsumer)
+  add('OneDrive', path.join(home, 'OneDrive'))
+  for (const d of 'DEFGHIJ') add('Google Drive', `${d}:\\My Drive`)
+  add('Google Drive', path.join(home, 'Google Drive'))
+  add('Google Drive', path.join(home, 'My Drive'))
+  try {
+    const info = JSON.parse(fs.readFileSync(path.join(process.env.LOCALAPPDATA || '', 'Dropbox', 'info.json'), 'utf8'))
+    add('Dropbox', info.personal?.path || info.business?.path)
+  } catch {}
+  add('Dropbox', path.join(home, 'Dropbox'))
+  return out
+})
+
+// Back up every game with a confirmed (or known) save location at once.
 handle('saves:backupAll', async () => {
   const db = require('./db/database').getDb()
-  const { findSaveLocations } = require('./services/saveFinder')
-  const { backupSave } = require('./services/saveBackup')
-  const games = db.prepare('SELECT * FROM games').all()
+  const { resolvePaths } = require('./services/autoSaveBackup')
+  const vault = require('./services/saveVault')
+  const games = db.prepare('SELECT * FROM games WHERE is_archived = 0').all()
   const results = []
-  // Both findSaveLocations (walks AppData/Documents/Saved Games for every game)
-  // and backupSave (recursive fs.cpSync) are fully synchronous. Run back to
-  // back over a whole library they blocked the main process for as long as the
-  // copy took — the window froze, the process-watcher tick couldn't fire, and a
-  // session running at the time stopped being heartbeated. Yielding between
-  // games doesn't make the copies async, but it does let the event loop turn.
   for (const g of games) {
-    await new Promise(r => setImmediate(r))
-    let locs = []
-    try { locs = findSaveLocations(g) } catch {}
-    if (!locs.length) { results.push({ name: g.name, status: 'no_saves' }); continue }
-    await new Promise(r => setImmediate(r))
+    await new Promise(r => setImmediate(r))   // let the event loop turn between games
+    let paths = []
+    try { paths = resolvePaths(g) } catch {}
+    if (!paths.length) { results.push({ name: g.name, status: 'no_saves' }); continue }
     try {
-      const meta = backupSave(g.name, locs[0].path)
-      results.push({ name: g.name, status: 'ok', files: meta.files })
+      const r = vault.snapshot(g, paths, 'manual')
+      results.push({ name: g.name, status: r.skipped ? 'no_saves' : 'ok', files: r.files })
     } catch (e) {
       results.push({ name: g.name, status: 'error', error: e.message })
     }
@@ -299,6 +366,7 @@ handle('saves:backupAll', async () => {
     backedUp: results.filter(r => r.status === 'ok').length,
     noSaves:  results.filter(r => r.status === 'no_saves').length,
     failed:   results.filter(r => r.status === 'error').length,
+    needConfirm: results.filter(r => r.status === 'no_saves').map(r => r.name),
     results,
     dir: require('./services/saveBackup').rootPath(),
   }
@@ -393,6 +461,9 @@ function shellStart(file, cwd, { holdMs = 1200 } = {}) {
 async function doLaunch(id) {
   const game = gamesQ.getGame(id)
   if (!game) throw new Error('Game not found')
+  // Back up the save before the game can touch it (quick: unchanged files are
+  // already stored; gives up after a few seconds rather than delay the launch).
+  try { require('./services/autoSaveBackup').beforePlay(game) } catch {}
 
   const fs = require('fs')
 
@@ -1501,6 +1572,7 @@ handle('steam:storeDetails', (appId) => require('./services/steamApi').getStoreD
 handle('steam:comingSoon', (feed, page) => require('./services/steamApi').getComingSoon(feed, page))
 // appIds → { [appid]: { portrait, hero, header, capsule } } real store art URLs.
 handle('steam:tasteProfile', () => require('./services/steamApi').getTasteProfile())
+handle('steam:picks', () => require('./services/steamApi').getPicks())
 handle('steam:appAssets', async (appIds) => Object.fromEntries(await require('./services/steamApi').getAppAssets(appIds)))
 
 // Called when the Upcoming tab opens: warms the store-details cache for every
@@ -1592,6 +1664,11 @@ handle('steam:refreshAllBanners', async () => {
 
 // ── SteamGridDB (covers for non-Steam games) ─────────────────────────────────
 handle('sgdb:test', (key) => require('./services/steamGridDb').testKey(key))
+// Which keys KoZo brings itself (Settings shows "built in" for those).
+handle('keys:builtIn', () => {
+  const d = require('./defaults')
+  return { steamgriddb: !!d.STEAMGRIDDB_KEY, discord: !!d.DISCORD_CLIENT_ID }
+})
 handle('sgdb:search', (name) => require('./services/steamGridDb').searchGame(name))
 // Rate a finished game 1 to 10. The rating lives on the Game List row; a
 // Library game without one gets its row created first.

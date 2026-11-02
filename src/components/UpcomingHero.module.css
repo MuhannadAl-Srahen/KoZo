@@ -107,21 +107,9 @@
 .ghost { border: 1px solid rgba(255, 255, 255, 0.28); background: rgba(10, 10, 18, 0.55); color: #fff; }
 .ghost:hover { border-color: #fff; }
 .track { display: contents; }
-.track > button {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-6);
-  height: 36px;
-  padding: 0 var(--sp-16);
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: var(--r-pill);
-  background: rgba(10, 10, 18, 0.55);
-  color: #fff;
-  font-size: var(--fs-sm);
-  font-weight: 700;
-}
-.track > button:hover { border-color: var(--a); color: var(--a); }
-.trackedTag { color: var(--a); font-size: var(--fs-xs); font-weight: 700; }
+.track > button { height: 36px; padding: 0 var(--sp-16); font-size: var(--fs-sm); }
+.track > button[aria-label="Track release"] { border-color: rgba(255, 255, 255, 0.28); background: rgba(10, 10, 18, 0.55); color: #fff; }
+.track > button[aria-label="Track release"]:hover { border-color: var(--a); color: var(--a); }
 
 .match {
   display: inline-flex;

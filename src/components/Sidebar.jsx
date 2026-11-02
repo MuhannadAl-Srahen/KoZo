@@ -186,7 +186,6 @@ export default function Sidebar() {
         <HoneycombLogo size={28} />
         <div className={s.logoText}>
           <span className={s.appName}>KoZo</span>
-          <span className={s.appSub}>Game Vault</span>
         </div>
         {/* Full and slim sidebar, one click (also in Settings → Appearance). */}
         <button

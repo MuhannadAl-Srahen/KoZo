@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 12,
+  rev: 13,
   // Settings → Appearance → UI scale.
   ui: {
     setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
@@ -87,6 +87,7 @@ contextBridge.exposeInMainWorld('kozo', {
       comingSoon: (feed, page) => ipcRenderer.invoke('steam:comingSoon', feed, page),
       appAssets: (appIds) => ipcRenderer.invoke('steam:appAssets', appIds),
       tasteProfile: () => ipcRenderer.invoke('steam:tasteProfile'),
+      picks: () => ipcRenderer.invoke('steam:picks'),
       lastSyncError: (gameId) => ipcRenderer.invoke('steam:lastSyncError', gameId),
       recheckPrivacy: () => ipcRenderer.invoke('steam:recheckPrivacy'),
       getProfile: (overrides) => ipcRenderer.invoke('steam:getProfile', overrides),
@@ -119,6 +120,16 @@ contextBridge.exposeInMainWorld('kozo', {
       backupAll: () => ipcRenderer.invoke('saves:backupAll'),
       restore: (gameId, backupId, target) => ipcRenderer.invoke('saves:restore', gameId, backupId, target),
       deleteBackup: (gameId, backupId) => ipcRenderer.invoke('saves:deleteBackup', gameId, backupId),
+      setPaths: (gameId, paths) => ipcRenderer.invoke('saves:setPaths', gameId, paths),
+      compare: (gameId, id) => ipcRenderer.invoke('saves:compare', gameId, id),
+      exportSnapshot: (gameId, id) => ipcRenderer.invoke('saves:export', gameId, id),
+      storage: () => ipcRenderer.invoke('saves:storage'),
+      setCap: (gb) => ipcRenderer.invoke('saves:setCap', gb),
+      setMirror: (dir) => ipcRenderer.invoke('saves:setMirror', dir),
+      syncMirror: () => ipcRenderer.invoke('saves:syncMirror'),
+      refreshManifest: () => ipcRenderer.invoke('saves:refreshManifest'),
+      cloudFolders: () => ipcRenderer.invoke('saves:cloudFolders'),
+      drives: () => ipcRenderer.invoke('saves:drives'),
       getAutoBackup: () => ipcRenderer.invoke('saves:getAutoBackup'),
       setAutoBackup: (enabled) => ipcRenderer.invoke('saves:setAutoBackup', enabled),
     },
@@ -144,6 +155,7 @@ contextBridge.exposeInMainWorld('kozo', {
       pickImageData: () => ipcRenderer.invoke('image:pickData'),
       saveCroppedImage: (payload) => ipcRenderer.invoke('image:saveCropped', payload),
       pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
+      builtInKeys: () => ipcRenderer.invoke('keys:builtIn'),
       pickWallpaper: () => ipcRenderer.invoke('appearance:pickWallpaper'),
     },
     backup: {

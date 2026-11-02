@@ -417,6 +417,34 @@ Close any program that may be using it and start KoZo again.`)
     })
   }, 20000)
 
+  // Game-save backups: refresh the list of known save locations (weekly), turn
+  // old-style folder backups into versioned ones (once), and fill the second
+  // copy if it was offline. All disk work, so only while no game is running.
+  setTimeout(() => {
+    watcher.runWhenIdle('saveVaultStartup', async () => {
+      try { await require('./services/saveManifest').refresh() } catch (e) { require('./logger').warn('saveManifest refresh failed', { message: e.message }) }
+      // Games the list knows are set up on their own (confirmed save location).
+      try {
+        const { resolvePaths } = require('./services/autoSaveBackup')
+        for (const g of require('./db/database').getDb().prepare('SELECT * FROM games WHERE save_paths IS NULL AND is_archived = 0').all()) {
+          try { resolvePaths(g) } catch {}
+        }
+      } catch {}
+      try {
+        const settingsQ = require('./db/queries/settings')
+        if (settingsQ.getSetting('save_vault_migrated') !== '1') {
+          const vault = require('./services/saveVault')
+          const games = require('./db/database').getDb().prepare('SELECT id, name FROM games').all()
+          let n = 0
+          for (const g of games) n += vault.migrateLegacy(g)
+          settingsQ.setSetting('save_vault_migrated', '1')
+          if (n) require('./logger').info(`saveVault: imported ${n} older backup(s)`)
+        }
+        require('./services/saveVault').syncMirror()
+      } catch (e) { require('./logger').warn('saveVault startup failed', { message: e.message }) }
+    })
+  }, 45000)
+
   // "It's out now!" — notify when a tracked upcoming game's release date passes.
   try { require('./services/releaseWatch').start() } catch {}
 

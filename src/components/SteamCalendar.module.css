@@ -169,55 +169,40 @@
 .posterActions {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--sp-6);
   padding: var(--sp-6) var(--sp-8);
 }
-.trackBtn {
-  flex: 1;
+/* Track: one button in three sizes (TrackControl variant). */
+.track {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--sp-4);
-  padding: var(--sp-4) 0;
-  border: 1px solid var(--ab);
-  border-radius: var(--r-md);
-  background: var(--ad);
-  color: var(--a);
+  gap: 6px;
+  flex-shrink: 0;
+  border: 1px solid var(--neutral-border);
+  background: var(--neutral-bg);
+  color: var(--text-secondary);
   font-family: inherit;
-  font-size: var(--fs-xs);
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
-.trackBtn:hover { background: var(--a); color: var(--accent-ink); }
-.trackBtn:disabled { opacity: 0.6; cursor: default; }
-.trackedTag {
-  flex: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--sp-4);
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  color: var(--a);
+.track:hover { border-color: var(--ab); color: var(--a); background: var(--ad); }
+.track:disabled { opacity: 0.6; cursor: default; }
+.track_pill { height: 28px; padding: 0 12px; border-radius: var(--r-pill); font-size: var(--fs-xs); }
+.track_big { height: 36px; padding: 0 18px; border-radius: var(--r-pill); font-size: var(--fs-sm); }
+.track_icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(10, 10, 18, 0.82);
+  color: #fff;
 }
-.untrackBtn {
-  flex: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--sp-4);
-  padding: var(--sp-4) 0;
-  border: 1px solid var(--ab);
-  border-radius: var(--r-md);
-  background: var(--a);
-  color: var(--accent-ink);
-  font-family: inherit;
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  cursor: pointer;
-}
-.untrackBtn:hover { background: var(--error-bg); border-color: var(--error-border); color: var(--error); }
-.untrackConfirm, .untrackConfirm:hover { background: var(--error); border-color: var(--error); color: #fff; }
+.trackOn, .trackOn:hover { background: var(--a); border-color: var(--a); color: var(--accent-ink); }
+.trackOn:hover { filter: brightness(1.1); }
+.trackConfirm, .trackConfirm:hover { background: var(--error); border-color: var(--error); color: #fff; filter: none; }
 .iconBtn {
   display: inline-flex;
   padding: var(--sp-6);
@@ -500,8 +485,9 @@
 }
 .steamDayToday { color: var(--a); background: linear-gradient(90deg, var(--ad), transparent); }
 .steamDayList { display: flex; flex-direction: column; gap: var(--sp-8); padding: var(--sp-8); }
-.steamCap { position: relative; border-radius: var(--r-md); overflow: hidden; }
-.steamCapTracked { box-shadow: 0 0 0 2px var(--a); }
+.steamCap { position: relative; display: flex; flex-direction: column; gap: 5px; }
+.steamCapFrame { position: relative; border-radius: var(--r-md); overflow: hidden; }
+.steamCapTracked .steamCapFrame { box-shadow: 0 0 0 2px var(--a); }
 .steamCapHit {
   position: relative;
   display: block;
@@ -514,18 +500,8 @@
 }
 .steamCapArt { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transition: transform 0.2s ease; }
 .steamCap:hover .steamCapArt { transform: scale(1.03); }
-.steamCapHover {
-  position: absolute;
-  left: var(--sp-6);
-  right: var(--sp-6);
-  bottom: var(--sp-6);
-  display: flex;
-  opacity: 0;
-  transform: translateY(4px);
-  transition: opacity 0.15s ease, transform 0.15s ease;
-}
-.steamCap:hover .steamCapHover, .steamCap:focus-within .steamCapHover { opacity: 1; transform: none; }
-.steamCapHover > * { flex: 1; background: var(--scrim-chip); }
+.capTrack { position: absolute; top: var(--sp-6); right: var(--sp-6); opacity: 0; transition: opacity 0.15s ease; }
+.steamCap:hover .capTrack, .steamCap:focus-within .capTrack, .steamCapTracked .capTrack { opacity: 1; }
 .steamMore {
   align-self: stretch;
   padding: var(--sp-6) var(--sp-10);
@@ -596,26 +572,14 @@
 .matchOnPoster { top: calc(var(--sp-8) + 24px); left: var(--sp-8); }
 .matchOnWide { bottom: var(--sp-8); left: var(--sp-8); }
 .capReason {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 1;
-  padding: var(--sp-16) var(--sp-8) var(--sp-6);
-  background: linear-gradient(0deg, rgba(8, 8, 14, 0.92), transparent);
-  color: #fff;
+  padding: 0 2px;
+  color: var(--text-secondary);
   font-size: var(--fs-2xs);
   font-weight: 600;
-  text-align: left;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  opacity: 0;
-  transition: opacity 0.15s ease;
 }
-.steamCap:hover .capReason, .steamCap:focus-within .capReason { opacity: 1; }
-/* Hover shows Track at the bottom; the reason moves up out of its way. */
-.steamCap:hover .capReason { bottom: 34px; background: none; text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9); }
 .steamDayQuiet { background: transparent; border-style: dashed; }
 .steamDayQuiet .steamDayHead { color: var(--text-muted); }
 .moreRow {
@@ -627,3 +591,32 @@
   color: var(--text-muted);
   font-size: var(--fs-xs);
 }
+
+/* ── Tracked view ─────────────────────────────────────────────── */
+.tracked { display: flex; flex-direction: column; gap: var(--sp-20, 20px); }
+.tgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 340px), 1fr)); gap: var(--sp-14, 14px); }
+.tcard {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--r-card);
+  overflow: hidden;
+  background: var(--surface-2);
+  border: 1px solid var(--neutral-border);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.tcard:hover { border-color: var(--ab); box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35); }
+.tcardOut { border-color: color-mix(in srgb, var(--success) 50%, var(--neutral-border)); }
+.tcardArt { position: relative; display: block; width: 100%; aspect-ratio: 616 / 300; padding: 0; border: none; background: var(--surface-3); cursor: pointer; overflow: hidden; }
+.tcardImg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transition: transform 0.4s ease; }
+.tcard:hover .tcardImg { transform: scale(1.04); }
+.tcardShade { position: absolute; inset: 0; background: linear-gradient(0deg, rgba(8, 8, 14, 0.85) 0%, transparent 55%); pointer-events: none; }
+.tcardWhen { position: absolute; left: var(--sp-12); bottom: var(--sp-10); }
+.tcardCount { font-size: clamp(20px, 2vw, 28px); font-weight: 800; color: #fff; font-variant-numeric: tabular-nums; text-shadow: 0 2px 12px rgba(0, 0, 0, 0.7); }
+.tcardCountSoft { font-size: var(--fs-md); font-weight: 700; color: #fff; text-shadow: 0 2px 12px rgba(0, 0, 0, 0.7); }
+.tcardOutTag { padding: 4px 12px; border-radius: var(--r-pill); background: var(--success); color: #04130a; font-size: var(--fs-sm); font-weight: 800; }
+.tcardBody { display: flex; flex-direction: column; gap: var(--sp-6); padding: var(--sp-10) var(--sp-12) var(--sp-12); }
+.tcardName { font-size: var(--fs-md); font-weight: 700; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tcardMeta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-6); font-size: var(--fs-xs); color: var(--text-muted); }
+.tcardStatus { padding: 1px var(--sp-8); border-radius: var(--r-pill); background: var(--ad); color: var(--a); font-weight: 700; text-transform: capitalize; }
+.tcardActions { display: flex; align-items: center; gap: var(--sp-8); margin-top: var(--sp-4); }
+.tcardActions .iconBtn { margin-left: auto; }

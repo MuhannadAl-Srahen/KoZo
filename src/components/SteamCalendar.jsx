@@ -10,7 +10,6 @@ import EmptyState from './ui/EmptyState'
 import SteamGameModal from './SteamGameModal'
 import { PanelSkeleton } from './ui/Skeleton'
 import { parseRelease, storeRelease, countdownTo, localDayKey, monthKey, formatMonthKey } from '../lib/utils'
-import { matchScore, matchReason, matchTone, MATCH_MIN } from '../lib/tasteMatch'
 import useCardZoom from '../lib/useCardZoom'
 import UpcomingHero from './UpcomingHero'
 import s from './SteamCalendar.module.css'
@@ -21,9 +20,10 @@ import s from './SteamCalendar.module.css'
 // tab: Steam (day columns like the store's calendar), Strip (pick a day from a
 // TV-guide row), Week and Month (big grid). Games
 // with no day or month live in the TBA view; your tracked releases in Tracked.
-// "Picked for you" keeps only games that match your Game List (lib/tasteMatch:
-// shared Steam tags with the games you rate highly, play or want), with a
-// match % and the game it's most like. Release days come from the store's own
+// "Picked for you" = Steam's own "More like this" for your favourite games
+// (steamApi.getPicks): only games Steam itself rates as similar, with a match %
+// and which of your games they're like. Picks the popular feeds didn't load
+// are added to the calendar too. Release days come from the store's own
 // record (utils.storeRelease), so a date is the real unlock moment.
 // Track = a release watch on the Game List row (survives status changes).
 
@@ -44,6 +44,7 @@ const DAY_ALL = 8    // All releases: most popular shown per day
 
 // Survives tab switches: the feeds are cached in main for 6h anyway.
 let calendarCache = null   // { games, pages, art }
+let picksCache = null      // steam:picks result (main caches it 6h too)
 // The adult-games setting changes what the feeds return — start over.
 if (typeof window !== 'undefined') window.addEventListener('kozo:adult-changed', () => { calendarCache = null })
 
@@ -122,42 +123,44 @@ function Cover({ g, wide = false, hero = false, className }) {
 }
 
 // "92%" match pill (Picked for you), and the reason line.
+export function matchTone(pct) { return pct >= 80 ? 'high' : pct >= 60 ? 'mid' : 'low' }
 export function MatchBadge({ g, className = '' }) {
-  if (!(g.match >= MATCH_MIN)) return null
+  if (!g.match) return null
   return <span className={`${s.match} ${s['match_' + matchTone(g.match)]} ${className}`}>{g.match}%</span>
 }
-function reasonText(g) {
-  if (!g.reason) return null
-  return `Like ${g.reason.name}${g.reason.shared.length ? `: ${g.reason.shared.join(', ')}` : ''}`
+// "Like Hollow Knight and Dead Cells" (Steam's More like this for those games).
+export function reasonText(g) {
+  const n = g.reason || []
+  if (!n.length) return null
+  return `Like ${n.length === 1 ? n[0] : n.length === 2 ? `${n[0]} and ${n[1]}` : `${n[0]}, ${n[1]} and ${n[2]}`}`
 }
 
-// Track / Untrack. Untrack only removes entries still marked Upcoming; a game
-// the user moved to another status stays on their list ("On your list").
-function TrackControl({ g, info, busy, onTrack, onUntrack, big = false }) {
+// Track / Untrack, one look everywhere. variant: 'pill' (cards), 'icon' (a
+// round button in a capsule's corner), 'big' (the details popup). Untrack asks
+// once ("Untrack?") and only removes entries still marked Upcoming; a game you
+// moved to another status stays on your list.
+function TrackControl({ g, info, busy, onTrack, onUntrack, variant = 'pill' }) {
   const [confirm, setConfirm] = useState(false)
   useEffect(() => {
     if (!confirm) return
     const t = setTimeout(() => setConfirm(false), 3000)
     return () => clearTimeout(t)
   }, [confirm])
-  // Tracked = release-watched, whatever its Game List status. A game that is
-  // on your list but not watched can still be tracked.
-  if (!info?.watch) {
-    return (
-      <button className={big ? ms.btnPrimary : s.trackBtn} onClick={() => onTrack(g)} disabled={busy}>
-        <IconBookmark size={big ? 14 : 12} /> {busy ? 'Adding…' : big ? 'Track release' : 'Track'}
-      </button>
-    )
-  }
+  const tracked = !!info?.watch
+  const icon = variant === 'icon'
+  const big = variant === 'big'
+  const size = big ? 15 : 13
+  const cls = [s.track, s['track_' + variant], tracked && s.trackOn, confirm && s.trackConfirm].filter(Boolean).join(' ')
+  const label = busy ? (tracked ? 'Removing…' : 'Adding…')
+    : confirm ? 'Untrack?'
+    : tracked ? (big ? 'Tracked' : 'Tracked') : (big ? 'Track release' : 'Track')
   return (
-    <button
-      className={big ? (confirm ? ms.btnDanger : ms.btnCancel) : `${s.untrackBtn} ${confirm ? s.untrackConfirm : ''}`}
-      onClick={() => (confirm ? (setConfirm(false), onUntrack(g)) : setConfirm(true))}
-      disabled={busy}
-      title="Stop tracking this release"
-    >
-      {confirm ? <IconX size={big ? 14 : 12} /> : <IconCheck size={big ? 14 : 12} />}
-      {busy ? 'Removing…' : confirm ? 'Untrack?' : big ? 'Tracked (click to untrack)' : 'Tracked'}
+    <button type="button" className={cls} disabled={busy}
+      title={tracked ? (confirm ? 'Click again to stop tracking' : 'Tracked. Click to stop tracking') : 'Track this release: KoZo tells you when it comes out'}
+      aria-label={tracked ? 'Untrack release' : 'Track release'}
+      onClick={(e) => { e.stopPropagation(); if (!tracked) onTrack(g); else if (confirm) { setConfirm(false); onUntrack(g) } else setConfirm(true) }}>
+      {confirm ? <IconX size={size} /> : tracked ? <IconBookmarkFilled size={size} /> : <IconBookmark size={size} />}
+      {!icon && <span>{label}</span>}
     </button>
   )
 }
@@ -172,7 +175,6 @@ function PosterCard({ g, tracked, info, onOpen, onTrack, onUntrack, onMenu, busy
         {!compact && (g.prepurchase || g.price) && (
           <span className={s.posterPrice}>{g.prepurchase ? 'Pre-purchase' : g.price}</span>
         )}
-        {tracked && <span className={s.posterMark}><IconBookmarkFilled size={12} /></span>}
         {g.showMatch && <MatchBadge g={g} className={s.matchOnPoster} />}
         <span className={s.posterName}>{g.name}</span>
       </button>
@@ -211,7 +213,6 @@ function WideCard({ g, tracked, info, onOpen, onTrack, onUntrack, onMenu, busy }
         {(g.prepurchase || g.price) && (
           <span className={s.posterPrice}>{g.prepurchase ? 'Pre-purchase' : g.price}</span>
         )}
-        {tracked && <span className={s.posterMark}><IconBookmarkFilled size={12} /></span>}
         {g.showMatch && <MatchBadge g={g} className={s.matchOnWide} />}
       </button>
       <div className={s.wideInfo}>
@@ -331,13 +332,14 @@ function SteamView({ days, todayKey, dayPick, picked, isTracked, renderTrack, on
             <div className={s.steamDayList}>
               {list.map(g => (
                 <div key={g.appid} className={`${s.steamCap} ${isTracked(g) ? s.steamCapTracked : ''}`} onContextMenu={(e) => { e.preventDefault(); onMenu(e, g) }}>
-                  <button className={s.steamCapHit} onClick={() => onOpen(g)} title={[g.name, picked && reasonText(g)].filter(Boolean).join('\n')}>
-                    <Cover g={g} wide className={s.steamCapArt} />
-                    {isTracked(g) && <span className={s.posterMark}><IconBookmarkFilled size={12} /></span>}
-                    {picked && <MatchBadge g={g} className={s.matchOnCap} />}
-                    {picked && reasonText(g) && <span className={s.capReason}>{reasonText(g)}</span>}
-                  </button>
-                  <div className={s.steamCapHover}>{renderTrack(g, false)}</div>
+                  <div className={s.steamCapFrame}>
+                    <button className={s.steamCapHit} onClick={() => onOpen(g)} title={g.name}>
+                      <Cover g={g} wide className={s.steamCapArt} />
+                      {picked && <MatchBadge g={g} className={s.matchOnCap} />}
+                    </button>
+                    <div className={s.capTrack}>{renderTrack(g, 'icon')}</div>
+                  </div>
+                  {picked && reasonText(g) && <div className={s.capReason} title={reasonText(g)}>{reasonText(g)}</div>}
                 </div>
               ))}
               {full.length > list.length && (
@@ -354,10 +356,78 @@ function SteamView({ days, todayKey, dayPick, picked, isTracked, renderTrack, on
   )
 }
 
-// ── Tracked view: every release you track, even ones not in Steam's feeds ──
-function TrackedView({ entries, poster }) {
-  if (!entries.length) return <div className={s.muted}>You aren't tracking any releases yet. Press Track on a game in the calendar.</div>
-  return <div className={s.posterGrid}>{entries.map(g => poster(g))}</div>
+// ── Tracked view: every release you track, grouped by when it lands ───────
+const TRACK_GROUPS = [
+  { key: 'out',   label: 'Out now' },
+  { key: 'week',  label: 'This week' },
+  { key: 'month', label: 'Within a month' },
+  { key: 'later', label: 'Later' },
+  { key: 'tba',   label: 'No date yet' },
+]
+function trackGroup(rel, now) {
+  if (!rel || rel.ts == null) return 'tba'
+  if (rel.precision === 'day' && rel.ts <= now) return 'out'
+  if (rel.precision !== 'day') return rel.ts - now < 31 * DAY_MS ? 'month' : 'later'
+  const d = rel.ts - now
+  return d <= 7 * DAY_MS ? 'week' : d <= 31 * DAY_MS ? 'month' : 'later'
+}
+
+function TrackedCard({ g, info, renderTrack, onOpen, onMenu, onWant }) {
+  const cd = countdownTo(g.rel)
+  const status = info?.status && info.status !== 'upcoming' ? info.status : null
+  const out = g.rel?.precision === 'day' && g.rel.ts != null && g.rel.ts <= Date.now()
+  return (
+    <div className={`${s.tcard} ${out ? s.tcardOut : ''}`} onContextMenu={(e) => { e.preventDefault(); onMenu(e, g) }}>
+      <button type="button" className={s.tcardArt} onClick={() => onOpen(g)} title={g.name}>
+        <Cover g={g} wide className={s.tcardImg} />
+        <span className={s.tcardShade} />
+        <span className={s.tcardWhen}>
+          {out ? <span className={s.tcardOutTag}>Out now</span>
+            : cd ? <span className={s.tcardCount}>{cd.replace(/^in /, '')}</span>
+            : <span className={s.tcardCountSoft}>{g.rel?.label || 'TBA'}</span>}
+        </span>
+      </button>
+      <div className={s.tcardBody}>
+        <div className={s.tcardName} title={g.name}>{g.name}</div>
+        <div className={s.tcardMeta}>
+          <IconCalendarEvent size={13} /> {releaseText(g)}
+          {status && <span className={s.tcardStatus}>{status === 'want_to_play' ? 'Want to play' : status.replace(/_/g, ' ')}</span>}
+        </div>
+        <div className={s.tcardActions}>
+          {renderTrack(g, 'pill')}
+          {out && onWant && info?.status !== 'want_to_play' && (
+            <button type="button" className={s.textBtn} onClick={() => onWant(g)}><IconClockHour4 size={13} /> Want to play</button>
+          )}
+          {Number(g.appid) > 0 && (
+            <button type="button" className={s.iconBtn} title="Steam page"
+              onClick={() => window.kozo?.api?.shell?.openExternal?.(`https://store.steampowered.com/app/${g.appid}`)}>
+              <IconBrandSteam size={14} />
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function TrackedView({ entries, card }) {
+  if (!entries.length) return <div className={s.muted}>You aren't tracking any releases yet. Press Track on a game in the calendar, and KoZo tells you the day it comes out.</div>
+  const now = Date.now()
+  const groups = new Map(TRACK_GROUPS.map(gr => [gr.key, []]))
+  for (const g of entries) groups.get(trackGroup(g.rel, now)).push(g)
+  return (
+    <div className={s.tracked}>
+      {TRACK_GROUPS.filter(gr => groups.get(gr.key).length).map(gr => (
+        <section key={gr.key} className={s.daySection}>
+          <div className={s.dayHead}>
+            <span className={s.dayHeadMain}>{gr.label}</span>
+            <span className={s.dayHeadCount}>{groups.get(gr.key).length}</span>
+          </div>
+          <div className={s.tgrid}>{groups.get(gr.key).map(g => card(g))}</div>
+        </section>
+      ))}
+    </div>
+  )
 }
 
 // ── Week view: one row per day, cards scroll sideways ───────────────────────
@@ -467,14 +537,14 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
   const [pickMode, setPickMode] = useState(() => {
     try { return localStorage.getItem('kozo:calendar:pick') === 'all' ? 'all' : 'picked' } catch { return 'picked' }
   })
-  const [taste, setTaste] = useState(null)   // steamApi.getTasteProfile: { tagWeights, sources, tagNames, count }
+  const [picks, setPicks] = useState(() => picksCache)   // steamApi.getPicks: { picks: { appid: { pct, because } }, sources, names }
   useEffect(() => {
-    window.kozo?.api?.steam?.tasteProfile?.().then(r => { if (r?.ok) setTaste(r.data) }).catch(() => {})
+    window.kozo?.api?.steam?.picks?.().then(r => { if (r?.ok) { picksCache = r.data; setPicks(r.data) } }).catch(() => {})
   }, [])
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()))
   const [steamDays, setSteamDays] = useState(42)   // Steam view: how far ahead (days) it reaches
   // Ctrl + mouse wheel card size, per layout (Month has a fixed layout).
-  const zoomStyle = useCardZoom('calendar', view, { steam: 230, strip: 300, week: 300, tba: 150, tracked: 150 })
+  const zoomStyle = useCardZoom('calendar', view, { steam: 290, strip: 300, week: 300, tba: 160, tracked: 340 })
   const [dayOpen, setDayOpen] = useState(null)    // { label, games }
   const [detail, setDetail]   = useState(null)    // game
   const [menu, setMenu]       = useState(null)    // right-click: { x, y, g }
@@ -554,19 +624,32 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
   }, [])
 
   // Bucket every game by its release: exact day, month-only, or later/TBA.
+  // Picks the popular feeds didn't load: ask for their store record (name,
+  // date, art), then they join the calendar like any other game.
+  const pickIds = useMemo(() => Object.keys(picks?.picks || {}).map(Number), [picks])
+  useEffect(() => {
+    const have = new Set(games.map(g => Number(g.appid)))
+    const need = pickIds.filter(id => !have.has(id) && !art[id] && !artTried.has(id))
+    if (need.length) fetchArt(need)
+  }, [pickIds, games.length])
+  const allGames = useMemo(() => {
+    const have = new Set(games.map(g => Number(g.appid)))
+    const extra = pickIds.filter(id => !have.has(id) && art[id]?.name).map(id => ({ appid: id, name: art[id].name, release: null, capsule: null }))
+    return extra.length ? [...games, ...extra] : games
+  }, [games, pickIds, art])
+
   const buckets = useMemo(() => {
     const byDay = new Map(), byMonth = new Map(), later = [], all = []
     const todayStart = dayStart(Date.now())
-    for (const g of games) {
+    for (const g of allGames) {
       const a = art[g.appid] || art[String(g.appid)] || (artTried.has(Number(g.appid)) ? {} : null)
       const rel = storeRelease(a?.release, g.release)
       // Out already (the feeds lag behind the store): not upcoming any more.
       if (rel.precision === 'day' && rel.ts != null && rel.ts < todayStart) continue
-      const tags = a?.tags || []
-      const match = taste ? matchScore(tags, taste) : 0
+      const pick = picks?.picks?.[g.appid]
       const entry = {
-        ...g, rel, art: a, match,
-        reason: match >= MATCH_MIN ? matchReason(tags, taste) : null,
+        ...g, name: g.name || a?.name || 'Unknown', rel, art: a,
+        match: pick?.pct || 0, reason: pick?.because || null,
         showMatch: pickMode === 'picked',
       }
       all.push(entry)
@@ -583,14 +666,14 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
       }
     }
     return { byDay, byMonth, later, all }
-  }, [games, art, artTried, taste, pickMode])
+  }, [allGames, art, artTried, picks, pickMode])
 
   // "Picked for you": only games that match your Game List, best match first
   // (popularity breaks ties). "All releases": every game, most popular first.
   const popOf = (g) => Math.min(g.wishRank ?? 1e4, g.popRank ?? 1e4)
   const dayPick = (list) => (pickMode === 'all'
     ? [...list].sort((a, b) => popOf(a) - popOf(b)).slice(0, DAY_ALL)
-    : list.filter(g => g.match >= MATCH_MIN).sort((a, b) => b.match - a.match || popOf(a) - popOf(b)).slice(0, DAY_PICK))
+    : list.filter(g => g.match > 0).sort((a, b) => b.match - a.match || popOf(a) - popOf(b)).slice(0, DAY_PICK))
   function setPick(m) { setPickMode(m); try { localStorage.setItem('kozo:calendar:pick', m) } catch {} }
   const isTracked = (g) => !!(byAppId.get(Number(g.appid))?.watch || g._listId)
   const openMore = (label, games) => setDayOpen({ label, games })
@@ -689,9 +772,9 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
     <WideCard key={g.appid} g={g} tracked={isTracked(g)} info={infoOf(g)}
       onOpen={setDetail} onTrack={track} onUntrack={untrack} onMenu={openMenu} busy={busyId === g.appid} />
   )
-  const renderTrack = (g, big) => (
+  const renderTrack = (g, variant = 'pill') => (
     <TrackControl g={g} info={infoOf(g)} busy={busyId === g.appid}
-      onTrack={() => track(g)} onUntrack={() => untrack(g)} big={big} />
+      onTrack={() => track(g)} onUntrack={() => untrack(g)} variant={variant === true ? 'big' : variant === false ? 'pill' : variant} />
   )
 
   return (
@@ -724,9 +807,11 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
           </div>
         )}
         <div className={s.spacer} />
-        {pickMode === 'picked' && ['steam', 'strip', 'week'].includes(view) && taste?.count > 0 && (
-          <span className={s.muted} title="Steam tags of the games on your Game List, weighted by your ratings and status">
-            Based on {taste.count} game{taste.count !== 1 ? 's' : ''} on your Game List
+        {pickMode === 'picked' && ['steam', 'strip', 'week'].includes(view) && (
+          <span className={s.muted} title={picks?.names?.length ? `Steam's "More like this" for: ${picks.names.join(', ')}` : ''}>
+            {!picks ? 'Finding games like yours…'
+              : picks.sources ? `Like ${picks.sources} of your favourite games`
+              : 'Rate or play a few Steam games to get picks'}
           </span>
         )}
         {loading && <IconLoader2 size={15} className="spin" />}
@@ -774,7 +859,9 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
       )}
       {games.length > 0 && view === 'strip' && <StripView buckets={buckets} todayKey={todayKey} wide={wide} dayPick={dayPick} onMore={openMore} />}
       {games.length > 0 && view === 'week' && <WeekView buckets={buckets} todayKey={todayKey} weekStart={weekStart} wide={wide} dayPick={dayPick} onMore={openMore} />}
-      {view === 'tracked' && <TrackedView entries={trackedEntries} poster={poster} />}
+      {view === 'tracked' && <TrackedView entries={trackedEntries} card={(g) => (
+        <TrackedCard key={g.appid} g={g} info={infoOf(g)} renderTrack={renderTrack} onOpen={setDetail} onMenu={openMenu} onWant={onWant} />
+      )} />}
       {games.length > 0 && view === 'tba' && <TbaView later={buckets.later} poster={poster} />}
 
       {view === 'month' && (
@@ -858,11 +945,11 @@ function DetailModal({ g, info, busy, onTrack, onUntrack, onClose }) {
       name={g.name}
       release={releaseText(g)}
       countdown={countdownLabel(g.rel)}
-      match={g.match >= MATCH_MIN ? { pct: g.match, tone: matchTone(g.match), reason: reasonText(g) } : null}
+      match={g.match ? { pct: g.match, tone: matchTone(g.match), reason: reasonText(g) } : null}
       art={g.art}
       fallbackArt={[g.capsule]}
       onClose={onClose}
-      actions={<TrackControl g={g} info={info} busy={busy} onTrack={onTrack} onUntrack={onUntrack} big />}
+      actions={<TrackControl g={g} info={info} busy={busy} onTrack={onTrack} onUntrack={onUntrack} variant="big" />}
     />
   )
 }

@@ -468,6 +468,7 @@ async function getAppAssets(appIds) {
           capsule:  assetUrl(a, 'main_capsule_2x', 'main_capsule'),
           tags:     Array.isArray(item.tagids) ? item.tagids.slice(0, 12) : [],   // Steam tag ids, most voted first
           release:  releaseOf(item.release),
+          name:     item.name || null,
         }
         capSet(assetCache, item.appid, { at: Date.now(), assets }, 2000)
         out.set(item.appid, assets)
@@ -479,25 +480,31 @@ async function getAppAssets(appIds) {
   return out
 }
 
-// Steam's tag id → name list (keyless), cached for a week.
-let tagNameCache = null   // { at, names: { id: name } }
-async function getTagNames() {
-  if (tagNameCache && Date.now() - tagNameCache.at < 7 * 86400000) return tagNameCache.names
-  const data = await getJSON('https://api.steampowered.com/IStoreService/GetTagList/v1/', { language: 'english' })
-  const names = {}
-  for (const t of data?.response?.tags || []) names[t.tagid] = t.name
-  tagNameCache = { at: Date.now(), names }
-  return names
+// Pick for me (Game List): every genre of your Library games, weighted by
+// playtime (a game you never launched still counts a little). Weights are
+// normalised to 0..1, keyed by lower-case genre name.
+function getTasteProfile() {
+  const db = require('../db/database').getDb()
+  const rows = db.prepare('SELECT genres, total_playtime_seconds FROM games WHERE genres IS NOT NULL AND is_archived = 0').all()
+  const w = {}
+  for (const r of rows) {
+    let genres = []
+    try { genres = JSON.parse(r.genres) } catch {}
+    const weight = 1 + Math.log1p((r.total_playtime_seconds || 0) / 3600)
+    for (const g of genres) {
+      const k = String(g).toLowerCase()
+      w[k] = (w[k] || 0) + weight
+    }
+  }
+  const max = Math.max(1, ...Object.values(w))
+  for (const k of Object.keys(w)) w[k] = +(w[k] / max).toFixed(3)
+  return { weights: w }
 }
 
-// "Picked for you" on Upcoming: what your Game List says you like. Every row
-// with a Steam id is a source, weighted by your rating and status (a 9/10 or a
-// game you're playing pulls hard, a dropped or low-rated one pushes away),
-// plus hours played. Each source's Steam TAGS (Metroidvania, Souls-like, ...)
-// add up into tagWeights (-1..1); `sources` lets the calendar say "Because
-// you liked Hollow Knight". Cached 10 minutes; ratings clear it.
-let tasteCache = null
-function clearTasteProfile() { tasteCache = null }
+// How much a Game List / Library row says about your taste: a 9/10 or a game
+// you're playing counts most, a dropped or low-rated one counts against.
+// Hours played add a little. Used to choose the "Picked for you" favourites.
+function clearTasteProfile() { picksCache = null }
 function sourceWeight(row) {
   const r = Number(row.rating) || 0
   let w
@@ -513,47 +520,81 @@ function sourceWeight(row) {
   if (w > 0) w += Math.log1p((row.seconds || 0) / 3600) * 0.5
   return w
 }
-async function getTasteProfile() {
-  if (tasteCache && Date.now() - tasteCache.at < 10 * 60 * 1000) return tasteCache.data
+// "Picked for you" on Upcoming, from Steam's own similarity: each favourite
+// game's "More like this" page lists the upcoming games Steam considers like
+// it (store.steampowered.com/recommended/morelike/app/<id>, its "comingsoon"
+// section). A game several favourites agree on, high in their lists, scores
+// highest. Favourites = Game List / Library games weighted by rating, status
+// and hours (sourceWeight); dropped and low-rated games are never sources.
+let picksCache = null
+const moreLikeCache = new Map()   // appid -> { at, ids }
+async function moreLikeComingSoon(appId) {
+  const hit = moreLikeCache.get(appId)
+  if (hit && Date.now() - hit.at < 24 * 3600000) return hit.ids
+  const res = await getAxios().get(`https://store.steampowered.com/recommended/morelike/app/${appId}/`, {
+    timeout: 15000,
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', ...adultSearchOpts().headers },
+  })
+  const html = String(res.data || '')
+  const at = html.indexOf('id="comingsoon"')
+  let ids = []
+  if (at >= 0) {
+    const next = ['id="released"', 'id="newreleases"', 'id="topsellers"']
+      .map(m => html.indexOf(m, at + 10)).filter(i => i > at)
+    const chunk = html.slice(at, next.length ? Math.min(...next) : html.length)
+    ids = [...new Set([...chunk.matchAll(/data-ds-appid="(\d+)"/g)].map(m => Number(m[1])))]
+  }
+  capSet(moreLikeCache, appId, { at: Date.now(), ids }, 300)
+  return ids
+}
+
+// Pure: sources [{ name, appid, weight, ids: [upcoming appids, best first] }]
+// -> { appid: { pct, because: [names] } }.
+function scorePicks(sources) {
+  const acc = new Map()
+  for (const src of sources) {
+    src.ids.forEach((id, rank) => {
+      const e = acc.get(id) || { score: 0, because: [] }
+      e.score += src.weight * Math.max(0.1, 1 - rank / 40)
+      if (e.because.length < 3) e.because.push(src.name)
+      acc.set(id, e)
+    })
+  }
+  const top = Math.max(1e-6, ...[...acc.values()].map(e => e.score))
+  const out = {}
+  for (const [id, e] of acc) out[id] = { pct: Math.round(45 + 54 * Math.sqrt(e.score / top)), because: e.because }
+  return out
+}
+
+async function getPicks() {
+  if (picksCache && Date.now() - picksCache.at < 6 * 3600000) return picksCache.data
   const db = require('../db/database').getDb()
   const rows = db.prepare(`
     SELECT gl.name, gl.status, gl.rating, COALESCE(gl.steam_app_id, g.steam_app_id) AS appid,
            COALESCE(g.total_playtime_seconds, 0) AS seconds
     FROM game_list gl LEFT JOIN games g ON g.id = gl.game_id
     WHERE COALESCE(gl.steam_app_id, g.steam_app_id) IS NOT NULL`).all()
-  const lib = db.prepare(`
-    SELECT name, steam_app_id AS appid, total_playtime_seconds AS seconds FROM games
-    WHERE steam_app_id IS NOT NULL AND is_archived = 0`).all()
+  const lib = db.prepare('SELECT name, steam_app_id AS appid, total_playtime_seconds AS seconds FROM games WHERE steam_app_id IS NOT NULL AND is_archived = 0').all()
   const byApp = new Map()
   for (const r of rows) byApp.set(Number(r.appid), r)
   for (const g of lib) if (!byApp.has(Number(g.appid))) byApp.set(Number(g.appid), { ...g, status: 'playing' })
-  let assets = new Map()
-  try { assets = await getAppAssets([...byApp.keys()]) } catch {}
-  const tagWeights = {}
+  // Favourites: what you rated well, finished, or put real hours into. A game
+  // you only want to play says less about your taste, so it ranks last.
+  const favs = [...byApp.entries()]
+    .map(([appid, r]) => ({ appid, name: r.name, weight: sourceWeight(r) }))
+    .filter(x => x.weight >= 1.2)
+    .sort((a, b) => b.weight - a.weight)
+    .slice(0, 15)
   const sources = []
-  for (const [appid, row] of byApp) {
-    const tags = assets.get(appid)?.tags || []
-    if (!tags.length) continue
-    const w = sourceWeight(row)
-    tags.forEach((t, i) => { tagWeights[t] = (tagWeights[t] || 0) + w * (1 - i * 0.05) })
-    sources.push({ name: row.name, appid, weight: +w.toFixed(2), tags })
+  for (const f of favs) {
+    try { sources.push({ ...f, ids: await moreLikeComingSoon(f.appid) }) } catch {}
+    await new Promise(r => setTimeout(r, 350))   // gentle on the store
   }
-  // Tags nearly every game has (Singleplayer, Action) say little about taste:
-  // scale each by how rare it is among your games, so Metroidvania or
-  // Souls-like outweigh them.
-  const freq = {}
-  for (const src of sources) for (const t of src.tags) freq[t] = (freq[t] || 0) + 1
-  const n = Math.max(2, sources.length)
-  for (const t of Object.keys(tagWeights)) tagWeights[t] *= Math.log((n + 1) / freq[t]) / Math.log(n + 1)
-  const max = Math.max(1e-6, ...Object.values(tagWeights).map(Math.abs))
-  for (const k of Object.keys(tagWeights)) tagWeights[k] = +(tagWeights[k] / max).toFixed(3)
-  sources.sort((a, b) => b.weight - a.weight)
-  let tagNames = {}
-  try { tagNames = await getTagNames() } catch {}
-  const data = { tagWeights, sources: sources.filter(x => x.weight > 0).slice(0, 60), tagNames, count: sources.length }
-  tasteCache = { at: Date.now(), data }
+  const data = { picks: scorePicks(sources), sources: sources.length, names: sources.map(x => x.name) }
+  picksCache = { at: Date.now(), data }
   return data
 }
+
 async function assetsFor(appId) {
   return (await getAppAssets([appId])).get(Number(appId)) || null
 }
@@ -1106,7 +1147,7 @@ async function getComingSoon(feed = 'soon', page = 0) {
 }
 
 module.exports = {
-  shrinkCover, getTasteProfile, clearTasteProfile,
+  shrinkCover, getTasteProfile, clearTasteProfile, getPicks, scorePicks,
   getBannersDir, downloadFile,
   getAppAssets, downloadHero,
   getComingSoon, parseComingSoonHtml,

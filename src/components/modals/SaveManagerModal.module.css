@@ -71,10 +71,10 @@
   text-transform: uppercase;
 }
 
-.tagAmber {
-  composes: chip chipSm chipWarning from '../../styles/controls.module.css';
-  margin-left: var(--sp-6);
-}
+.tagAmber { composes: chip chipSm chipWarning from '../../styles/controls.module.css'; }
+.tagGreen { composes: chip chipSm chipSuccess from '../../styles/controls.module.css'; }
+.tagBlue { composes: chip chipSm chipInfo from '../../styles/controls.module.css'; }
+.tagAccent { composes: chip chipSm chipAccent from '../../styles/controls.module.css'; }
 
 .bkTitle {
   display: flex;
@@ -172,3 +172,36 @@
   background: var(--error-bg);
   border-color: var(--error-border);
 }
+
+/* ── Saves manager (vault) ─────────────────────────────────────── */
+.footer { display: flex; align-items: center; gap: var(--sp-8); width: 100%; }
+.footNote { flex: 1; font-size: var(--fs-xs); color: var(--text-muted); }
+.spacer { flex: 1; }
+.linkBtn { margin-left: auto; border: none; background: none; color: var(--a); font: inherit; font-size: var(--fs-xs); font-weight: 600; text-transform: none; letter-spacing: 0; cursor: pointer; }
+.hint { margin: 0 0 var(--sp-10); font-size: var(--fs-sm); color: var(--text-secondary); line-height: var(--lh-base); }
+.okIcon { color: var(--success); flex-shrink: 0; }
+.rowConfirmed { border-color: var(--success-border); background: color-mix(in srgb, var(--success) 6%, var(--surface-3)); }
+.rowPick { cursor: pointer; }
+.rowPick input { accent-color: var(--a); width: 16px; height: 16px; flex-shrink: 0; }
+.rowPicked { border-color: var(--ab); background: color-mix(in srgb, var(--a) 7%, var(--surface-3)); }
+.editBar { display: flex; align-items: center; gap: var(--sp-8); margin-top: var(--sp-10); }
+.ghostBtn { composes: btn btnSecondary btnSm from '../../styles/controls.module.css'; }
+.day { margin-top: var(--sp-10); }
+.dayTitle { margin-bottom: var(--sp-6); font-size: var(--fs-sm); font-weight: 600; color: var(--text-secondary); }
+.snapWrap { display: flex; flex-direction: column; gap: var(--sp-6); }
+.time { min-width: 52px; font-size: var(--fs-sm); font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.metaInline { font-size: var(--fs-xs); color: var(--text-muted); white-space: nowrap; }
+.restoreBox {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-8);
+  padding: var(--sp-10) var(--sp-12);
+  border-radius: var(--r-input);
+  background: var(--info-bg);
+  border: 1px solid var(--info-border);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-base);
+}
+.restoreBox > span:first-child { flex: 1 1 300px; }

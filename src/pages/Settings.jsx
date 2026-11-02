@@ -7,13 +7,13 @@ import {
   IconBrandSteam, IconBrandDiscord, IconDeviceTv, IconKeyboard, IconSettings, IconSparkles,
   IconSearch, IconPlus, IconMinus, IconFolder, IconTrophy,
   IconDownload, IconUpload, IconDeviceFloppy, IconArchive, IconCloud,
-  IconHistory, IconList, IconChartBar, IconBell, IconBolt,
+  IconHistory, IconList, IconChartBar, IconBell, IconBolt, IconShieldCheck, IconCopy, IconChevronDown,
   IconStar, IconStethoscope, IconLock, IconCode, IconChevronRight, IconArrowUp, IconArrowDown, IconPhoto, IconLayoutCards, IconTextSize, IconLayoutSidebar,
 } from '@tabler/icons-react'
 import { useAccentColor } from '../context/AccentColorContext'
 import { useAppearance, DEFAULT_APPEARANCE } from '../context/AppearanceContext'
 import { NAV_ITEMS } from '../components/Sidebar'
-import { fileUrl } from '../lib/utils'
+import { fileUrl, timeAgo } from '../lib/utils'
 import HoneycombLogo from '../components/HoneycombLogo'
 import ScanResultModal from '../components/modals/ScanResultModal'
 import SaveManagerModal from '../components/modals/SaveManagerModal'
@@ -579,30 +579,27 @@ function DiscordSection() {
           onChange={toggle}
         />
       </div>
+      {on && msg && <StatusLine type={msg.type}>{msg.text}</StatusLine>}
       {on && (
-        <>
-          <ol className={s.steps}>
-            <li>
-              Open the{' '}
-              <button type="button" className={s.linkBtn}
-                onClick={() => window.kozo?.api?.shell?.openExternal?.('https://discord.com/developers/applications')}>
-                Discord Developer Portal
-              </button>{' '}
-              and click New Application. Name it KoZo.
-            </li>
-            <li>Copy its Application ID (General Information page).</li>
-            <li>Paste it below. That's it.</li>
-          </ol>
+        <details className={s.foldInline} open={!!id || undefined}>
+          <summary>Use your own Discord app (optional)</summary>
+          <p className={s.sectionDescQuiet}>
+            KoZo shows up as "KoZo" by default. To use another name or picture, make an app in the{' '}
+            <button type="button" className={s.linkBtn}
+              onClick={() => window.kozo?.api?.shell?.openExternal?.('https://discord.com/developers/applications')}>
+              Discord Developer Portal
+            </button>{' '}
+            and paste its Application ID. Leave it empty to use KoZo's.
+          </p>
           <div className={s.keyRow}>
             <div className={`${s.keyInputWrap} hasRing`}>
-              <input className={s.keyInput} placeholder="Application ID" value={id}
+              <input className={s.keyInput} placeholder="Application ID (empty = KoZo's)" value={id}
                 aria-label="Discord Application ID" inputMode="numeric"
                 onChange={e => setId(e.target.value.replace(/\D/g, ''))}
                 spellCheck={false} autoComplete="off" />
             </div>
           </div>
-          {msg && <StatusLine type={msg.type}>{msg.text}</StatusLine>}
-        </>
+        </details>
       )}
     </section>
   )
@@ -880,12 +877,13 @@ function SteamTab({ children }) {
         )}
       </section>
 
-      {/* API Key */}
-      <section className={s.section}>
-        <div className={s.sectionHeader}>
+      {/* API Key: optional, so folded away */}
+      <details className={`${s.section} ${s.foldSection}`} open={!!apiKey.trim() || undefined}>
+        <summary className={s.sectionHeader}>
           <IconKey size={15} stroke={1.6} />
-          <span>Steam Web API Key</span>
-        </div>
+          <span>Advanced: Steam Web API key (optional)</span>
+          <IconChevronDown size={14} className={s.foldChev} />
+        </summary>
         <p className={s.sectionDesc}>
           <strong className={s.strong}>Optional</strong>, KoZo syncs achievements
           without a key as long as your Steam profile's Game details are public. A key adds support for
@@ -921,7 +919,7 @@ function SteamTab({ children }) {
           <StatusLine type={testState === 'valid' ? 'success' : 'error'}>{testMsg}</StatusLine>
         )}
         {saved && testState === 'idle' && <StatusLine type="success">{apiKey.trim() ? 'Key saved.' : 'Key removed.'}</StatusLine>}
-      </section>
+      </details>
 
       {children}
 
@@ -953,6 +951,8 @@ function SteamTab({ children }) {
 // SteamGridDB key: covers + wide banners for games that aren't on Steam.
 const SGDB_KEY_URL = 'https://www.steamgriddb.com/profile/preferences/api'
 function SteamGridDbSection() {
+  const [builtIn, setBuiltIn] = useState(false)
+  useEffect(() => { window.kozo?.api?.dialog?.builtInKeys?.().then(r => { if (r?.ok) setBuiltIn(!!r.data?.steamgriddb) }) }, [])
   const [key, setKey]     = useState('')
   const [saved, setSaved] = useState('')
   const [show, setShow]   = useState(false)
@@ -1007,11 +1007,15 @@ function SteamGridDbSection() {
       </div>
       <p className={s.sectionDesc}>
         Games that aren't on Steam (League of Legends, Xbox or Epic exclusives) get their covers from{' '}
-        <strong className={s.strong}>SteamGridDB</strong>. Paste your free API key and KoZo fills them in
-        automatically. You can also pick a different cover from Edit, Find cover.{' '}
+        <strong className={s.strong}>SteamGridDB</strong>, automatically. You can also pick a different cover from Edit, Find cover.
+      </p>
+      {builtIn && !key.trim() && <StatusLine type="success">Built in. Covers are filled in for you, no key needed.</StatusLine>}
+      <details className={s.foldInline} open={!builtIn || !!key.trim() || undefined}>
+      <summary>{builtIn ? 'Use your own SteamGridDB key (optional)' : 'SteamGridDB API key'}</summary>
+      <p className={s.sectionDescQuiet}>
         <button type="button" className={s.linkBtn} onClick={() => window.kozo?.api?.shell?.openExternal?.(SGDB_KEY_URL)}>
           Get a free key
-        </button>
+        </button>{' '}and paste it here.
       </p>
       <div className={s.keyRow}>
         <div className={`${s.keyInputWrap} hasRing`}>
@@ -1032,6 +1036,7 @@ function SteamGridDbSection() {
       {(state === 'ok' || state === 'error') && (
         <StatusLine type={state === 'ok' ? 'success' : 'error'}>{msg}</StatusLine>
       )}
+      </details>
     </section>
   )
 }
@@ -1631,11 +1636,15 @@ function DataTab({ onManageSaves }) {
 
   return (
     <div className={s.tabContent}>
+      <GameSavesSection autoSaveEnabled={autoSaveEnabled} toggleAutoSave={toggleAutoSave} backupsDir={backupsDir}
+        overview={overview} loadOverview={loadOverview} onManageSaves={onManageSaves}
+        allState={allState} allResult={allResult} doBackupAll={doBackupAll} />
+
       {/* Sync & Backup — folder based, fully offline. No accounts needed. */}
       <section className={s.section}>
         <div className={s.sectionHeader}>
           <IconCloud size={15} stroke={1.6} />
-          <span>Sync &amp; Backup: your data on any PC</span>
+          <span>Your KoZo data: library, playtime, lists</span>
         </div>
         <p className={s.sectionDesc}>
           No account needed, sync KoZo to <strong className={s.strong}>any folder</strong>:
@@ -1680,79 +1689,176 @@ function DataTab({ onManageSaves }) {
           <StatusLine type="error">{importResult?.error || 'Restore failed'}</StatusLine>
         )}
 
-        {/* ── Game save files — same folder, same section ── */}
-        <div className={s.subSection}>
-          <div className={s.sectionHeader}>
-            <IconDeviceFloppy size={14} stroke={1.6} />
-            <span>Game save files</span>
-          </div>
-          <p className={s.sectionDesc}>
-            Each game's save files back up into the same folder
-            {backupsDir && <> (<code className={s.savePath} title={backupsDir}>{backupsDir}</code>)</>}, great for
-            cracked/offline games with no cloud saves.
-          </p>
-
-          <div className={s.toggleList}>
-            <ToggleRow
-              label="Auto-back up saves after each session"
-              desc="After you finish playing, snapshots that game's saves automatically, keeps the last two sessions (older ones are overwritten so backups never balloon in size)."
-              checked={autoSaveEnabled}
-              onChange={toggleAutoSave}
-            />
-          </div>
-
-          {/* Back up every game's saves at once — for moving PCs / formatting */}
-          {overview.length > 0 && (
-            <div className={s.keyRow}>
-              <button type="button" className={s.testBtn} onClick={doBackupAll} disabled={allState === 'working'}>
-                {allState === 'working'
-                  ? <><IconLoader2 size={13} stroke={1.8} className="spin" /> Backing up all…</>
-                  : <><IconArchive size={13} stroke={1.8} /> Back up all game saves</>}
-              </button>
-              {allState === 'done' && allResult && (
-                <StatusLine type={(allResult.noSaves || allResult.failed) ? 'warning' : 'success'}>
-                  {allResult.backedUp} backed up
-                  {allResult.noSaves ? `. ${allResult.noSaves} had no detectable save folder (open that game's Save Files to back up manually)` : ''}
-                  {allResult.failed ? `, ${allResult.failed} failed` : ''}
-                </StatusLine>
-              )}
-              {allState === 'error' && (
-                <StatusLine type="error">{allResult?.error || 'Backup failed'}</StatusLine>
-              )}
-            </div>
-          )}
-
-          {/* Per-game overview — count + newest snapshot at a glance */}
-          {overview.length === 0 ? (
-            <p className={s.sectionDescItalic}>No games in your library yet.</p>
-          ) : (
-            <div className={s.saveGameList}>
-              {overview.map(g => (
-                <div key={g.id} className={s.saveGameRow}>
-                  <span className={s.saveGameName} title={g.name}>{g.name}</span>
-                  {g.count > 0 ? (
-                    <span className={s.saveBackupInfo}>
-                      <IconCheck size={11} stroke={2.5} className={s.saveBackupTick} />
-                      {g.count} backup{g.count === 1 ? '' : 's'}
-                      {g.latestAt && <span className={s.saveBackupDate}> · {new Date(g.latestAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>}
-                    </span>
-                  ) : (
-                    <span className={`${s.saveBackupInfo} ${s.saveBackupNone}`}>No backups</span>
-                  )}
-                  <button type="button" className={s.saveManageBtn} onClick={() => onManageSaves?.({ id: g.id, name: g.name })}>
-                    <IconDeviceFloppy size={12} stroke={1.7} /> Manage
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
         <p className={s.sectionDescQuiet}>
           Restoring merges data in (matching entries are updated), it never deletes anything or touches game saves.
         </p>
       </section>
     </div>
+  )
+}
+
+// Game saves in Settings → Backups: automatic backups, where they're kept (and
+// a second copy off this PC), the history policy, and every game's status.
+function fmtSize(b) {
+  if (!b) return '0 MB'
+  return b >= 1024 ** 3 ? `${(b / 1024 ** 3).toFixed(1)} GB` : `${Math.max(0.1, b / 1024 ** 2).toFixed(1)} MB`
+}
+function GameSavesSection({ autoSaveEnabled, toggleAutoSave, backupsDir, overview, loadOverview, onManageSaves, allState, allResult, doBackupAll }) {
+  const [storage, setStorage] = useState(null)
+  const [places, setPlaces] = useState([])     // other drives + cloud folders for the extra copy
+  const [busy, setBusy] = useState('')
+  const [filter, setFilter] = useState('need')
+  const [more, setMore] = useState(false)
+  const load = () => window.kozo?.api?.saves?.storage?.().then(r => { if (r?.ok) setStorage(r.data) })
+  useEffect(() => {
+    load()
+    Promise.all([window.kozo?.api?.saves?.drives?.(), window.kozo?.api?.saves?.cloudFolders?.()]).then(([d, c]) => {
+      const drives = d?.ok ? d.data.map(x => ({ path: x.path, label: `${x.name} · ${fmtSize(x.free)} free` })) : []
+      const clouds = c?.ok ? c.data.filter(x => x.name !== 'OneDrive').map(x => ({ path: x.path, label: x.name })) : []
+      setPlaces([...drives, ...clouds])
+    })
+  }, [])
+  async function setMirror(dir) {
+    setBusy('mirror')
+    await window.kozo?.api?.saves?.setMirror?.(dir)
+    setBusy(''); load()
+  }
+  async function pickMirror() {
+    const r = await window.kozo?.api?.dialog?.pickFolder?.()
+    if (r?.ok && r.data) setMirror(r.data)
+  }
+  async function refreshKnown() {
+    setBusy('manifest')
+    await window.kozo?.api?.saves?.refreshManifest?.()
+    setBusy(''); load(); loadOverview()
+  }
+  const need = overview.filter(g => !g.confirmed)
+  const done = overview.length - need.length
+  const latest = overview.map(g => g.latestAt).filter(Boolean).sort().pop()
+  const shown = filter === 'need' && need.length ? need : overview
+
+  return (
+    <section className={s.section}>
+      <div className={s.sectionHeader}>
+        <IconDeviceFloppy size={15} stroke={1.6} />
+        <span>Your game saves</span>
+      </div>
+
+      {/* At a glance: how many games are protected, and the on/off switch */}
+      <div className={`${s.saveHero} ${need.length ? s.saveHeroWarn : ''}`}>
+        <span className={s.saveHeroIcon}>{need.length ? <IconAlertTriangle size={22} /> : <IconShieldCheck size={22} />}</span>
+        <div className={s.saveHeroText}>
+          <strong>{overview.length === 0 ? 'No games yet' : need.length ? `${done} of ${overview.length} games protected` : `All ${overview.length} games protected`}</strong>
+          <span>
+            {autoSaveEnabled ? 'Backed up before and after every session' : 'Automatic backups are off'}
+            {storage ? ` · ${fmtSize(storage.bytes)} used` : ''}
+            {latest ? ` · last backup ${timeAgo(latest)}` : ''}
+          </span>
+        </div>
+        <button type="button" role="switch" aria-checked={autoSaveEnabled} aria-label="Back up saves automatically"
+          title="Back up saves automatically" className={`${s.toggle} ${autoSaveEnabled ? s.toggleOn : ''}`} onClick={() => toggleAutoSave(!autoSaveEnabled)}>
+          <span className={s.toggleThumb} />
+        </button>
+      </div>
+
+      {/* Where the backups go */}
+      <div className={s.saveWhere}>
+        <div className={s.saveWhereRow}>
+          <span className={s.saveWhereLabel}><IconFolder size={14} /> On this PC</span>
+          <code className={s.savePath} title={backupsDir || ''}>{backupsDir || '…'}</code>
+          <button type="button" className={s.testBtn} onClick={() => backupsDir && window.kozo?.api?.shell?.openPath?.(backupsDir)}><IconExternalLink size={13} /> Open</button>
+        </div>
+        <div className={s.saveWhereRow}>
+          <span className={s.saveWhereLabel}><IconCopy size={14} /> Extra copy</span>
+          {storage?.mirror ? (
+            <>
+              <code className={s.savePath} title={storage.mirror}>{storage.mirror}</code>
+              <span className={s.saveWhereNote}>{storage.mirrorLast ? `copied ${timeAgo(storage.mirrorLast)}` : 'copying…'}</span>
+              <button type="button" className={s.testBtn} onClick={() => setMirror(null)}><IconX size={13} /> Remove</button>
+            </>
+          ) : (
+            <span className={s.saveWhereNote}>Not set. Put a second copy on another drive or a USB stick, so a format can't take your saves.</span>
+          )}
+        </div>
+        {!storage?.mirror && (
+          <div className={s.saveWhereChoices}>
+            {places.map(p => (
+              <button key={p.path} type="button" className={s.testBtn} onClick={() => setMirror(p.path)} disabled={busy === 'mirror'}>
+                <IconDeviceFloppy size={13} /> {p.label}
+              </button>
+            ))}
+            <button type="button" className={s.testBtn} onClick={pickMirror}><IconFolder size={13} /> Choose a folder…</button>
+          </div>
+        )}
+      </div>
+
+      {/* Games: the ones that need you first */}
+      {overview.length > 0 && (
+        <>
+          <div className={s.saveListHead}>
+            <div className={s.seg} role="radiogroup" aria-label="Which games">
+              <button type="button" role="radio" aria-checked={filter === 'need'} className={`${s.segBtn} ${filter === 'need' ? s.segBtnOn : ''}`} onClick={() => setFilter('need')} disabled={!need.length}>
+                Needs you ({need.length})
+              </button>
+              <button type="button" role="radio" aria-checked={filter === 'all' || !need.length} className={`${s.segBtn} ${filter === 'all' || !need.length ? s.segBtnOn : ''}`} onClick={() => setFilter('all')}>
+                All games ({overview.length})
+              </button>
+            </div>
+            {need.length > 0 && filter === 'need' && <span className={s.saveWhereNote}>No save found on this PC for these yet. For a game you play here, pick its save folder once.</span>}
+          </div>
+          <div className={s.saveGameList}>
+            {shown.map(g => (
+              <div key={g.id} className={s.saveGameRow}>
+                <span className={s.saveGameName} title={g.name}>{g.name}</span>
+                {!g.confirmed ? (
+                  <button type="button" className={s.savePickBtn} onClick={() => onManageSaves?.({ id: g.id, name: g.name })}>
+                    <IconFolder size={12} /> Choose save folder
+                  </button>
+                ) : (
+                  <>
+                    <span className={s.saveBackupInfo}>
+                      <IconShieldCheck size={12} className={s.saveBackupTick} />
+                      {g.count > 0 ? `${g.count} backup${g.count === 1 ? '' : 's'}${g.latestAt ? `, ${timeAgo(g.latestAt)}` : ''}` : 'Ready, backs up when you play'}
+                    </span>
+                    <button type="button" className={s.saveManageBtn} onClick={() => onManageSaves?.({ id: g.id, name: g.name })}>Open</button>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Everything else, folded away */}
+      <button type="button" className={s.moreToggle} onClick={() => setMore(v => !v)} aria-expanded={more}>
+        <IconChevronDown size={14} className={more ? s.moreOpen : ''} /> More options
+      </button>
+      {more && (
+        <div className={s.moreBody}>
+          <Segmented label="Keep at most" value={String(storage?.capGb ?? 0)} wrap
+            onChange={async (v) => { await window.kozo?.api?.saves?.setCap?.(Number(v)); load() }}
+            options={[{ value: '0', label: 'No limit' }, { value: '1', label: '1 GB' }, { value: '5', label: '5 GB' }, { value: '20', label: '20 GB' }]} />
+          <p className={s.sectionDescQuiet}>
+            Every backup is kept for 2 weeks, then one a day up to 6 weeks, then one a week up to 4 months.
+            Backups you make yourself are never removed. Same files are stored once, compressed.
+          </p>
+          <div className={s.keyRow}>
+            <button type="button" className={s.testBtn} onClick={doBackupAll} disabled={allState === 'working'}>
+              {allState === 'working' ? <><IconLoader2 size={13} className="spin" /> Backing up…</> : <><IconArchive size={13} /> Back up every game now</>}
+            </button>
+            <button type="button" className={s.testBtn} onClick={refreshKnown} disabled={busy === 'manifest'}>
+              {busy === 'manifest' ? <IconLoader2 size={13} className="spin" /> : <IconRefresh size={13} />} Update the save locations list
+            </button>
+            {storage?.manifest?.games > 0 && <span className={s.sectionDescQuiet}>{storage.manifest.games.toLocaleString()} games known (PCGamingWiki)</span>}
+          </div>
+          {allState === 'done' && allResult && (
+            <StatusLine type={allResult.failed ? 'warning' : 'success'}>
+              {allResult.backedUp} backed up{allResult.failed ? `, ${allResult.failed} failed` : ''}
+            </StatusLine>
+          )}
+        </div>
+      )}
+    </section>
   )
 }
 

@@ -43,7 +43,6 @@
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
-.appSub { font-size: var(--fs-2xs); color: var(--a); text-transform: uppercase; letter-spacing: 0.14em; opacity: 0.85; }
 
 /* ── Nav ────────────────────────────────────────────────────── */
 .nav {

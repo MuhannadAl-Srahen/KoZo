@@ -617,6 +617,9 @@ async function tick() {
         logger.info('Session started', { gameId: game.id, name: game.name })
         sendToRenderer('session:started', enriched)
         try { require('./notifications').notifySessionStarted({ gameName: game.name }) } catch {}
+        // Save backup before playing, for games started outside KoZo (one
+        // started from KoZo got it in doLaunch; this one then finds no change).
+        setImmediate(() => { try { require('./autoSaveBackup').beforePlay(game) } catch {} })
         try {
           require('../overlayWindow').sendSessionStarted({
             gameName: game.name,

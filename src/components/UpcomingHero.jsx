@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { IconChevronLeft, IconChevronRight, IconClock, IconSparkles, IconFlame, IconBrandSteam } from '@tabler/icons-react'
 import { countdownTo } from '../lib/utils'
-import { matchTone, MATCH_MIN } from '../lib/tasteMatch'
+import { matchTone, reasonText } from './SteamCalendar'
 import s from './UpcomingHero.module.css'
 
 // Top of Upcoming: the most anticipated games of the next 30 days in a big
@@ -94,12 +94,12 @@ function Slide({ g, active, quiet, now, isTracked, onOpen, renderTrack }) {
       <div className={s.info}>
         <div className={s.kicker}>
           <IconFlame size={14} /> Most anticipated
-          {g.match >= MATCH_MIN && (
+          {g.match > 0 && (
             <span className={`${s.match} ${s['match_' + matchTone(g.match)]}`}><IconSparkles size={12} /> {g.match}% match</span>
           )}
         </div>
         <h2 className={s.name}>{g.name}</h2>
-        {g.reason && <div className={s.reason}>Like {g.reason.name}{g.reason.shared.length ? `: ${g.reason.shared.join(', ')}` : ''}</div>}
+        {reasonText(g) && <div className={s.reason}>{reasonText(g)}</div>}
         <div className={s.when}>
           <span className={s.date}>{when.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</span>
           {cd && <span className={s.countdown}><IconClock size={14} /> {cd}</span>}
@@ -111,7 +111,6 @@ function Slide({ g, active, quiet, now, isTracked, onOpen, renderTrack }) {
             onClick={() => window.kozo?.api?.shell?.openExternal?.(`https://store.steampowered.com/app/${g.appid}`)}>
             <IconBrandSteam size={14} /> Store page
           </button>
-          {isTracked(g) && <span className={s.trackedTag}>Tracked</span>}
         </div>
       </div>
     </div>
@@ -191,7 +190,7 @@ export default function UpcomingHero({ games, isTracked, onOpen, renderTrack }) 
                 <span className={s.weekArt}>
                   {(g.art?.capsule || g.art?.header || g.capsule) && <img src={g.art?.capsule || g.art?.header || g.capsule} alt="" loading="lazy" />}
                   <span className={s.weekCount}><IconClock size={11} /> {countdownTo(g.rel, now)}</span>
-                  {g.match >= MATCH_MIN && <span className={`${s.weekMatch} ${s['match_' + matchTone(g.match)]}`}>{g.match}%</span>}
+                  {g.match > 0 && <span className={`${s.weekMatch} ${s['match_' + matchTone(g.match)]}`}>{g.match}%</span>}
                 </span>
                 <span className={s.weekName}>{g.name}</span>
               </button>

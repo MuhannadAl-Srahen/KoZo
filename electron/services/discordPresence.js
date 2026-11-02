@@ -53,7 +53,8 @@ function decode(bytes) {
 }
 
 function enabled() { return settingsQ.getSetting('discord_presence') === '1' }
-function clientId() { return String(settingsQ.getSetting('discord_client_id') || '').trim() }
+// The user's own Discord application, else KoZo's (electron/defaults.js).
+function clientId() { return String(settingsQ.getSetting('discord_client_id') || '').trim() || require('../defaults').DISCORD_CLIENT_ID }
 
 function send(op, data) {
   try { sock?.write(encode(op, data)) } catch {}
