@@ -300,7 +300,7 @@ handle('saves:storage', () => {
     base: home.base() || path.dirname(root),
     free: home.freeSpace(root),
     lowSpaceAt: settingsQ.getSetting('save_low_space') || null,
-    capGb: Number(settingsQ.getSetting('save_vault_cap_gb') || 0),
+    capGb: vault.capGb(),
     manifest: require('./services/saveManifest').status(),
     dataAt: (() => { try { return require('fs').statSync(path.join(settingsQ.getSetting('auto_backup_dir') || '', 'kozo-autobackup.json')).mtime.toISOString() } catch { return null } })(),
   }
@@ -350,6 +350,14 @@ handle('saves:restoreMany', async (items) => {
 
 // Google Drive (services/googleDrive.js)
 handle('drive:status', () => require('./services/googleDrive').status())
+// The Google client the user made (Set up Google Drive in Connections).
+handle('drive:setClient', ({ id, secret } = {}) => {
+  const cid = String(id || '').trim(), sec = String(secret || '').trim()
+  if (cid && !/\.apps\.googleusercontent\.com$/.test(cid)) throw new Error('That Client ID should end with .apps.googleusercontent.com')
+  settingsQ.setSetting('gdrive_client_id', cid)
+  settingsQ.setSetting('gdrive_client_secret', sec)
+  return require('./services/googleDrive').status()
+})
 handle('drive:connect', () => require('./services/googleDrive').connect())
 handle('drive:disconnect', () => require('./services/googleDrive').disconnect())
 handle('drive:sync', () => require('./services/googleDrive').sync())
@@ -2350,7 +2358,7 @@ async function importBackupFile(filePath) {
   // Paths are per-machine (a restore on a new PC must keep the folders just set
   // up there) and the API key is never exported — keep the local values.
   const LOCAL_SETTINGS = new Set(['sync_folder', 'auto_backup_dir', 'saves_backup_dir', 'backup_base', 'steam_api_key', 'steamgriddb_key',
-    'gdrive_token', 'gdrive_folder_id', 'gdrive_email', 'gdrive_last_sync', 'install_id', 'backup_defaults_v1'])
+    'gdrive_token', 'gdrive_folder_id', 'gdrive_email', 'gdrive_last_sync', 'gdrive_client_id', 'gdrive_client_secret', 'install_id', 'backup_defaults_v1'])
   const rowsFor = (t) => t === 'settings' && Array.isArray(data[t])
     ? data[t].filter(r => !LOCAL_SETTINGS.has(r?.key))
     : data[t]

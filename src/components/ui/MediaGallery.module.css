@@ -74,10 +74,7 @@
 /* Same scrollbar as the rest of KoZo (global.css). Don't add scrollbar-width
    or scrollbar-color here: in Chromium either one switches the custom styling
    off and the plain white Windows scrollbar comes back. */
-.strip::-webkit-scrollbar { height: 5px; }
-.strip::-webkit-scrollbar-track { background: transparent; }
-.strip::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: var(--r-sm); }
-.strip::-webkit-scrollbar-thumb:hover { background: var(--a); }
+.strip::-webkit-scrollbar { height: 0; width: 0; }   /* the arrows and the wheel scroll it */
 .thumb {
   flex: 0 0 auto;
   width: 120px;

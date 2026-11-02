@@ -470,22 +470,6 @@ export default function GameList() {
 
   return (
     <div className={s.page}>
-      {/* At a glance, like the Library: each box filters to its status. */}
-      <div className={s.statsBar} data-list-stats="">
-        {[
-          { key: 'want_to_play', label: 'Want to play', value: counts?.want_to_play ?? 0 },
-          { key: 'playing', label: 'Playing', value: counts?.playing ?? 0 },
-          { key: 'finished', label: 'Finished', value: counts?.finished ?? 0 },
-          { key: null, label: 'Average rating', value: counts?.avgRating ? `${counts.avgRating.toFixed(1)} / 10` : 'None yet', sub: counts?.rated ? `${counts.rated} rated` : null },
-        ].map(c => (
-          <button key={c.label} type="button" className={`${s.statCard} ${c.key && statusFilter === c.key ? s.statCardOn : ''}`}
-            disabled={!c.key} onClick={() => c.key && handleStatusChange(statusFilter === c.key ? '' : c.key)}>
-            <span className={s.statLabel}>{c.label}</span>
-            <span className={s.statValue}>{c.value}{c.sub && <small className={s.statSub}>{c.sub}</small>}</span>
-          </button>
-        ))}
-      </div>
-
       {/* Toolbar — two modes */}
       {!selectionMode ? (
         <div className={s.toolbar}>

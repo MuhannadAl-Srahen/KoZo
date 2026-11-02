@@ -12,6 +12,7 @@ import ContextMenu from '../components/ui/ContextMenu'
 import InfoModal from '../components/ui/InfoModal'
 import Modal, { modalStyles as ms } from '../components/ui/Modal'
 import EditGameListModal from '../components/modals/EditGameListModal'
+import { useSteamArt } from '../lib/steamArt'
 import PlanMonthModal from '../components/modals/PlanMonthModal'
 import RateGameModal from '../components/modals/RateGameModal'
 import useCardZoom from '../lib/useCardZoom'
@@ -66,11 +67,16 @@ function coverOf(item) {
   return item.banner_url || (item.game_banner_local_path ? fileUrl(item.game_banner_local_path) : null)
 }
 
+// The stored cover; if it fails, Steam's real portrait or capsule, then the
+// generated cover.
 function Thumb({ item }) {
-  const [failed, setFailed] = useState(false)
-  const src = coverOf(item)
-  return src && !failed
-    ? <img src={src} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} />
+  const [failed, setFailed] = useState(0)
+  const stored = coverOf(item)
+  const art = useSteamArt(failed || !stored ? item.steam_app_id : null)
+  const srcs = [stored, art?.portrait, art?.capsule, art?.header].filter(Boolean)
+  const src = srcs[failed]
+  return src
+    ? <img key={src} src={src} alt="" loading="lazy" decoding="async" onError={() => setFailed(f => f + 1)} />
     : <GeneratedCover name={item.name} compact />
 }
 
@@ -217,22 +223,12 @@ function MiniCard({ item, n, dropMark, h }) {
   )
 }
 
-// Steam's wide art for a game (asked once per game, remembered): `header`
-// (460px, with the logo) for tiles, `hero` (the big library art) for banners.
-const wideArt = new Map()
+// Steam's wide art for a game: `header` (460px, with the logo) for tiles,
+// `hero` (the big library art) for banners. lib/steamArt batches and retries,
+// so the art is right from the first paint (it used to stay wrong until the
+// game's window was opened once).
 function useWideArt(item) {
-  const [, bump] = useState(0)
-  const id = item?.steam_app_id
-  useEffect(() => {
-    if (!id || wideArt.has(id)) return
-    wideArt.set(id, null)
-    window.kozo?.api?.steam?.appAssets?.([id]).then(res => {
-      const a = res?.ok ? res.data?.[id] : null
-      wideArt.set(id, a ? { header: a.header || null, hero: a.hero || null, capsule: a.capsule || null } : null)
-      bump(n => n + 1)
-    }).catch(() => {})
-  }, [id])
-  return (id && wideArt.get(id)) || null
+  return useSteamArt(item?.steam_app_id)
 }
 
 function stateOf(item, n) {

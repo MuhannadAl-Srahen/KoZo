@@ -5,6 +5,7 @@ import {
   IconArchive, IconCheck, IconCloudOff,
 } from '@tabler/icons-react'
 import Modal, { modalStyles as ms } from './ui/Modal'
+import DriveSetupModal from './DriveSetupModal'
 import { fileUrl, timeAgo } from '../lib/utils'
 import b from './BackupsTab.module.css'
 
@@ -43,6 +44,7 @@ export default function BackupsTab({ onManageSaves }) {
   const [found, setFound] = useState([])
   const [restoreAll, setRestoreAll] = useState(false)
   const [showQuiet, setShowQuiet] = useState(false)
+  const [setup, setSetup] = useState(false)
 
   const loadOverview = () => api()?.saves?.overview?.().then(r => { if (r?.ok) setOverview(r.data) })
   const loadStorage = () => api()?.saves?.storage?.().then(r => { if (r?.ok) setStorage(r.data) })
@@ -127,15 +129,18 @@ export default function BackupsTab({ onManageSaves }) {
               <strong>Google Drive {drive?.email ? <em>{drive.email}</em> : null}</strong>
               <span>
                 {!drive ? '…'
-                  : !drive.configured ? 'Not set up in this build of KoZo yet.'
+                  : !drive.configured ? 'Needs a one-time setup (about two minutes). Keeps a copy off this PC, so even a full format can\'t take your saves.'
                   : !drive.connected ? 'Keeps a copy off this PC, so even a full format can\'t take your saves.'
                   : drive.error === 'signed_out' ? 'Google signed KoZo out. Connect again.'
                   : drive.error ? `Last copy failed: ${drive.error}`
                   : drive.syncing ? 'Copying…'
-                  : drive.lastSync ? <>Copied {timeAgo(drive.lastSync)}{drive.last ? ` · ${fmtSize(drive.last.bytes)} of ${drive.budgetGb ? `${drive.budgetGb} GB` : 'your Drive'}` : ''}</>
+                  : drive.lastSync ? <>Copied {timeAgo(drive.lastSync)}{drive.last ? ` · ${fmtSize(drive.last.bytes)} of ${drive.budgetGb ? (drive.budgetGb < 1 ? `${drive.budgetGb * 1000} MB` : `${drive.budgetGb} GB`) : 'your Drive'}` : ''}</>
                   : 'Connected. The first copy starts in a moment.'}
               </span>
             </div>
+            {drive && !drive.configured && (
+              <button type="button" className={`${b.btn} ${b.btnPrimary}`} onClick={() => setSetup(true)}>Set up</button>
+            )}
             {drive?.configured && (!drive.connected || drive.error === 'signed_out'
               ? <button type="button" className={`${b.btn} ${b.btnPrimary}`} onClick={connectDrive} disabled={busy === 'drive'}>
                   {busy === 'drive' ? <><IconLoader2 size={14} className="spin" /> Waiting for Google…</> : 'Connect'}
@@ -215,14 +220,14 @@ export default function BackupsTab({ onManageSaves }) {
       <details className={b.more}>
         <summary><IconChevronRight size={14} className={b.moreChevron} /> More options</summary>
         <div className={b.moreBody}>
-          <Row label="Keep at most on this PC" hint="Every backup is kept 2 weeks, then one a day up to 6 weeks, then one a week up to 4 months. Ones you make yourself always stay.">
-            <Seg value={String(storage?.capGb ?? 0)} onChange={async v => { await api()?.saves?.setCap?.(Number(v)); loadStorage() }}
-              options={[['0', 'No limit'], ['5', '5 GB'], ['20', '20 GB'], ['50', '50 GB']]} />
+          <Row label="Keep at most on this PC" hint="Every backup is kept a week, then one a day up to a month, then one a week up to 3 months. Ones you make yourself always stay. The oldest automatic ones go first when it's full.">
+            <Seg value={String(storage?.capGb ?? 2)} onChange={async v => { await api()?.saves?.setCap?.(Number(v)); loadStorage() }}
+              options={[['1', '1 GB'], ['2', '2 GB'], ['5', '5 GB'], ['0', 'No limit']]} />
           </Row>
           {drive?.configured && (
             <Row label="Google Drive space for KoZo" hint="Saves are small and only changed files are sent. If KoZo runs out of this space, older restore points stay on this PC only.">
-              <Seg value={String(drive?.budgetGb ?? 5)} onChange={async v => { await api()?.drive?.setBudget?.(Number(v)); loadDrive() }}
-                options={[['2', '2 GB'], ['5', '5 GB'], ['10', '10 GB'], ['0', 'As much as fits']]} />
+              <Seg value={String(drive?.budgetGb ?? 1)} onChange={async v => { await api()?.drive?.setBudget?.(Number(v)); loadDrive() }}
+                options={[['0.5', '500 MB'], ['1', '1 GB'], ['2', '2 GB'], ['5', '5 GB']]} />
             </Row>
           )}
           <div className={b.moreBtns}>
@@ -251,6 +256,7 @@ export default function BackupsTab({ onManageSaves }) {
         </div>
       </details>
 
+      {setup && <DriveSetupModal onClose={() => setSetup(false)} onDone={loadDrive} />}
       {restoreAll && <RestoreAllModal onClose={() => { setRestoreAll(false); loadOverview() }} />}
     </div>
   )

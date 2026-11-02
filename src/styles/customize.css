@@ -62,11 +62,12 @@
   --text-primary: #f4e9eb; --text-secondary: #c8adb2; --text-muted: #957c81;
 }
 
-/* ── Heading font ───────────────────────────────────────────────────── */
-:root[data-display-font] h1, :root[data-display-font] h2, :root[data-display-font] h3 { font-family: var(--font-display); }
-/* Wide faces (Orbitron) need less size and a bit of air. */
-:root[data-display-font="orbitron"] { --display-tracking: 0.02em; --display-scale: 0.88; }
-:root[data-display-font="rajdhani"] { --display-scale: 1.08; }
+/* ── The chosen font, everywhere ────────────────────────────────────── */
+/* Every face is sized to DM Sans' letter height, so Orbitron isn't huge and
+   Rajdhani isn't tiny; buttons and inputs follow the page font too. */
+:root[data-font] { font-size-adjust: 0.5; }
+:root[data-font] body { letter-spacing: var(--font-tracking, normal); }
+:root[data-font] button, :root[data-font] input, :root[data-font] textarea, :root[data-font] select { font-family: inherit; }
 
 /* ── Cards ──────────────────────────────────────────────────────────── */
 :root[data-card-border="none"]   { --card-border: transparent; }
@@ -88,8 +89,6 @@
 :root[data-page-width="centered"] .app-main { padding-inline: max(0px, calc((100% - 1400px) / 2)); }
 
 /* ── Scrollbars ─────────────────────────────────────────────────────── */
-:root[data-scrollbar="wide"] ::-webkit-scrollbar { width: 10px; height: 10px; }
-:root[data-scrollbar="wide"] ::-webkit-scrollbar-thumb { border-radius: 6px; }
 :root[data-scrollbar="hidden"] ::-webkit-scrollbar { width: 0; height: 0; }
 
 /* ── Ambient: a slow accent glow drifting behind the app ────────────── */

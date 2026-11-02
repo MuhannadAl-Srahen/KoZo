@@ -414,6 +414,9 @@ Close any program that may be using it and start KoZo again.`)
       // API key and — unlike the Web API — works with a private profile, which
       // is why it's the primary path rather than a fallback.
       require('./services/steamStatsWatcher').scanAllSteamGames().catch(() => {})
+      // Steam Web: new achievements in a game's list, and unlocks earned on
+      // another PC (the stats files above only know this one).
+      require('./services/achievementSync').sweepSteamGames().catch(() => {})
     })
   }, 20000)
 

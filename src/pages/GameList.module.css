@@ -914,26 +914,6 @@
 :global(html[data-hide-status-dot]) .cardStatusLed { display: none; }
 :global(html[data-hide-plan-chip]) .planChip { display: none; }
 
-/* ── Header numbers (same look as the Library's) ───────────────── */
-.statsBar {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
-  padding: 16px 20px 12px; flex-shrink: 0; border-bottom: 1px solid var(--border);
-}
-.statCard {
-  background: var(--surface-accent); border: 1px solid var(--border); border-radius: var(--r-card);
-  padding: 12px 14px; display: flex; flex-direction: column; gap: 3px; text-align: left; font: inherit; cursor: pointer;
-}
-.statCard:disabled { cursor: default; }
-.statCard:hover:not(:disabled) { border-color: var(--border-accent-soft); }
-.statCardOn { border-color: var(--a); box-shadow: 0 0 0 1px var(--a); }
-.statLabel { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); font-weight: 500; }
-.statValue {
-  font-size: 20px; font-weight: 500; color: var(--a); line-height: 1.2; font-variant-numeric: tabular-nums;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: baseline; gap: 8px;
-}
-.statSub { font-size: var(--fs-xs); color: var(--text-muted); font-weight: 500; }
-:global(html[data-hide-library-stats]) .statsBar { display: none; }
-
 /* ── Status tabs (replace the status dropdown) ──────────────────── */
 .statusTabs { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); }
 .statusTab {
@@ -945,7 +925,6 @@
 .statusTabDot { width: 7px; height: 7px; border-radius: 50%; background: var(--st, var(--a)); }
 .listsDivider { width: 1px; height: 22px; background: var(--border); margin: 0 4px; }
 
-.cardName { font-family: var(--font-display); letter-spacing: var(--display-tracking, normal); }
 
 /* ── Card style (Settings → Appearance → Game cards), like GameCard ── */
 :global(html[data-card-style="poster"]) .cardInfo { display: none; }

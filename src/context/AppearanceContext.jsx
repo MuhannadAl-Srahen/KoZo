@@ -20,8 +20,7 @@ export const DEFAULT_APPEARANCE = {
   motion: 'soft',                 // 'heavy' | 'soft' | 'off' (styles/motion.css)
   bg: { mode: 'off', image: null, gameId: null, gameArt: null, blur: 8, dim: 55 },
   theme: 'midnight',              // midnight | tint | oled | slate | nord | mocha | forest | crimson (styles/customize.css)
-  font: 'dm',                     // FONTS key
-  displayFont: 'same',            // DISPLAY_FONTS key: headings, game names, Big Picture
+  font: 'dm',                     // FONTS key, the whole app
   cardStyle: 'classic',           // classic | poster | glass | minimal (GameCard / GameList css)
   textScale: 1,                   // 0.9 to 1.2, scales every --fs-* token
   accent2: null,                  // second color for gradients (progress, XP ring, glow) or null
@@ -32,31 +31,29 @@ export const DEFAULT_APPEARANCE = {
   sidebarSide: 'left',            // left | right
   sidebarWidth: 205,              // px, full sidebar
   pageWidth: 'full',              // full | centered
-  scrollbar: 'thin',              // thin | wide | hidden
+  scrollbar: 'thin',              // thin | hidden (an older 'wide' reads as thin)
   ambient: 'off',                 // off | on (slow accent glow behind the app)
   hideLibraryStats: false,
   hideUpcomingHero: false,
 }
 
-// Fonts you can pick (bundled with @fontsource, styles/customize.css).
+// The app's font, one for everything (bundled with @fontsource, styles/
+// customize.css). Every face is fitted to the same letter height
+// (font-size-adjust in customize.css), so a tall or small face never breaks a
+// layout; `track` tightens or loosens the wide and narrow ones.
 export const FONTS = {
   dm:       { label: 'DM Sans', css: "'DM Sans', system-ui, sans-serif" },
   inter:    { label: 'Inter', css: "'Inter', system-ui, sans-serif" },
   poppins:  { label: 'Poppins', css: "'Poppins', system-ui, sans-serif" },
   nunito:   { label: 'Nunito', css: "'Nunito', system-ui, sans-serif" },
-  atkinson: { label: 'Atkinson (easy to read)', css: "'Atkinson Hyperlegible', system-ui, sans-serif" },
-  mono:     { label: 'JetBrains Mono', css: "'JetBrains Mono', ui-monospace, monospace" },
-  system:   { label: 'Windows (Segoe UI)', css: "'Segoe UI', system-ui, sans-serif" },
-}
-
-// Heading fonts, the gaming faces among them (@fontsource, styles/customize.css).
-export const DISPLAY_FONTS = {
-  same:     { label: 'Same as text', css: null },
-  orbitron: { label: 'Orbitron', css: "'Orbitron', system-ui, sans-serif" },
-  rajdhani: { label: 'Rajdhani', css: "'Rajdhani', system-ui, sans-serif" },
-  chakra:   { label: 'Chakra Petch', css: "'Chakra Petch', system-ui, sans-serif" },
-  exo:      { label: 'Exo 2', css: "'Exo 2', system-ui, sans-serif" },
-  oxanium:  { label: 'Oxanium', css: "'Oxanium', system-ui, sans-serif" },
+  atkinson: { label: 'Atkinson', note: 'Easy to read', css: "'Atkinson Hyperlegible', system-ui, sans-serif" },
+  system:   { label: 'Segoe UI', note: 'Windows', css: "'Segoe UI', system-ui, sans-serif" },
+  mono:     { label: 'JetBrains Mono', css: "'JetBrains Mono', ui-monospace, monospace", track: '-0.02em' },
+  orbitron: { label: 'Orbitron', note: 'Gaming', css: "'Orbitron', system-ui, sans-serif", track: '-0.01em' },
+  rajdhani: { label: 'Rajdhani', note: 'Gaming', css: "'Rajdhani', system-ui, sans-serif", track: '0.01em' },
+  chakra:   { label: 'Chakra Petch', note: 'Gaming', css: "'Chakra Petch', system-ui, sans-serif" },
+  exo:      { label: 'Exo 2', note: 'Gaming', css: "'Exo 2', system-ui, sans-serif" },
+  oxanium:  { label: 'Oxanium', note: 'Gaming', css: "'Oxanium', system-ui, sans-serif" },
 }
 
 // Old or partial saved values never break the app: fill in every missing key.
@@ -65,6 +62,11 @@ function normalize(saved) {
   const p = { ...d, ...(saved || {}) }
   p.cards = { ...d.cards, ...(saved?.cards || {}) }
   p.bg = { ...d.bg, ...(saved?.bg || {}) }
+  if (p.scrollbar === 'wide') p.scrollbar = 'thin'
+  // The short-lived separate heading font: a chosen gaming face becomes the font.
+  if (saved?.displayFont && saved.displayFont !== 'same' && FONTS[saved.displayFont]) p.font = saved.displayFont
+  delete p.displayFont
+  if (!FONTS[p.font]) p.font = 'dm'
   // 75% was the first default darkness and hid most of the picture.
   if (saved?.bg?.dim === 75 && !saved?.bg?.image && !saved?.bg?.gameArt) p.bg.dim = d.bg.dim
   // Saved order first; a tab added in a later version slots in right after the
@@ -80,6 +82,25 @@ function normalize(saved) {
   p.nav = p.nav.map(n => (n.path === '/' ? { ...n, hidden: false } : n))   // Library always shows
   return p
 }
+
+// UI scale. The chosen scale is capped so a page always keeps about 1000
+// CSS px of width (a big scale in a small window squeezed every layout), and
+// Big Picture locks its own size (setZoomLock), whatever the app's scale.
+let zoomPref = 1
+let zoomNow = 1
+let zoomLock = null
+function applyZoom() {
+  const current = window.kozo?.ui?.getZoom?.() || zoomNow || 1
+  const physical = window.innerWidth * current
+  const z = zoomLock ?? Math.min(zoomPref, Math.max(0.8, physical / 1000))
+  const next = Math.round(z * 100) / 100
+  if (next === zoomNow) return
+  zoomNow = next
+  window.kozo?.ui?.setZoom?.(next)
+}
+export function setZoomLock(v) { zoomLock = v; applyZoom() }
+let resizeT = null
+window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(applyZoom, 150) })
 
 function apply(p) {
   const el = document.documentElement
@@ -102,13 +123,14 @@ function apply(p) {
   if (p.hideLibraryStats) el.dataset.hideLibraryStats = ''; else delete el.dataset.hideLibraryStats
   if (p.hideUpcomingHero) el.dataset.hideUpcomingHero = ''; else delete el.dataset.hideUpcomingHero
   const font = FONTS[p.font] || FONTS.dm
-  if (p.font && p.font !== 'dm') el.style.setProperty('--font', font.css); else el.style.removeProperty('--font')
-  const display = DISPLAY_FONTS[p.displayFont]?.css
-  if (display) { el.style.setProperty('--font-display', display); el.dataset.displayFont = p.displayFont } else { el.style.removeProperty('--font-display'); delete el.dataset.displayFont }
+  if (p.font && p.font !== 'dm') { el.style.setProperty('--font', font.css); el.dataset.font = p.font } else { el.style.removeProperty('--font'); delete el.dataset.font }
+  if (font.track) el.style.setProperty('--font-tracking', font.track); else el.style.removeProperty('--font-tracking')
   if (p.textScale && p.textScale !== 1) el.style.setProperty('--text-scale', String(p.textScale)); else el.style.removeProperty('--text-scale')
   if (p.sidebarWidth && p.sidebarWidth !== 205) el.style.setProperty('--sidebar-width', `${p.sidebarWidth}px`); else el.style.removeProperty('--sidebar-width')
   if (p.accent2) el.style.setProperty('--accent-2', p.accent2); else el.style.removeProperty('--accent-2')
-  window.kozo?.ui?.setZoom?.(p.scale)
+  zoomPref = p.scale || 1
+  zoomNow = 0   // force the first apply
+  applyZoom()
 }
 
 const AppearanceContext = createContext({ prefs: DEFAULT_APPEARANCE, loaded: false, setPrefs: () => {} })

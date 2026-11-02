@@ -33,7 +33,7 @@
      .hero — because BOTH .hero (its negative sticky top) and .tabs (which
      pins directly beneath the strip) read it, and siblings don't inherit
      custom properties from each other. */
-  --hero-min: 172px;   /* fits the roomier title block (gap 16 + pb 20) */
+  --hero-min: 166px;   /* the title row and the number tiles stay pinned */
 }
 
 /* Collapsing header: opens tall (the bigger cover the user asked for), then
@@ -42,7 +42,7 @@
    top: no per-frame height animation, no JS, no layout cost. */
 .hero {
   position: sticky;
-  --hero-h: clamp(340px, 50vh, 600px);
+  --hero-h: clamp(400px, 56vh, 640px);
   top: calc(var(--hero-min) - var(--hero-h));
   height: var(--hero-h);
   z-index: var(--z-sticky);
@@ -365,8 +365,9 @@
 .gameName {
   min-width: 0;
   max-width: 100%;
-  font-size: var(--fs-2xl);
-  font-weight: 500;
+  font-size: clamp(26px, 2.6vw, 42px);
+  font-weight: 800;
+  line-height: 1.1;
   color: var(--on-art);
   letter-spacing: -0.01em;
   overflow: hidden;
@@ -846,3 +847,78 @@
   min-width: 40px;
   justify-content: flex-end;
 }
+
+/* ── Title block: Play, the numbers ─────────────────────────────────────── */
+.heroLower { display: flex; align-items: stretch; gap: var(--sp-12); min-width: 0; }
+.heroLower .heroStats { flex: 1; }
+.heroCta { display: flex; align-items: center; gap: var(--sp-10); flex-shrink: 0; order: 2; }
+.heroCta:empty { display: none; }
+.gameNameRow .genreChips { align-self: center; }
+.playBig {
+  display: inline-flex; align-items: center; gap: 8px; height: 100%; min-height: 48px; padding: 0 30px;
+  border-radius: var(--r-pill); border: 0; cursor: pointer;
+  background: var(--a); color: var(--accent-ink, #0b0b12); font-size: var(--fs-md); font-weight: 800;
+  box-shadow: var(--elev-accent, 0 6px 20px color-mix(in srgb, var(--a) 40%, transparent));
+  transition: transform var(--dur-fast) var(--ease), filter var(--dur-fast) var(--ease);
+}
+.playBig:hover { filter: brightness(1.08); }
+.playBig:active { transform: scale(0.97); }
+.livePill, .notInstalled {
+  display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border-radius: var(--r-pill);
+  font-size: var(--fs-sm); font-weight: 700; background: var(--scrim-chip); border: 1px solid rgba(255, 255, 255, 0.14);
+}
+.livePill { color: var(--success); border-color: var(--success-border-strong); }
+.notInstalled { color: var(--on-art-dim); }
+
+.heroStats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; max-width: 880px; }
+.statTile {
+  display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 10px 14px;
+  border-radius: var(--r-card); border: 1px solid rgba(255, 255, 255, 0.1);
+  background: color-mix(in srgb, var(--surface-1) 78%, transparent);
+}
+.statLabel { font-size: var(--fs-2xs); text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); font-weight: 600; }
+.statValue {
+  font-size: 18px; font-weight: 600; color: var(--a); font-variant-numeric: tabular-nums;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.statValue small { font-size: var(--fs-xs); color: var(--text-muted); font-weight: 500; }
+.statTile .progressBar { width: 100%; margin-top: 4px; }
+
+/* ── Entrances (Settings → Appearance → Animations) ─────────────────────── */
+@keyframes gdUp { from { opacity: 0; transform: translateY(14px); } }
+@keyframes gdPop { from { opacity: 0; transform: scale(0.92); } }
+:global(html[data-motion="soft"]) .heroBottom > *,
+:global(html[data-motion="heavy"]) .heroBottom > * { animation: gdUp 0.4s var(--ease-out) backwards; }
+:global(html[data-motion]) .heroBottom > :nth-child(2) { animation-delay: 0.05s; }
+:global(html[data-motion]) .heroBottom > :nth-child(3) { animation-delay: 0.1s; }
+:global(html[data-motion]) .heroBottom > :nth-child(4) { animation-delay: 0.15s; }
+:global(html[data-motion="heavy"]) .playBig { animation: gdPop 0.45s var(--ease-spring) 0.12s backwards; }
+:global(html[data-motion="heavy"]) .statTile { animation: gdUp 0.45s var(--ease-out) backwards; }
+:global(html[data-motion="heavy"]) .statTile:nth-child(2) { animation-delay: 0.2s; }
+:global(html[data-motion="heavy"]) .statTile:nth-child(3) { animation-delay: 0.25s; }
+:global(html[data-motion="heavy"]) .statTile:nth-child(4) { animation-delay: 0.3s; }
+:global(html[data-motion="heavy"]) .statTile:nth-child(5) { animation-delay: 0.35s; }
+:global(html[data-motion="heavy"]) .playBig:hover { transform: scale(1.04); }
+:global(html[data-motion]) .tabView { animation: gdUp 0.3s var(--ease-out) backwards; }
+:global(html[data-motion]) .achCard { animation: gdUp 0.35s var(--ease-out) backwards; }
+:global(html[data-motion="heavy"]) .sessionRow { animation: gdUp 0.35s var(--ease-out) backwards; }
+:global(html[data-motion]) .achGrid > :nth-child(1) { animation-delay: 0.02s; }
+:global(html[data-motion]) .achGrid > :nth-child(2) { animation-delay: 0.04s; }
+:global(html[data-motion]) .achGrid > :nth-child(3) { animation-delay: 0.06s; }
+:global(html[data-motion]) .achGrid > :nth-child(4) { animation-delay: 0.08s; }
+:global(html[data-motion]) .achGrid > :nth-child(5) { animation-delay: 0.10s; }
+:global(html[data-motion]) .achGrid > :nth-child(6) { animation-delay: 0.12s; }
+:global(html[data-motion]) .achGrid > :nth-child(7) { animation-delay: 0.14s; }
+:global(html[data-motion]) .achGrid > :nth-child(8) { animation-delay: 0.16s; }
+:global(html[data-motion]) .achGrid > :nth-child(9) { animation-delay: 0.18s; }
+:global(html[data-motion]) .achGrid > :nth-child(10) { animation-delay: 0.20s; }
+:global(html[data-motion]) .achGrid > :nth-child(11) { animation-delay: 0.22s; }
+:global(html[data-motion]) .achGrid > :nth-child(12) { animation-delay: 0.24s; }
+:global(html[data-motion]) .achGrid > :nth-child(13) { animation-delay: 0.26s; }
+:global(html[data-motion]) .achGrid > :nth-child(14) { animation-delay: 0.28s; }
+:global(html[data-motion]) .achGrid > :nth-child(15) { animation-delay: 0.30s; }
+:global(html[data-motion]) .achGrid > :nth-child(16) { animation-delay: 0.32s; }
+:global(html[data-motion]) .achGrid > :nth-child(17) { animation-delay: 0.34s; }
+:global(html[data-motion]) .achGrid > :nth-child(18) { animation-delay: 0.36s; }
+:global(html[data-motion]) .achGrid > :nth-child(19) { animation-delay: 0.38s; }
+:global(html[data-motion]) .achGrid > :nth-child(20) { animation-delay: 0.40s; }

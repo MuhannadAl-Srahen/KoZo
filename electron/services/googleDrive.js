@@ -9,9 +9,11 @@
 //   sees the files it made. The refresh token is encrypted with safeStorage
 //   (setting gdrive_token, never exported).
 // - Sync (after a save backup, debounced, never while a game runs; and at
-//   startup): uploads what Drive is missing. Blobs are content-addressed and
+//   startup): uploads what Drive is missing.
+// - The Google client ID: pasted once in KoZo (setting gdrive_client_id /
+//   gdrive_client_secret, never exported) or built into defaults.js. Blobs are content-addressed and
 //   deduplicated, so only changed save files ever go up.
-// - Space: KoZo stays inside a budget (gdrive_budget_gb, default 5) and the
+// - Space: KoZo stays inside a budget (gdrive_budget_gb, default 1) and the
 //   real free space of the Drive. When it doesn't fit, the oldest automatic
 //   restore points are left out of the Drive copy (cloudPrunePlan); the copy
 //   on this PC is never touched. Saves bigger than 2 GB stay on this PC only.
@@ -33,10 +35,18 @@ const BIG_GAME = 2 * 1024 ** 3
 const GB = 1024 ** 3
 
 function settings() { return require('../db/queries/settings') }
-function defaults() { return require('../defaults') }
+// The Google Cloud "Desktop app" client: the one the user pasted in KoZo
+// (Connections, Set up Google Drive), else the one built into defaults.js.
+function defaults() {
+  const d = require('../defaults')
+  const s = settings()
+  const id = String(s.getSetting('gdrive_client_id') || '').trim()
+  const secret = String(s.getSetting('gdrive_client_secret') || '').trim()
+  return id ? { GOOGLE_CLIENT_ID: id, GOOGLE_CLIENT_SECRET: secret } : d
+}
 function axios() { return require('axios') }
 
-function budgetOf(s) { const v = s.getSetting('gdrive_budget_gb'); return v == null || v === '' ? 5 : Number(v) }
+function budgetOf(s) { const v = s.getSetting('gdrive_budget_gb'); return v == null || v === '' ? 1 : Number(v) }
 function configured() { return !!defaults().GOOGLE_CLIENT_ID }
 
 // ── Tokens ──────────────────────────────────────────────────────────────────

@@ -7,7 +7,7 @@ import {
   IconCircleCheck, IconCircleOff, IconEye, IconEyeOff, IconChevronDown,
   IconChevronRight, IconAlertTriangle, IconDeviceGamepad2,
 } from '@tabler/icons-react'
-import { getBannerBg, getBannerIcon, formatPlaytime, formatDate, formatDateTime, fileUrl, isSteamTracked, launcherLabel, localDayKey, rarityColor } from '../lib/utils'
+import { getBannerBg, getBannerIcon, formatPlaytime, formatDate, formatDateTime, fileUrl, isSteamTracked, launcherLabel, localDayKey, rarityColor, timeAgo } from '../lib/utils'
 import { STATUS_META } from '../components/GameCard'
 import AchievementModal from '../components/modals/AchievementModal'
 import EditGameModal from '../components/modals/EditGameModal'
@@ -760,13 +760,6 @@ export default function GameDetail() {
           </button>
 
           <div className={s.heroActions}>
-            {!!game.is_installed && !isLive && (
-              <button onClick={handleLaunch} title={`Launch ${game.name}`} className={s.playBtn}>
-                <IconPlayerPlayFilled size={13} />
-                Play
-              </button>
-            )}
-
             {/* Status picker — Playing / Finished / Dropped / On hold, synced with the Game List */}
             <div className={s.statusWrap} ref={statusMenuRef}>
               <button
@@ -926,16 +919,6 @@ export default function GameDetail() {
         <div className={s.heroBottom}>
           <div className={s.gameNameRow}>
             <div className={s.gameName} title={game.name}>{game.name}</div>
-            {!!game.is_cracked && (
-              <div className={s.crackBadge}>
-                CRACKED
-                {crackScanInfo?.sources?.length > 0 && (
-                  <span className={s.crackBadgeSource}> · {crackScanInfo.sources.join(', ')}</span>
-                )}
-              </div>
-            )}
-          </div>
-
           {(() => {
             let genres = []
             try { genres = JSON.parse(game.genres || '[]') } catch {}
@@ -949,37 +932,59 @@ export default function GameDetail() {
             )
           })()}
 
-          <div className={s.heroMeta}>
-            <div className={s.metaItem}>
-              <span>Playtime</span>
-              <span className={s.metaValue}>{formatPlaytime(game.total_playtime_seconds)}</span>
+            {!!game.is_cracked && (
+              <div className={s.crackBadge}>
+                CRACKED
+                {crackScanInfo?.sources?.length > 0 && (
+                  <span className={s.crackBadgeSource}> · {crackScanInfo.sources.join(', ')}</span>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className={s.heroLower}>
+          <div className={s.heroCta}>
+            {!!game.is_installed && !isLive && (
+              <button onClick={handleLaunch} title={`Launch ${game.name}`} className={s.playBig}>
+                <IconPlayerPlayFilled size={17} />
+                Play
+              </button>
+            )}
+            {isLive && <span className={s.livePill}><span className={s.liveDot} /> Playing now</span>}
+            {!game.is_installed && !isLive && <span className={s.notInstalled}>Not installed on this PC</span>}
+          </div>
+
+          {/* The numbers, as tiles like the Library's */}
+          <div className={s.heroStats}>
+            <div className={s.statTile}>
+              <span className={s.statLabel}>Playtime</span>
+              <span className={s.statValue}>{game.total_playtime_seconds ? formatPlaytime(game.total_playtime_seconds) : 'Not yet'}</span>
             </div>
-            {total > 0 && (
-              <div className={s.achProgress}>
-                <span className={s.metaItem}>
-                  <IconTrophy size={12} stroke={1.5} />
-                  <span className={s.metaValue}>{unlocked}/{total}</span>
-                  <span className={s.metaPct}>({pct}%)</span>
-                </span>
-                <div
-                  className={s.progressBar}
-                  role="progressbar"
-                  aria-valuenow={pct}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-label="Achievements unlocked"
-                  title={`${unlocked} of ${total} achievements unlocked`}
-                >
+            <div className={s.statTile}>
+              <span className={s.statLabel}>Achievements</span>
+              <span className={s.statValue}>{total > 0 ? <>{unlocked}/{total} <small>{pct}%</small></> : 'None'}</span>
+              {total > 0 && (
+                <div className={s.progressBar} role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}
+                  aria-label="Achievements unlocked" title={`${unlocked} of ${total} achievements unlocked`}>
                   <div className={s.progressFill} style={{ width: `${pct}%` }} />
                 </div>
-              </div>
-            )}
+              )}
+            </div>
+            <div className={s.statTile}>
+              <span className={s.statLabel}>Sessions</span>
+              <span className={s.statValue}>{sessions.length || 'None'}</span>
+            </div>
+            <div className={s.statTile}>
+              <span className={s.statLabel}>Last played</span>
+              <span className={s.statValue}>{game.last_played_at ? timeAgo(game.last_played_at) : 'Never'}</span>
+            </div>
             {game.first_played_at && (
-              <div className={s.metaItem}>
-                <span>Since</span>
-                <span className={s.metaValue}>{formatDate(game.first_played_at)}</span>
+              <div className={s.statTile}>
+                <span className={s.statLabel}>Since</span>
+                <span className={s.statValue}>{formatDate(game.first_played_at)}</span>
               </div>
             )}
+          </div>
           </div>
         </div>
       </div>
@@ -1004,9 +1009,9 @@ export default function GameDetail() {
         </button>
       </div>
 
-      {/* Tab content */}
+      {/* Tab content (keyed, so switching tabs plays the same entrance) */}
       <div className={s.content}>
-        <div className={s.contentInner}>
+        <div key={tab} className={`${s.contentInner} ${s.tabView}`}>
           {tab === 'achievements' && (
             <>
               {syncPrivacyError && total > 0 && (

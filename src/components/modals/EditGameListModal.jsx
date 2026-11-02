@@ -4,6 +4,7 @@ import Modal, { modalStyles as ms } from '../ui/Modal'
 import { LIST_STATUSES, LIST_STATUS_ORDER } from '../../lib/cardModel'
 import MonthPicker from '../ui/MonthPicker'
 import MediaGallery from '../ui/MediaGallery'
+import { useSteamArt } from '../../lib/steamArt'
 import { formatMonthKey } from '../../lib/utils'
 import s from './AddGameModal.module.css'
 
@@ -19,26 +20,23 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
   const [errors, setErrors]         = useState({})
   const [plannedMonth, setPlannedMonth] = useState(item.planned_month || null)   // play plan 'YYYY-MM'
   const [pickingMonth, setPickingMonth] = useState(false)
-  // Game media for the header gallery: Steam art + store screenshots.
-  const [media, setMedia] = useState([])
+  // Game media for the header gallery: trailers first, then Steam art (the
+  // same art the cards use, lib/steamArt) and the store screenshots.
+  const art = useSteamArt(item.steam_app_id)
+  const [details, setDetails] = useState(null)
   useEffect(() => {
     const appId = item.steam_app_id
     if (!appId) return
     let alive = true
-    Promise.all([
-      window.kozo?.api?.steam?.appAssets?.([appId]),
-      window.kozo?.api?.steam?.storeDetails?.(appId),
-    ]).then(([assets, details]) => {
-      if (!alive) return
-      const a = assets?.ok ? assets.data?.[appId] : null
-      const lead = a?.hero || a?.capsule || a?.header
-      setMedia([
-        ...(lead ? [{ thumb: a.capsule || a.header || lead, full: lead }] : []),
-        ...(details?.ok ? (details.data?.media || []) : []),
-      ])
-    })
+    window.kozo?.api?.steam?.storeDetails?.(appId).then(r => { if (alive && r?.ok) setDetails(r.data) })
     return () => { alive = false }
   }, [item.steam_app_id])
+  const lead = art?.hero || art?.capsule || art?.header
+  const media = [
+    ...(details?.videos || []).map(v => ({ thumb: v.thumb, video: v })),
+    ...(lead ? [{ thumb: art.capsule || art.header || lead, full: lead }] : []),
+    ...(details?.media || []),
+  ]
   const [confirmingClose, setConfirmingClose] = useState(false)
 
   // Custom-list membership (Spotify-playlist style, many-to-many).

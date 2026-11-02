@@ -12,7 +12,7 @@ import {
   IconPlugConnected, IconBrandGoogleDrive,
 } from '@tabler/icons-react'
 import { useAccentColor } from '../context/AccentColorContext'
-import { useAppearance, DEFAULT_APPEARANCE, FONTS, DISPLAY_FONTS } from '../context/AppearanceContext'
+import { useAppearance, DEFAULT_APPEARANCE, FONTS } from '../context/AppearanceContext'
 import ColorPicker from '../components/ui/ColorPicker'
 import GameCard from '../components/GameCard'
 import { NAV_ITEMS } from '../components/Sidebar'
@@ -21,6 +21,7 @@ import HoneycombLogo from '../components/HoneycombLogo'
 import ScanResultModal from '../components/modals/ScanResultModal'
 import SaveManagerModal from '../components/modals/SaveManagerModal'
 import BackupsTab from '../components/BackupsTab'
+import DriveSetupModal from '../components/DriveSetupModal'
 import s from './Settings.module.css'
 
 // ── Shared bits ──────────────────────────────────────────────────────────────
@@ -761,6 +762,7 @@ function SteamTab() {
   const sgdb = useSgdb()
   const [drive, setDrive] = useState(null)
   const [driveBusy, setDriveBusy] = useState(false)
+  const [driveSetup, setDriveSetup] = useState(false)
   const [showKeys, setShowKeys] = useState({})
   const navigate = useNavigate()
   useEffect(() => {
@@ -824,9 +826,10 @@ function SteamTab() {
           </ConnRow>
           <ConnRow icon={<IconBrandGoogleDrive size={20} />} name="Google Drive"
             tone={drive?.connected && !drive.error ? 'ok' : drive?.error ? 'warn' : 'muted'}
-            status={!drive ? '…' : !drive.configured ? 'Not set up in this build of KoZo yet'
+            status={!drive ? '…' : !drive.configured ? 'Needs a one-time setup, then your saves are safe off this PC'
               : drive.connected ? <>Backups copied to <b>{drive.email || 'your Drive'}</b>{drive.lastSync ? `, ${timeAgo(drive.lastSync)}` : ''}</>
               : 'Keeps your saves and library safe off this PC'}>
+            {drive && !drive.configured && <button type="button" className={s.testBtn} onClick={() => setDriveSetup(true)}>Set up</button>}
             {drive?.configured && !drive.connected && (
               <button type="button" className={s.testBtn} onClick={connectDrive} disabled={driveBusy}>
                 {driveBusy ? <><IconLoader2 size={13} className="spin" /> Waiting…</> : 'Connect'}
@@ -868,6 +871,8 @@ function SteamTab() {
           </div>
         )}
       </section>
+
+      {driveSetup && <DriveSetupModal onClose={() => setDriveSetup(false)} onDone={() => window.kozo?.api?.drive?.status?.().then(r => { if (r?.ok) setDrive(r.data) })} />}
 
       {/* Every key and ID, in one place, folded away */}
       <details className={`${s.section} ${s.foldSection}`}>
@@ -1351,19 +1356,18 @@ function LookCustomize() {
 
       <section className={s.section}>
         <div className={s.sectionHeader}><IconTextSize size={15} stroke={1.6} /><span>Text</span></div>
-        <p className={s.sectionDesc}>Headings: page titles, game names and Big Picture.</p>
+        <p className={s.sectionDesc}>One font for all of KoZo: menus, cards, titles and Big Picture.</p>
         <div className={s.fontGrid}>
-          {Object.entries(DISPLAY_FONTS).map(([value, f]) => (
-            <button key={value} type="button" aria-pressed={prefs.displayFont === value}
-              className={`${s.fontTile} ${prefs.displayFont === value ? s.fontTileOn : ''}`} onClick={() => setPrefs({ displayFont: value })}>
-              <span className={s.fontSample} style={{ fontFamily: f.css || 'var(--font)' }}>{sample?.name?.slice(0, 18) || 'Hollow Knight'}</span>
-              <span className={s.fontName}>{f.label}</span>
+          {Object.entries(FONTS).map(([value, f]) => (
+            <button key={value} type="button" aria-pressed={prefs.font === value}
+              className={`${s.fontTile} ${prefs.font === value ? s.fontTileOn : ''}`} onClick={() => setPrefs({ font: value })}
+              style={{ fontFamily: f.css, letterSpacing: f.track || 'normal' }}>
+              <span className={s.fontSample}>{sample?.name || 'Hollow Knight'}</span>
+              <span className={s.fontName}>{f.label}{f.note ? <em> · {f.note}</em> : null}</span>
             </button>
           ))}
         </div>
         <div className={s.segList}>
-          <Segmented label="Body text" value={prefs.font} wrap onChange={v => setPrefs({ font: v })}
-            options={Object.entries(FONTS).map(([value, f]) => ({ value, label: <span style={{ fontFamily: f.css }}>{f.label}</span> }))} />
           <Segmented label={`Text size ${Math.round((prefs.textScale || 1) * 100)}%`} value={prefs.textScale} onChange={v => setPrefs({ textScale: v })}
             options={[0.9, 1, 1.05, 1.1, 1.2].map(v => ({ value: v, label: `${Math.round(v * 100)}%` }))} />
         </div>
@@ -1424,7 +1428,7 @@ function LookCustomize() {
           <Segmented label="Moving glow" value={prefs.ambient} onChange={v => setPrefs({ ambient: v })}
             options={[{ value: 'off', label: 'Off' }, { value: 'on', label: 'On' }]} />
           <Segmented label="Scrollbars" value={prefs.scrollbar} onChange={v => setPrefs({ scrollbar: v })}
-            options={[{ value: 'thin', label: 'Thin' }, { value: 'wide', label: 'Wide' }, { value: 'hidden', label: 'Hidden' }]} />
+            options={[{ value: 'thin', label: 'Thin' }, { value: 'hidden', label: 'Hidden' }]} />
         </div>
       </section>
 

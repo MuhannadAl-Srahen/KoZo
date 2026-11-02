@@ -102,6 +102,7 @@ function CtrlWheelZoom() {
       if (!e.ctrlKey) return
       e.preventDefault()   // never Chromium's own page zoom
       if (zoomGridAt(e.target) || document.querySelector('[role="dialog"]')) return   // over a card grid: useCardZoom resizes it
+      if (window.location.hash.startsWith('#/big')) return   // Big Picture keeps its own size
       const next = Math.round(Math.min(1.5, Math.max(0.8, scaleRef.current + (e.deltaY < 0 ? 0.05 : -0.05))) * 100) / 100
       scaleRef.current = next
       setPrefs({ scale: next })

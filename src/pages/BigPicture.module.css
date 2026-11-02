@@ -133,7 +133,6 @@
 .heroRow { display: flex; align-items: flex-end; gap: clamp(16px, 1.8vw, 32px); }
 .heroInfo { display: flex; flex-direction: column; gap: clamp(6px, 1vh, 14px); min-width: 0; }
 .heroName, .gameName {
-  font-family: var(--font-display);
   margin: 0;
   max-width: 70vw;
   font-size: clamp(32px, 3.6vw, 72px);
@@ -441,3 +440,24 @@
 /* Off: no lift, the backdrop just swaps. */
 :global(html[data-motion="off"]) .backdropImg { animation: none; }
 :global(html[data-motion="off"]) .card[data-gpfocus] .cardArt { transform: none; }
+
+/* Every tab and the game screen come in the same way as Home (the view is
+   keyed by tab, so LB / RB replays it). */
+.view { min-width: 0; }
+:global(html[data-motion="soft"]) .view { animation: bpUp 0.32s var(--ease-out) backwards; }
+:global(html[data-motion="soft"]) .grid .card { animation: bpUp 0.35s var(--ease-out) backwards; }
+:global(html[data-motion="heavy"]) .view { animation: bpUp 0.45s var(--ease-out) backwards; }
+:global(html[data-motion="heavy"]) .gridHead { animation: bpInfoInHv 0.45s var(--ease-out) backwards; }
+:global(html[data-motion="heavy"]) .grid .card { animation: bpCoverIn 0.5s var(--ease-spring) backwards; }
+:global(html[data-motion]) .grid .card:nth-child(1) { animation-delay: 0.03s; }
+:global(html[data-motion]) .grid .card:nth-child(2) { animation-delay: 0.06s; }
+:global(html[data-motion]) .grid .card:nth-child(3) { animation-delay: 0.09s; }
+:global(html[data-motion]) .grid .card:nth-child(4) { animation-delay: 0.12s; }
+:global(html[data-motion]) .grid .card:nth-child(5) { animation-delay: 0.15s; }
+:global(html[data-motion]) .grid .card:nth-child(6) { animation-delay: 0.18s; }
+:global(html[data-motion]) .grid .card:nth-child(7) { animation-delay: 0.21s; }
+:global(html[data-motion]) .grid .card:nth-child(8) { animation-delay: 0.24s; }
+:global(html[data-motion]) .grid .card:nth-child(9) { animation-delay: 0.27s; }
+:global(html[data-motion]) .grid .card:nth-child(10) { animation-delay: 0.30s; }
+:global(html[data-motion]) .grid .card:nth-child(11) { animation-delay: 0.33s; }
+:global(html[data-motion]) .grid .card:nth-child(12) { animation-delay: 0.36s; }

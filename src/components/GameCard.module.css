@@ -119,9 +119,7 @@
 .bannerTitle {
   flex: 1;
   min-width: 0;
-  font-family: var(--font-display);
-  letter-spacing: var(--display-tracking, normal);
-  font-size: calc(15px * var(--display-scale, 1));
+  font-size: 15px;
   font-weight: 600;
   line-height: var(--lh-snug);
   color: var(--on-art);

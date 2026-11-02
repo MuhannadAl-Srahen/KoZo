@@ -13,6 +13,7 @@ import PickForMeModal from '../components/modals/PickForMeModal'
 import RateGameModal from '../components/modals/RateGameModal'
 import OnScreenKeyboard from '../components/OnScreenKeyboard'
 import { ratingColor } from '../components/ui/RatingPicker'
+import { setZoomLock } from '../context/AppearanceContext'
 import s from './BigPicture.module.css'
 
 // Big Picture: KoZo full screen for the couch and the TV.
@@ -266,6 +267,9 @@ export default function BigPicture() {
   const [level, setLevel] = useState(null)
   const [focus, setFocus] = useState(null)
   const [tab, setTab] = useState('home')
+  // Big Picture has its own size, whatever the app's UI scale (a TV-sized
+  // page zoomed again by the app's scale overflowed).
+  useEffect(() => { setZoomLock(0.85); return () => setZoomLock(null) }, [])
   const [query, setQuery] = useState('')
   const [keyboard, setKeyboard] = useState(false)   // on-screen keyboard (controller search)
   const [installedOnly, setInstalledOnly] = useState(false)
@@ -507,6 +511,7 @@ export default function BigPicture() {
       </header>
 
       <main className={s.main}>
+       <div key={opened ? `game-${opened.id}` : tab} className={s.view}>
         {opened ? (
           <GameScreen g={opened} live={!!liveOf(opened)} liveMin={minutesOf(liveOf(opened))} onPlay={play} onRate={setRating} onMenu={menuFor} />
         ) : tab === 'home' ? (
@@ -560,6 +565,7 @@ export default function BigPicture() {
             {tab === 'library' && !libraryList.length && <div className={s.panelEmpty}>No games match.</div>}
           </div>
         )}
+       </div>
       </main>
 
       {ctx && (

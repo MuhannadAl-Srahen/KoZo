@@ -4,10 +4,11 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 14,
+  rev: 15,
   // Settings → Appearance → UI scale.
   ui: {
     setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
+    getZoom: () => { try { return webFrame.getZoomFactor() } catch { return 1 } },
   },
   api: {
     games: {
@@ -166,6 +167,7 @@ contextBridge.exposeInMainWorld('kozo', {
       disconnect: () => ipcRenderer.invoke('drive:disconnect'),
       sync: () => ipcRenderer.invoke('drive:sync'),
       setBudget: (gb) => ipcRenderer.invoke('drive:setBudget', gb),
+      setClient: (c) => ipcRenderer.invoke('drive:setClient', c),
       restore: () => ipcRenderer.invoke('drive:restore'),
     },
     backup: {

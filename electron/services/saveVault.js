@@ -29,6 +29,7 @@ const logger = require('../logger')
 
 const { isJunk } = require('./saveDetect')
 const MIN_FREE = 2 * 1024 ** 3
+const BIG_FILE = 256 * 1024 ** 2
 
 const AUTO_REASONS = new Set(['before-play', 'after-play', 'auto', 'before-restore'])
 const DAY = 86400000
@@ -109,7 +110,12 @@ function listSourceFiles(sources) {
         const r = rel ? `${rel}/${e.name}` : e.name
         if (e.isDirectory()) { if (!e.name.endsWith('.kozo-restore') && !e.name.endsWith('.kozo-old')) walk(abs, r) }
         else if (e.isFile() && !isJunk(r)) {
-          try { const fst = fs.statSync(abs); out.push({ s, p: r, abs, n: fst.size, m: Math.round(fst.mtimeMs) }) } catch {}
+          try {
+            const fst = fs.statSync(abs)
+            // A single file this big inside a save folder is game data, not a save.
+            if (fst.size > BIG_FILE) { logger.debug(`saveVault: skipped ${abs} (${Math.round(fst.size / 1048576)} MB)`); continue }
+            out.push({ s, p: r, abs, n: fst.size, m: Math.round(fst.mtimeMs) })
+          } catch {}
         }
       }
     }
@@ -130,7 +136,7 @@ function storeBlob(vault, abs) {
   const dest = blobPath(vault, hash)
   if (fs.existsSync(dest)) return hash
   const tmp = dest + '.tmp'
-  fs.writeFileSync(tmp, zlib.gzipSync(data, { level: 6 }))
+  fs.writeFileSync(tmp, zlib.gzipSync(data, { level: 9 }))
   const check = crypto.createHash('sha1').update(zlib.gunzipSync(fs.readFileSync(tmp))).digest('hex')
   if (check !== hash) { try { fs.rmSync(tmp, { force: true }) } catch {} ; throw new Error(`Backup copy of ${path.basename(abs)} did not verify`) }
   fs.renameSync(tmp, dest)
@@ -349,8 +355,8 @@ function remove(game, id) {
 }
 
 // ── Smart history ───────────────────────────────────────────────────────────
-// Automatic snapshots: all from the last 14 days, then the newest per day up
-// to 45 days, then the newest per week up to 120 days. Manual ones are kept.
+// Automatic snapshots: all from the last 7 days, then the newest per day up
+// to 30 days, then the newest per week up to 90 days. Manual ones are kept.
 // The newest snapshot always survives. Pure, so it can be unit tested.
 function prunePolicy(snaps, now = Date.now()) {
   const sorted = [...snaps].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
@@ -359,13 +365,13 @@ function prunePolicy(snaps, now = Date.now()) {
   sorted.forEach((s, i) => {
     if (i === 0 || !AUTO_REASONS.has(s.reason)) { keep.add(s.id); return }
     const age = now - new Date(s.createdAt).getTime()
-    if (age <= 14 * DAY) { keep.add(s.id); return }
-    if (age <= 45 * DAY) {
+    if (age <= 7 * DAY) { keep.add(s.id); return }
+    if (age <= 30 * DAY) {
       const d = String(s.createdAt).slice(0, 10)
       if (!seenDay.has(d)) { seenDay.add(d); keep.add(s.id) }
       return
     }
-    if (age <= 120 * DAY) {
+    if (age <= 90 * DAY) {
       const w = Math.floor(new Date(s.createdAt).getTime() / (7 * DAY))
       if (!seenWeek.has(w)) { seenWeek.add(w); keep.add(s.id) }
     }
@@ -417,10 +423,15 @@ function usage(game) {
   return dirSize(path.join(vault, 'blobs')) + dirSize(path.join(vault, 'snapshots'))
 }
 
-// Storage cap (setting save_vault_cap_gb, 0 = off): drop the oldest automatic
-// snapshots across all games until the total fits. Never a game's newest one.
+// Storage cap (setting save_vault_cap_gb, default 2, 0 = off): drop the oldest
+// automatic snapshots across all games until the total fits. Never a game's
+// newest one.
+function capGb() {
+  const v = settings().getSetting('save_vault_cap_gb')
+  return v == null || v === '' ? 2 : Number(v) || 0
+}
 function enforceCap(games) {
-  const cap = Number(settings().getSetting('save_vault_cap_gb') || 0) * 1024 ** 3
+  const cap = capGb() * 1024 ** 3
   if (!cap) return 0
   let total = games.reduce((a, g) => a + usage(g), 0)
   let dropped = 0
@@ -537,5 +548,5 @@ function migrateLegacy(game) {
 
 module.exports = {
   snapshot, listSnapshots, restore, compare, exportSnapshot, remove,
-  prune, prunePolicy, gc, usage, enforceCap, syncMirror, migrateLegacy, mirrorRoot, cleanEmpty,
+  prune, prunePolicy, gc, usage, enforceCap, capGb, syncMirror, migrateLegacy, mirrorRoot, cleanEmpty,
 }

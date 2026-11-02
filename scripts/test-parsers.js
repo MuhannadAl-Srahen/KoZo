@@ -312,6 +312,7 @@ console.log('\nsave detection')
   const { buildMatcher } = require(path.join(__dirname, '..', 'electron', 'services', 'saveFinder.js'))
   check('logs, caches and crash dumps are junk', isJunk('Logs/game.log') && isJunk('ShaderCache/a.bin') && isJunk('Crashes/x.dmp') && isJunk('a/output.log'))
   check('save files are not', !isJunk('SaveGames/slot1.sav') && !isJunk('user_0.dat') && !isJunk('Profiles/settings.json'))
+  check('game data is never a save', isJunk('Paks/pakchunk0.pak') && isJunk('bin/game.exe') && isJunk('Mods/x/a.json') && isJunk('Binaries/Win64/a.dll'))
   const root = 'C:/Users/me/AppData/LocalLow'
   const files = [
     { root, rel: 'Team Cherry/Hollow Knight Silksong/user1.dat' },

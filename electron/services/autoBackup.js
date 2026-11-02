@@ -26,7 +26,7 @@ const fs   = require('fs')
 const path = require('path')
 const logger = require('../logger')
 
-const SECRET_SETTINGS = new Set(['steam_api_key', 'steamgriddb_key', 'gdrive_token', 'gdrive_folder_id', 'gdrive_email', 'install_id'])
+const SECRET_SETTINGS = new Set(['steam_api_key', 'steamgriddb_key', 'gdrive_token', 'gdrive_folder_id', 'gdrive_email', 'gdrive_client_id', 'gdrive_client_secret', 'install_id'])
 
 const TABLES = ['games', 'sessions', 'achievements', 'achievement_unlocks', 'game_list', 'categories', 'custom_lists', 'custom_list_games', 'settings']
 

@@ -23,8 +23,8 @@ function isDir(p) { try { return fs.statSync(p).isDirectory() } catch { return f
 function norm(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '') }
 
 // Files that are never worth keeping (and folders that only hold them).
-const JUNK_DIRS = /(^|\/)(logs?|cache|caches|shadercache|shader_?cache|shadercaches|pipelinecache|gpucache|code cache|webcache|htmlcache|crash(es|dumps|reports?)?|crashreportclient|temp|tmp|screenshots?|videos?|movies?|webbrowser|cef|blob_storage|local storage|session storage|indexeddb|service worker|d3dscache|nvidia|amd)(\/|$)/i
-const JUNK_EXT = /\.(log|tmp|dmp|mdmp|etl|pdb|lock|mp4|webm|avi|mkv)$/i
+const JUNK_DIRS = /(^|\/)(logs?|cache|caches|shadercache|shader_?cache|shadercaches|pipelinecache|gpucache|code cache|webcache|htmlcache|crash(es|dumps|reports?)?|crashreportclient|temp|tmp|screenshots?|videos?|movies?|webbrowser|cef|blob_storage|local storage|session storage|indexeddb|service worker|d3dscache|nvidia|amd|texturecache|texture_cache|mods?|workshop|binaries|content|paks)(\/|$)/i
+const JUNK_EXT = /\.(log|tmp|dmp|mdmp|etl|pdb|lock|mp4|webm|avi|mkv|exe|dll|pak|ucas|utoc|bik|bk2|wem|bnk|dds|ktx)$/i
 // Whether a file inside a save folder should be left out of backups. Pure.
 function isJunk(relPath) {
   const p = String(relPath || '').replace(/\\/g, '/')
@@ -201,12 +201,36 @@ function learnFromSession(game, startedAt, endedAt) {
   }
 }
 
+// Bytes of real (non-junk) files under a folder, stopping past `limit`.
+function saveBytes(dir, limit) {
+  let total = 0
+  const walk = (d, rel, depth) => {
+    if (total > limit || depth > 6) return
+    for (const e of safeList(d)) {
+      const r = rel ? `${rel}/${e.name}` : e.name
+      const abs = path.join(d, e.name)
+      if (e.isDirectory()) { if (!JUNK_DIRS.test(r)) walk(abs, r, depth + 1) }
+      else if (e.isFile() && !isJunk(r)) { try { total += fs.statSync(abs).size } catch {} }
+      if (total > limit) return
+    }
+  }
+  try { if (fs.statSync(dir).isFile()) return fs.statSync(dir).size } catch { return 0 }
+  walk(dir, '', 0)
+  return total
+}
+const TOO_BIG = 1024 ** 3
+
 // Detect and confirm for one game. Adds to (never replaces) what's confirmed.
-// Returns the confirmed list.
+// A folder holding over 1 GB of non-junk files is game data, not saves, and is
+// never confirmed on its own. Returns the confirmed list.
 function confirmFor(game, extra = []) {
   const asb = require('./autoSaveBackup')
   const have = asb.getSavePaths(game)
-  const found = [...detect(game).map(f => f.path), ...extra]
+  const found = [...detect(game).map(f => f.path), ...extra].filter(p => {
+    if (saveBytes(p, TOO_BIG) <= TOO_BIG) return true
+    logger.info(`saveDetect: "${game.name}" ${p} is too big to be only saves, not used`)
+    return false
+  })
   const merged = [...have]
   for (const p of found) {
     const k = p.toLowerCase()
@@ -231,4 +255,4 @@ function confirmAll() {
   return { games: games.length, withSaves: n }
 }
 
-module.exports = { detect, emulatorDirs, steamCloudDirs, confirmFor, confirmAll, learnFromSession, changedFiles, pickChangedFolders, isJunk }
+module.exports = { saveBytes, detect, emulatorDirs, steamCloudDirs, confirmFor, confirmAll, learnFromSession, changedFiles, pickChangedFolders, isJunk }
