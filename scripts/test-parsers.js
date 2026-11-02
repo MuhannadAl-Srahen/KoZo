@@ -284,6 +284,68 @@ console.log('\npicks')
   check('everything listed is a pick', [10, 20, 30, 40].every(id => p[id]?.pct >= 45))
 }
 
+// Picked for you: sources come from the whole Game List, not only favourites.
+console.log('\npick sources')
+{
+  const { pickSources } = require(path.join(__dirname, '..', 'electron', 'services', 'steamApi.js'))
+  const rows = [
+    { appid: 1, name: 'Loved', status: 'finished', rating: 9 },
+    { appid: 2, name: 'Played', status: 'playing', seconds: 40 * 3600 },
+    { appid: 3, name: 'Wish new', status: 'want_to_play', addedAt: '2026-10-30' },
+    { appid: 4, name: 'Wish old', status: 'want_to_play', addedAt: '2025-01-01' },
+    { appid: 5, name: 'Hated', status: 'finished', rating: 3 },
+    { appid: 6, name: 'Dropped', status: 'dropped' },
+    { appid: 7, name: 'Soon', status: 'upcoming', addedAt: '2026-11-01' },
+  ]
+  const src = pickSources(rows, 6)
+  const names = src.map(x => x.name)
+  check('wanted games are sources too', names.includes('Wish new') && names.includes('Soon'), names.join())
+  check('liked and wanted take turns', src[0].kind === 'liked' && src[1].kind === 'wanted', names.join())
+  check('newest wish first', names.indexOf('Soon') < names.indexOf('Wish old'), names.join())
+  check('dropped and low-rated never', !names.includes('Hated') && !names.includes('Dropped'), names.join())
+}
+
+// Saves found on their own: junk filter and learning from a session.
+console.log('\nsave detection')
+{
+  const { isJunk, pickChangedFolders } = require(path.join(__dirname, '..', 'electron', 'services', 'saveDetect.js'))
+  const { buildMatcher } = require(path.join(__dirname, '..', 'electron', 'services', 'saveFinder.js'))
+  check('logs, caches and crash dumps are junk', isJunk('Logs/game.log') && isJunk('ShaderCache/a.bin') && isJunk('Crashes/x.dmp') && isJunk('a/output.log'))
+  check('save files are not', !isJunk('SaveGames/slot1.sav') && !isJunk('user_0.dat') && !isJunk('Profiles/settings.json'))
+  const root = 'C:/Users/me/AppData/LocalLow'
+  const files = [
+    { root, rel: 'Team Cherry/Hollow Knight Silksong/user1.dat' },
+    { root, rel: 'Team Cherry/Hollow Knight Silksong/Player.log' },
+    { root, rel: 'Unity/Analytics/x.json' },
+    { root: 'C:/Users/me/Documents', rel: 'Some App/Saves/thing.sav' },
+    { root: 'D:/Games/HKS', rel: 'save/slot.dat' },
+  ]
+  const dirs = pickChangedFolders(files, { score: buildMatcher({ name: 'Hollow Knight Silksong' }), installPath: 'D:/Games/HKS' })
+  check('the folder named after the game is found', dirs.includes(root + '/Team Cherry/Hollow Knight Silksong'), dirs.join(' | '))
+  check('a save folder in the install folder is found', dirs.includes('D:/Games/HKS/save'), dirs.join(' | '))
+  check('other apps are ignored', !dirs.some(d => /Unity|Some App/.test(d)), dirs.join(' | '))
+}
+
+// Google Drive space: thin the cloud copy, oldest automatic first.
+console.log('\ndrive budget')
+{
+  const { cloudPrunePlan } = require(path.join(__dirname, '..', 'electron', 'services', 'googleDrive.js'))
+  const MB = 1024 * 1024
+  const games = [{ key: 'A', snaps: [
+    { id: 'new', createdAt: '2026-11-02', reason: 'after-play', blobs: [['x', 10 * MB], ['y', 5 * MB]] },
+    { id: 'mid', createdAt: '2026-10-20', reason: 'after-play', blobs: [['x', 10 * MB], ['z', 20 * MB]] },
+    { id: 'old', createdAt: '2026-09-01', reason: 'before-play', blobs: [['w', 30 * MB]] },
+    { id: 'mine', createdAt: '2026-08-01', reason: 'manual', blobs: [['m', 1 * MB]] },
+  ] }]
+  const all = cloudPrunePlan(games, 0)
+  check('no limit keeps everything', all.keep.size === 4 && !all.over)
+  const p = cloudPrunePlan(games, 40 * MB)
+  check('oldest automatic goes first', !p.keep.has('A|old') && p.keep.has('A|mid'), [...p.keep].join())
+  check('shared files are counted once', p.bytes === 36 * MB, String(p.bytes / MB))
+  const tight = cloudPrunePlan(games, 5 * MB)
+  check('the newest and manual ones always stay', tight.keep.has('A|new') && tight.keep.has('A|mine') && tight.over, [...tight.keep].join())
+}
+
 // Game-save backups: the smart history and the known save locations list.
 console.log('\nsave backups')
 {

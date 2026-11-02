@@ -200,6 +200,15 @@ function ListRow({ item, onClick, selectionMode, selected, onToggle, onToggleFav
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
+const STATUS_TABS = [
+  { value: 'want_to_play', label: 'Want to play' },
+  { value: 'playing',      label: 'Playing' },
+  { value: 'on_hold',      label: 'On hold' },
+  { value: 'finished',     label: 'Finished' },
+  { value: 'dropped',      label: 'Dropped' },
+  { value: 'upcoming',     label: 'Upcoming' },
+]
+
 export default function GameList() {
   const [items, setItems]       = useState([])
   const [total, setTotal]       = useState(0)
@@ -216,6 +225,9 @@ export default function GameList() {
   const [searchText, setSearchText]     = useState('')
   const [genreOptions, setGenreOptions] = useState([])
   const [customLists, setCustomLists]   = useState([])
+  const [counts, setCounts]             = useState(null)   // per status, for the header and chips
+  const loadCounts = () => window.kozo?.api?.gameList?.statusCounts?.().then(r => { if (r?.ok) setCounts(r.data) })
+  useEffect(() => { loadCounts() }, [allTotal, items])
   const [activeListId, setActiveListId] = useState(null)   // null = All
   // Big grid or list (Small grid is gone: Ctrl + mouse wheel sizes the cards).
   const [view, setView]         = useState(() => (localStorage.getItem('kozo:view:gamelist') === 'list' ? 'list' : 'big'))
@@ -458,12 +470,27 @@ export default function GameList() {
 
   return (
     <div className={s.page}>
+      {/* At a glance, like the Library: each box filters to its status. */}
+      <div className={s.statsBar} data-list-stats="">
+        {[
+          { key: 'want_to_play', label: 'Want to play', value: counts?.want_to_play ?? 0 },
+          { key: 'playing', label: 'Playing', value: counts?.playing ?? 0 },
+          { key: 'finished', label: 'Finished', value: counts?.finished ?? 0 },
+          { key: null, label: 'Average rating', value: counts?.avgRating ? `${counts.avgRating.toFixed(1)} / 10` : 'None yet', sub: counts?.rated ? `${counts.rated} rated` : null },
+        ].map(c => (
+          <button key={c.label} type="button" className={`${s.statCard} ${c.key && statusFilter === c.key ? s.statCardOn : ''}`}
+            disabled={!c.key} onClick={() => c.key && handleStatusChange(statusFilter === c.key ? '' : c.key)}>
+            <span className={s.statLabel}>{c.label}</span>
+            <span className={s.statValue}>{c.value}{c.sub && <small className={s.statSub}>{c.sub}</small>}</span>
+          </button>
+        ))}
+      </div>
+
       {/* Toolbar — two modes */}
       {!selectionMode ? (
         <div className={s.toolbar}>
           <h1 className={s.pageTitle}>
             Game List
-            {allTotal > 0 && <span className={s.pageTitleCount}>{allTotal}</span>}
             {switching && (
               <IconLoader2
                 size={14}
@@ -490,21 +517,6 @@ export default function GameList() {
           </div>
 
           <div className={s.filters}>
-            <SearchableSelect
-              value={statusFilter}
-              onChange={handleStatusChange}
-              searchable={false}
-              placeholder="All statuses"
-              width={145}
-              options={[
-                { value: 'want_to_play', label: 'Want to play' },
-                { value: 'playing',      label: 'Playing' },
-                { value: 'finished',     label: 'Finished' },
-                { value: 'on_hold',      label: 'On hold' },
-                { value: 'dropped',      label: 'Dropped' },
-                { value: 'upcoming',     label: 'Upcoming' },
-              ]}
-            />
             {genreOptions.length > 0 && (
               <SearchableSelect
                 value={genreFilter}
@@ -543,7 +555,7 @@ export default function GameList() {
 
           <button className={s.btnPrimary} onClick={() => setShowAdd(true)}>
             <IconPlus size={15} stroke={2} />
-            Add Game
+            Add games
           </button>
         </div>
       ) : (
@@ -605,12 +617,25 @@ export default function GameList() {
           toolbar dropdown, so the header stays compact) */}
       {!selectionMode && (
         <div className={s.listsBar}>
+          <div className={s.statusTabs} role="tablist" aria-label="Status">
+            <button type="button" role="tab" aria-selected={!statusFilter}
+              className={`${s.statusTab} ${!statusFilter ? s.statusTabOn : ''}`} onClick={() => handleStatusChange('')}>
+              All <span className={s.listChipCount}>{counts?.all ?? allTotal}</span>
+            </button>
+            {STATUS_TABS.map(t => (
+              <button key={t.value} type="button" role="tab" aria-selected={statusFilter === t.value}
+                className={`${s.statusTab} ${statusFilter === t.value ? s.statusTabOn : ''}`} style={{ '--st': STATUS_CONFIG[t.value]?.color }}
+                onClick={() => handleStatusChange(statusFilter === t.value ? '' : t.value)}>
+                <span className={s.statusTabDot} />{t.label} <span className={s.listChipCount}>{counts?.[t.value] ?? 0}</span>
+              </button>
+            ))}
+          </div>
+          <span className={s.listsDivider} />
           <button
             className={`${s.listChip} ${activeListId == null ? s.listChipActive : ''}`}
             onClick={() => handleListChange(null)}
           >
-            All
-            <span className={s.listChipCount}>{allTotal}</span>
+            Whole list
           </button>
           {customLists.map(l => (
             <button

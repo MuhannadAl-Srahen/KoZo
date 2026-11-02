@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 13,
+  rev: 14,
   // Settings → Appearance → UI scale.
   ui: {
     setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
@@ -54,6 +54,7 @@ contextBridge.exposeInMainWorld('kozo', {
       plannedMonths: () => ipcRenderer.invoke('gameList:plannedMonths'),
       planBoard: (month, from, to) => ipcRenderer.invoke('gameList:planBoard', month, from, to),
       planSummary: () => ipcRenderer.invoke('gameList:planSummary'),
+      statusCounts: () => ipcRenderer.invoke('gameList:statusCounts'),
       planMonth: (ids, month) => ipcRenderer.invoke('gameList:planMonth', ids, month),
     },
     customLists: {
@@ -126,11 +127,11 @@ contextBridge.exposeInMainWorld('kozo', {
       exportSnapshot: (gameId, id) => ipcRenderer.invoke('saves:export', gameId, id),
       storage: () => ipcRenderer.invoke('saves:storage'),
       setCap: (gb) => ipcRenderer.invoke('saves:setCap', gb),
-      setMirror: (dir) => ipcRenderer.invoke('saves:setMirror', dir),
-      syncMirror: () => ipcRenderer.invoke('saves:syncMirror'),
       refreshManifest: () => ipcRenderer.invoke('saves:refreshManifest'),
-      cloudFolders: () => ipcRenderer.invoke('saves:cloudFolders'),
-      drives: () => ipcRenderer.invoke('saves:drives'),
+      detect: () => ipcRenderer.invoke('saves:detect'),
+      moveBase: () => ipcRenderer.invoke('saves:moveBase'),
+      restorePlan: () => ipcRenderer.invoke('saves:restorePlan'),
+      restoreMany: (items) => ipcRenderer.invoke('saves:restoreMany', items),
       getAutoBackup: () => ipcRenderer.invoke('saves:getAutoBackup'),
       setAutoBackup: (enabled) => ipcRenderer.invoke('saves:setAutoBackup', enabled),
     },
@@ -159,7 +160,17 @@ contextBridge.exposeInMainWorld('kozo', {
       builtInKeys: () => ipcRenderer.invoke('keys:builtIn'),
       pickWallpaper: () => ipcRenderer.invoke('appearance:pickWallpaper'),
     },
+    drive: {
+      status: () => ipcRenderer.invoke('drive:status'),
+      connect: () => ipcRenderer.invoke('drive:connect'),
+      disconnect: () => ipcRenderer.invoke('drive:disconnect'),
+      sync: () => ipcRenderer.invoke('drive:sync'),
+      setBudget: (gb) => ipcRenderer.invoke('drive:setBudget', gb),
+      restore: () => ipcRenderer.invoke('drive:restore'),
+    },
     backup: {
+      findExisting: () => ipcRenderer.invoke('backup:findExisting'),
+      restoreFolder: (folder) => ipcRenderer.invoke('backup:restoreFolder', folder),
       import: () => ipcRenderer.invoke('backup:import'),
       syncSetup: () => ipcRenderer.invoke('sync:setup'),
       syncStatus: () => ipcRenderer.invoke('sync:status'),
@@ -265,6 +276,7 @@ contextBridge.exposeInMainWorld('kozo', {
       onXpLevelUp: sub('xp:levelup', pass),
       onAppUpdate: sub('app:update', pass),
       onReleasesChanged: sub('releases:changed', pass),
+      onDriveStatus: sub('drive:status', pass),
       onTrayRefresh: sub('tray:refresh', pass),
       onAccentChanged: sub('accent:changed', pass),
       onUnknownProcessAdd: sub('unknown-process:add', pass),

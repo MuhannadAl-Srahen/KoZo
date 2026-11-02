@@ -837,7 +837,7 @@ function endSession(gameId, session, forcedEndAt) {
   logger.info('Session ended', { gameId: session.game_id, duration: ended?.duration_seconds })
   try { require('./autoBackup').markDirty() } catch {}
   // Auto-snapshot this game's save files (no-op unless the user enabled it).
-  try { require('./autoSaveBackup').backupGameAfterSession(game) } catch {}
+  try { require('./autoSaveBackup').backupGameAfterSession(game, ended || session) } catch {}
   sendToRenderer('session:ended', { session: ended, game_name: game?.name })
   try {
     require('./notifications').notifySessionEnded({

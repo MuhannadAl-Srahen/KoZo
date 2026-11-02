@@ -83,7 +83,7 @@
   gap: 5px;
   padding: 3px var(--sp-10);
   border-radius: var(--r-pill);
-  background: var(--a);
+  background: linear-gradient(90deg, var(--a), var(--accent-2, var(--a)));
   color: var(--accent-ink);
   font-size: var(--fs-xs);
   font-weight: 800;
@@ -179,7 +179,7 @@
   bottom: 0;
   height: 3px;
   width: 100%;
-  background: var(--a);
+  background: linear-gradient(90deg, var(--a), var(--accent-2, var(--a)));
   transform-origin: left;
   animation: thumbFill 9s linear both;
 }

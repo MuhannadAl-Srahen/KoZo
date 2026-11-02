@@ -9,14 +9,18 @@ import {
   IconDownload, IconUpload, IconDeviceFloppy, IconArchive, IconCloud,
   IconHistory, IconList, IconChartBar, IconBell, IconBolt, IconShieldCheck, IconCopy, IconChevronDown,
   IconStar, IconStethoscope, IconLock, IconCode, IconChevronRight, IconArrowUp, IconArrowDown, IconPhoto, IconLayoutCards, IconTextSize, IconLayoutSidebar,
+  IconPlugConnected, IconBrandGoogleDrive,
 } from '@tabler/icons-react'
 import { useAccentColor } from '../context/AccentColorContext'
-import { useAppearance, DEFAULT_APPEARANCE, FONTS } from '../context/AppearanceContext'
+import { useAppearance, DEFAULT_APPEARANCE, FONTS, DISPLAY_FONTS } from '../context/AppearanceContext'
+import ColorPicker from '../components/ui/ColorPicker'
+import GameCard from '../components/GameCard'
 import { NAV_ITEMS } from '../components/Sidebar'
 import { fileUrl, timeAgo } from '../lib/utils'
 import HoneycombLogo from '../components/HoneycombLogo'
 import ScanResultModal from '../components/modals/ScanResultModal'
 import SaveManagerModal from '../components/modals/SaveManagerModal'
+import BackupsTab from '../components/BackupsTab'
 import s from './Settings.module.css'
 
 // ── Shared bits ──────────────────────────────────────────────────────────────
@@ -531,24 +535,29 @@ const DISCORD_STATUS = {
   not_running: { type: 'info',    text: 'Discord isn\'t open. KoZo connects when it is.' },
   bad_id:      { type: 'error',   text: 'Discord refused this Application ID. Check it and paste it again.' },
 }
-function DiscordSection() {
+// Discord Rich Presence state for the Connections page: the switch, the
+// optional own Application ID (saved a moment after typing), the status.
+function useDiscord() {
   const [on, setOn] = useState(false)
   const [id, setId] = useState('')
   const [status, setStatus] = useState('off')
   const loaded = useRef(false)
-
   async function refreshStatus() {
     const r = await window.kozo?.api?.discord?.apply?.()
     if (r?.ok) setStatus(r.data)
   }
   useEffect(() => {
     window.kozo?.api?.settings?.getAll?.().then(res => {
-      if (res?.ok) { setOn(res.data?.discord_presence === '1'); setId(res.data?.discord_client_id || '') }
-      loaded.current = true
+      // An ID equal to the built-in one isn't "your own app".
+      window.kozo?.api?.dialog?.builtInKeys?.().then(k => {
+        const builtIn = k?.ok ? k.data?.discordId : null
+        const mine = res?.data?.discord_client_id || ''
+        if (res?.ok) { setOn(res.data?.discord_presence === '1'); setId(builtIn && mine === builtIn ? '' : mine) }
+        loaded.current = true
+      })
     })
     window.kozo?.api?.discord?.status?.().then(r => { if (r?.ok) setStatus(r.data) })
   }, [])
-  // The ID saves a moment after typing stops.
   useEffect(() => {
     if (!loaded.current) return
     const t = setTimeout(async () => {
@@ -557,52 +566,12 @@ function DiscordSection() {
     }, 600)
     return () => clearTimeout(t)
   }, [id])
-
   async function toggle(v) {
     setOn(v)
     await window.kozo?.api?.settings?.set?.('discord_presence', v ? '1' : '0')
     refreshStatus()
   }
-
-  const msg = on ? DISCORD_STATUS[status] : null
-  return (
-    <section className={s.section}>
-      <div className={s.sectionHeader}>
-        <IconBrandDiscord size={15} stroke={1.6} />
-        <span>Discord</span>
-      </div>
-      <div className={s.toggleList}>
-        <ToggleRow
-          label="Show my game on Discord"
-          desc="While you play, Discord shows the game's name, your KoZo level and your hours in it."
-          checked={on}
-          onChange={toggle}
-        />
-      </div>
-      {on && msg && <StatusLine type={msg.type}>{msg.text}</StatusLine>}
-      {on && (
-        <details className={s.foldInline} open={!!id || undefined}>
-          <summary>Use your own Discord app (optional)</summary>
-          <p className={s.sectionDescQuiet}>
-            KoZo shows up as "KoZo" by default. To use another name or picture, make an app in the{' '}
-            <button type="button" className={s.linkBtn}
-              onClick={() => window.kozo?.api?.shell?.openExternal?.('https://discord.com/developers/applications')}>
-              Discord Developer Portal
-            </button>{' '}
-            and paste its Application ID. Leave it empty to use KoZo's.
-          </p>
-          <div className={s.keyRow}>
-            <div className={`${s.keyInputWrap} hasRing`}>
-              <input className={s.keyInput} placeholder="Application ID (empty = KoZo's)" value={id}
-                aria-label="Discord Application ID" inputMode="numeric"
-                onChange={e => setId(e.target.value.replace(/\D/g, ''))}
-                spellCheck={false} autoComplete="off" />
-            </div>
-          </div>
-        </details>
-      )}
-    </section>
-  )
+  return { on, toggle, id, setId, status, msg: on ? DISCORD_STATUS[status] : null }
 }
 
 // ── Tab: Steam ────────────────────────────────────────────────────────────────
@@ -610,7 +579,7 @@ function DiscordSection() {
 // instead of flashing empty fields + reloading the profile card every time.
 let steamTabCache = null
 
-function SteamTab({ children }) {
+function SteamTab() {
   const [apiKey, setApiKey]         = useState(steamTabCache?.apiKey ?? '')
   const [showKey, setShowKey]       = useState(false)
   const [testState, setTestState]   = useState('idle')
@@ -788,44 +757,102 @@ function SteamTab({ children }) {
     }
   }
 
+  const discord = useDiscord()
+  const sgdb = useSgdb()
+  const [drive, setDrive] = useState(null)
+  const [driveBusy, setDriveBusy] = useState(false)
+  const [showKeys, setShowKeys] = useState({})
+  const navigate = useNavigate()
+  useEffect(() => {
+    window.kozo?.api?.drive?.status?.().then(r => { if (r?.ok) setDrive(r.data) })
+    const off = window.kozo?.events?.onDriveStatus?.(setDrive)
+    return () => { try { off?.() } catch {} }
+  }, [])
+  async function connectDrive() {
+    setDriveBusy(true)
+    await window.kozo?.api?.drive?.connect?.()
+    setDriveBusy(false)
+    window.kozo?.api?.drive?.status?.().then(r => { if (r?.ok) setDrive(r.data) })
+  }
+  const keyInput = (id, label, value, onChange, placeholder, extra = null) => (
+    <div className={s.advField}>
+      <label className={s.advLabel}>{label}</label>
+      <div className={s.keyRow}>
+        <div className={`${s.keyInputWrap} hasRing`}>
+          <input type={showKeys[id] ? 'text' : 'password'} className={s.keyInput} placeholder={placeholder} value={value}
+            aria-label={label} onChange={e => onChange(e.target.value)} spellCheck={false} autoComplete="off" />
+          <button type="button" className={s.keyToggle} onClick={() => setShowKeys(k => ({ ...k, [id]: !k[id] }))}
+            aria-label={showKeys[id] ? 'Hide' : 'Show'}>
+            {showKeys[id] ? <IconEyeOff size={14} stroke={1.6} /> : <IconEye size={14} stroke={1.6} />}
+          </button>
+        </div>
+        {extra}
+      </div>
+    </div>
+  )
+
   return (
     <div className={s.tabContent}>
-      {/* User ID + Profile */}
       <section className={s.section}>
-        <div className={s.sectionHeader}>
-          <IconUser size={15} stroke={1.6} />
-          <span>Your Steam Profile</span>
+        <div className={s.sectionHeader}><IconPlugConnected size={15} stroke={1.6} /><span>Connections</span></div>
+        <p className={s.sectionDesc}>Everything works without typing a key. Each one only needs a click.</p>
+        <div className={s.connList}>
+          <ConnRow
+            icon={profile?.avatar ? <img src={profile.avatar} alt="" /> : <IconBrandSteam size={20} />}
+            name="Steam"
+            tone={steamUserId ? 'ok' : 'muted'}
+            status={steamUserId ? <>Connected as <b>{steamPersona || profile?.persona_name || steamUserId}</b></> : 'Not connected. KoZo reads the account the Steam app is signed in to.'}>
+            <button type="button" className={s.testBtn} onClick={detectFromPc} title="Read the account from the Steam app on this PC">Detect</button>
+            <button type="button" className={s.testBtn} disabled={signingIn} onClick={signInWithSteam}>
+              {signingIn ? <><IconLoader2 size={13} className="spin" /> Waiting…</> : (steamUserId ? 'Change account' : 'Sign in')}
+            </button>
+          </ConnRow>
+          <ConnRow icon={<IconBrandDiscord size={20} />} name="Discord"
+            tone={discord.on && discord.msg?.type === 'success' ? 'ok' : discord.on && discord.msg ? 'warn' : 'muted'}
+            status={discord.on ? (discord.msg?.text || 'On. Shows your game while you play.') : 'Off. Turn on to show the game you play on Discord.'}>
+            <button type="button" role="switch" aria-checked={discord.on} aria-label="Show my game on Discord"
+              className={`${s.toggle} ${discord.on ? s.toggleOn : ''}`} onClick={() => discord.toggle(!discord.on)}>
+              <span className={s.toggleThumb} />
+            </button>
+          </ConnRow>
+          <ConnRow icon={<IconPhoto size={20} />} name="Covers for non-Steam games"
+            tone={sgdb.working ? 'ok' : 'warn'}
+            status={sgdb.saved ? 'From SteamGridDB with your key' : sgdb.builtIn ? 'From SteamGridDB, built in' : 'Needs a SteamGridDB key (Advanced, below)'}>
+            <button type="button" className={s.testBtn} disabled={bannerRefreshing} onClick={doRefreshBanners} title="Download every cover again at 2x quality">
+              {bannerRefreshing ? <><IconLoader2 size={13} className="spin" /> Refreshing…</> : <><IconRefresh size={13} /> Refresh covers</>}
+            </button>
+          </ConnRow>
+          <ConnRow icon={<IconBrandGoogleDrive size={20} />} name="Google Drive"
+            tone={drive?.connected && !drive.error ? 'ok' : drive?.error ? 'warn' : 'muted'}
+            status={!drive ? '…' : !drive.configured ? 'Not set up in this build of KoZo yet'
+              : drive.connected ? <>Backups copied to <b>{drive.email || 'your Drive'}</b>{drive.lastSync ? `, ${timeAgo(drive.lastSync)}` : ''}</>
+              : 'Keeps your saves and library safe off this PC'}>
+            {drive?.configured && !drive.connected && (
+              <button type="button" className={s.testBtn} onClick={connectDrive} disabled={driveBusy}>
+                {driveBusy ? <><IconLoader2 size={13} className="spin" /> Waiting…</> : 'Connect'}
+              </button>
+            )}
+            {drive?.connected && <button type="button" className={s.testBtn} onClick={() => navigate('/settings?tab=data')}>Backups</button>}
+          </ConnRow>
         </div>
-        <p className={s.sectionDesc}>
-          Connects <strong className={s.strong}>automatically</strong>, KoZo reads
-          your logged-in account from the Steam app on this PC. Use "Sign in with Steam" for a
-          different account or when Steam isn't installed here. Nothing to type.
-        </p>
-        {steamUserId && (
-          <StatusLine type="success">
-            Connected{steamPersona ? <> as <strong>{steamPersona}</strong></> : <> ({steamUserId})</>}
-          </StatusLine>
-        )}
+        <Message msg={detectMsg} />
+        <Message msg={bannerMsg} />
         {privacyError && (
           <div className={s.privacyBanner}>
             <IconAlertTriangle size={15} stroke={1.8} className={s.privacyIcon} />
             <div>
               {privacyError === 'profile_not_found'
-                ? <>KoZo couldn't read your Steam profile. Check the Steam ID above.</>
+                ? <>KoZo couldn't read your Steam profile. Try Detect or Sign in again.</>
                 : <>
-                    Steam wouldn't return unlocks for any game KoZo tried, which usually means your
-                    profile's <strong>Game details</strong> are private. KoZo still reads unlocks
-                    straight from the Steam app on this PC, so achievements keep working, this only
-                    costs you Steam's real unlock dates. If you've already set Game details to Public,
-                    hit Re-check.
+                    Steam won't share unlock dates because your profile's <strong>Game details</strong> are private.
+                    Achievements still work (KoZo reads them from the Steam app on this PC); only Steam's exact
+                    unlock times are missing. Set Game details to Public, then Re-check.
                   </>}
               <div className={s.keyRow}>
                 <button type="button" className={s.testBtn}
                   onClick={() => window.kozo?.api?.shell?.openExternal?.('https://steamcommunity.com/my/edit/settings')}>
                   Open Steam privacy settings
                 </button>
-                {/* Steam caches privacy changes for a moment, and KoZo only
-                    re-tests on launch, so give it a way to confirm now. */}
                 <button type="button" className={s.testBtn} disabled={privacyChecking}
                   onClick={async () => {
                     setPrivacyChecking(true)
@@ -834,210 +861,106 @@ function SteamTab({ children }) {
                     const d = res?.ok ? res.data : null
                     if (d?.checked && !d.private) setPrivacyError('')
                   }}>
-                  {privacyChecking
-                    ? <><IconLoader2 size={13} stroke={1.8} className="spin" /> Checking…</>
-                    : <><IconRefresh size={13} stroke={1.8} /> Re-check now</>}
+                  {privacyChecking ? <><IconLoader2 size={13} stroke={1.8} className="spin" /> Checking…</> : <><IconRefresh size={13} stroke={1.8} /> Re-check now</>}
                 </button>
               </div>
             </div>
           </div>
         )}
-        <div className={s.keyRow}>
-          <button type="button" className={s.testBtn}
-            title="Read your logged-in account from the local Steam install, no typing needed"
-            onClick={detectFromPc}>
-            Detect from this PC
-          </button>
-          <button type="button" className={s.testBtn}
-            title="Sign in with Steam in your browser, for a different account or when Steam isn't installed here"
-            disabled={signingIn}
-            onClick={signInWithSteam}>
-            <IconBrandSteam size={13} stroke={1.8} />
-            {signingIn ? 'Waiting…' : 'Sign in with Steam'}
-          </button>
-        </div>
-        <Message msg={detectMsg} />
-        {profile && profileState === 'found' && (
-          <div className={s.profileCard}>
-            {profile.avatar && <img src={profile.avatar} alt="" className={s.profileAvatar} loading="lazy" decoding="async" />}
-            <div className={s.profileBody}>
-              <div className={s.profileName} title={profile.persona_name}>{profile.persona_name}</div>
-              <div className={s.profileId} title={profile.steam_id}>SteamID: {profile.steam_id}</div>
-            </div>
-            {profile.profile_url && (
-              <button type="button" className={s.profileLinkBtn} aria-label="Open Steam profile"
-                onClick={() => window.kozo?.api?.shell?.openExternal(profile.profile_url)}>
-                <IconExternalLink size={13} stroke={1.6} />
-              </button>
-            )}
-          </div>
-        )}
-        {profileState === 'error' && profileMsg && (
-          <StatusLine type="error">{profileMsg}</StatusLine>
-        )}
       </section>
 
-      {/* API Key: optional, so folded away */}
-      <details className={`${s.section} ${s.foldSection}`} open={!!apiKey.trim() || undefined}>
+      {/* Every key and ID, in one place, folded away */}
+      <details className={`${s.section} ${s.foldSection}`}>
         <summary className={s.sectionHeader}>
           <IconKey size={15} stroke={1.6} />
-          <span>Advanced: Steam Web API key (optional)</span>
+          <span>Advanced: your own keys (optional)</span>
           <IconChevronDown size={14} className={s.foldChev} />
         </summary>
-        <p className={s.sectionDesc}>
-          <strong className={s.strong}>Optional</strong>, KoZo syncs achievements
-          without a key as long as your Steam profile's Game details are public. A key adds support for
-          private profiles and owned-games data. Get yours at{' '}
-          <button
-            type="button"
-            className={s.linkBtn}
-            onClick={() => window.kozo?.api?.shell?.openExternal('https://steamcommunity.com/dev/apikey')}
-          >
-            steamcommunity.com/dev/apikey
-          </button>
-        </p>
-        <div className={s.keyRow}>
-          {/* hasRing: the bordered wrapper is the control, so the focus ring is
-              drawn once around the whole row rather than around the bare input. */}
-          <div className={`${s.keyInputWrap} hasRing`}>
-            <input type={showKey ? 'text' : 'password'} className={s.keyInput}
-              placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" value={apiKey}
-              aria-label="Steam Web API key"
-              onChange={e => { setApiKey(e.target.value); setTestState('idle') }}
-              onBlur={save}
-              spellCheck={false} autoComplete="off" />
-            <button type="button" className={s.keyToggle} onClick={() => setShowKey(v => !v)}
-              aria-label={showKey ? 'Hide API key' : 'Show API key'}>
-              {showKey ? <IconEyeOff size={14} stroke={1.6} /> : <IconEye size={14} stroke={1.6} />}
-            </button>
-          </div>
+        <p className={s.sectionDesc}>Nothing here is needed. Use them only if you want your own.</p>
+
+        {keyInput('steam', 'Steam Web API key', apiKey, v => { setApiKey(v); setTestState('idle') }, 'For private profiles and owned-games data',
           <button type="button" className={s.testBtn} onClick={testKey} disabled={!apiKey.trim() || testState === 'testing'}>
             {testState === 'testing' ? <IconLoader2 size={13} stroke={1.8} className="spin" /> : 'Test'}
-          </button>
-        </div>
-        {testState !== 'idle' && testState !== 'testing' && (
-          <StatusLine type={testState === 'valid' ? 'success' : 'error'}>{testMsg}</StatusLine>
-        )}
-        {saved && testState === 'idle' && <StatusLine type="success">{apiKey.trim() ? 'Key saved.' : 'Key removed.'}</StatusLine>}
-      </details>
-
-      {children}
-
-      <SteamGridDbSection />
-
-      {/* Refresh cover images (moved here from the Library toolbar) */}
-      <section className={s.section}>
-        <div className={s.sectionHeader}>
-          <IconRefresh size={15} stroke={1.6} />
-          <span>Refresh Cover Images</span>
-        </div>
-        <p className={s.sectionDesc}>
-          Re-downloads every cover at 2× quality (Library + Game List). Use it if covers look blurry or failed to load.
+          </button>)}
+        <p className={s.sectionDescQuiet}>
+          Get one at{' '}
+          <button type="button" className={s.linkBtn} onClick={() => window.kozo?.api?.shell?.openExternal('https://steamcommunity.com/dev/apikey')}>steamcommunity.com/dev/apikey</button>.
         </p>
-        <div className={s.keyRow}>
-          <button type="button" className={s.testBtn} disabled={bannerRefreshing} onClick={doRefreshBanners}>
-            {bannerRefreshing
-              ? <><IconLoader2 size={13} stroke={1.8} className="spin" /> Refreshing…</>
-              : <><IconRefresh size={13} stroke={1.8} /> Refresh images</>}
-          </button>
-        </div>
-        <Message msg={bannerMsg} />
-      </section>
+        {testState !== 'idle' && testState !== 'testing' && <StatusLine type={testState === 'valid' ? 'success' : 'error'}>{testMsg}</StatusLine>}
+        {saved && testState === 'idle' && <StatusLine type="success">{apiKey.trim() ? 'Key saved.' : 'Key removed.'}</StatusLine>}
 
+        {keyInput('sgdb', 'SteamGridDB key', sgdb.key, v => sgdb.setKey(v), sgdb.builtIn ? 'Empty = KoZo\'s built-in key' : 'Needed for covers of non-Steam games',
+          <button type="button" className={s.testBtn} onClick={sgdb.save} disabled={sgdb.state === 'saving' || !sgdb.key.trim()}>
+            {sgdb.state === 'saving' ? <IconLoader2 size={13} stroke={1.8} className="spin" /> : 'Check'}
+          </button>)}
+        <p className={s.sectionDescQuiet}>
+          <button type="button" className={s.linkBtn} onClick={() => window.kozo?.api?.shell?.openExternal?.(SGDB_KEY_URL)}>Get a free key</button>.
+        </p>
+        {(sgdb.state === 'ok' || sgdb.state === 'error') && <StatusLine type={sgdb.state === 'ok' ? 'success' : 'error'}>{sgdb.msg}</StatusLine>}
+
+        <div className={s.advField}>
+          <label className={s.advLabel}>Your own Discord app ID</label>
+          <div className={s.keyRow}>
+            <div className={`${s.keyInputWrap} hasRing`}>
+              <input className={s.keyInput} placeholder="Empty = shows as KoZo" value={discord.id}
+                aria-label="Discord Application ID" inputMode="numeric"
+                onChange={e => discord.setId(e.target.value.replace(/\D/g, ''))} spellCheck={false} autoComplete="off" />
+            </div>
+          </div>
+          <p className={s.sectionDescQuiet}>
+            To show another name or picture, make an app in the{' '}
+            <button type="button" className={s.linkBtn} onClick={() => window.kozo?.api?.shell?.openExternal?.('https://discord.com/developers/applications')}>Discord Developer Portal</button>.
+          </p>
+        </div>
+      </details>
     </div>
   )
 }
 
-// SteamGridDB key: covers + wide banners for games that aren't on Steam.
+// SteamGridDB key (covers for games that aren't on Steam): the built-in key,
+// or the user's own, saved and checked a moment after typing.
 const SGDB_KEY_URL = 'https://www.steamgriddb.com/profile/preferences/api'
-function SteamGridDbSection() {
+function useSgdb() {
   const [builtIn, setBuiltIn] = useState(false)
-  useEffect(() => { window.kozo?.api?.dialog?.builtInKeys?.().then(r => { if (r?.ok) setBuiltIn(!!r.data?.steamgriddb) }) }, [])
   const [key, setKey]     = useState('')
   const [saved, setSaved] = useState('')
-  const [show, setShow]   = useState(false)
   const [state, setState] = useState('idle')   // idle | saving | ok | error
   const [msg, setMsg]     = useState('')
-
+  const loadedRef = useRef(false)
   useEffect(() => {
+    window.kozo?.api?.dialog?.builtInKeys?.().then(r => { if (r?.ok) setBuiltIn(!!r.data?.steamgriddb) })
     window.kozo?.api?.settings?.get?.('steamgriddb_key').then(res => {
-      if (res?.ok && res.data) {
-        setKey(res.data); setSaved(res.data)
-        setState('ok'); setMsg('Key saved. Covers for games without one are filled in automatically.')
-      }
+      if (res?.ok && res.data) { setKey(res.data); setSaved(res.data) }
       loadedRef.current = true
     })
   }, [])
-
-  // Saves (and checks) a moment after typing stops; the button re-checks.
-  const loadedRef = useRef(false)
   useEffect(() => {
     if (!loadedRef.current || key.trim() === saved) return
     const t = setTimeout(save, 800)
     return () => clearTimeout(t)
   }, [key])
-
   async function save() {
-    // A main process older than this screen has no SteamGridDB support yet:
-    // store the key anyway, the covers come after the restart.
-    if (!window.kozo?.api?.sgdb?.setKey) {
-      const r = await window.kozo?.api?.settings?.set?.('steamgriddb_key', key.trim())
-      if (r?.ok) { setSaved(key.trim()); setState('ok'); setMsg('Saved. Restart KoZo to fetch the covers.') }
-      else { setState('error'); setMsg('Could not save the key.') }
-      return
-    }
     setState('saving')
-    const res = await window.kozo.api.sgdb.setKey(key).catch(e => ({ ok: false, error: e?.message }))
+    const res = await window.kozo?.api?.sgdb?.setKey?.(key).catch(e => ({ ok: false, error: e?.message }))
     const d = res?.ok ? res.data : null
     if (d?.valid) {
-      setSaved(key.trim())
-      setState('ok')
-      setMsg(key.trim() ? 'Saved. Covers for your non-Steam games are being fetched in the background.' : 'Key removed.')
-    } else {
-      setState('error')
-      setMsg(d?.message || res?.error || 'Could not check the key.')
-    }
+      setSaved(key.trim()); setState('ok')
+      setMsg(key.trim() ? 'Saved. Covers for your non-Steam games are being fetched.' : 'Key removed.')
+    } else { setState('error'); setMsg(d?.message || res?.error || 'Could not check the key.') }
   }
+  return { builtIn, key, setKey, saved, state, msg, save, working: builtIn || !!saved }
+}
 
+function ConnRow({ icon, name, status, tone = 'muted', children }) {
   return (
-    <section className={s.section}>
-      <div className={s.sectionHeader}>
-        <IconPalette size={15} stroke={1.6} />
-        <span>Covers for non-Steam games</span>
+    <div className={s.connRow}>
+      <span className={s.connIcon}>{icon}</span>
+      <div className={s.connText}>
+        <strong>{name}</strong>
+        <span className={`${s.connStatus} ${s['conn_' + tone]}`}>{status}</span>
       </div>
-      <p className={s.sectionDesc}>
-        Games that aren't on Steam (League of Legends, Xbox or Epic exclusives) get their covers from{' '}
-        <strong className={s.strong}>SteamGridDB</strong>, automatically. You can also pick a different cover from Edit, Find cover.
-      </p>
-      {builtIn && !key.trim() && <StatusLine type="success">Built in. Covers are filled in for you, no key needed.</StatusLine>}
-      <details className={s.foldInline} open={!builtIn || !!key.trim() || undefined}>
-      <summary>{builtIn ? 'Use your own SteamGridDB key (optional)' : 'SteamGridDB API key'}</summary>
-      <p className={s.sectionDescQuiet}>
-        <button type="button" className={s.linkBtn} onClick={() => window.kozo?.api?.shell?.openExternal?.(SGDB_KEY_URL)}>
-          Get a free key
-        </button>{' '}and paste it here.
-      </p>
-      <div className={s.keyRow}>
-        <div className={`${s.keyInputWrap} hasRing`}>
-          <input type={show ? 'text' : 'password'} className={s.keyInput}
-            placeholder="SteamGridDB API key" value={key}
-            aria-label="SteamGridDB API key"
-            onChange={e => { setKey(e.target.value); setState('idle') }}
-            spellCheck={false} autoComplete="off" />
-          <button type="button" className={s.keyToggle} onClick={() => setShow(v => !v)}
-            aria-label={show ? 'Hide key' : 'Show key'}>
-            {show ? <IconEyeOff size={14} stroke={1.6} /> : <IconEye size={14} stroke={1.6} />}
-          </button>
-        </div>
-        <button type="button" className={s.testBtn} onClick={save} disabled={state === 'saving' || !key.trim()}>
-          {state === 'saving' ? <IconLoader2 size={13} stroke={1.8} className="spin" /> : 'Check'}
-        </button>
-      </div>
-      {(state === 'ok' || state === 'error') && (
-        <StatusLine type={state === 'ok' ? 'success' : 'error'}>{msg}</StatusLine>
-      )}
-      </details>
-    </section>
+      <div className={s.connActions}>{children}</div>
+    </div>
   )
 }
 
@@ -1320,11 +1243,12 @@ const START_PAGES = [
   { value: '/profile', label: 'Profile' },
 ]
 
-// Settings → Appearance: size and density, card details, sidebar and start
-// page, background picture. Every change applies at once (AppearanceContext).
-// Theme, text, cards, layout, effects, what's shown, and sharing a look.
+// Settings → Appearance: color, theme, fonts, cards, layout, what's shown,
+// and sharing a look (LookCustomize); size, sidebar, start page and the
+// background picture (AppearanceCustomize). Every change applies at once.
 const THEMES = [
   { value: 'midnight', label: 'Midnight', bg: '#10101a', s2: '#161624' },
+  { value: 'tint',     label: 'Accent tint', tint: true },
   { value: 'oled',     label: 'OLED black', bg: '#000000', s2: '#0b0b0f' },
   { value: 'slate',    label: 'Slate', bg: '#11151b', s2: '#19202a' },
   { value: 'nord',     label: 'Nord', bg: '#1d2230', s2: '#272e3d' },
@@ -1333,9 +1257,32 @@ const THEMES = [
   { value: 'crimson',  label: 'Crimson', bg: '#150e10', s2: '#201618' },
 ]
 
+const CARD_STYLES = [
+  { value: 'classic', label: 'Classic', desc: 'Name on the art, stats below' },
+  { value: 'poster',  label: 'Poster', desc: 'Just the cover, details on hover' },
+  { value: 'glass',   label: 'Glass', desc: 'Name and stats on a tinted band' },
+  { value: 'minimal', label: 'Minimal', desc: 'Cover and name, nothing else' },
+]
+
+// A real Library card for the preview: the most played game with art.
+function useSampleGame() {
+  const [game, setGame] = useState(null)
+  useEffect(() => {
+    window.kozo?.api?.games?.list?.().then(r => {
+      if (!r?.ok) return
+      const withArt = (r.data || []).filter(g => g.banner_local_path || g.banner_url)
+      withArt.sort((a, b) => (b.total_playtime_seconds || 0) - (a.total_playtime_seconds || 0))
+      setGame(withArt[0] || (r.data || [])[0] || null)
+    })
+  }, [])
+  return game
+}
+
 function LookCustomize() {
   const { prefs, setPrefs } = useAppearance()
-  const { accent, setAccent } = useAccentColor()
+  const { accent, setAccent, presets } = useAccentColor()
+  const sample = useSampleGame()
+  const art = sample ? (sample.banner_local_path ? fileUrl(sample.banner_local_path) : sample.banner_url) : null
   const [code, setCode] = useState('')
   const [codeMsg, setCodeMsg] = useState(null)
   function exportLook() {
@@ -1356,18 +1303,34 @@ function LookCustomize() {
   }
   return (
     <>
-      {/* Live preview */}
-      <div className={s.lookPreview} aria-hidden="true">
-        <div className={s.lookCard}>
-          <div className={s.lookArt} />
-          <div className={s.lookCardBody}><strong>Game name</strong><span>Action · Adventure</span></div>
+      <section className={s.section}>
+        <div className={s.sectionHeader}><IconPalette size={15} stroke={1.6} /><span>Color</span></div>
+        <p className={s.sectionDesc}>The highlight color for buttons, active tabs and badges.</p>
+        <div className={s.swatchGrid}>
+          {presets.map(p => (
+            <button key={p.value} type="button" aria-pressed={accent === p.value}
+              className={`${s.swatch} ${accent === p.value ? s.swatchActive : ''}`}
+              style={{ '--sw': p.value }} onClick={() => setAccent(p.value)} title={p.label}>
+              <span className={s.swatchDot} />
+              {accent === p.value && <IconCheck size={12} stroke={2.5} className={s.swatchCheck} />}
+              <span className={s.swatchLabel}>{p.label}</span>
+            </button>
+          ))}
         </div>
-        <div className={s.lookSide}>
-          <span className={s.lookTitle}>Preview</span>
-          <span className={s.lookText}>Text looks like this, with <span className={s.lookAccent}>the accent</span>.</span>
-          <div className={s.lookRow}><span className={s.lookBtn}>Play</span><span className={s.lookChip}>Playing</span><span className={s.lookChipMuted}>12h 40m</span></div>
+        <div className={s.colorRows}>
+          <div className={s.colorRow}>
+            <span className={s.segLabel}>Any color</span>
+            <ColorPicker value={accent} onChange={setAccent} presets={presets} label="Accent color" />
+            <span className={s.sectionDescQuiet}>Very dark colors are brightened so text stays readable.</span>
+          </div>
+          <div className={s.colorRow}>
+            <span className={s.segLabel}>Second color</span>
+            <ColorPicker value={prefs.accent2} onChange={v => setPrefs({ accent2: v })} presets={presets} label="Second color"
+              allowClear clearLabel="Same as accent" />
+            <span className={s.sectionDescQuiet}>Blends into progress bars, the XP ring, the Upcoming banner and the moving glow.</span>
+          </div>
         </div>
-      </div>
+      </section>
 
       <section className={s.section}>
         <div className={s.sectionHeader}><IconPalette size={15} stroke={1.6} /><span>Theme</span></div>
@@ -1375,34 +1338,60 @@ function LookCustomize() {
           {THEMES.map(t => (
             <button key={t.value} type="button" aria-pressed={prefs.theme === t.value}
               className={`${s.themeBtn} ${prefs.theme === t.value ? s.themeOn : ''}`} onClick={() => setPrefs({ theme: t.value })}
-              style={{ '--tbg': t.bg, '--ts2': t.s2 }}>
+              style={t.tint
+                ? { '--tbg': `color-mix(in srgb, ${accent} 12%, #0b0b10)`, '--ts2': `color-mix(in srgb, ${accent} 22%, #121218)` }
+                : { '--tbg': t.bg, '--ts2': t.s2 }}>
               <span className={s.themeSwatch}><span /><span /></span>
               {t.label}
             </button>
           ))}
         </div>
-        <div className={s.segRow}>
-          <span className={s.segLabel}>Second accent</span>
-          <input type="color" className={s.colorInput} value={prefs.accent2 || accent} aria-label="Second accent color"
-            onChange={e => setPrefs({ accent2: e.target.value })} />
-          {prefs.accent2 && <button type="button" className={s.linkBtn} onClick={() => setPrefs({ accent2: null })}>Same as accent</button>}
-          <span className={s.sectionDescQuiet}>Used by the moving background glow.</span>
-        </div>
+        <p className={s.sectionDescQuiet}>Accent tint colors the background with your accent color.</p>
       </section>
 
       <section className={s.section}>
         <div className={s.sectionHeader}><IconTextSize size={15} stroke={1.6} /><span>Text</span></div>
+        <p className={s.sectionDesc}>Headings: page titles, game names and Big Picture.</p>
+        <div className={s.fontGrid}>
+          {Object.entries(DISPLAY_FONTS).map(([value, f]) => (
+            <button key={value} type="button" aria-pressed={prefs.displayFont === value}
+              className={`${s.fontTile} ${prefs.displayFont === value ? s.fontTileOn : ''}`} onClick={() => setPrefs({ displayFont: value })}>
+              <span className={s.fontSample} style={{ fontFamily: f.css || 'var(--font)' }}>{sample?.name?.slice(0, 18) || 'Hollow Knight'}</span>
+              <span className={s.fontName}>{f.label}</span>
+            </button>
+          ))}
+        </div>
         <div className={s.segList}>
-          <Segmented label="Font" value={prefs.font} wrap onChange={v => setPrefs({ font: v })}
+          <Segmented label="Body text" value={prefs.font} wrap onChange={v => setPrefs({ font: v })}
             options={Object.entries(FONTS).map(([value, f]) => ({ value, label: <span style={{ fontFamily: f.css }}>{f.label}</span> }))} />
           <Segmented label={`Text size ${Math.round((prefs.textScale || 1) * 100)}%`} value={prefs.textScale} onChange={v => setPrefs({ textScale: v })}
             options={[0.9, 1, 1.05, 1.1, 1.2].map(v => ({ value: v, label: `${Math.round(v * 100)}%` }))} />
         </div>
-        <p className={s.sectionDescQuiet}>Text size changes only the letters; UI scale (below) zooms everything.</p>
       </section>
 
       <section className={s.section}>
-        <div className={s.sectionHeader}><IconLayoutCards size={15} stroke={1.6} /><span>Card style</span></div>
+        <div className={s.sectionHeader}><IconLayoutCards size={15} stroke={1.6} /><span>Game cards</span></div>
+        <p className={s.sectionDesc}>How cards look in the Library and the Game List.</p>
+        <div className={s.cardStudio}>
+          <div className={s.cardStyles} role="radiogroup" aria-label="Card style">
+            {CARD_STYLES.map(c => (
+              <button key={c.value} type="button" role="radio" aria-checked={prefs.cardStyle === c.value}
+                className={`${s.cardStyleTile} ${prefs.cardStyle === c.value ? s.cardStyleOn : ''}`} onClick={() => setPrefs({ cardStyle: c.value })}>
+                <span className={`${s.mini} ${s['mini_' + c.value]}`}>
+                  {art ? <img src={art} alt="" /> : <span className={s.miniArt} />}
+                  <span className={s.miniName}>{sample?.name || 'Game name'}</span>
+                  <span className={s.miniStats}><i /><i /><i /></span>
+                </span>
+                <span className={s.cardStyleText}><strong>{c.label}</strong><small>{c.desc}</small></span>
+                {prefs.cardStyle === c.value && <IconCheck size={14} stroke={2.6} className={s.cardStyleCheck} />}
+              </button>
+            ))}
+          </div>
+          <div className={s.cardPreview} aria-hidden="true" onClickCapture={e => { e.stopPropagation(); e.preventDefault() }}>
+            {sample ? <GameCard game={{ ...sample, _isLive: false }} view="big" /> : <div className={s.cardPreviewEmpty}>Add a game to see it here</div>}
+            <span className={s.cardPreviewLabel}>Live preview</span>
+          </div>
+        </div>
         <div className={s.segList}>
           <Segmented label="Border" value={prefs.cardBorder} onChange={v => setPrefs({ cardBorder: v })}
             options={[{ value: 'none', label: 'None' }, { value: 'subtle', label: 'Subtle' }, { value: 'accent', label: 'Accent' }]} />
@@ -1410,14 +1399,22 @@ function LookCustomize() {
             options={[{ value: 'off', label: 'Off' }, { value: 'soft', label: 'Soft' }, { value: 'strong', label: 'Strong' }]} />
           <Segmented label="Shadow" value={prefs.cardShadow} onChange={v => setPrefs({ cardShadow: v })}
             options={[{ value: 'flat', label: 'Flat' }, { value: 'normal', label: 'Normal' }, { value: 'deep', label: 'Deep' }]} />
-          <Segmented label="Accent glow" value={prefs.glow} onChange={v => setPrefs({ glow: v })}
-            options={[{ value: 'off', label: 'Off' }, { value: 'soft', label: 'Soft' }, { value: 'strong', label: 'Strong' }]} />
+        </div>
+        <div className={s.chipToggles}>
+          {[['genres', 'Genres'], ['stats', 'Stats row'], ['progress', 'Achievement bar'], ['statusDot', 'Status dot'], ['planChip', 'Play plan month']].map(([k, l]) => (
+            <button key={k} type="button" aria-pressed={!!prefs.cards[k]} className={`${s.chipToggle} ${prefs.cards[k] ? s.chipToggleOn : ''}`}
+              onClick={() => setPrefs(p => ({ ...p, cards: { ...p.cards, [k]: !p.cards[k] } }))}>
+              {prefs.cards[k] ? <IconCheck size={12} stroke={2.6} /> : <IconX size={12} stroke={2.2} />} {l}
+            </button>
+          ))}
         </div>
       </section>
 
       <section className={s.section}>
         <div className={s.sectionHeader}><IconLayoutSidebar size={15} stroke={1.6} /><span>Layout and effects</span></div>
         <div className={s.segList}>
+          <Segmented label="Accent glow" value={prefs.glow} onChange={v => setPrefs({ glow: v })}
+            options={[{ value: 'off', label: 'Off' }, { value: 'soft', label: 'Soft' }, { value: 'strong', label: 'Strong' }]} />
           <Segmented label="Sidebar side" value={prefs.sidebarSide} onChange={v => setPrefs({ sidebarSide: v })}
             options={[{ value: 'left', label: 'Left' }, { value: 'right', label: 'Right' }]} />
           <Segmented label="Sidebar width" value={prefs.sidebarWidth} onChange={v => setPrefs({ sidebarWidth: v })}
@@ -1581,22 +1578,6 @@ function AppearanceCustomize() {
           )}
         </div>
       </section>
-      <section className={s.section}>
-        <div className={s.sectionHeader}>
-          <IconLayoutCards size={15} stroke={1.6} />
-          <span>Card details</span>
-        </div>
-        <p className={s.sectionDesc}>Choose what game cards show in the Library and the Game List.</p>
-        <div className={s.toggleList}>
-          <ToggleRow label="Genres" desc="The genre line under the game name." checked={prefs.cards.genres} onChange={v => setCard('genres', v)} />
-          <ToggleRow label="Stats row" desc="Achievements, last played and playtime in the Library; the status in the Game List." checked={prefs.cards.stats} onChange={v => setCard('stats', v)} />
-          <ToggleRow label="Achievement progress bar" desc="The thin bar above the stats in the Library." checked={prefs.cards.progress} onChange={v => setCard('progress', v)} />
-          <ToggleRow label="Status dot" desc="The colored dot in the corner of the cover." checked={prefs.cards.statusDot} onChange={v => setCard('statusDot', v)} />
-          <ToggleRow label="Play plan month" desc="The month chip on games you planned to play." checked={prefs.cards.planChip} onChange={v => setCard('planChip', v)} />
-        </div>
-      </section>
-
-
       <div>
         <button type="button" className={s.testBtn} onClick={() => setPrefs(DEFAULT_APPEARANCE)}>
           <IconRefresh size={14} stroke={1.7} /> Reset appearance
@@ -1608,389 +1589,11 @@ function AppearanceCustomize() {
 
 // ── Tab: Appearance ──────────────────────────────────────────────────────────
 function AppearanceTab() {
-  const { accent, setAccent, presets, bgTint, setBgTint } = useAccentColor()
-  const [customHex, setCustomHex] = useState(accent)
-  useEffect(() => { setCustomHex(accent) }, [accent])
-  const validHex = /^#[0-9A-Fa-f]{6}$/.test(customHex.trim())
-
   return (
     <div className={s.tabContent}>
-      <section className={s.section}>
-        <div className={s.sectionHeader}>
-          <IconPalette size={15} stroke={1.6} />
-          <span>Accent Color</span>
-        </div>
-        <p className={s.sectionDesc}>
-          Controls the highlight color used across the entire app: buttons, active states, and badges.
-        </p>
-        <div className={s.swatchGrid}>
-          {presets.map(p => (
-            <button key={p.value}
-              type="button"
-              aria-pressed={accent === p.value}
-              className={`${s.swatch} ${accent === p.value ? s.swatchActive : ''}`}
-              style={{ '--sw': p.value }} onClick={() => setAccent(p.value)} title={p.label}>
-              <span className={s.swatchDot} />
-              {accent === p.value && <IconCheck size={12} stroke={2.5} className={s.swatchCheck} />}
-              <span className={s.swatchLabel}>{p.label}</span>
-            </button>
-          ))}
-        </div>
-        <div className={s.customColorRow}>
-          <div className={s.customColorPreview}
-            style={{ background: validHex ? customHex.trim() : 'var(--surface-3)' }} />
-          <input className={s.customColorInput} value={customHex} maxLength={7}
-            aria-label="Custom accent hex"
-            onChange={e => {
-              const v = e.target.value
-              setCustomHex(v)
-              if (/^#[0-9A-Fa-f]{6}$/.test(v.trim())) setAccent(v.trim())   // applies as you type
-            }}
-            placeholder="#a78bfa" spellCheck={false} />
-        </div>
-        <p className={s.sectionDescQuiet}>
-          Enter any hex color. Very dark colors are automatically brightened for readability.
-        </p>
-
-        {/* Accent-matched dark background */}
-        <div className={s.toggleList}>
-          <ToggleRow
-            label="Match background to accent"
-            desc="Tints the app's dark background and cards with your accent color's hue, a themed dark look instead of the stock blue-violet."
-            checked={bgTint}
-            onChange={setBgTint}
-          />
-        </div>
-      </section>
-
       <LookCustomize />
       <AppearanceCustomize />
     </div>
-  )
-}
-
-// ── Tab: Data ────────────────────────────────────────────────────────────────
-// Module cache so re-opening Data doesn't flash the auto-backup toggles off→on
-// while their async state loads.
-let dataTabCache = null
-
-function DataTab({ onManageSaves }) {
-  const [importState, setImportState] = useState('idle')   // idle | working | done | error
-  const [importResult, setImportResult] = useState(null)
-
-  // Sync folder ("sign in" without an account)
-  const [sync, setSync]               = useState(dataTabCache?.sync ?? null)
-
-  // Game saves — per-game overview (count + latest) so backups are trackable.
-  const [overview, setOverview]       = useState(dataTabCache?.overview ?? [])
-  const [backupsDir, setBackupsDir]   = useState(dataTabCache?.backupsDir ?? null)
-  const [allState, setAllState]       = useState('idle')   // idle | working | done | error
-  const [allResult, setAllResult]     = useState(null)
-  const [autoSaveEnabled, setAutoSaveEnabled] = useState(dataTabCache?.autoSaveEnabled ?? false)
-
-  async function loadOverview() {
-    const res = await window.kozo?.api?.saves?.overview?.()
-    if (res?.ok) { setOverview(res.data ?? []); if (dataTabCache) dataTabCache.overview = res.data ?? [] }
-  }
-
-  async function doBackupAll() {
-    setAllState('working'); setAllResult(null)
-    const res = await window.kozo?.api?.saves?.backupAll?.()
-    if (res?.ok) { setAllResult(res.data); setAllState('done') }
-    else { setAllResult({ error: res?.error || 'Backup failed' }); setAllState('error') }
-    loadOverview()
-  }
-
-  useEffect(() => {
-    dataTabCache = dataTabCache || {}
-    loadOverview()
-    window.kozo?.api?.saves?.backupsDir?.().then(res => { if (res?.ok) { setBackupsDir(res.data); dataTabCache.backupsDir = res.data } })
-    window.kozo?.api?.saves?.getAutoBackup?.().then(res => { if (res?.ok) { setAutoSaveEnabled(!!res.data); dataTabCache.autoSaveEnabled = !!res.data } })
-    window.kozo?.api?.backup?.syncStatus?.().then(res => { if (res?.ok) { setSync(res.data); dataTabCache.sync = res.data } })
-  }, [])
-
-  async function doSyncSetup() {
-    const res = await window.kozo?.api?.backup?.syncSetup?.()
-    if (!res?.ok || !res.data) return   // cancelled
-    setSync(res.data)
-    if (dataTabCache) dataTabCache.sync = res.data
-    // The sync setup rewires the backup dirs + toggles — refresh dependent state.
-    const dir = await window.kozo?.api?.saves?.backupsDir?.()
-    if (dir?.ok) { setBackupsDir(dir.data); if (dataTabCache) dataTabCache.backupsDir = dir.data }
-    setAutoSaveEnabled(true)
-    loadOverview()
-  }
-
-  async function doSyncRestore() {
-    setImportState('working')
-    setImportResult(null)
-    try {
-      const res = await window.kozo?.api?.backup?.syncRestore?.()
-      const data = res?.ok ? res.data : res
-      if (data?.error) {
-        setImportResult({ error: data.error === 'no_backup_found' ? 'No backup file found in the sync folder yet.' : 'Sync folder is not set up.' })
-        setImportState('error')
-        return
-      }
-      setImportResult(data)
-      setImportState('done')
-    } catch (e) {
-      setImportResult({ error: e.message })
-      setImportState('error')
-    }
-  }
-
-  async function toggleAutoSave(val) {
-    setAutoSaveEnabled(val)
-    if (dataTabCache) dataTabCache.autoSaveEnabled = val
-    await window.kozo?.api?.saves?.setAutoBackup?.(val)
-  }
-
-  async function doImport() {
-    setImportState('working')
-    setImportResult(null)
-    try {
-      // Every IPC reply is an { ok, data } envelope, so the envelope itself is
-      // always truthy — cancel (data === null) and failures have to be read out
-      // of it, or a cancelled picker reports a restore of "undefined" games.
-      const env = await window.kozo?.api?.backup?.import()
-      if (!env?.ok) {
-        setImportResult({ error: env?.error || 'Restore failed' })
-        setImportState('error')
-        return
-      }
-      if (!env.data) { setImportState('idle'); return }   // user cancelled
-      setImportResult(env.data)
-      setImportState('done')
-    } catch (e) {
-      setImportResult({ error: e.message })
-      setImportState('error')
-    }
-  }
-
-  return (
-    <div className={s.tabContent}>
-      <GameSavesSection autoSaveEnabled={autoSaveEnabled} toggleAutoSave={toggleAutoSave} backupsDir={backupsDir}
-        overview={overview} loadOverview={loadOverview} onManageSaves={onManageSaves}
-        allState={allState} allResult={allResult} doBackupAll={doBackupAll} />
-
-      {/* Sync & Backup — folder based, fully offline. No accounts needed. */}
-      <section className={s.section}>
-        <div className={s.sectionHeader}>
-          <IconCloud size={15} stroke={1.6} />
-          <span>Your KoZo data: library, playtime, lists</span>
-        </div>
-        <p className={s.sectionDesc}>
-          Keep a copy of your library, playtime, achievements and lists in <strong className={s.strong}>any folder</strong>:
-          another drive, a USB stick, or a cloud folder. On a new PC: install KoZo, choose the same folder, press Restore.
-        </p>
-        <div className={s.keyRow}>
-          <button type="button" className={s.testBtn} onClick={doSyncSetup}>
-            <IconFolder size={13} stroke={1.8} /> {sync?.configured ? 'Change sync folder' : 'Choose sync folder'}
-          </button>
-          {sync?.configured && (
-            <>
-              <button type="button" className={s.testBtn} onClick={() => window.kozo?.api?.shell?.openPath?.(sync.folder)}>
-                <IconExternalLink size={13} stroke={1.8} /> Open folder
-              </button>
-              <button type="button" className={s.testBtn} onClick={doSyncRestore} disabled={importState === 'working'}>
-                {importState === 'working'
-                  ? <><IconLoader2 size={13} stroke={1.8} className="spin" /> Restoring…</>
-                  : <><IconDownload size={13} stroke={1.8} /> Restore from sync folder</>}
-              </button>
-            </>
-          )}
-          <button type="button" className={s.testBtn} onClick={doImport} disabled={importState === 'working'}>
-            <IconUpload size={13} stroke={1.8} /> Restore from file…
-          </button>
-        </div>
-        {sync?.configured && (
-          <p className={s.sectionDescQuiet}>
-            Syncing to <strong className={s.savePath} title={sync.folder}>{sync.folder}</strong>
-            {sync.lastBackupAt ? <>. Last backup {new Date(sync.lastBackupAt).toLocaleString()}</> : '. The first backup will be written shortly'}
-          </p>
-        )}
-
-        {importState === 'done' && importResult && (
-          <StatusLine type="success">
-            Restored {importResult.games} games, {importResult.sessions} sessions,
-            {' '}{importResult.gameList} list items
-          </StatusLine>
-        )}
-        {importState === 'error' && (
-          <StatusLine type="error">{importResult?.error || 'Restore failed'}</StatusLine>
-        )}
-
-        <p className={s.sectionDescQuiet}>
-          Restoring merges data in (matching entries are updated), it never deletes anything or touches game saves.
-        </p>
-      </section>
-    </div>
-  )
-}
-
-// Game saves in Settings → Backups: automatic backups, where they're kept (and
-// a second copy off this PC), the history policy, and every game's status.
-function fmtSize(b) {
-  if (!b) return '0 MB'
-  return b >= 1024 ** 3 ? `${(b / 1024 ** 3).toFixed(1)} GB` : `${Math.max(0.1, b / 1024 ** 2).toFixed(1)} MB`
-}
-function GameSavesSection({ autoSaveEnabled, toggleAutoSave, backupsDir, overview, loadOverview, onManageSaves, allState, allResult, doBackupAll }) {
-  const [storage, setStorage] = useState(null)
-  const [places, setPlaces] = useState([])     // other drives + cloud folders for the extra copy
-  const [busy, setBusy] = useState('')
-  const [filter, setFilter] = useState('need')
-  const [more, setMore] = useState(false)
-  const load = () => window.kozo?.api?.saves?.storage?.().then(r => { if (r?.ok) setStorage(r.data) })
-  useEffect(() => {
-    load()
-    Promise.all([window.kozo?.api?.saves?.drives?.(), window.kozo?.api?.saves?.cloudFolders?.()]).then(([d, c]) => {
-      const drives = d?.ok ? d.data.map(x => ({ path: x.path, label: `${x.name} · ${fmtSize(x.free)} free` })) : []
-      const clouds = c?.ok ? c.data.filter(x => x.name !== 'OneDrive').map(x => ({ path: x.path, label: x.name })) : []
-      setPlaces([...drives, ...clouds])
-    })
-  }, [])
-  async function setMirror(dir) {
-    setBusy('mirror')
-    await window.kozo?.api?.saves?.setMirror?.(dir)
-    setBusy(''); load()
-  }
-  async function pickMirror() {
-    const r = await window.kozo?.api?.dialog?.pickFolder?.()
-    if (r?.ok && r.data) setMirror(r.data)
-  }
-  async function refreshKnown() {
-    setBusy('manifest')
-    await window.kozo?.api?.saves?.refreshManifest?.()
-    setBusy(''); load(); loadOverview()
-  }
-  const need = overview.filter(g => !g.confirmed)
-  const done = overview.length - need.length
-  const latest = overview.map(g => g.latestAt).filter(Boolean).sort().pop()
-  const shown = filter === 'need' && need.length ? need : overview
-
-  return (
-    <section className={s.section}>
-      <div className={s.sectionHeader}>
-        <IconDeviceFloppy size={15} stroke={1.6} />
-        <span>Your game saves</span>
-      </div>
-
-      {/* At a glance: how many games are protected, and the on/off switch */}
-      <div className={`${s.saveHero} ${need.length ? s.saveHeroWarn : ''}`}>
-        <span className={s.saveHeroIcon}>{need.length ? <IconAlertTriangle size={22} /> : <IconShieldCheck size={22} />}</span>
-        <div className={s.saveHeroText}>
-          <strong>{overview.length === 0 ? 'No games yet' : need.length ? `${done} of ${overview.length} games protected` : `All ${overview.length} games protected`}</strong>
-          <span>
-            {autoSaveEnabled ? 'Backed up before and after every session' : 'Automatic backups are off'}
-            {storage ? ` · ${fmtSize(storage.bytes)} used` : ''}
-            {latest ? ` · last backup ${timeAgo(latest)}` : ''}
-          </span>
-        </div>
-        <button type="button" role="switch" aria-checked={autoSaveEnabled} aria-label="Back up saves automatically"
-          title="Back up saves automatically" className={`${s.toggle} ${autoSaveEnabled ? s.toggleOn : ''}`} onClick={() => toggleAutoSave(!autoSaveEnabled)}>
-          <span className={s.toggleThumb} />
-        </button>
-      </div>
-
-      {/* Where the backups go */}
-      <div className={s.saveWhere}>
-        <div className={s.saveWhereRow}>
-          <span className={s.saveWhereLabel}><IconFolder size={14} /> On this PC</span>
-          <code className={s.savePath} title={backupsDir || ''}>{backupsDir || '…'}</code>
-          <button type="button" className={s.testBtn} onClick={() => backupsDir && window.kozo?.api?.shell?.openPath?.(backupsDir)}><IconExternalLink size={13} /> Open</button>
-        </div>
-        <div className={s.saveWhereRow}>
-          <span className={s.saveWhereLabel}><IconCopy size={14} /> Extra copy</span>
-          {storage?.mirror ? (
-            <>
-              <code className={s.savePath} title={storage.mirror}>{storage.mirror}</code>
-              <span className={s.saveWhereNote}>{storage.mirrorLast ? `copied ${timeAgo(storage.mirrorLast)}` : 'copying…'}</span>
-              <button type="button" className={s.testBtn} onClick={() => setMirror(null)}><IconX size={13} /> Remove</button>
-            </>
-          ) : (
-            <span className={s.saveWhereNote}>Not set. Put a second copy on another drive or a USB stick, so a format can't take your saves.</span>
-          )}
-        </div>
-        {!storage?.mirror && (
-          <div className={s.saveWhereChoices}>
-            {places.map(p => (
-              <button key={p.path} type="button" className={s.testBtn} onClick={() => setMirror(p.path)} disabled={busy === 'mirror'}>
-                <IconDeviceFloppy size={13} /> {p.label}
-              </button>
-            ))}
-            <button type="button" className={s.testBtn} onClick={pickMirror}><IconFolder size={13} /> Choose a folder…</button>
-          </div>
-        )}
-      </div>
-
-      {/* Games: the ones that need you first */}
-      {overview.length > 0 && (
-        <>
-          <div className={s.saveListHead}>
-            <div className={s.seg} role="radiogroup" aria-label="Which games">
-              <button type="button" role="radio" aria-checked={filter === 'need'} className={`${s.segBtn} ${filter === 'need' ? s.segBtnOn : ''}`} onClick={() => setFilter('need')} disabled={!need.length}>
-                Needs you ({need.length})
-              </button>
-              <button type="button" role="radio" aria-checked={filter === 'all' || !need.length} className={`${s.segBtn} ${filter === 'all' || !need.length ? s.segBtnOn : ''}`} onClick={() => setFilter('all')}>
-                All games ({overview.length})
-              </button>
-            </div>
-            {need.length > 0 && filter === 'need' && <span className={s.saveWhereNote}>No save found on this PC for these yet. For a game you play here, pick its save folder once.</span>}
-          </div>
-          <div className={s.saveGameList}>
-            {shown.map(g => (
-              <div key={g.id} className={s.saveGameRow}>
-                <span className={s.saveGameName} title={g.name}>{g.name}</span>
-                {!g.confirmed ? (
-                  <button type="button" className={s.savePickBtn} onClick={() => onManageSaves?.({ id: g.id, name: g.name })}>
-                    <IconFolder size={12} /> Choose save folder
-                  </button>
-                ) : (
-                  <>
-                    <span className={s.saveBackupInfo}>
-                      <IconShieldCheck size={12} className={s.saveBackupTick} />
-                      {g.count > 0 ? `${g.count} backup${g.count === 1 ? '' : 's'}${g.latestAt ? `, ${timeAgo(g.latestAt)}` : ''}` : 'Ready, backs up when you play'}
-                    </span>
-                    <button type="button" className={s.saveManageBtn} onClick={() => onManageSaves?.({ id: g.id, name: g.name })}>Open</button>
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-
-      {/* Everything else, folded away */}
-      <button type="button" className={s.moreToggle} onClick={() => setMore(v => !v)} aria-expanded={more}>
-        <IconChevronDown size={14} className={more ? s.moreOpen : ''} /> More options
-      </button>
-      {more && (
-        <div className={s.moreBody}>
-          <Segmented label="Keep at most" value={String(storage?.capGb ?? 0)} wrap
-            onChange={async (v) => { await window.kozo?.api?.saves?.setCap?.(Number(v)); load() }}
-            options={[{ value: '0', label: 'No limit' }, { value: '1', label: '1 GB' }, { value: '5', label: '5 GB' }, { value: '20', label: '20 GB' }]} />
-          <p className={s.sectionDescQuiet}>
-            Every backup is kept for 2 weeks, then one a day up to 6 weeks, then one a week up to 4 months.
-            Backups you make yourself are never removed. Same files are stored once, compressed.
-          </p>
-          <div className={s.keyRow}>
-            <button type="button" className={s.testBtn} onClick={doBackupAll} disabled={allState === 'working'}>
-              {allState === 'working' ? <><IconLoader2 size={13} className="spin" /> Backing up…</> : <><IconArchive size={13} /> Back up every game now</>}
-            </button>
-            <button type="button" className={s.testBtn} onClick={refreshKnown} disabled={busy === 'manifest'}>
-              {busy === 'manifest' ? <IconLoader2 size={13} className="spin" /> : <IconRefresh size={13} />} Update the save locations list
-            </button>
-            {storage?.manifest?.games > 0 && <span className={s.sectionDescQuiet}>{storage.manifest.games.toLocaleString()} games known (PCGamingWiki)</span>}
-          </div>
-          {allState === 'done' && allResult && (
-            <StatusLine type={allResult.failed ? 'warning' : 'success'}>
-              {allResult.backedUp} backed up{allResult.failed ? `, ${allResult.failed} failed` : ''}
-            </StatusLine>
-          )}
-        </div>
-      )}
-    </section>
   )
 }
 
@@ -2028,9 +1631,9 @@ const FEATURE_GROUPS = [
   {
     title: 'Saves & Backups',
     items: [
-      { Icon: IconDeviceFloppy, name: 'Save file finder', go: 'tab:data',     desc: 'Locates each game’s real save folder (even tricky publisher paths).' },
-      { Icon: IconArchive,      name: 'Save backup & restore', go: 'tab:data',desc: 'Snapshot and roll back any game’s saves, manually, all at once before a format, or automatically after each session (keeps the last two).' },
-      { Icon: IconCloud,        name: 'Folder sync', go: 'tab:data', desc: 'Sync everything (game saves included) to any folder, cloud-synced, network drive, or USB, and restore on any PC. Fully offline, no account.' },
+      { Icon: IconDeviceFloppy, name: 'Saves found for you', go: 'tab:data', desc: 'KoZo finds where each game saves by itself: known locations, cracked-game folders, Steam Cloud, and the folders a game writes while you play.' },
+      { Icon: IconArchive,      name: 'Automatic save backups', go: 'tab:data', desc: 'Before and after every session, with restore points by day. Only changed files take space. Restore any game, or all of them at once.' },
+      { Icon: IconCloud,        name: 'Google Drive copy', go: 'tab:data', desc: 'Your saves and library copied to your Google Drive, so even a full format cannot take them. Get everything back on a new PC in one click.' },
     ],
   },
   {
@@ -2266,8 +1869,8 @@ const TABS = [
   { key: 'appearance', label: 'Appearance', group: 'App',   Icon: IconPalette,    desc: 'Colors, the sidebar, sizes, animations, a background picture and what cards show.' },
   { key: 'shortcuts',  label: 'Shortcuts',  group: 'App',   Icon: IconKeyboard,   desc: 'Every keyboard shortcut and controller button.' },
   { key: 'tracking',   label: 'Tracking',   group: 'Games', Icon: IconClock,      desc: 'How playtime is counted, and where KoZo looks for your games.' },
-  { key: 'accounts',   label: 'Accounts',   group: 'Games', Icon: IconUser,       desc: 'Steam, Discord and where covers come from.' },
-  { key: 'data',       label: 'Backups',    group: 'Data',  Icon: IconArchive,    desc: 'Back up and move your KoZo data and your game saves.' },
+  { key: 'accounts',   label: 'Connections', group: 'Games', Icon: IconPlugConnected, desc: 'Steam, Discord, covers and Google Drive.' },
+  { key: 'data',       label: 'Backups',    group: 'Data',  Icon: IconArchive,    desc: 'Your game saves and your library, backed up on their own.' },
   { key: 'features',   label: 'Features',   group: 'Help',  Icon: IconLayoutGrid, desc: 'Everything KoZo can do, with a link to each.' },
   { key: 'about',      label: 'About',      group: 'Help',  Icon: IconInfoCircle, desc: 'Version, updates, diagnostics and the walkthrough.' },
 ]
@@ -2309,10 +1912,10 @@ export default function Settings() {
           {tab === 'features'   && <FeaturesTab setTab={setTab} />}
           {tab === 'general'    && <GeneralTab />}
           {tab === 'shortcuts'  && <ShortcutsTab />}
-          {tab === 'accounts'   && <SteamTab><DiscordSection /></SteamTab>}
+          {tab === 'accounts'   && <SteamTab />}
           {tab === 'tracking'   && <TrackingTab />}
           {tab === 'appearance' && <AppearanceTab />}
-          {tab === 'data'       && <DataTab onManageSaves={setSaveGame} />}
+          {tab === 'data'       && <BackupsTab onManageSaves={setSaveGame} />}
           {tab === 'about'      && <AboutTab />}
         </div>
       </div>

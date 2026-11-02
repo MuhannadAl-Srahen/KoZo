@@ -16,14 +16,19 @@
 // - Restore REPLACES a save folder with the snapshot (staged, verified, then
 //   swapped), so nothing the game wrote later is left mixed in.
 // - Smart history for automatic snapshots (prunePolicy), manual ones are kept.
-// - An optional second copy (`save_mirror_dir`, e.g. a OneDrive folder or a USB
-//   drive) receives every blob and snapshot as it's written.
+// - Logs, caches, crash dumps and videos inside a save folder are left out
+//   (saveDetect.isJunk); nothing is written when the drive is nearly full.
+// - The off-PC copy is Google Drive (googleDrive.js). The older optional
+//   folder copy (`save_mirror_dir`) still works when it was set.
 
 const fs     = require('fs')
 const path   = require('path')
 const zlib   = require('zlib')
 const crypto = require('crypto')
 const logger = require('../logger')
+
+const { isJunk } = require('./saveDetect')
+const MIN_FREE = 2 * 1024 ** 3
 
 const AUTO_REASONS = new Set(['before-play', 'after-play', 'auto', 'before-restore'])
 const DAY = 86400000
@@ -42,6 +47,12 @@ function vaultDir(game) {
     try { fs.writeFileSync(meta, JSON.stringify({ gameId: game.id ?? null, gameName: game.name || '', vault: 1 }, null, 2)) } catch {}
   }
   return dir
+}
+// The vault if this game has one, else null (reads never create folders).
+function existingVault(game) {
+  const g = require('./saveBackup').existingGameDir(game.name, game.id != null ? String(game.id) : undefined)
+  const v = g && path.join(g, 'vault')
+  return v && fs.existsSync(path.join(v, 'snapshots')) ? v : null
 }
 const blobPath = (vault, hash) => path.join(vault, 'blobs', `${hash}.gz`)
 
@@ -97,7 +108,7 @@ function listSourceFiles(sources) {
         const abs = path.join(dir, e.name)
         const r = rel ? `${rel}/${e.name}` : e.name
         if (e.isDirectory()) { if (!e.name.endsWith('.kozo-restore') && !e.name.endsWith('.kozo-old')) walk(abs, r) }
-        else if (e.isFile()) {
+        else if (e.isFile() && !isJunk(r)) {
           try { const fst = fs.statSync(abs); out.push({ s, p: r, abs, n: fst.size, m: Math.round(fst.mtimeMs) }) } catch {}
         }
       }
@@ -144,7 +155,8 @@ function readSnapshot(vault, id) {
 }
 
 function listSnapshots(game) {
-  const vault = vaultDir(game)
+  const vault = existingVault(game)
+  if (!vault) return []
   let names = []
   try { names = fs.readdirSync(path.join(vault, 'snapshots')).filter(n => n.endsWith('.json')) } catch {}
   const out = []
@@ -178,6 +190,12 @@ function snapshot(game, sources, reason = 'manual', opts = {}) {
   sources = (sources || []).filter(Boolean)
   if (!sources.length) return { skipped: 'no_source' }
   const started = Date.now()
+  const free = require('./backupHome').freeSpace(backupRoot())
+  if (free != null && free < MIN_FREE) {
+    try { settings().setSetting('save_low_space', new Date().toISOString()) } catch {}
+    logger.warn(`saveVault: under 2 GB free on the backup drive, skipped "${game.name}"`)
+    return { skipped: 'low_space' }
+  }
   const vault = vaultDir(game)
   const files = listSourceFiles(sources)
   if (!files.length) return { skipped: 'empty' }
@@ -394,7 +412,8 @@ function dirSize(dir) {
 
 // Space used on disk (compressed, deduplicated) by one game's backups.
 function usage(game) {
-  const vault = vaultDir(game)
+  const vault = existingVault(game)
+  if (!vault) return 0
   return dirSize(path.join(vault, 'blobs')) + dirSize(path.join(vault, 'snapshots'))
 }
 
@@ -453,10 +472,33 @@ function syncMirror() {
   return { copied }
 }
 
+// Game folders holding nothing but an empty vault (an older build made one
+// for every game just by listing them). Removed at startup.
+function cleanEmpty() {
+  const root = backupRoot()
+  let removed = 0
+  for (const e of (() => { try { return fs.readdirSync(root, { withFileTypes: true }) } catch { return [] } })()) {
+    if (!e.isDirectory()) continue
+    const dir = path.join(root, e.name)
+    try {
+      const top = fs.readdirSync(dir)
+      if (top.length !== 1 || top[0] !== 'vault') continue
+      const v = path.join(dir, 'vault')
+      const inside = fs.readdirSync(v)
+      const empty = (n) => { try { return fs.readdirSync(path.join(v, n)).length === 0 } catch { return true } }
+      if (inside.every(n => n === 'meta.json' || ((n === 'blobs' || n === 'snapshots') && empty(n)))) {
+        fs.rmSync(dir, { recursive: true, force: true }); removed++
+      }
+    } catch {}
+  }
+  return removed
+}
+
 // Old-style backups (folder copies with meta.json: manual ones and the two
 // rolling auto slots) become snapshots once, then the old folders go.
 function migrateLegacy(game) {
-  const gdir = path.dirname(vaultDir(game))
+  const gdir = require('./saveBackup').existingGameDir(game.name, game.id != null ? String(game.id) : undefined)
+  if (!gdir) return 0
   let entries = []
   try { entries = fs.readdirSync(gdir, { withFileTypes: true }) } catch { return 0 }
   let n = 0
@@ -495,5 +537,5 @@ function migrateLegacy(game) {
 
 module.exports = {
   snapshot, listSnapshots, restore, compare, exportSnapshot, remove,
-  prune, prunePolicy, gc, usage, enforceCap, syncMirror, migrateLegacy, mirrorRoot,
+  prune, prunePolicy, gc, usage, enforceCap, syncMirror, migrateLegacy, mirrorRoot, cleanEmpty,
 }

@@ -133,6 +133,7 @@
 .heroRow { display: flex; align-items: flex-end; gap: clamp(16px, 1.8vw, 32px); }
 .heroInfo { display: flex; flex-direction: column; gap: clamp(6px, 1vh, 14px); min-width: 0; }
 .heroName, .gameName {
+  font-family: var(--font-display);
   margin: 0;
   max-width: 70vw;
   font-size: clamp(32px, 3.6vw, 72px);

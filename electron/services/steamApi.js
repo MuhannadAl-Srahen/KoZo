@@ -559,8 +559,8 @@ function sourceWeight(row) {
 // game's "More like this" page lists the upcoming games Steam considers like
 // it (store.steampowered.com/recommended/morelike/app/<id>, its "comingsoon"
 // section). A game several favourites agree on, high in their lists, scores
-// highest. Favourites = Game List / Library games weighted by rating, status
-// and hours (sourceWeight); dropped and low-rated games are never sources.
+// highest. Sources = your whole Game List and Library (pickSources): half
+// what you liked, half what you want to play; dropped and low-rated never.
 let picksCache = null
 const moreLikeCache = new Map()   // appid -> { at, ids }
 async function moreLikeComingSoon(appId) {
@@ -601,31 +601,60 @@ function scorePicks(sources) {
   return out
 }
 
+// Which Game List games "Picked for you" asks Steam about. Pure.
+// rows: [{ appid, name, status, rating, seconds, addedAt }]
+// Half from what you liked (rated, finished, playing, played a lot), half from
+// what you WANT to play (Want to play, Upcoming, On hold; newest first), taken
+// in turn so neither side drowns the other. Dropped and low-rated: never.
+function pickSources(rows, max = 16) {
+  const liked = rows
+    .map(r => ({ ...r, weight: sourceWeight(r) }))
+    .filter(r => r.weight >= 1.5 && !['want_to_play', 'upcoming', 'on_hold'].includes(r.status))
+    .sort((a, b) => b.weight - a.weight)
+  const wanted = rows
+    .filter(r => ['want_to_play', 'upcoming', 'on_hold'].includes(r.status) && !(Number(r.rating) > 0 && Number(r.rating) <= 4))
+    .sort((a, b) => String(b.addedAt || '').localeCompare(String(a.addedAt || '')))
+    .map(r => ({ ...r, weight: r.status === 'on_hold' ? 0.8 : 1.3 }))
+  const out = [], seen = new Set()
+  for (let i = 0; out.length < max && (i < liked.length || i < wanted.length); i++) {
+    for (const r of [liked[i], wanted[i]]) {
+      if (!r || out.length >= max || seen.has(r.appid ?? r.name)) continue
+      seen.add(r.appid ?? r.name)
+      out.push({ appid: r.appid ?? null, name: r.name, weight: r.weight, kind: liked.includes(r) ? 'liked' : 'wanted' })
+    }
+  }
+  return out
+}
+
+const nameAppCache = new Map()   // name -> appid | null
 async function getPicks() {
   if (picksCache && Date.now() - picksCache.at < 6 * 3600000) return picksCache.data
   const db = require('../db/database').getDb()
   const rows = db.prepare(`
-    SELECT gl.name, gl.status, gl.rating, COALESCE(gl.steam_app_id, g.steam_app_id) AS appid,
+    SELECT gl.name, gl.status, gl.rating, gl.added_at AS addedAt, COALESCE(gl.steam_app_id, g.steam_app_id) AS appid,
            COALESCE(g.total_playtime_seconds, 0) AS seconds
-    FROM game_list gl LEFT JOIN games g ON g.id = gl.game_id
-    WHERE COALESCE(gl.steam_app_id, g.steam_app_id) IS NOT NULL`).all()
+    FROM game_list gl LEFT JOIN games g ON g.id = gl.game_id`).all()
   const lib = db.prepare('SELECT name, steam_app_id AS appid, total_playtime_seconds AS seconds FROM games WHERE steam_app_id IS NOT NULL AND is_archived = 0').all()
-  const byApp = new Map()
-  for (const r of rows) byApp.set(Number(r.appid), r)
-  for (const g of lib) if (!byApp.has(Number(g.appid))) byApp.set(Number(g.appid), { ...g, status: 'playing' })
-  // Favourites: what you rated well, finished, or put real hours into. A game
-  // you only want to play says less about your taste, so it ranks last.
-  const favs = [...byApp.entries()]
-    .map(([appid, r]) => ({ appid, name: r.name, weight: sourceWeight(r) }))
-    .filter(x => x.weight >= 1.2)
-    .sort((a, b) => b.weight - a.weight)
-    .slice(0, 15)
+  const byKey = new Map()
+  for (const r of rows) byKey.set(r.appid ? `a${Number(r.appid)}` : `n${String(r.name).toLowerCase()}`, { ...r, appid: r.appid ? Number(r.appid) : null })
+  for (const g of lib) if (!byKey.has(`a${Number(g.appid)}`)) byKey.set(`a${Number(g.appid)}`, { ...g, appid: Number(g.appid), status: 'playing' })
+  const chosen = pickSources([...byKey.values()])
+  // Game List rows without a Steam id (added by name): find it by name.
+  let lookups = 0
+  for (const c of chosen) {
+    if (c.appid) continue
+    const k = c.name.toLowerCase()
+    if (!nameAppCache.has(k) && lookups++ < 8) {
+      try { const m = await findAppByName(c.name); capSet(nameAppCache, k, m ? Number(m.steam_app_id) : null, 500) } catch { capSet(nameAppCache, k, null, 500) }
+    }
+    c.appid = nameAppCache.get(k) || null
+  }
   const sources = []
-  for (const f of favs) {
+  for (const f of chosen.filter(c => c.appid)) {
     try { sources.push({ ...f, ids: await moreLikeComingSoon(f.appid) }) } catch {}
     await new Promise(r => setTimeout(r, 350))   // gentle on the store
   }
-  const data = { picks: scorePicks(sources), sources: sources.length, names: sources.map(x => x.name) }
+  const data = { picks: scorePicks(sources), sources: sources.length, names: sources.map(x => x.name), wanted: sources.filter(x => x.kind === 'wanted').map(x => x.name) }
   picksCache = { at: Date.now(), data }
   return data
 }
@@ -1182,7 +1211,7 @@ async function getComingSoon(feed = 'soon', page = 0) {
 }
 
 module.exports = {
-  shrinkCover, getTasteProfile, clearTasteProfile, getPicks, scorePicks, getReviews,
+  shrinkCover, getTasteProfile, clearTasteProfile, getPicks, scorePicks, pickSources, getReviews,
   getBannersDir, downloadFile,
   getAppAssets, downloadHero,
   getComingSoon, parseComingSoonHtml,

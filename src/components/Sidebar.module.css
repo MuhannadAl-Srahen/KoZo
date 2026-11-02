@@ -218,7 +218,7 @@
   height: 40px;
   padding: 3px;
   border-radius: 50%;
-  background: conic-gradient(var(--a) var(--xp, 0%), var(--neutral-bg-hover) 0);
+  background: conic-gradient(var(--a), var(--accent-2, var(--a)) var(--xp, 0%), var(--neutral-bg-hover) 0);
 }
 .profileAvatar {
   display: flex;

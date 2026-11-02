@@ -222,4 +222,4 @@ function findSaveLocations(game) {
   return trustworthy.map(({ path: p, source, files, saveLike, known }) => ({ path: p, source, files, saveLike, known: !!known, modifiedAt: newestMtime(p) }))
 }
 
-module.exports = { findSaveLocations }
+module.exports = { findSaveLocations, buildMatcher }

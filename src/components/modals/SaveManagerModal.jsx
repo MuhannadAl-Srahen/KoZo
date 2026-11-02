@@ -75,7 +75,7 @@ export default function SaveManagerModal({ game, onClose }) {
 
   async function savePaths(paths) {
     const res = await window.kozo?.api?.saves?.setPaths(game.id, paths)
-    if (res?.ok) { setEditing(false); setMsg({ type: 'ok', text: 'Save location confirmed. Backups now use it.' }); loadAll() }
+    if (res?.ok) { setEditing(false); setMsg({ type: 'ok', text: 'Saved. Backups use this folder now.' }); loadAll() }
     else setMsg({ type: 'err', text: res?.error || 'Could not save that' })
   }
   async function addFolder() {
@@ -164,10 +164,9 @@ export default function SaveManagerModal({ game, onClose }) {
       ) : (
         <>
           <p className={s.hint}>
-            {found.locations.some(l => l.known)
-              ? 'KoZo knows where this game saves (from PCGamingWiki). Check it, then confirm.'
-              : 'Tick the folder the game really saves into. The newest change helps: play, save, and it moves to the top.'}
-            {' '}Automatic backups only use what you confirm here.
+            {found.locations.length
+              ? "Folders that may hold this game's saves. Tick the right one only if you want to set it by hand."
+              : "KoZo hasn't seen this game save on this PC yet. It finds the folder by itself the first time you play here."}
           </p>
           <div className={s.list}>
             {found.locations.length === 0 && <div className={s.empty}>No save folder found. Add it yourself below.</div>}
@@ -192,7 +191,7 @@ export default function SaveManagerModal({ game, onClose }) {
             <span className={s.spacer} />
             {confirmed.length > 0 && <button className={s.ghostBtn} onClick={() => setEditing(false)}><IconX size={14} /> Cancel</button>}
             <button className={s.primaryBtn} disabled={!picked.size} onClick={() => savePaths([...picked])}>
-              <IconCheck size={14} /> Confirm {picked.size > 1 ? `${picked.size} locations` : 'location'}
+              <IconCheck size={14} /> Use {picked.size > 1 ? `these ${picked.size} folders` : 'this folder'}
             </button>
           </div>
         </>
@@ -203,7 +202,7 @@ export default function SaveManagerModal({ game, onClose }) {
         <IconRestore size={15} /> Restore points {snaps?.length > 0 && <span className={s.count}>{snaps.length}</span>}
       </div>
       {snaps === null ? null : snaps.length === 0 ? (
-        <div className={s.empty}>No backups yet. {confirmed.length ? 'Press Back up now, or just play: KoZo backs up before and after every session when automatic backups are on.' : 'Confirm the save location first.'}</div>
+        <div className={s.empty}>No backups yet. {confirmed.length ? 'Press Back up now, or just play: KoZo backs up before and after every session.' : 'Play the game once on this PC and KoZo starts backing it up.'}</div>
       ) : groups.map(g => (
         <div key={g.k} className={s.day}>
           <div className={s.dayTitle}>{g.k}</div>

@@ -128,11 +128,14 @@ export function MatchBadge({ g, className = '' }) {
   if (!g.match) return null
   return <span className={`${s.match} ${s['match_' + matchTone(g.match)]} ${className}`}>{g.match}%</span>
 }
-// "Like Hollow Knight and Dead Cells" (Steam's More like this for those games).
+// "Like Hollow Knight and Dead Cells" (Steam's More like this for those games);
+// "on your list" when they're all games you still want to play.
 export function reasonText(g) {
   const n = g.reason || []
   if (!n.length) return null
-  return `Like ${n.length === 1 ? n[0] : n.length === 2 ? `${n[0]} and ${n[1]}` : `${n[0]}, ${n[1]} and ${n[2]}`}`
+  const list = n.length === 1 ? n[0] : n.length === 2 ? `${n[0]} and ${n[1]}` : `${n[0]}, ${n[1]} and ${n[2]}`
+  const wanted = g.wantedSources && n.every(x => g.wantedSources.includes(x))
+  return `Like ${list}${wanted ? ' on your list' : ''}`
 }
 
 // Track / Untrack, one look everywhere. variant: 'pill' (cards), 'icon' (a
@@ -649,7 +652,7 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
       const pick = picks?.picks?.[g.appid]
       const entry = {
         ...g, name: g.name || a?.name || 'Unknown', rel, art: a,
-        match: pick?.pct || 0, reason: pick?.because || null,
+        match: pick?.pct || 0, reason: pick?.because || null, wantedSources: picks?.wanted || null,
         showMatch: pickMode === 'picked',
       }
       all.push(entry)
@@ -811,7 +814,7 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
           <span className={s.muted} title={picks?.names?.length ? `Steam's "More like this" for: ${picks.names.join(', ')}` : ''}>
             {!picks ? 'Finding games like yours…'
               : picks.sources ? `Like ${picks.sources} of your favourite games`
-              : 'Rate or play a few Steam games to get picks'}
+              : 'Add a few games to your Game List (or rate some) to get picks'}
           </span>
         )}
         {loading && <IconLoader2 size={15} className="spin" />}

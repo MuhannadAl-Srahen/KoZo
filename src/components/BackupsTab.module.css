@@ -1,0 +1,164 @@
+/* Settings → Backups (BackupsTab.jsx): three calm cards and a fold. */
+.page { display: flex; flex-direction: column; gap: var(--sp-16); max-width: 860px; }
+
+.card {
+  display: flex; flex-direction: column; gap: var(--sp-12);
+  padding: var(--sp-16) var(--sp-18, 18px);
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+}
+.cardHead { display: flex; align-items: baseline; gap: var(--sp-10, 10px); flex-wrap: wrap; }
+.cardHead h4 { margin: 0; font-size: var(--fs-md); font-weight: 700; color: var(--text-primary); }
+.cardHead span { font-size: var(--fs-xs); color: var(--text-muted); }
+
+/* ── Status ─────────────────────────────────────────────────────────── */
+.status {
+  background:
+    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--success) 9%, transparent), transparent 60%),
+    var(--surface-1);
+  border-color: var(--success-border);
+}
+.statusWarn {
+  background:
+    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--warning) 10%, transparent), transparent 60%),
+    var(--surface-1);
+  border-color: var(--warning-border-strong);
+}
+.statusTop { display: flex; align-items: center; gap: var(--sp-14, 14px); }
+.shield {
+  flex-shrink: 0; width: 48px; height: 48px; border-radius: 14px;
+  display: grid; place-items: center;
+  color: var(--success); background: var(--success-bg); border: 1px solid var(--success-border);
+}
+.statusWarn .shield { color: var(--warning); background: var(--warning-bg); border-color: var(--warning-border); }
+.statusText { flex: 1; min-width: 0; }
+.statusText h3 { margin: 0; font-size: var(--fs-lg); font-weight: 700; color: var(--text-primary); }
+.statusText p { margin: 2px 0 0; font-size: var(--fs-sm); color: var(--text-secondary); }
+
+.places { display: flex; flex-direction: column; gap: 6px; }
+.place {
+  display: flex; align-items: center; gap: var(--sp-12);
+  padding: 10px 12px; border-radius: var(--r-card);
+  background: color-mix(in srgb, var(--surface-3) 55%, transparent);
+  border: 1px solid var(--border-subtle, var(--border));
+}
+.placeWarn { border-color: var(--warning-border-strong); }
+.placeIcon {
+  flex-shrink: 0; width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center;
+  color: var(--text-secondary); background: var(--surface-3);
+}
+.driveIcon { color: #4c8bf5; }
+.placeText { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.placeText strong { font-size: var(--fs-sm); color: var(--text-primary); font-weight: 600; }
+.placeText strong em { font-style: normal; font-weight: 500; color: var(--text-muted); margin-left: 6px; }
+.placeText span { font-size: var(--fs-xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.btn {
+  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+  height: 32px; padding: 0 12px; border-radius: var(--r-input);
+  font-size: var(--fs-sm); font-weight: 600; color: var(--text-secondary);
+  background: var(--surface-3); border: 1px solid var(--border); cursor: pointer;
+}
+.btn:hover:not(:disabled) { color: var(--text-primary); border-color: var(--border-accent-soft, var(--border)); }
+.btn:disabled { opacity: 0.55; cursor: default; }
+.btnPrimary { color: var(--on-accent, #0b0b12); background: var(--a); border-color: transparent; }
+.btnPrimary:hover:not(:disabled) { color: var(--on-accent, #0b0b12); filter: brightness(1.08); }
+
+.note, .msg {
+  display: flex; align-items: flex-start; gap: 6px; margin: 0;
+  font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.45;
+}
+.note svg, .msg svg { flex-shrink: 0; margin-top: 2px; }
+.msg { color: var(--success); }
+.msgErr { color: var(--warning); }
+
+/* ── Games ──────────────────────────────────────────────────────────── */
+.empty { margin: 0; font-size: var(--fs-sm); color: var(--text-muted); }
+.games { display: flex; flex-direction: column; gap: 2px; max-height: 420px; overflow-y: auto; margin: 0 -6px; padding: 0 6px; }
+.game {
+  display: flex; align-items: center; gap: var(--sp-12); width: 100%;
+  padding: 6px 8px; border-radius: var(--r-card); text-align: left;
+  background: transparent; border: 1px solid transparent; cursor: pointer; color: inherit;
+}
+.game:hover { background: var(--surface-2); border-color: var(--border); }
+.art {
+  flex-shrink: 0; width: 34px; height: 46px; border-radius: 6px; overflow: hidden;
+  background: linear-gradient(135deg, var(--surface-3), var(--surface-2));
+}
+.art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.gameText { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.gameText strong { font-size: var(--fs-sm); font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gameText small { font-size: var(--fs-xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gameQuiet .art { opacity: 0.55; filter: grayscale(0.6); }
+.gameQuiet strong { color: var(--text-secondary); }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--text-muted); opacity: 0.6; }
+.dotOk { background: var(--success); opacity: 1; box-shadow: 0 0 8px color-mix(in srgb, var(--success) 60%, transparent); }
+.chev { color: var(--text-muted); flex-shrink: 0; }
+
+.fold {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 6px;
+  background: none; border: 0; padding: 4px 0; cursor: pointer;
+  font-size: var(--fs-xs); font-weight: 600; color: var(--text-muted);
+}
+.fold:hover { color: var(--text-primary); }
+.fold svg { transition: transform var(--dur-fast, 120ms); transform: rotate(-90deg); }
+.foldOpen { transform: rotate(0deg) !important; }
+.foldNote { margin: 0; font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.5; }
+
+/* ── Restore ────────────────────────────────────────────────────────── */
+.actions { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+.action {
+  display: flex; align-items: center; gap: 12px; text-align: left;
+  padding: 12px; border-radius: var(--r-card); cursor: pointer; color: var(--text-secondary);
+  background: var(--surface-2); border: 1px solid var(--border);
+}
+.action:hover:not(:disabled) { border-color: var(--border-accent-soft, var(--border)); color: var(--a); }
+.action:disabled { opacity: 0.5; cursor: default; }
+.action > svg { flex-shrink: 0; }
+.action span { display: flex; flex-direction: column; min-width: 0; }
+.action strong { font-size: var(--fs-sm); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.action small { font-size: var(--fs-xs); color: var(--text-muted); }
+
+/* ── More ───────────────────────────────────────────────────────────── */
+.more { border-radius: var(--r-lg); border: 1px solid var(--border); background: var(--surface-1); }
+.more summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center; gap: 6px;
+  padding: 12px 16px; font-size: var(--fs-sm); font-weight: 600; color: var(--text-secondary);
+}
+.more summary::-webkit-details-marker { display: none; }
+.more summary:hover { color: var(--text-primary); }
+.moreChevron { transition: transform var(--dur-fast, 120ms); }
+.more[open] .moreChevron { transform: rotate(90deg); }
+.moreBody { display: flex; flex-direction: column; gap: var(--sp-14, 14px); padding: 0 16px 16px; }
+.row { display: flex; align-items: center; gap: var(--sp-16); flex-wrap: wrap; }
+.rowText { flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: 2px; }
+.rowText strong { font-size: var(--fs-sm); color: var(--text-primary); font-weight: 600; }
+.rowText small { font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.45; }
+.seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: var(--r-input); background: var(--surface-3); border: 1px solid var(--border); }
+.seg button {
+  height: 28px; padding: 0 10px; border-radius: calc(var(--r-input) - 2px); border: 0; cursor: pointer;
+  background: transparent; color: var(--text-secondary); font-size: var(--fs-xs); font-weight: 600;
+}
+.seg button:hover { color: var(--text-primary); }
+.seg .segOn { background: var(--a); color: var(--on-accent, #0b0b12); }
+.seg .segOn:hover { color: var(--on-accent, #0b0b12); }
+.moreBtns { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* ── Switch ─────────────────────────────────────────────────────────── */
+.switch {
+  flex-shrink: 0; position: relative; width: 44px; height: 24px; border-radius: 12px; cursor: pointer;
+  background: var(--surface-3); border: 1px solid var(--border);
+}
+.switchOn { background: var(--a); border-color: transparent; }
+.thumb {
+  position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--text-secondary); transition: transform var(--dur-fast, 120ms), background var(--dur-fast, 120ms);
+}
+.switchOn .thumb { transform: translateX(20px); background: #fff; }
+
+/* ── Restore picker ─────────────────────────────────────────────────── */
+.pickList { display: flex; flex-direction: column; gap: 2px; max-height: 360px; overflow-y: auto; margin-top: 10px; }
+.pickRow { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: var(--r-card); cursor: pointer; }
+.pickRow:hover { background: var(--surface-3); }
+.pickRow input { accent-color: var(--a); width: 16px; height: 16px; }

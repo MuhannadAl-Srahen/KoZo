@@ -137,6 +137,7 @@
 
   /* ── Typography ──────────────────────────────────────────────────── */
   --font:      'DM Sans', system-ui, -apple-system, sans-serif;
+  --font-display: var(--font);   /* headings and game names (Appearance) */
   --font-mono: ui-monospace, 'Cascadia Mono', Consolas, 'Courier New', monospace;
 
   /* One step larger across the whole scale : the user runs a 2K

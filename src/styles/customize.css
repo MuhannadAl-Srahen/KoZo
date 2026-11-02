@@ -16,8 +16,27 @@
 @import '@fontsource/jetbrains-mono/700.css';
 @import '@fontsource/atkinson-hyperlegible/400.css';
 @import '@fontsource/atkinson-hyperlegible/700.css';
+/* Heading fonts (gaming faces) */
+@import '@fontsource/orbitron/600.css';
+@import '@fontsource/orbitron/700.css';
+@import '@fontsource/rajdhani/600.css';
+@import '@fontsource/rajdhani/700.css';
+@import '@fontsource/chakra-petch/600.css';
+@import '@fontsource/chakra-petch/700.css';
+@import '@fontsource/exo-2/600.css';
+@import '@fontsource/exo-2/700.css';
+@import '@fontsource/oxanium/600.css';
+@import '@fontsource/oxanium/700.css';
 
-/* ── Themes (all dark; "Match background to accent" still wins) ─────── */
+/* ── Themes (all dark) ───────────────────────────────────────────────── */
+/* Accent tint: the stock lightness, in the accent's hue (--tint-h, set by
+   AccentColorContext). */
+:root[data-theme="tint"] {
+  --bg:        hsl(var(--tint-h, 250) 24% 8.2%);
+  --surface-1: hsl(var(--tint-h, 250) 23% 10.2%);
+  --surface-2: hsl(var(--tint-h, 250) 24% 11.4%);
+  --surface-3: hsl(var(--tint-h, 250) 21% 13.7%);
+}
 :root[data-theme="oled"] {
   --bg: #000000; --surface-1: #060608; --surface-2: #0b0b0f; --surface-3: #121217;
   --border: rgba(255, 255, 255, 0.08); --border-subtle: rgba(255, 255, 255, 0.05);
@@ -42,6 +61,12 @@
   --bg: #150e10; --surface-1: #1b1214; --surface-2: #201618; --surface-3: #281c1f;
   --text-primary: #f4e9eb; --text-secondary: #c8adb2; --text-muted: #957c81;
 }
+
+/* ── Heading font ───────────────────────────────────────────────────── */
+:root[data-display-font] h1, :root[data-display-font] h2, :root[data-display-font] h3 { font-family: var(--font-display); }
+/* Wide faces (Orbitron) need less size and a bit of air. */
+:root[data-display-font="orbitron"] { --display-tracking: 0.02em; --display-scale: 0.88; }
+:root[data-display-font="rajdhani"] { --display-scale: 1.08; }
 
 /* ── Cards ──────────────────────────────────────────────────────────── */
 :root[data-card-border="none"]   { --card-border: transparent; }

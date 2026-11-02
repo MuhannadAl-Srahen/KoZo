@@ -422,14 +422,12 @@ Close any program that may be using it and start KoZo again.`)
   // copy if it was offline. All disk work, so only while no game is running.
   setTimeout(() => {
     watcher.runWhenIdle('saveVaultStartup', async () => {
+      // Backups live somewhere safe (never Temp), automatic backups on once.
+      try { require('./services/backupHome').ensure() } catch (e) { require('./logger').warn('backupHome failed', { message: e.message }) }
       try { await require('./services/saveManifest').refresh() } catch (e) { require('./logger').warn('saveManifest refresh failed', { message: e.message }) }
-      // Games the list knows are set up on their own (confirmed save location).
-      try {
-        const { resolvePaths } = require('./services/autoSaveBackup')
-        for (const g of require('./db/database').getDb().prepare('SELECT * FROM games WHERE save_paths IS NULL AND is_archived = 0').all()) {
-          try { resolvePaths(g) } catch {}
-        }
-      } catch {}
+      try { require('./services/saveVault').cleanEmpty() } catch {}
+      // Every game's saves, found on their own (saveDetect).
+      try { require('./services/saveDetect').confirmAll() } catch {}
       try {
         const settingsQ = require('./db/queries/settings')
         if (settingsQ.getSetting('save_vault_migrated') !== '1') {
@@ -442,6 +440,7 @@ Close any program that may be using it and start KoZo again.`)
         }
         require('./services/saveVault').syncMirror()
       } catch (e) { require('./logger').warn('saveVault startup failed', { message: e.message }) }
+      try { require('./services/googleDrive').syncSoon(5000) } catch {}
     })
   }, 45000)
 

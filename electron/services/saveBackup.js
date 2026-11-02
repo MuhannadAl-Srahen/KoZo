@@ -149,6 +149,22 @@ function gameDir(gameName, gameId = resolveGameId(gameName)) {
   return dir
 }
 
+// The game's folder if it already exists, else null. Never creates anything
+// (listing backups must not leave an empty folder per game behind).
+function existingGameDir(gameName, gameId = resolveGameId(gameName)) {
+  const root = rootDir()
+  const owned = findDirOwnedBy(root, gameId)
+  if (owned) return owned
+  for (const base of [sanitize(gameName), legacySanitize(gameName)].filter(Boolean)) {
+    for (let i = 1; i <= 20; i++) {
+      const dir = path.join(root, i === 1 ? base : `${base} (${i})`)
+      if (!fs.existsSync(dir)) break
+      if (ownedBy(folderOwner(dir), gameName, gameId)) return dir
+    }
+  }
+  return null
+}
+
 // backupId comes from the renderer and the main process is the only place it is
 // checked: a "..", a separator or a drive letter would resolve outside the game's
 // folder and hand rmSync/cpSync a directory that isn't a backup at all.
@@ -447,16 +463,17 @@ function migrateRoot(oldDir, newDir) {
         moved++
         continue
       }
-      // Game exists in both roots — merge snapshot subfolders that don't collide.
-      for (const snap of fs.readdirSync(srcGame, { withFileTypes: true })) {
-        if (!snap.isDirectory()) continue
-        const destSnap = path.join(destGame, snap.name)
-        if (fs.existsSync(destSnap)) continue
-        moveEntry(path.join(srcGame, snap.name), destSnap)
-        moved++
+      // Game exists in both roots: merge everything that isn't there yet (the
+      // vault's blobs and snapshots included), keeping what's already there.
+      const merge = (src, dest) => {
+        for (const e of fs.readdirSync(src, { withFileTypes: true })) {
+          const a = path.join(src, e.name), b = path.join(dest, e.name)
+          if (!fs.existsSync(b)) { fs.mkdirSync(dest, { recursive: true }); moveEntry(a, b); moved++ }
+          else if (e.isDirectory()) merge(a, b)
+        }
+        try { fs.rmSync(src, { recursive: true, force: true }) } catch {}
       }
-      // Remove the old game folder if it's now empty.
-      try { if (fs.readdirSync(srcGame).length === 0) fs.rmdirSync(srcGame) } catch {}
+      merge(srcGame, destGame)
     }
     if (moved > 0) logger.info(`saveBackup: migrated ${moved} backup folder(s) from "${from}" to "${to}"`)
     return { moved }
@@ -466,4 +483,4 @@ function migrateRoot(oldDir, newDir) {
   }
 }
 
-module.exports = { backupSave, listBackups, restoreBackup, deleteBackup, autoBackupGame, rootPath, migrateRoot, gameDir }
+module.exports = { backupSave, listBackups, restoreBackup, deleteBackup, autoBackupGame, rootPath, migrateRoot, gameDir, existingGameDir }

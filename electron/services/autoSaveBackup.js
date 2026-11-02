@@ -1,11 +1,11 @@
 'use strict'
 
-// Automatic game-save backups (Settings → Backups → Game saves), stored by
-// saveVault.js. A game is backed up only from its CONFIRMED save locations
-// (games.save_paths): either the user confirmed them, or the Ludusavi manifest
-// knew them exactly (saveManifest.js). The old way, taking the first folder a
-// name search turned up after every session, could back up the wrong folder
-// and never the real save.
+// Automatic game-save backups (Settings → Backups), stored by saveVault.js.
+// A game is backed up only from its CONFIRMED save locations (games.save_paths),
+// which saveDetect.js fills in on its own: the Ludusavi manifest, emulator
+// folders, Steam Cloud, and the folders a game wrote to while it was played.
+// The old way, taking the first folder a name search turned up, could back up
+// the wrong folder and never the real save.
 //
 //   before-play: right before KoZo starts the game, and when a session starts
 //                (games started outside KoZo). Unchanged saves cost nothing,
@@ -30,20 +30,12 @@ function setSavePaths(gameId, paths) {
   return clean
 }
 
-// Confirmed paths, or the manifest's exact ones (saved as confirmed the first
-// time they're used, so the user sees them in the Saves panel).
+// Confirmed paths, or what saveDetect finds now (saved as confirmed, so the
+// user sees them in the game's backup window).
 function resolvePaths(game) {
   const confirmed = getSavePaths(game)
   if (confirmed.length) return confirmed
-  try {
-    const known = require('./saveManifest').pathsFor(game).map(h => h.path)
-    if (known.length) {
-      setSavePaths(game.id, known)
-      logger.info(`autoSaveBackup: using the known save location for "${game.name}"`, { paths: known })
-      return known
-    }
-  } catch {}
-  return []
+  try { return require('./saveDetect').confirmFor(game) } catch { return [] }
 }
 
 const pending = new Map()
@@ -68,12 +60,20 @@ function beforePlay(game) {
   return take(game, 'before-play', { maxMs: 4000 })
 }
 
-function backupGameAfterSession(game) {
+// After a session: learn where the game saved (folders it wrote to while it
+// ran), then back up. `session` = { started_at, ended_at }.
+function backupGameAfterSession(game, session = null) {
   if (!isEnabled() || !game) return
   pending.set(game.id, game)
   const run = () => setImmediate(() => {
     if (!pending.delete(game.id)) return
+    try {
+      const fresh = require('../db/queries/games').getGame(game.id) || game
+      const learned = session?.started_at ? require('./saveDetect').learnFromSession(fresh, session.started_at, session.ended_at) : []
+      require('./saveDetect').confirmFor(fresh, learned)
+    } catch (e) { logger.warn('autoSaveBackup: detection failed', { message: e.message }) }
     take(game, 'after-play')
+    try { require('./googleDrive').syncSoon() } catch {}
     try {
       const games = require('../db/database').getDb().prepare('SELECT id, name FROM games WHERE save_paths IS NOT NULL').all()
       require('./saveVault').enforceCap(games)

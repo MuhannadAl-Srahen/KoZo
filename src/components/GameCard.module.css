@@ -119,7 +119,9 @@
 .bannerTitle {
   flex: 1;
   min-width: 0;
-  font-size: 15px;
+  font-family: var(--font-display);
+  letter-spacing: var(--display-tracking, normal);
+  font-size: calc(15px * var(--display-scale, 1));
   font-weight: 600;
   line-height: var(--lh-snug);
   color: var(--on-art);
@@ -251,7 +253,7 @@
 .achFill {
   height: 100%;
   border-radius: var(--r-xs);
-  background: linear-gradient(90deg, var(--a), var(--text-accent-bright));
+  background: linear-gradient(90deg, var(--a), var(--accent-2, var(--text-accent-bright)));
   box-shadow: 0 0 8px -2px var(--a);
 }
 
@@ -716,3 +718,28 @@
   border-color: var(--ab);
   box-shadow: var(--elev-2), 0 0 0 1px color-mix(in srgb, var(--a) 45%, transparent), 0 0 18px color-mix(in srgb, var(--a) 28%, transparent);
 }
+
+/* ── Card style (Settings → Appearance → Game cards) ─────────── */
+/* Poster: only the cover; the name and stats come up on hover or focus. */
+:global(html[data-card-style="poster"]) .gameInfo { display: none; }
+:global(html[data-card-style="poster"]) .artInfo,
+:global(html[data-card-style="poster"]) .artScrim { opacity: 0; transition: opacity var(--dur-base) var(--ease); }
+:global(html[data-card-style="poster"]) .card:hover .artInfo,
+:global(html[data-card-style="poster"]) .card:hover .artScrim,
+:global(html[data-card-style="poster"]) :global([data-gpfocus]) .artInfo,
+:global(html[data-card-style="poster"]) :global([data-gpfocus]) .artScrim { opacity: 1; }
+
+/* Glass: the name and the stats share one tinted band over the art. */
+:global(html[data-card-style="glass"]) .card { display: block; }
+:global(html[data-card-style="glass"]) .artScrim { height: 42%; }
+:global(html[data-card-style="glass"]) .artInfo { bottom: 52px; }
+:global(html[data-card-style="glass"]) .gameInfo {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+  border-top: 1px solid color-mix(in srgb, var(--a) 35%, transparent);
+  background: linear-gradient(0deg, color-mix(in srgb, var(--surface-1) 94%, transparent), color-mix(in srgb, var(--surface-1) 72%, transparent));
+}
+:global(html[data-card-style="glass"]) .cardSmall .artInfo { bottom: 44px; }
+
+/* Minimal: cover and name, nothing else. */
+:global(html[data-card-style="minimal"]) .gameInfo,
+:global(html[data-card-style="minimal"]) .bannerGenres { display: none; }
