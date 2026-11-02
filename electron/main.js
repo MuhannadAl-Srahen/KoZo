@@ -356,7 +356,7 @@ Close any program that may be using it and start KoZo again.`)
   }
 
   // Open KoZo from anywhere, even closed in the tray: Ctrl + Shift + K on the
-  // keyboard, or View + Menu held for a second on a controller.
+  // keyboard, or a held controller combo (Settings > Shortcuts, Xbox button by default).
   try {
     const ok = globalShortcut.register('Control+Shift+K', () => showFromAnywhere())
     if (!ok) require('./logger').warn('globalShortcut Ctrl+Shift+K registration failed (in use by another app)')

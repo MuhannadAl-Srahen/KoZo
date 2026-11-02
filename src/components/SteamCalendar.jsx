@@ -298,7 +298,7 @@ function SteamView({ days, todayKey, dayPick, isTracked, renderTrack, onOpen, on
         return (
           <section key={k} className={s.steamDay}>
             <div className={`${s.steamDayHead} ${k === todayKey ? s.steamDayToday : ''}`}>
-              {k === todayKey ? `Today, ${label}` : label}
+              {k === todayKey ? `Today, ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : label}
             </div>
             <div className={s.steamDayList}>
               {list.map(g => (

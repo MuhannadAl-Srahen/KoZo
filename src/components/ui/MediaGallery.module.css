@@ -69,6 +69,7 @@
   overflow-x: auto;
   padding: 3px 3px var(--sp-8);
   scroll-snap-type: x proximity;
+  scroll-padding-inline: 3px;   /* snapping to the first thumb lands at 0, not 3px in */
 }
 /* Same scrollbar as the rest of KoZo (global.css). Don't add scrollbar-width
    or scrollbar-color here: in Chromium either one switches the custom styling

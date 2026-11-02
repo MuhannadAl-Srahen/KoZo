@@ -401,7 +401,7 @@ function MonthTitle({ m, model, isNow, onAdd, small }) {
 function EmptyMonth({ m, onAdd }) {
   return (
     <div className={s.emptyDrop}>
-      Drop a game here, or <button type="button" className={s.linkBtn} onClick={() => onAdd(m)}>add games</button>
+      <span>Drop a game here, or <button type="button" className={s.linkBtn} onClick={() => onAdd(m)}>add games</button></span>
     </div>
   )
 }
@@ -651,7 +651,7 @@ export default function PlayPlan() {
       <>
         <div className={s.rmNav}>
           <button className={s.navBtn} onClick={() => setRmStart(shiftMonth(rmStart, -1))} aria-label="Earlier months"><IconChevronLeft size={17} /></button>
-          <span className={`${s.rmRange} ${s.cap}`}>{formatMonthKey(rmMonths[0], 'long')} to {formatMonthKey(rmMonths[3], 'long')}</span>
+          <span className={s.rmRange}>{formatMonthKey(rmMonths[0], 'long')} to {formatMonthKey(rmMonths[3], 'long')}</span>
           <button className={s.navBtn} onClick={() => setRmStart(shiftMonth(rmStart, 1))} aria-label="Later months"><IconChevronRight size={17} /></button>
           {rmStart !== thisMonth && <button className={s.todayBtn} onClick={() => setRmStart(thisMonth)}>This month</button>}
         </div>

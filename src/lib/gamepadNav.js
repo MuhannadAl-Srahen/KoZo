@@ -15,7 +15,7 @@
 // or dialog is open only its controls count. The ring is the `data-gpfocus`
 // attribute (not a class: React rewrites className on re-render and would drop
 // it); real mouse or keyboard input hides it and the hint bar. Polling runs
-// ONLY after the first `gamepadconnected` (or a View + Menu wake from the
+// ONLY after the first `gamepadconnected` (or a controller wake combo from the
 // main process), and pauses while the window is hidden or unfocused.
 
 const POLL_MS = 90
@@ -258,6 +258,12 @@ function readDirection(gp) {
 function justPressed(gp, index) {
   return !!gp.buttons[index]?.pressed && !_prevButtons[index]
 }
+function justReleased(gp, index) {
+  return !gp.buttons[index]?.pressed && !!_prevButtons[index]
+}
+// LB, RB and Menu act on release, and not at all when they were part of a
+// held combo (the "open KoZo" wake combos LB + RB + Menu and View + Menu).
+let _chord = false
 
 function pressEscape() {
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }))
@@ -367,13 +373,17 @@ function poll() {
   }
   if (justPressed(gp, B.X)) openOptions()
   if (justPressed(gp, B.Y) && !_scopeEl) focusSearch()
+  const held = (i) => !!gp.buttons[i]?.pressed
+  const heldCount = [B.LB, B.RB, B.MENU, B.VIEW].filter(held).length
+  if (heldCount >= 2) _chord = true
   if (!_scopeEl) {
-    if (justPressed(gp, B.LB)) cycleSidebar(-1)
-    if (justPressed(gp, B.RB)) cycleSidebar(1)
+    if (justReleased(gp, B.LB) && !_chord) cycleSidebar(-1)
+    if (justReleased(gp, B.RB) && !_chord) cycleSidebar(1)
     if (justPressed(gp, B.LT)) cycleInPageTabs(-1)
     if (justPressed(gp, B.RT)) cycleInPageTabs(1)
-    if (justPressed(gp, B.MENU)) { _navigate?.('/settings'); clearFocus() }
+    if (justReleased(gp, B.MENU) && !_chord) { _navigate?.('/settings'); clearFocus() }
   }
+  if (heldCount === 0) _chord = false
 
   _prevButtons = gp.buttons.map(x => !!x?.pressed)
 }
@@ -424,7 +434,7 @@ export function initGamepadNav({ navigate, onBigPicture }) {
     if (document.visibilityState === 'visible') onVisible()
     else onHidden()
   }
-  // View + Menu held while KoZo was in the tray (main process): the pad is
+  // The wake combo held while KoZo was in the tray (main process): the pad is
   // certainly there, so start driving at once.
   const offWake = window.kozo?.events?.onGamepadWake?.((info) => {
     _padSeen = true

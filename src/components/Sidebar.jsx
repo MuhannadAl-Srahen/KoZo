@@ -276,7 +276,7 @@ export default function Sidebar() {
             to="/big"
             data-gpnav=""
             className={s.footBtn}
-            title="Big Picture: full screen for the TV and the controller (or hold View + Menu)"
+            title="Big Picture: full screen for the TV and the controller (or hold the controller shortcut from Settings > Shortcuts)"
           >
             <IconDeviceTv size={17} stroke={1.7} />
             <span className={s.navLabel}>Big Picture</span>

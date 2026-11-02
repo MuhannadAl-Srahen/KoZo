@@ -54,8 +54,8 @@ export default function MediaGallery({ items = [], height }) {
   function measure() {
     const el = stripRef.current
     if (!el) return
-    const left = el.scrollLeft > 2
-    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 2
+    const left = el.scrollLeft > 8
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 8
     setEdges(prev => (prev.left === left && prev.right === right ? prev : { left, right }))
   }
   useEffect(() => {

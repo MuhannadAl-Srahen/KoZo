@@ -471,7 +471,6 @@ export default function Library() {
           <SearchableSelect
             value={sortBy}
             onChange={v => {
-              // Clearing (X) resets to the default sort rather than no-op'ing.
               const next = v || 'last_played'
               setSortBy(next)
               localStorage.setItem('kozo:sort:library', next)
@@ -479,6 +478,7 @@ export default function Library() {
             options={SORT_OPTIONS}
             placeholder="Sort by"
             searchable={false}
+            clearable={false}
             width={148}
           />
 

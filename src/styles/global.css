@@ -102,6 +102,9 @@ select:focus-visible {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--a) 35%, transparent), 0 0 26px color-mix(in srgb, var(--a) 42%, transparent);
 }
 html[data-gamepad] .app-main { scroll-behavior: smooth; }
+/* Scrolling to the ring leaves room for the hint bar (GamepadHints) at the
+   bottom and a little air at the top, so the focused card is never under it. */
+html[data-gamepad] [data-gpfocus] { scroll-margin: 20px 12px 76px; }
 
 /* ── Motion ──────────────────────────────────────────────────────────── */
 @keyframes spin {

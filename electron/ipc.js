@@ -836,7 +836,11 @@ handle('genres:distinct', () => gameListQ.distinctGenres())
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 handle('settings:get', (key) => settingsQ.getSetting(key))
-handle('settings:set', (key, value) => { settingsQ.setSetting(key, value); return true })
+handle('settings:set', (key, value) => {
+  settingsQ.setSetting(key, value)
+  if (key === 'pad_wake_combo') require('./services/controllerWake').setCombo(value)
+  return true
+})
 handle('settings:getAll', () => settingsQ.getAllSettings())
 
 // ── Active sessions (from process watcher) ───────────────────────────────────
@@ -1308,6 +1312,21 @@ handle('scanner:scan', async (paths) => {
   } catch (e) {
     logger.warn('scanner: relocate pass failed', { message: e.message })
   }
+
+  // Games already in the library show the cover they have there (a cracked
+  // copy has no Steam id, so the modal had nothing to draw).
+  try {
+    const norm = (s) => String(s || '').trim().toLowerCase().replace(/[\\/]+$/, '')
+    const lib = db.prepare('SELECT name, install_path, steam_app_id, banner_local_path, banner_url FROM games').all()
+    for (const g of results) {
+      if (!g.alreadyInLibrary) continue
+      const row = lib.find(r =>
+        (r.install_path && norm(r.install_path) === norm(g.install_path)) ||
+        (r.steam_app_id && g.steam_app_id && String(r.steam_app_id) === String(g.steam_app_id)) ||
+        norm(r.name) === norm(g.name))
+      if (row) { g.library_cover_path = row.banner_local_path || null; g.library_cover_url = row.banner_url || null }
+    }
+  } catch {}
 
   return results
 })

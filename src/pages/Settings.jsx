@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useId, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   IconKey, IconCheck, IconX, IconLoader2, IconClock, IconEye, IconEyeOff, IconLayoutGrid,
   IconUser, IconRefresh, IconExternalLink, IconAlertTriangle,
@@ -331,10 +331,16 @@ const PAD_GROUPS = [
     [['Y'], 'Jump to the search box'],
     [['Menu'], 'Open Settings'],
   ] },
-  { title: 'From anywhere', rows: [
-    [['View + Menu'], 'Hold for a second: bring KoZo up in Big Picture, even from the tray or a game'],
-  ] },
 ]
+
+// The held combo that brings KoZo up from anywhere (services/controllerWake.js).
+const WAKE_COMBOS = [
+  { value: 'guide',    label: 'Xbox button', keys: ['Xbox'] },
+  { value: 'lbrbmenu', label: 'LB + RB + Menu', keys: ['LB + RB + Menu'] },
+  { value: 'viewmenu', label: 'View + Menu', keys: ['View + Menu'] },
+  { value: 'off',      label: 'Off', keys: null },
+]
+let wakeComboCache = null
 const PAD_COLORS = { A: '#3fb950', B: '#f85149', X: '#4493f8', Y: '#e3b341' }
 
 function Keys({ keys }) {
@@ -387,6 +393,43 @@ function usePadName() {
   return name
 }
 
+function WakeComboPicker() {
+  const [combo, setCombo] = useState(wakeComboCache || 'guide')
+  useEffect(() => {
+    window.kozo?.api?.settings?.get?.('pad_wake_combo').then(r => {
+      if (r?.ok && WAKE_COMBOS.some(c => c.value === r.data)) { wakeComboCache = r.data; setCombo(r.data) }
+    })
+  }, [])
+  function pick(v) {
+    setCombo(v)
+    wakeComboCache = v
+    window.kozo?.api?.settings?.set('pad_wake_combo', v)
+  }
+  const cur = WAKE_COMBOS.find(c => c.value === combo)
+  return (
+    <div className={s.shortcutGroup}>
+      <div className={s.shortcutGroupTitle}>From anywhere</div>
+      <Segmented label="Open KoZo with" value={combo} options={WAKE_COMBOS} onChange={pick} wrap />
+      <div className={s.shortcutList}>
+        <div className={s.shortcutRow}>
+          {cur.keys ? <PadKeys keys={cur.keys} /> : <span className={s.shortcutKeys}><kbd className={s.padKey}>Off</kbd></span>}
+          <span className={s.shortcutWhat}>
+            {cur.keys
+              ? 'Hold for a second: bring KoZo up in Big Picture, even from the tray or a game'
+              : "The controller can't open KoZo from the tray. Ctrl + Shift + K still works"}
+          </span>
+        </div>
+      </div>
+      {combo === 'guide' && (
+        <p className={s.sectionDescQuiet}>
+          A quick press of the Xbox button still opens Windows Game Bar; holding it opens KoZo.
+          If your controller doesn't report the Xbox button, LB + RB + Menu works instead.
+        </p>
+      )}
+    </div>
+  )
+}
+
 function ShortcutsTab() {
   const pad = usePadName()
   return (
@@ -433,6 +476,7 @@ function ShortcutsTab() {
             </div>
           </div>
         ))}
+        <WakeComboPicker />
       </section>
     </div>
   )
@@ -1766,7 +1810,7 @@ const FEATURE_GROUPS = [
       { Icon: IconBell,      name: 'In-game status (Alt+K)', go: 'tab:shortcuts', desc: 'Press Alt+K while playing to flash your live session time and achievement progress over the game.' },
       { Icon: IconTrophy,    name: 'Achievement list (Alt+J)', go: 'tab:shortcuts', desc: 'Press Alt+J while playing to flash your progress and the rarest achievements you still have left, right over the game.' },
       { Icon: IconRocket,    name: 'Tray & startup', go: 'tab:general',desc: 'Runs quietly in the system tray and can launch with Windows.' },
-      { Icon: IconRocket,    name: 'Open KoZo from anywhere', go: 'tab:shortcuts', desc: 'Press Ctrl+Shift+K, or hold View and Menu on a controller for a second, to bring KoZo up (in Big Picture) even when it is closed to the tray.' },
+      { Icon: IconRocket,    name: 'Open KoZo from anywhere', go: 'tab:shortcuts', desc: 'Press Ctrl+Shift+K, or hold the Xbox button on a controller for a second (pick another combo in Shortcuts), to bring KoZo up (in Big Picture) even when it is closed to the tray.' },
       { Icon: IconDeviceTv,  name: 'Big Picture', go: '/big', desc: 'Full screen for the TV: big posters, your recent games and Up next, made for the controller.' },
       { Icon: IconBrandDiscord, name: 'Discord status', go: 'tab:accounts', desc: 'Discord shows the game you are playing, your KoZo level and your hours in it.' },
       { Icon: IconDeviceGamepad2, name: 'Controller control', go: 'tab:shortcuts', desc: 'Drive the whole app with a controller: D-pad to move, A to select, B to go back, X for options, Y to search, LB and RB to switch tabs.' },
@@ -1993,8 +2037,11 @@ const TABS = [
 const TAB_ALIASES = { steam: 'accounts', scan: 'tracking' }
 
 export default function Settings() {
-  const [tab, setTabRaw] = useState('general')
-  const setTab = (t) => setTabRaw(TAB_ALIASES[t] || t)
+  // `?tab=<key>` (or an old alias) opens that tab; links and the URL stay in step.
+  const [params, setParams] = useSearchParams()
+  const want = TAB_ALIASES[params.get('tab')] || params.get('tab')
+  const tab = TABS.some(t => t.key === want) ? want : 'general'
+  const setTab = (t) => setParams({ tab: TAB_ALIASES[t] || t }, { replace: true })
   const current = TABS.find(t => t.key === tab) || TABS[0]
   const [saveGame, setSaveGame] = useState(null)   // game whose saves are being managed
   return (

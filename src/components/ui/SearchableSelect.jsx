@@ -5,6 +5,7 @@ import s from './SearchableSelect.module.css'
 
 export default function SearchableSelect({
   value, onChange, options, placeholder = 'All', width = 180, searchable = true,
+  clearable = true,   // false for a sort: there is no "nothing" to clear to
 }) {
   const [open, setOpen]       = useState(false)
   const [query, setQuery]     = useState('')
@@ -71,7 +72,7 @@ export default function SearchableSelect({
         <span className={s.triggerLabel} title={selected ? selected.label : placeholder}>
           {selected ? selected.label : <span className={s.triggerPlaceholder}>{placeholder}</span>}
         </span>
-        {value && value !== '' ? (
+        {clearable && value && value !== '' ? (
           <span
             className={s.clear}
             onMouseDown={e => { e.preventDefault(); e.stopPropagation() }}

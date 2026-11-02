@@ -36,7 +36,7 @@ function GamepadNav() {
     navigate: (to, ...rest) => (to === -1 && (window.history.state?.idx ?? 0) === 0)
       ? navRef.current('/')
       : navRef.current(to, ...rest),
-    // View + Menu held on a controller opens Big Picture.
+    // The controller wake combo (Settings > Shortcuts) opens Big Picture.
     onBigPicture: () => navRef.current('/big'),
   }), [])
   return null
