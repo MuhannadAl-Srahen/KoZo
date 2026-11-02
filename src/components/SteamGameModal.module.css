@@ -91,3 +91,19 @@
   cursor: pointer;
 }
 .ghostBtn:hover { background: var(--neutral-bg-hover); color: var(--text-primary); }
+
+.topChips { display: flex; flex-wrap: wrap; gap: var(--sp-6); }
+.topChips .countdown { align-self: auto; }
+.match {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: var(--sp-4) var(--sp-12);
+  border-radius: var(--r-pill);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+.match_high { background: color-mix(in srgb, var(--success) 18%, transparent); color: var(--success); }
+.match_mid { background: color-mix(in srgb, var(--a) 18%, transparent); color: var(--a); }
+.match_low { background: var(--surface-3); color: var(--text-secondary); }
+.matchReason { color: var(--text-secondary); font-size: var(--fs-sm); }

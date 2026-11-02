@@ -247,6 +247,54 @@ console.log('\npickForMe')
   check('empty list picks nothing', pickWeighted([], () => 0.5) === null)
 }
 
+// src/lib/utils.js release dates: the store record beats the search text, and
+// vague dates ("Q1 2027") never land on an exact day.
+console.log('\nrelease dates')
+{
+  let src = require('fs').readFileSync(path.join(__dirname, '..', 'src', 'lib', 'utils.js'), 'utf8')
+  const icons = (src.match(/^import \{([\s\S]*?)\} from '@tabler\/icons-react'/) || [])[1] || ''
+  src = src.replace(/^import \{[\s\S]*?\} from '@tabler\/icons-react'\r?\n/, '')
+    .replace(/export (const|function|async function)/g, '$1')
+  const stubs = icons.split(',').map(x => x.trim()).filter(Boolean).map(n => `const ${n} = null;`).join('\n')
+  const { parseRelease, storeRelease, countdownTo } = new Function(stubs + src + '; return { parseRelease, storeRelease, countdownTo }')()
+  check('"Q1 2027" is a year, not a day', parseRelease('Q1 2027').precision === 'year')
+  check('"Early 2027" is a year', parseRelease('Early 2027').precision === 'year')
+  check('"Nov 5, 2026" is a day', parseRelease('Nov 5, 2026').precision === 'day')
+  const at = Date.UTC(2027, 1, 18, 5, 0)   // 05:00 UTC
+  const full = storeRelease({ ts: at, display: 'date_full' }, 'Feb 17, 2027')
+  check('store date wins over the search text', full.precision === 'day' && full.ts === at)
+  check('store month stays vague', storeRelease({ ts: Date.UTC(2026, 11, 31, 8), display: 'date_month' }, 'December 2026').precision === 'month')
+  check('store quarter is a year', storeRelease({ ts: Date.UTC(2027, 2, 31, 7), display: 'date_quarter' }, 'Q1 2027').precision === 'year')
+  check('TBA has no date', storeRelease({ ts: null, display: 'text_tba', text: 'To be announced' }, 'x').ts === null)
+  check('no store record falls back to the text', storeRelease(null, 'Nov 5, 2026').precision === 'day')
+  check('countdown', countdownTo({ ts: 10 * 3600000 + 5 * 60000, precision: 'day' }, 0) === 'in 10h 5m' &&
+    countdownTo({ ts: 3 * 86400000 + 4 * 3600000, precision: 'day' }, 0) === 'in 3d 4h')
+}
+
+// src/lib/tasteMatch.js: "Picked for you" scores and reasons.
+console.log('\ntasteMatch')
+{
+  const src = require('fs').readFileSync(path.join(__dirname, '..', 'src', 'lib', 'tasteMatch.js'), 'utf8')
+    .replace(/export (const|function)/g, '$1')
+  const { matchScore, matchReason, MATCH_MIN } = new Function(src + '; return { matchScore, matchReason, MATCH_MIN }')()
+  const profile = {
+    tagWeights: { 1: 1, 2: 0.8, 3: 0.6, 4: -0.5 },
+    sources: [
+      { name: 'Hollow Knight', appid: 10, weight: 3, tags: [1, 2, 9] },
+      { name: 'Dropped Game', appid: 11, weight: -1, tags: [4, 5] },
+    ],
+    tagNames: { 1: 'Metroidvania', 2: 'Souls-like', 3: 'Difficult', 4: 'Farming' },
+  }
+  const good = matchScore([1, 2, 3], profile), bad = matchScore([4, 7, 8], profile), none = matchScore([7, 8], profile)
+  check('shared top tags match well', good >= 70, String(good))
+  check('tags of dropped games do not match', bad === 0, String(bad))
+  check('nothing shared is 0', none === 0)
+  check('a good match passes the Picked for you cut', good >= MATCH_MIN)
+  const why = matchReason([1, 2, 3], profile)
+  check('reason names the game it is like', why?.name === 'Hollow Knight' && why.shared.join() === 'Metroidvania,Souls-like', JSON.stringify(why))
+  check('no reason from a disliked game', matchReason([4, 5], profile) === null)
+}
+
 // ── Discord Rich Presence (against a fake Discord pipe) ──────────────────────
 async function discordTests() {
   console.log('\ndiscordPresence')

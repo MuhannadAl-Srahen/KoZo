@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { IconBrandSteam, IconCalendar, IconClock, IconTag, IconUsers } from '@tabler/icons-react'
+import { IconBrandSteam, IconCalendar, IconClock, IconTag, IconUsers, IconSparkles } from '@tabler/icons-react'
 import Modal from './ui/Modal'
 import MediaGallery from './ui/MediaGallery'
 import { PanelSkeleton } from './ui/Skeleton'
@@ -9,7 +9,7 @@ import s from './SteamGameModal.module.css'
 // a media gallery (hero art + screenshots, full-screen on click), release and
 // countdown, price, genres, developer, description and Steam categories.
 // `actions` renders in the footer next to "Steam page".
-export default function SteamGameModal({ appId, name, release, countdown, art, fallbackArt = [], onClose, actions }) {
+export default function SteamGameModal({ appId, name, release, countdown, art, fallbackArt = [], onClose, actions, match = null }) {
   const [details, setDetails] = useState(undefined)   // undefined = loading, null = unavailable
 
   useEffect(() => {
@@ -51,7 +51,11 @@ export default function SteamGameModal({ appId, name, release, countdown, art, f
         </div>
 
         <div className={s.infoCol}>
-          {countdown && <div className={s.countdown}><IconClock size={14} /> {countdown}</div>}
+          <div className={s.topChips}>
+            {countdown && <div className={s.countdown}><IconClock size={14} /> {countdown}</div>}
+            {match && <div className={`${s.match} ${s['match_' + match.tone]}`}><IconSparkles size={14} /> {match.pct}% match</div>}
+          </div>
+          {match?.reason && <div className={s.matchReason}>{match.reason}</div>}
           <div className={s.facts}>
             <div className={s.fact}>
               <IconCalendar size={14} />

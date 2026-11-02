@@ -712,6 +712,7 @@ handle('gameList:add', async (data) => {
   const r = gameListQ.addGameListItem(data); bk(); return r
 })
 handle('gameList:update', (id, data) => {
+  if (data?.status || data?.rating !== undefined) require('./services/steamApi').clearTasteProfile()
   const prev = data?.status ? gameListQ.getGameListItem(id) : null
   const r = gameListQ.updateGameListItem(id, data)
   // Mirror a status change onto the linked library game (and vice versa elsewhere).
@@ -1604,6 +1605,7 @@ handle('gameList:rate', ({ listId = null, gameId = null } = {}, rating) => {
   }
   if (!id) throw new Error('Game not found')
   gameListQ.updateGameListItem(id, { rating: value })
+  require('./services/steamApi').clearTasteProfile()
   bk(); broadcast('game:updated', null)
   return value
 })
@@ -2022,6 +2024,23 @@ handle('app:relaunch', () => {
 handle('app:minimize', () => {
   const win = require('./main').getMainWindow()
   if (win && !win.isDestroyed()) win.minimize()
+  return true
+})
+
+// Big Picture after a game it started closes: back in front (Windows refuses
+// a plain focus() from the background, so briefly always-on-top).
+handle('app:bringToFront', () => {
+  const { app } = require('electron')
+  const win = require('./main').getMainWindow()
+  if (!win || win.isDestroyed()) return false
+  if (win.isMinimized()) win.restore()
+  win.show()
+  try {
+    win.setAlwaysOnTop(true)
+    app.focus({ steal: true })
+    win.focus()
+    setTimeout(() => { if (!win.isDestroyed()) win.setAlwaysOnTop(false) }, 400)
+  } catch {}
   return true
 })
 

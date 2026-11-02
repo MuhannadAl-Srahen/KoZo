@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 11,
+  rev: 12,
   // Settings → Appearance → UI scale.
   ui: {
     setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
@@ -194,6 +194,7 @@ contextBridge.exposeInMainWorld('kozo', {
       whatsNew: () => ipcRenderer.invoke('app:whatsNew'),
       setFullScreen: (on) => ipcRenderer.invoke('app:setFullScreen', on),
       minimize: () => ipcRenderer.invoke('app:minimize'),
+      bringToFront: () => ipcRenderer.invoke('app:bringToFront'),
       getGpu: () => ipcRenderer.invoke('app:getGpu'),
       setGpu: (on) => ipcRenderer.invoke('app:setGpu', on),
       relaunch: () => ipcRenderer.invoke('app:relaunch'),

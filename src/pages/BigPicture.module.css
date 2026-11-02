@@ -9,38 +9,79 @@
   overflow: hidden;
   background: var(--bg);
   color: var(--text-primary);
+  --bp-pad: clamp(20px, 3vw, 56px);
   /* Width follows the window's width AND height, so a whole row of posters
      always fits under the hero, on a TV or in a short window. */
-  --bp-poster: clamp(110px, min(12vw, 26vh), 260px);
+  --bp-poster: clamp(120px, min(11.5vw, 24vh), 250px);
 }
 
+/* ── Backdrop: the focused game's art behind everything ─────── */
 .backdrop { position: absolute; inset: 0; z-index: -1; overflow: hidden; }
 .backdropImg {
   position: absolute;
   inset: 0;
   width: 100%;
-  height: 72%;
+  height: 78%;
   object-fit: cover;
   object-position: center 25%;
-  animation: bpFade 0.45s ease;
+  animation: bpFade 0.55s ease;
 }
 @keyframes bpFade { from { opacity: 0; } to { opacity: 1; } }
+/* Poster as backdrop (no wide art): soft and dim instead of stretched. */
+.backdropSoft { filter: blur(28px) saturate(1.2) brightness(0.7); transform: scale(1.12); height: 85%; }
 .backdropShade {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(90deg, rgba(8, 8, 14, 0.92) 0%, rgba(8, 8, 14, 0.55) 45%, rgba(8, 8, 14, 0.2) 100%),
-    linear-gradient(0deg, var(--bg) 30%, color-mix(in srgb, var(--bg) 70%, transparent) 55%, transparent 80%);
+    linear-gradient(90deg, rgba(8, 8, 14, 0.94) 0%, rgba(8, 8, 14, 0.55) 45%, rgba(8, 8, 14, 0.15) 100%),
+    linear-gradient(0deg, var(--bg) 34%, color-mix(in srgb, var(--bg) 70%, transparent) 58%, transparent 82%);
+}
+.backdropShadeGame {
+  background:
+    linear-gradient(90deg, rgba(8, 8, 14, 0.9) 0%, rgba(8, 8, 14, 0.45) 55%, rgba(8, 8, 14, 0.2) 100%),
+    linear-gradient(0deg, var(--bg) 42%, color-mix(in srgb, var(--bg) 60%, transparent) 64%, transparent 88%);
 }
 
+/* ── Top bar ────────────────────────────────────────────────── */
 .top {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: clamp(12px, 1.4vw, 28px);
-  padding: clamp(14px, 2vh, 28px) clamp(20px, 3vw, 56px);
+  padding: clamp(14px, 2vh, 28px) var(--bp-pad);
 }
 .brand { display: inline-flex; align-items: center; gap: 10px; font-size: clamp(18px, 1.5vw, 28px); font-weight: 800; letter-spacing: 0.02em; }
+.tabs { display: flex; gap: 4px; padding: 4px; border-radius: var(--r-pill); background: rgba(8, 8, 14, 0.5); border: 1px solid rgba(255, 255, 255, 0.1); }
+.tab {
+  padding: clamp(6px, 0.8vh, 10px) clamp(14px, 1.3vw, 26px);
+  border: none;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  font: inherit;
+  font-size: clamp(14px, 1.1vw, 21px);
+  font-weight: 700;
+  cursor: pointer;
+}
+.tab:hover { color: #fff; }
+.tabOn { background: #fff; color: #0b0b12; }
+.tabOn:hover { color: #0b0b12; }
 .topSpacer { flex: 1; }
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: clamp(180px, 18vw, 360px);
+  padding: 0 14px;
+  height: clamp(36px, 4.4vh, 50px);
+  border-radius: var(--r-pill);
+  background: rgba(8, 8, 14, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.7);
+}
+.search:focus-within { border-color: var(--a); color: #fff; }
+.search input { flex: 1; min-width: 0; border: none; outline: none; background: none; color: #fff; font: inherit; font-size: clamp(14px, 1.05vw, 19px); }
+.search input::placeholder { color: rgba(255, 255, 255, 0.5); }
 .level {
   padding: 4px 14px;
   border-radius: var(--r-pill);
@@ -48,9 +89,10 @@
   border: 1px solid var(--ab);
   font-size: clamp(14px, 1.05vw, 20px);
   font-weight: 700;
+  white-space: nowrap;
 }
 .clock { font-size: clamp(18px, 1.5vw, 28px); font-weight: 600; font-variant-numeric: tabular-nums; }
-.exitBtn {
+.exitBtn, .backBtn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -58,145 +100,54 @@
   border-radius: var(--r-pill);
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font: inherit;
   font-size: clamp(14px, 1.05vw, 20px);
   font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
 }
-.exitBtn:hover { background: rgba(255, 255, 255, 0.16); }
+.exitBtn:hover, .backBtn:hover { background: rgba(255, 255, 255, 0.16); }
 
+/* ── Scrolling area ─────────────────────────────────────────── */
+.main {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-bottom: clamp(70px, 9vh, 110px);   /* room for the controller hints */
+  scrollbar-width: none;
+  mask-image: linear-gradient(to bottom, transparent 0, #000 14px);
+}
+.main::-webkit-scrollbar { display: none; }
+:global(html[data-gamepad]) .main { scroll-behavior: smooth; }
+
+/* ── Home hero ──────────────────────────────────────────────── */
 .hero {
-  flex-shrink: 0;
-  min-height: clamp(180px, 30vh, 420px);
+  min-height: clamp(170px, 30vh, 420px);
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  gap: clamp(8px, 1.2vh, 18px);
-  padding: 0 clamp(20px, 3vw, 56px) clamp(12px, 2vh, 28px);
+  padding: 0 var(--bp-pad) clamp(8px, 1.5vh, 20px);
 }
-.heroName {
+.heroRow { display: flex; align-items: flex-end; gap: clamp(16px, 1.8vw, 32px); }
+.heroInfo { display: flex; flex-direction: column; gap: clamp(6px, 1vh, 14px); min-width: 0; }
+.heroName, .gameName {
+  margin: 0;
   max-width: 70vw;
   font-size: clamp(32px, 3.6vw, 72px);
   font-weight: 800;
   line-height: 1.05;
   text-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
 }
-.heroMeta { display: flex; flex-wrap: wrap; gap: clamp(14px, 1.6vw, 32px); font-size: clamp(15px, 1.15vw, 22px); color: rgba(255, 255, 255, 0.85); }
+.heroGenres { font-size: clamp(14px, 1.05vw, 20px); color: rgba(255, 255, 255, 0.72); font-weight: 600; letter-spacing: 0.02em; }
+.heroMeta { display: flex; flex-wrap: wrap; gap: clamp(14px, 1.6vw, 32px); font-size: clamp(15px, 1.15vw, 22px); color: rgba(255, 255, 255, 0.86); }
 .heroMeta span { display: inline-flex; align-items: center; gap: 8px; }
 .heroMeta svg { color: var(--a); }
-.heroActions { display: flex; gap: 12px; margin-top: 6px; }
-.playBtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: clamp(10px, 1.2vh, 16px) clamp(26px, 2.4vw, 44px);
-  border-radius: var(--r-pill);
-  background: var(--a);
-  color: var(--accent-ink);
-  font-size: clamp(17px, 1.3vw, 24px);
-  font-weight: 800;
-  box-shadow: 0 10px 30px color-mix(in srgb, var(--a) 40%, transparent);
-}
-.playBtn:hover { filter: brightness(1.1); }
-
-.rows {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding-bottom: clamp(20px, 4vh, 60px);
-  scroll-behavior: smooth;
-  /* Rows snap whole into view: a row never sits sliced in half under the
-     hero. The top edge fades instead of cutting hard. */
-  scroll-snap-type: y mandatory;
-  mask-image: linear-gradient(to bottom, transparent 0, #000 18px);
-  scrollbar-width: none;
-}
-.rows::-webkit-scrollbar { display: none; }
-.row { padding: clamp(8px, 1.4vh, 18px) 0; scroll-snap-align: start; }
-.rowTitle {
-  padding: 0 clamp(20px, 3vw, 56px) 10px;
-  font-size: clamp(18px, 1.45vw, 28px);
-  font-weight: 700;
-}
-.rowScroll {
-  display: flex;
-  gap: clamp(12px, 1.2vw, 24px);
-  overflow-x: auto;
-  /* Room for the focus ring and the scaled-up card. */
-  padding: 12px clamp(20px, 3vw, 56px) 18px;
-  scroll-padding-inline: clamp(20px, 3vw, 56px);
-  scrollbar-width: none;
-}
-.rowScroll::-webkit-scrollbar { display: none; }
-
-.card {
-  position: relative;
-  flex: 0 0 var(--bp-poster);
-  aspect-ratio: 2 / 3;
-  border-radius: var(--r-card);
-  overflow: hidden;
-  background: var(--surface-3);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-}
-.card:hover { transform: scale(1.04); box-shadow: 0 14px 36px rgba(0, 0, 0, 0.5); }
-.cardBtn {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100%;
-  height: 100%;
-  padding: 0;
-  text-align: center;
-}
-.cardBtn img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.cardName {
-  position: absolute;
-  left: 0; right: 0; bottom: 0;
-  padding: 28px 12px 12px;
-  background: linear-gradient(to top, rgba(8, 8, 14, 0.92), transparent);
-  font-size: clamp(13px, 0.95vw, 18px);
-  font-weight: 700;
-  text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-.card:hover .cardName, .card[data-gpfocus] .cardName { opacity: 1; }
-
-.pickCard {
-  background: linear-gradient(160deg, color-mix(in srgb, var(--a) 35%, var(--surface-2)), var(--surface-2));
-  border-color: var(--ab);
-  color: var(--text-primary);
-}
-.pickCard svg { color: var(--a); }
-.pickLabel { font-size: clamp(16px, 1.25vw, 24px); font-weight: 800; }
-.pickSub { padding: 0 12px; font-size: clamp(12px, 0.85vw, 16px); color: var(--text-secondary); }
-
-/* Poster as backdrop (no wide art): soft and dim instead of stretched. */
-.backdropSoft { filter: blur(28px) saturate(1.2) brightness(0.7); transform: scale(1.12); height: 80%; }
-
-.heroRow { display: flex; align-items: flex-end; gap: clamp(16px, 1.8vw, 32px); }
-.heroCover {
-  position: relative;
-  flex-shrink: 0;
-  width: clamp(110px, 9vw, 190px);
-  aspect-ratio: 2 / 3;
-  border-radius: var(--r-card);
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
-}
-.heroCover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.heroInfo { display: flex; flex-direction: column; gap: clamp(6px, 1vh, 14px); min-width: 0; }
-.heroGenres { font-size: clamp(14px, 1.05vw, 20px); color: rgba(255, 255, 255, 0.7); font-weight: 600; letter-spacing: 0.02em; }
 .heroAch { gap: 10px !important; }
 .heroAchBar { display: inline-block; width: clamp(80px, 7vw, 140px); height: 6px; border-radius: 99px; background: rgba(255, 255, 255, 0.18); overflow: hidden; }
 .heroAchBar span { display: block; height: 100%; background: linear-gradient(90deg, var(--a), #fbbf24); }
+.heroActions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; }
 .livePill {
   align-self: flex-start;
   display: inline-flex; align-items: center; gap: 8px;
@@ -209,40 +160,253 @@
   font-weight: 700;
 }
 .liveDot { width: 9px; height: 9px; border-radius: 50%; background: var(--status-playing); animation: livePulse 1.6s ease-in-out infinite; }
-.ghostBtn {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: clamp(10px, 1.2vh, 16px) clamp(20px, 1.8vw, 32px);
+@keyframes livePulse { 50% { opacity: 0.35; } }
+
+.playBtn, .ghostBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
   border-radius: var(--r-pill);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+.playBtn {
+  padding: clamp(11px, 1.3vh, 17px) clamp(28px, 2.6vw, 48px);
+  border: none;
+  background: var(--a);
+  color: var(--accent-ink);
+  font-size: clamp(17px, 1.35vw, 25px);
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--a) 40%, transparent);
+}
+.playBtn:hover { filter: brightness(1.1); }
+.playBtn:disabled { filter: saturate(0.6); cursor: default; }
+.ghostBtn {
+  padding: clamp(10px, 1.2vh, 16px) clamp(20px, 1.8vw, 32px);
   background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   color: #fff;
   font-size: clamp(15px, 1.1vw, 20px);
   font-weight: 700;
 }
 .ghostBtn:hover { background: rgba(255, 255, 255, 0.18); }
-.playBtn:disabled { filter: saturate(0.6); cursor: default; }
+
+/* ── Rows and cards ─────────────────────────────────────────── */
+.rows { display: flex; flex-direction: column; gap: clamp(4px, 1vh, 14px); }
+.row { min-width: 0; }
+.rowTitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 0 var(--bp-pad);
+  font-size: clamp(18px, 1.45vw, 28px);
+  font-weight: 700;
+}
+.rowTitle svg { color: var(--a); }
+.rowScroll {
+  display: flex;
+  gap: clamp(14px, 1.3vw, 26px);
+  overflow-x: auto;
+  /* Room above and below for the focused card's scale-up and glow. */
+  padding: 16px var(--bp-pad) 18px;
+  scroll-padding-inline: var(--bp-pad);
+  scrollbar-width: none;
+}
+.rowScroll::-webkit-scrollbar { display: none; }
+
+.card { position: relative; flex: 0 0 var(--bp-poster); width: var(--bp-poster); }
+.cardBtn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cardArt {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--r-card);
+  overflow: hidden;
+  background: var(--surface-3);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35);
+  transition: transform 0.25s var(--ease-out, ease), box-shadow 0.25s ease;
+}
+.cardArt img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transition: transform 0.35s var(--ease-out, ease); }
+.cardName {
+  padding: 0 2px;
+  font-size: clamp(13px, 0.95vw, 18px);
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.72);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 0.15s ease;
+}
+.card:hover .cardArt { box-shadow: 0 14px 36px rgba(0, 0, 0, 0.5), 0 0 0 2px rgba(255, 255, 255, 0.4); }
+.card:hover .cardName { color: #fff; }
+/* Controller focus: the poster lifts inside the row's padding with an accent
+   ring and glow; the title under it turns white. */
+.card[data-gpfocus] { outline: none; box-shadow: none; }
+.card[data-gpfocus] .cardArt {
+  transform: scale(1.06);
+  box-shadow: 0 0 0 3px var(--a), 0 0 34px color-mix(in srgb, var(--a) 45%, transparent), 0 20px 46px rgba(0, 0, 0, 0.6);
+}
+.card[data-gpfocus] .cardName { color: #fff; }
 .cardLive {
-  position: absolute; top: 10px; left: 10px; z-index: 1;
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 3px 10px;
   border-radius: 99px;
-  background: var(--status-playing);
-  color: #04130a;
   font-size: clamp(11px, 0.75vw, 14px);
   font-weight: 800;
 }
-.card[data-gpfocus] { outline: none; box-shadow: 0 0 0 3px var(--a), 0 0 30px color-mix(in srgb, var(--a) 40%, transparent), 0 18px 44px rgba(0, 0, 0, 0.55); }
-.card[data-gpfocus] .cardBtn img { transform: scale(1.05); transition: transform 0.35s var(--ease-out); }
+.cardLive { background: var(--status-playing); color: #04130a; }
+.cardLive .liveDot { background: #04130a; width: 7px; height: 7px; }
+
+.pickCard .cardArt {
+  background: linear-gradient(160deg, color-mix(in srgb, var(--a) 38%, var(--surface-2)), var(--surface-2));
+  border-color: var(--ab);
+}
+.pickInner { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--text-primary); }
+.pickInner svg { color: var(--a); }
+.pickLabel { font-size: clamp(16px, 1.25vw, 24px); font-weight: 800; }
+
+/* ── Library / Up next grid ─────────────────────────────────── */
+.gridPage { display: flex; flex-direction: column; gap: 6px; padding-top: clamp(10px, 3vh, 40px); }
+.gridHead { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; padding: 0 var(--bp-pad); }
+.gridTitle { margin: 0; font-size: clamp(26px, 2.4vw, 46px); font-weight: 800; }
+.gridCount { color: rgba(255, 255, 255, 0.6); font-size: clamp(14px, 1vw, 19px); }
+.chips { display: flex; gap: 6px; margin-left: auto; }
+.chip {
+  padding: 6px 16px;
+  border-radius: var(--r-pill);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(8, 8, 14, 0.5);
+  color: rgba(255, 255, 255, 0.8);
+  font: inherit;
+  font-size: clamp(13px, 0.95vw, 18px);
+  font-weight: 700;
+  cursor: pointer;
+}
+.chipOn { background: #fff; color: #0b0b12; border-color: #fff; }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--bp-poster), 1fr));
+  gap: clamp(18px, 2vw, 34px) clamp(14px, 1.3vw, 26px);
+  padding: 18px var(--bp-pad);
+}
+.grid .card { width: auto; }
+
+/* ── A game's own screen ────────────────────────────────────── */
+.game { display: flex; flex-direction: column; gap: clamp(18px, 3vh, 40px); padding: clamp(10px, 6vh, 90px) var(--bp-pad) 0; }
+.gameTop { display: flex; align-items: flex-end; gap: clamp(20px, 2.4vw, 44px); }
+.gameCover {
+  position: relative;
+  flex-shrink: 0;
+  width: clamp(150px, 14vw, 280px);
+  aspect-ratio: 2 / 3;
+  border-radius: var(--r-card);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+}
+.gameCover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.gameInfo { display: flex; flex-direction: column; gap: clamp(8px, 1.2vh, 16px); min-width: 0; }
+.gamePanels { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: clamp(16px, 1.6vw, 28px); }
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: clamp(14px, 1.4vw, 24px);
+  border-radius: var(--r-card);
+  background: rgba(16, 16, 26, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.panelTitle { display: flex; align-items: center; gap: 10px; margin: 0; font-size: clamp(18px, 1.4vw, 26px); font-weight: 800; }
+.panelTitle svg { color: var(--a); }
+.panelCount { margin-left: auto; color: var(--a); font-size: clamp(15px, 1.1vw, 20px); }
+.panelSub { margin-top: 4px; color: rgba(255, 255, 255, 0.55); font-size: clamp(12px, 0.85vw, 16px); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+.panelEmpty { padding: 10px var(--bp-pad) 0; color: rgba(255, 255, 255, 0.6); font-size: clamp(14px, 1vw, 18px); }
+.panel .panelEmpty { padding: 0; }
+.achList, .sessList { display: flex; flex-direction: column; gap: 6px; }
+.ach, .sess {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 10px;
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, 0.04);
+}
+.ach img, .achIconBlank { flex-shrink: 0; width: clamp(36px, 2.6vw, 52px); height: clamp(36px, 2.6vw, 52px); border-radius: var(--r-sm); background: var(--surface-3); }
+.achIconLocked { filter: grayscale(1); opacity: 0.6; }
+.achText { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.achName { font-size: clamp(14px, 1vw, 19px); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.achSub { color: rgba(255, 255, 255, 0.6); font-size: clamp(12px, 0.85vw, 16px); }
+.sessWhen { flex: 1; font-size: clamp(14px, 1vw, 18px); }
+.sessDur { font-weight: 800; color: var(--a); font-size: clamp(14px, 1vw, 18px); }
+.sessAch { display: inline-flex; align-items: center; gap: 4px; color: #fbbf24; font-weight: 700; }
+
+/* ── Starting / Session done ────────────────────────────────── */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  animation: bpFade 0.3s ease;
+}
+.overlayArt { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: blur(6px) brightness(0.55); transform: scale(1.06); }
+.overlayShade { position: absolute; inset: 0; background: radial-gradient(ellipse at center, rgba(8, 8, 14, 0.3), rgba(8, 8, 14, 0.9) 75%); }
+.overlayBody { position: relative; display: flex; align-items: center; gap: clamp(24px, 3vw, 56px); padding: var(--bp-pad); max-width: 1300px; }
+.overlayCover {
+  position: relative;
+  flex-shrink: 0;
+  width: clamp(160px, 15vw, 300px);
+  aspect-ratio: 2 / 3;
+  border-radius: var(--r-card);
+  overflow: hidden;
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+.overlayCover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.overlayText { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; min-width: 0; }
+.overlayText > svg { color: var(--a); }
+.overlayTitle { font-size: clamp(28px, 3vw, 60px); font-weight: 800; line-height: 1.08; }
+.overlaySub { color: rgba(255, 255, 255, 0.7); font-size: clamp(15px, 1.1vw, 21px); }
+.doneKicker { display: inline-flex; align-items: center; gap: 8px; color: var(--status-playing); font-size: clamp(15px, 1.1vw, 21px); font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; }
+.doneStats { display: flex; flex-wrap: wrap; gap: clamp(14px, 2vw, 40px); margin: 4px 0 8px; }
+.doneStat { display: flex; flex-direction: column; color: rgba(255, 255, 255, 0.65); font-size: clamp(13px, 0.95vw, 18px); }
+.doneStat strong { color: #fff; font-size: clamp(24px, 2.2vw, 42px); font-weight: 800; }
 
 /* Short windows: a smaller hero so a whole row of posters still fits. */
 @media (max-height: 820px) {
-  .hero { min-height: 0; padding-bottom: 10px; }
-  .heroCover { width: clamp(80px, 6.5vw, 120px); }
-  .heroName { font-size: clamp(26px, 2.8vw, 48px); }
+  .hero { min-height: 0; }
+  .heroName, .gameName { font-size: clamp(26px, 2.8vw, 48px); }
   .top { padding-top: 10px; padding-bottom: 6px; }
+}
+@media (max-width: 900px) {
+  .search { width: 160px; }
+  .level, .clock { display: none; }
+  .gameTop { flex-direction: column; align-items: flex-start; }
 }
 
 /* ── Animations (Settings → Appearance → Animations, motion.css) ───────── */
-/* Soft: the hero text eases in when the focus moves; the art cross fades. */
 @keyframes bpInfoIn { from { opacity: 0; transform: translateY(8px); } }
 @keyframes bpInfoInHv { from { opacity: 0; transform: translateX(-28px); filter: blur(6px); } }
 @keyframes bpCoverIn { from { opacity: 0; transform: scale(0.9) rotate(-2deg); } }
@@ -251,26 +415,28 @@
 @keyframes bpArtDrift { from { transform: scale(1.12); } to { transform: scale(1.2) translateX(-1.5%); } }
 @keyframes bpRowIn { from { opacity: 0; transform: translateX(60px); } }
 @keyframes bpEnter { from { opacity: 0; transform: scale(1.04); } }
-:global(html[data-motion="soft"]) .heroRow { animation: bpInfoIn 0.28s var(--ease-out) backwards; }
-:global(html[data-motion="soft"]) .card[data-gpfocus] { transform: scale(1.05); }
+@keyframes bpUp { from { opacity: 0; transform: translateY(18px); } }
+:global(html[data-motion="soft"]) .heroRow,
+:global(html[data-motion="soft"]) .gameTop { animation: bpInfoIn 0.3s var(--ease-out) backwards; }
+:global(html[data-motion="soft"]) .card[data-gpfocus] .cardArt img { transform: scale(1.04); }
 
 /* Heavy: the page zooms in, rows slide in one after another, the art drifts
-   slowly, the hero slides in with its cover, and the focused poster springs. */
+   slowly, the hero slides in, and the focused poster springs. */
 :global(html[data-motion="heavy"]) .root { animation: bpEnter 0.5s var(--ease-out) backwards; }
-:global(html[data-motion="heavy"]) .backdropImg {
-  animation: bpFade 0.7s ease, bpArtDrift 24s ease-in-out infinite alternate;
-}
+:global(html[data-motion="heavy"]) .backdropImg { animation: bpFade 0.7s ease, bpArtDrift 24s ease-in-out infinite alternate; }
 :global(html[data-motion="heavy"]) .heroInfo { animation: bpInfoInHv 0.45s var(--ease-out) backwards; }
-:global(html[data-motion="heavy"]) .heroCover { animation: bpCoverIn 0.5s var(--ease-spring) backwards; }
+:global(html[data-motion="heavy"]) .gameCover, :global(html[data-motion="heavy"]) .overlayCover { animation: bpCoverIn 0.5s var(--ease-spring) backwards; }
+:global(html[data-motion="heavy"]) .gameInfo { animation: bpInfoInHv 0.45s var(--ease-out) 0.05s backwards; }
+:global(html[data-motion="heavy"]) .panel { animation: bpUp 0.5s var(--ease-out) 0.12s backwards; }
 :global(html[data-motion="heavy"]) .row { animation: bpRowIn 0.6s var(--ease-out) backwards; }
-:global(html[data-motion="heavy"]) .row:nth-child(2) { animation-delay: 0.1s; }
-:global(html[data-motion="heavy"]) .row:nth-child(3) { animation-delay: 0.2s; }
-:global(html[data-motion="heavy"]) .card { transition: transform 0.35s var(--ease-spring), box-shadow 0.25s ease; }
-:global(html[data-motion="heavy"]) .card[data-gpfocus] {
-  transform: scale(1.07);
-  box-shadow: 0 0 0 3px var(--a), 0 0 34px color-mix(in srgb, var(--a) 45%, transparent), 0 22px 50px rgba(0, 0, 0, 0.6);
-}
+:global(html[data-motion="heavy"]) .row:nth-child(2) { animation-delay: 0.08s; }
+:global(html[data-motion="heavy"]) .row:nth-child(3) { animation-delay: 0.16s; }
+:global(html[data-motion="heavy"]) .row:nth-child(4) { animation-delay: 0.24s; }
+:global(html[data-motion="heavy"]) .cardArt { transition: transform 0.35s var(--ease-spring), box-shadow 0.25s ease; }
+:global(html[data-motion="heavy"]) .card[data-gpfocus] .cardArt { transform: scale(1.08); }
+:global(html[data-motion="heavy"]) .card[data-gpfocus] .cardArt img { transform: scale(1.06); }
 :global(html[data-motion="heavy"]) .playBtn { transition: transform 0.25s var(--ease-spring), filter 0.2s ease; }
 :global(html[data-motion="heavy"]) .playBtn:hover, :global(html[data-motion="heavy"]) .playBtn[data-gpfocus] { transform: scale(1.06); }
-/* Off: the backdrop just swaps. */
+/* Off: no lift, the backdrop just swaps. */
 :global(html[data-motion="off"]) .backdropImg { animation: none; }
+:global(html[data-motion="off"]) .card[data-gpfocus] .cardArt { transform: none; }

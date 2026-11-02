@@ -317,6 +317,22 @@ function capSet(map, key, value, max = CACHE_MAX) {
   while (map.size > max) map.delete(map.keys().next().value)
 }
 
+// A short silent loop of the first trailer (Steam's "microtrailer"), for a
+// muted background video. New store trailers are DASH/HLS only, but the same
+// folder keeps microtrailer.webm/.mp4; older ones list webm/mp4 directly.
+function trailerOf(movies) {
+  const m = (movies || []).find(x => x.highlight) || (movies || [])[0]
+  if (!m) return null
+  const stream = m.dash_h264 || m.dash_av1 || m.hls_h264
+  if (stream) {
+    const base = stream.split('?')[0].replace(/\/[^/]+$/, '')
+    return { webm: `${base}/microtrailer.webm`, mp4: `${base}/microtrailer.mp4`, poster: m.thumbnail || null }
+  }
+  const webm = m.webm?.['480'] || m.webm?.max
+  const mp4 = m.mp4?.['480'] || m.mp4?.max
+  return webm || mp4 ? { webm: webm || null, mp4: mp4 || null, poster: m.thumbnail || null } : null
+}
+
 const _detailsCache = new Map()
 async function getStoreDetails(appId) {
   const hit = _detailsCache.get(appId)
@@ -343,6 +359,7 @@ async function getStoreDetails(appId) {
         price: d.is_free ? 'Free to play' : (d.price_overview?.final_formatted || null),
         categories: (d.categories || []).map(c => c.description).filter(Boolean).slice(0, 6),
         website: d.website || null,
+        trailer: trailerOf(d.movies),
       }
     }
   } catch (e) {
@@ -405,14 +422,30 @@ function assetUrl(a, ...keys) {
   return null
 }
 
-// appIds → Map(appid → { portrait, hero, header, capsule } absolute URLs, any may be null).
+// The store's own release record. `ts` is the real unlock moment (ms), so a
+// game out at 05:00 UTC lands on the right LOCAL day; the search page only
+// shows the US date. `display`: date_full | date_month | date_quarter |
+// date_year | text_comingsoon | text_tba. null when Steam sent nothing.
+function releaseOf(r) {
+  if (!r || typeof r !== 'object') return null
+  const ts = Number(r.steam_release_date) > 0 ? Number(r.steam_release_date) * 1000 : null
+  return {
+    ts,
+    display: r.coming_soon_display || (ts ? 'date_full' : null),
+    soon: !!r.is_coming_soon,
+    text: r.custom_release_date_message || null,
+  }
+}
+
+// appIds → Map(appid → { portrait, hero, header, capsule, tags, release } (URLs may be null).
 async function getAppAssets(appIds) {
   const ids = [...new Set((appIds || []).map(Number).filter(n => Number.isFinite(n) && n > 0))]
   const out = new Map()
   const missing = []
   for (const id of ids) {
     const hit = assetCache.get(id)
-    if (hit && Date.now() - hit.at < ASSET_TTL_MS) out.set(id, hit.assets)
+    // Entries from before release data was asked for are refetched once.
+    if (hit && Date.now() - hit.at < ASSET_TTL_MS && hit.assets.release !== undefined) out.set(id, hit.assets)
     else missing.push(id)
   }
   const batches = []
@@ -423,7 +456,7 @@ async function getAppAssets(appIds) {
       const input = {
         ids: batch.map(appid => ({ appid })),
         context: { language: 'english', country_code: 'US' },
-        data_request: { include_assets: true, include_tag_count: 12 },
+        data_request: { include_assets: true, include_tag_count: 12, include_release: true },
       }
       const data = await getJSON('https://api.steampowered.com/IStoreBrowseService/GetItems/v1/', { input_json: JSON.stringify(input) })
       for (const item of data?.response?.store_items || []) {
@@ -434,6 +467,7 @@ async function getAppAssets(appIds) {
           header:   assetUrl(a, 'header_2x', 'header'),
           capsule:  assetUrl(a, 'main_capsule_2x', 'main_capsule'),
           tags:     Array.isArray(item.tagids) ? item.tagids.slice(0, 12) : [],   // Steam tag ids, most voted first
+          release:  releaseOf(item.release),
         }
         capSet(assetCache, item.appid, { at: Date.now(), assets }, 2000)
         out.set(item.appid, assets)
@@ -456,29 +490,70 @@ async function getTagNames() {
   return names
 }
 
-// What you play, for the calendar's "Picked for you": every genre of your
-// Library games, weighted by playtime (a game you never launched still counts
-// a little). Weights are normalised to 0..1, keyed by lower-case name.
+// "Picked for you" on Upcoming: what your Game List says you like. Every row
+// with a Steam id is a source, weighted by your rating and status (a 9/10 or a
+// game you're playing pulls hard, a dropped or low-rated one pushes away),
+// plus hours played. Each source's Steam TAGS (Metroidvania, Souls-like, ...)
+// add up into tagWeights (-1..1); `sources` lets the calendar say "Because
+// you liked Hollow Knight". Cached 10 minutes; ratings clear it.
+let tasteCache = null
+function clearTasteProfile() { tasteCache = null }
+function sourceWeight(row) {
+  const r = Number(row.rating) || 0
+  let w
+  if (r >= 8) w = 3
+  else if (r >= 6) w = 2
+  else if (r > 0 && r <= 4) w = -1.5
+  else if (r > 0) w = 1
+  else if (row.status === 'finished') w = 1.5
+  else if (row.status === 'playing') w = 2
+  else if (row.status === 'dropped') w = -1
+  else if (row.status === 'on_hold') w = 0.6
+  else w = 1.2   // want to play, upcoming
+  if (w > 0) w += Math.log1p((row.seconds || 0) / 3600) * 0.5
+  return w
+}
 async function getTasteProfile() {
+  if (tasteCache && Date.now() - tasteCache.at < 10 * 60 * 1000) return tasteCache.data
   const db = require('../db/database').getDb()
-  const rows = db.prepare('SELECT genres, total_playtime_seconds FROM games WHERE genres IS NOT NULL AND is_archived = 0').all()
-  const w = {}
-  for (const r of rows) {
-    let genres = []
-    try { genres = JSON.parse(r.genres) } catch {}
-    const weight = 1 + Math.log1p((r.total_playtime_seconds || 0) / 3600)
-    for (const g of genres) {
-      const k = String(g).toLowerCase()
-      w[k] = (w[k] || 0) + weight
-    }
+  const rows = db.prepare(`
+    SELECT gl.name, gl.status, gl.rating, COALESCE(gl.steam_app_id, g.steam_app_id) AS appid,
+           COALESCE(g.total_playtime_seconds, 0) AS seconds
+    FROM game_list gl LEFT JOIN games g ON g.id = gl.game_id
+    WHERE COALESCE(gl.steam_app_id, g.steam_app_id) IS NOT NULL`).all()
+  const lib = db.prepare(`
+    SELECT name, steam_app_id AS appid, total_playtime_seconds AS seconds FROM games
+    WHERE steam_app_id IS NOT NULL AND is_archived = 0`).all()
+  const byApp = new Map()
+  for (const r of rows) byApp.set(Number(r.appid), r)
+  for (const g of lib) if (!byApp.has(Number(g.appid))) byApp.set(Number(g.appid), { ...g, status: 'playing' })
+  let assets = new Map()
+  try { assets = await getAppAssets([...byApp.keys()]) } catch {}
+  const tagWeights = {}
+  const sources = []
+  for (const [appid, row] of byApp) {
+    const tags = assets.get(appid)?.tags || []
+    if (!tags.length) continue
+    const w = sourceWeight(row)
+    tags.forEach((t, i) => { tagWeights[t] = (tagWeights[t] || 0) + w * (1 - i * 0.05) })
+    sources.push({ name: row.name, appid, weight: +w.toFixed(2), tags })
   }
-  const max = Math.max(1, ...Object.values(w))
-  for (const k of Object.keys(w)) w[k] = +(w[k] / max).toFixed(3)
+  // Tags nearly every game has (Singleplayer, Action) say little about taste:
+  // scale each by how rare it is among your games, so Metroidvania or
+  // Souls-like outweigh them.
+  const freq = {}
+  for (const src of sources) for (const t of src.tags) freq[t] = (freq[t] || 0) + 1
+  const n = Math.max(2, sources.length)
+  for (const t of Object.keys(tagWeights)) tagWeights[t] *= Math.log((n + 1) / freq[t]) / Math.log(n + 1)
+  const max = Math.max(1e-6, ...Object.values(tagWeights).map(Math.abs))
+  for (const k of Object.keys(tagWeights)) tagWeights[k] = +(tagWeights[k] / max).toFixed(3)
+  sources.sort((a, b) => b.weight - a.weight)
   let tagNames = {}
   try { tagNames = await getTagNames() } catch {}
-  return { weights: w, tagNames }
+  const data = { tagWeights, sources: sources.filter(x => x.weight > 0).slice(0, 60), tagNames, count: sources.length }
+  tasteCache = { at: Date.now(), data }
+  return data
 }
-
 async function assetsFor(appId) {
   return (await getAppAssets([appId])).get(Number(appId)) || null
 }
@@ -1031,7 +1106,7 @@ async function getComingSoon(feed = 'soon', page = 0) {
 }
 
 module.exports = {
-  shrinkCover, getTasteProfile,
+  shrinkCover, getTasteProfile, clearTasteProfile,
   getBannersDir, downloadFile,
   getAppAssets, downloadHero,
   getComingSoon, parseComingSoonHtml,

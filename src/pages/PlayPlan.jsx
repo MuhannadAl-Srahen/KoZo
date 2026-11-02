@@ -3,7 +3,7 @@ import {
   IconCalendarEvent, IconPlus, IconSearch, IconCalendarOff, IconCheck, IconChevronLeft, IconChevronRight,
   IconPlayerPlayFilled, IconListCheck, IconDeviceGamepad2, IconFlag, IconStarFilled, IconClock,
   IconPencil, IconBrandSteam, IconX, IconArrowRight, IconCalendarMonth, IconTimeline, IconLayoutColumns,
-  IconList, IconChevronDown, IconHistory, IconDots, IconCarouselHorizontal, IconLayoutCards,
+  IconList, IconChevronDown, IconHistory, IconDots, IconFocusCentered, IconLayoutKanban, IconLayoutDashboard,
 } from '@tabler/icons-react'
 import { fileUrl, formatMonthKey, formatPlaytime, monthKey, parseGenres } from '../lib/utils'
 import { LIST_STATUSES } from '../lib/cardModel'
@@ -18,10 +18,12 @@ import useCardZoom from '../lib/useCardZoom'
 import { ratingColor } from '../components/ui/RatingPicker'
 import s from './PlayPlan.module.css'
 
-// Play Plan: what you mean to play, month by month, in five views (saved per
-// user): Timeline (months down a glowing line, posters beside each), Shelves
-// (a sliding row of big posters per month), Showcase (wide art cards),
-// Roadmap (months side by side, this one wide) and List (a table). Every
+// Play Plan: what you mean to play, month by month, in six views (saved per
+// user): Timeline (months down a glowing line, posters beside each), Focus
+// (one month: the game you're playing fills a hero, the numbered queue
+// beside it), Board (one month as Up next / Playing / Done columns), Wall (a
+// mosaic of wide Steam art per month), Roadmap (months side by side, this one
+// wide) and List (a table). Every
 // view shows each month's games in play order: Playing, Up next (numbered),
 // Done. Drag a game onto another in the same month to reorder (taking that
 // game's state, so Done marks it Finished and asks for a rating), or onto
@@ -42,8 +44,9 @@ function laneOf(status) {
 
 const VIEWS = [
   { key: 'timeline', label: 'Timeline', Icon: IconTimeline },
-  { key: 'shelves',  label: 'Shelves',  Icon: IconCarouselHorizontal },
-  { key: 'showcase', label: 'Showcase', Icon: IconLayoutCards },
+  { key: 'focus',    label: 'Focus',    Icon: IconFocusCentered },
+  { key: 'board',    label: 'Board',    Icon: IconLayoutKanban },
+  { key: 'wall',     label: 'Wall',     Icon: IconLayoutDashboard },
   { key: 'roadmap',  label: 'Roadmap',  Icon: IconLayoutColumns },
   { key: 'list',     label: 'List',     Icon: IconList },
 ]
@@ -214,8 +217,8 @@ function MiniCard({ item, n, dropMark, h }) {
   )
 }
 
-// Wide art for the Showcase cards: Steam's hero/header (asked once per game,
-// remembered), else the cover blurred behind itself.
+// Steam's wide art for a game (asked once per game, remembered): `header`
+// (460px, with the logo) for tiles, `hero` (the big library art) for banners.
 const wideArt = new Map()
 function useWideArt(item) {
   const [, bump] = useState(0)
@@ -225,75 +228,150 @@ function useWideArt(item) {
     wideArt.set(id, null)
     window.kozo?.api?.steam?.appAssets?.([id]).then(res => {
       const a = res?.ok ? res.data?.[id] : null
-      wideArt.set(id, a?.header || a?.hero || null)
+      wideArt.set(id, a ? { header: a.header || null, hero: a.hero || null, capsule: a.capsule || null } : null)
       bump(n => n + 1)
     }).catch(() => {})
   }, [id])
   return (id && wideArt.get(id)) || null
 }
 
-// A wide card for the Showcase view: the game's landscape art, its state,
-// the month's hours and the actions.
-function ShowCard({ item, n, maxSec, dropMark, h }) {
+function stateOf(item, n) {
   const lane = laneOf(item.status)
-  const wide = useWideArt(item)
-  const cover = coverOf(item)
-  const score = item.rating ? Math.round(item.rating) : null
-  const genres = parseGenres(item).slice(0, 3)
-  const state = item.status === 'dropped' ? { label: 'Dropped', color: 'var(--status-dropped)', Icon: IconX }
+  return item.status === 'dropped' ? { label: 'Dropped', color: 'var(--status-dropped)', Icon: IconX }
     : lane === 'playing' ? { label: 'Playing', color: 'var(--status-playing)', Icon: IconDeviceGamepad2 }
     : lane === 'done' ? { label: 'Done', color: '#fbbf24', Icon: IconCheck }
-    : { label: `Up next #${n}`, color: 'var(--a)', Icon: IconListCheck }
+    : { label: n ? `Up next #${n}` : 'Up next', color: 'var(--a)', Icon: IconListCheck }
+}
+
+// ‹ November 2026 › for the one-month views (Focus, Board).
+function MonthNav({ m, thisMonth, onChange, summary }) {
+  const sm = summary[m]
   return (
-    <div {...itemProps(item, h, dropMark, `${s.sc} ${s['sc_' + lane]} ${item.status === 'dropped' ? s.scDropped : ''}`)} style={{ '--stc': state.color }}>
-      <div className={s.scArt}>
-        {wide ? <img src={wide} alt="" loading="lazy" />
-          : cover ? <img src={cover} alt="" loading="lazy" className={s.scSoft} />
-          : <GeneratedCover name={item.name} />}
-        <span className={s.scShade} />
-        <span className={s.scState}><state.Icon size={12} stroke={2.2} /> {state.label}</span>
-        {score && <span className={s.luScore} style={{ '--score': ratingColor(score) }}><strong>{score}</strong><span>/10</span></span>}
-        <div className={s.scOver}>
-          <span className={s.scCover}><Thumb item={item} /></span>
-          <span className={s.scText}>
-            <span className={s.scName}>{item.name}</span>
-            <span className={s.scSub}>{genres.length ? genres.join(' · ') : subLine(item)}</span>
-          </span>
-        </div>
-      </div>
-      <div className={s.scFoot}>
-        <span className={s.scHours}>
-          <IconClock size={13} />
-          {item.month_seconds > 0 ? `${formatPlaytime(item.month_seconds)} this month` : lane === 'done' ? subLine(item) : 'Not played this month'}
-        </span>
-        {lane === 'playing' && maxSec > 0 && <span className={s.scBar}><span style={{ width: `${Math.round(((item.month_seconds || 0) / maxSec) * 100)}%` }} /></span>}
-        <span className={s.scActions} onClick={e => e.stopPropagation()}><Actions item={item} h={h} /></span>
-      </div>
+    <div className={s.rmNav}>
+      <button className={s.navBtn} onClick={() => onChange(shiftMonth(m, -1))} aria-label="Previous month"><IconChevronLeft size={17} /></button>
+      <span className={`${s.rmRange} ${s.cap}`}>{formatMonthKey(m, 'long')}</span>
+      <button className={s.navBtn} onClick={() => onChange(shiftMonth(m, 1))} aria-label="Next month"><IconChevronRight size={17} /></button>
+      {m === thisMonth ? <span className={s.nowTag}>This month</span>
+        : <button className={s.todayBtn} onClick={() => onChange(thisMonth)}>This month</button>}
+      {sm?.total > 0 && <span className={s.navStat}>{sm.done} of {sm.total} done</span>}
     </div>
   )
 }
 
-// One month as a sliding shelf of big posters with arrows on the sides.
-function Shelf({ children }) {
-  const ref = useRef(null)
-  const [edges, setEdges] = useState({ start: true, end: true })
-  function measure() {
-    const el = ref.current
-    if (!el) return
-    setEdges({ start: el.scrollLeft < 4, end: el.scrollLeft + el.clientWidth >= el.scrollWidth - 4 })
-  }
-  useEffect(() => {
-    measure()
-    const ro = new ResizeObserver(measure)
-    if (ref.current) ro.observe(ref.current)
-    return () => ro.disconnect()
-  }, [])
-  const slide = (dir) => ref.current?.scrollBy({ left: dir * ref.current.clientWidth * 0.8, behavior: 'smooth' })
+// Focus: the game in the hero, big. Playing first, else the next one up.
+function FocusHero({ item, n, model, h, others, onPick, drop }) {
+  const art = useWideArt(item)
+  const lane = item ? laneOf(item.status) : null
+  const genres = item ? parseGenres(item).slice(0, 3) : []
+  const bg = art?.hero || art?.header || (item ? coverOf(item) : null)
+  const soft = !art?.hero && !art?.header
+  const share = item && model.maxSec > 0 ? Math.round(((item.month_seconds || 0) / Math.max(1, model.playedSec)) * 100) : 0
   return (
-    <div className={s.shelfWrap}>
-      {!edges.start && <button type="button" className={`${s.shelfArrow} ${s.shelfPrev}`} onClick={() => slide(-1)} aria-label="Scroll left"><IconChevronLeft size={22} /></button>}
-      <div ref={ref} className={s.shelf} data-axis="x" onScroll={measure}>{children}</div>
-      {!edges.end && <button type="button" className={`${s.shelfArrow} ${s.shelfNext}`} onClick={() => slide(1)} aria-label="Scroll right"><IconChevronRight size={22} /></button>}
+    <section className={`${s.foHero} ${drop.active ? s.isDrop : ''}`} onDragOver={drop.over} onDragLeave={drop.leave} onDrop={drop.drop}>
+      {bg && <img key={bg} className={`${s.foBg} ${soft ? s.foBgSoft : ''}`} src={bg} alt="" />}
+      <span className={s.foShade} />
+      {item ? (
+        <div className={s.foBody} key={item.id}>
+          <div className={s.foCover} onClick={() => h.open(item)} onContextMenu={(e) => { e.preventDefault(); h.ctx(e, item) }}
+            data-gpnav="" title={item.name} {...dragProps(item)}>
+            <Thumb item={item} />
+          </div>
+          <div className={s.foInfo}>
+            <span className={`${s.foKicker} ${lane === 'playing' ? s.foKickerLive : ''}`}>
+              {lane === 'playing' ? <><span className={s.foDot} /> Playing now</> : <>Up next{n ? ` #${n}` : ''}</>}
+            </span>
+            <h2 className={s.foName}>{item.name}</h2>
+            {genres.length > 0 && <span className={s.foGenres}>{genres.join('  ·  ')}</span>}
+            <span className={s.foHours}>
+              <IconClock size={15} />
+              {item.month_seconds > 0 ? `${formatPlaytime(item.month_seconds)} this month` : lane === 'playing' ? 'Not played this month yet' : 'Not started'}
+              {share > 0 && others.length > 1 && <span className={s.foShare}>{share}% of the month</span>}
+            </span>
+            <div className={s.foActions}>
+              {item.game_id && <button type="button" className={s.foPlay} onClick={() => h.play(item)}><IconPlayerPlayFilled size={18} /> Play</button>}
+              {lane === 'next' && <button type="button" className={s.foGhost} onClick={() => h.start(item)}><IconDeviceGamepad2 size={16} /> Start playing</button>}
+              {lane === 'playing' && <button type="button" className={s.foGhost} onClick={() => h.done(item)}><IconFlag size={16} /> Mark as done</button>}
+              <button type="button" className={s.foIcon} onClick={(e) => h.ctx(e, item)} aria-label="More" title="More"><IconDots size={18} /></button>
+            </div>
+          </div>
+          {others.length > 1 && (
+            <div className={s.foSwitch} aria-label="Playing this month">
+              {others.map(o => (
+                <button key={o.id} type="button" className={`${s.foSwitchBtn} ${o.id === item.id ? s.foSwitchOn : ''}`} onClick={() => onPick(o.id)} title={o.name}>
+                  <Thumb item={o} />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className={s.foEmpty}>
+          <IconDeviceGamepad2 size={34} stroke={1.4} />
+          <span>Nothing playing or queued this month</span>
+          <span className={s.foEmptySub}>Drop a game here to start it, or add games to the month.</span>
+        </div>
+      )}
+    </section>
+  )
+}
+
+// One row of the Focus queue: place, cover, name, Start.
+function QueueRow({ item, n, dropMark, h }) {
+  return (
+    <div {...itemProps(item, h, dropMark, s.qRow)}>
+      <span className={s.qNum}>{n}</span>
+      <span className={s.qCover}><Thumb item={item} /></span>
+      <span className={s.qText}>
+        <span className={s.qName}>{item.name}</span>
+        <span className={s.qSub}>{subLine(item)}</span>
+      </span>
+      <span className={s.qActions} onClick={e => e.stopPropagation()}><Actions item={item} h={h} compact /></span>
+    </div>
+  )
+}
+
+// A card in a Board column: cover, name, state line, actions.
+function BoardCard({ item, n, dropMark, h }) {
+  const lane = laneOf(item.status)
+  const score = item.rating ? Math.round(item.rating) : null
+  return (
+    <div {...itemProps(item, h, dropMark, `${s.bdCard} ${s['bd_' + lane]} ${item.status === 'dropped' ? s.bdDropped : ''}`)}>
+      <span className={s.bdCover}><Thumb item={item} />{lane === 'next' && <span className={s.bdNum}>{n}</span>}</span>
+      <span className={s.bdText}>
+        <span className={s.bdName}>{item.name}</span>
+        <span className={s.bdSub}>{subLine(item)}</span>
+        {lane === 'playing' && item.month_seconds > 0 && <span className={s.bdHours}><IconClock size={12} /> {formatPlaytime(item.month_seconds)}</span>}
+        {score && <span className={s.miniScore} style={{ '--score': ratingColor(score) }}>{score}/10</span>}
+      </span>
+      <span className={s.bdActions} onClick={e => e.stopPropagation()}><Actions item={item} h={h} compact /></span>
+    </div>
+  )
+}
+
+// A Wall tile: the game's wide Steam art, sized by its state.
+function WallTile({ item, n, dropMark, h }) {
+  const lane = laneOf(item.status)
+  const art = useWideArt(item)
+  const big = lane === 'playing'
+  const src = big ? (art?.hero || art?.header) : (art?.header || art?.capsule)
+  const cover = coverOf(item)
+  const st = stateOf(item, n)
+  const score = item.rating ? Math.round(item.rating) : null
+  return (
+    <div {...itemProps(item, h, dropMark, `${s.wl} ${s['wl_' + lane]} ${item.status === 'dropped' ? s.wlDropped : ''}`)} style={{ '--stc': st.color }}>
+      <span className={s.wlArt}>
+        {src ? <img src={src} alt="" loading="lazy" />
+          : cover ? <><img src={cover} alt="" aria-hidden="true" className={s.wlSoftBg} /><img src={cover} alt="" className={s.wlSoftFg} /></>
+          : <GeneratedCover name={item.name} />}
+      </span>
+      <span className={s.wlShade} />
+      <span className={s.wlState}><st.Icon size={12} stroke={2.2} /> {st.label}</span>
+      {score && <span className={s.luScore} style={{ '--score': ratingColor(score) }}><strong>{score}</strong><span>/10</span></span>}
+      <span className={s.wlFoot}>
+        <span className={s.wlName}>{item.name}</span>
+        <span className={s.wlSub}>{lane === 'playing' && item.month_seconds > 0 ? `${formatPlaytime(item.month_seconds)} this month` : subLine(item)}</span>
+      </span>
+      <span className={s.wlActions} onClick={e => e.stopPropagation()}><Actions item={item} h={h} compact={!big} /></span>
     </div>
   )
 }
@@ -418,6 +496,9 @@ export default function PlayPlan() {
   const [boards, setBoards] = useState({})     // 'YYYY-MM' → rows (play order)
   const [opened, setOpened] = useState([])     // earlier months shown on request
   const [rmStart, setRmStart] = useState(thisMonth)
+  const [oneMonth, setOneMonth] = useState(thisMonth)   // Focus and Board
+  const [focusId, setFocusId] = useState(null)          // which Playing game fills the Focus hero
+  const [heroDrop, setHeroDrop] = useState(false)
   const [unplanned, setUnplanned] = useState(null)
   const [showUnplanned, setShowUnplanned] = useState(false)
   const [showEarlier, setShowEarlier] = useState(false)
@@ -440,7 +521,7 @@ export default function PlayPlan() {
     return [...new Set([...opened, thisMonth, shiftMonth(thisMonth, 1), shiftMonth(thisMonth, 2), ...later])].sort()
   }, [summary, opened, thisMonth])
   const rmMonths = [0, 1, 2, 3].map(i => shiftMonth(rmStart, i))
-  const shown = view === 'roadmap' ? rmMonths : flowMonths
+  const shown = view === 'roadmap' ? rmMonths : (view === 'focus' || view === 'board') ? [oneMonth] : flowMonths
   const earlier = Object.keys(summary).filter(m => m < thisMonth && !opened.includes(m)).sort().reverse()
 
   async function loadSummary() {
@@ -604,39 +685,114 @@ export default function PlayPlan() {
     )
   }
 
-  function shelves() {
+  function focus() {
+    const m = oneMonth
+    const model = monthModel(boards[m])
+    const playing = model.lanes.playing
+    const hero = playing.find(i => i.id === focusId) || playing[0] || model.lanes.next[0] || null
+    const queue = model.lanes.next.filter(i => i !== hero)
+    const done = model.lanes.done
+    // Dropping a game on the hero starts it (and plans it for this month).
+    const drop = {
+      active: heroDrop,
+      over: (e) => { e.preventDefault(); setHeroDrop(true) },
+      leave: (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setHeroDrop(false) },
+      drop: async (e) => {
+        e.preventDefault(); setHeroDrop(false); setDropMark(null)
+        const item = findItem(dropId(e))
+        if (!item) return
+        if (item.planned_month !== m) await window.kozo?.api?.gameList?.planMonth?.([item.id], m)
+        if (item.status !== 'playing') await setStatus(item, 'playing')
+        else reload()
+        setFocusId(item.id)
+      },
+    }
     return (
-      <div className={s.shelves}>
-        {flowMonths.map(m => {
-          const model = monthModel(boards[m])
-          return (
-            <section key={m} className={`${s.shelfMonth} ${m === thisMonth ? s.shelfNow : ''} ${dropOn === m ? s.isDrop : ''}`} {...monthDrop(m)}>
-              <MonthTitle m={m} model={model} isNow={m === thisMonth} onAdd={openAdd} />
-              {boards[m] === undefined ? <div className={s.muted}>Loading…</div>
-                : model.total ? (
-                  <Shelf>
-                    {model.order.map(i => <PlanPoster key={i.id} item={i} n={model.num(i)} maxSec={model.maxSec} dropMark={markOf(i)} h={h} />)}
-                  </Shelf>
-                ) : <EmptyMonth m={m} onAdd={openAdd} />}
-            </section>
-          )
-        })}
-      </div>
+      <>
+        <MonthNav m={m} thisMonth={thisMonth} onChange={setOneMonth} summary={summary} />
+        {boards[m] === undefined ? <div className={s.muted}>Loading…</div> : (
+          <div className={`${s.fo} ${dropOn === m ? s.isDrop : ''}`} {...monthDrop(m)}>
+            <FocusHero item={hero} n={hero ? model.num(hero) : 0} model={model} h={h} others={playing} onPick={setFocusId} drop={drop} />
+            <aside className={s.foQueue}>
+              <div className={s.foQueueHead}>
+                <IconListCheck size={16} /> Up next <span className={s.foldCount}>{queue.length}</span>
+                <span className={s.spacer} />
+                <button type="button" className={s.addBtn} onClick={() => openAdd(m)} title="Add games to this month"><IconPlus size={14} stroke={2} /> Add</button>
+              </div>
+              {queue.length ? (
+                <div className={s.qList}>
+                  {queue.map(i => <QueueRow key={i.id} item={i} n={model.num(i)} dropMark={markOf(i)} h={h} />)}
+                </div>
+              ) : <EmptyMonth m={m} onAdd={openAdd} />}
+            </aside>
+            {done.length > 0 && (
+              <div className={s.foDone}>
+                <div className={s.foQueueHead}><IconFlag size={16} /> Done this month <span className={s.foldCount}>{done.length}</span></div>
+                <div className={s.foDoneRow} data-axis="x">
+                  {done.map(i => <PlanPoster key={i.id} item={i} n={0} maxSec={0} dropMark={markOf(i)} h={h} />)}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </>
     )
   }
 
-  function showcase() {
+  function board() {
+    const m = oneMonth
+    const model = monthModel(boards[m])
+    // Dropped on a column (not on a card): that state, at the end of it.
+    const colDrop = (lane) => ({
+      onDragOver: (e) => { e.preventDefault(); setDropOn(`${m}:${lane.key}`) },
+      onDragLeave: (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropOn(d => (d === `${m}:${lane.key}` ? null : d)) },
+      onDrop: async (e) => {
+        e.preventDefault(); setDropOn(null); setDropMark(null)
+        const item = findItem(dropId(e))
+        if (!item) return
+        if (item.planned_month !== m) await window.kozo?.api?.gameList?.planMonth?.([item.id], m)
+        if (laneOf(item.status) !== lane.key) await setStatus(item, lane.status)
+        else reload()
+      },
+    })
     return (
-      <div className={s.lv}>
+      <>
+        <MonthNav m={m} thisMonth={thisMonth} onChange={setOneMonth} summary={summary} />
+        {boards[m] === undefined ? <div className={s.muted}>Loading…</div> : (
+          <div className={s.bd}>
+            {[LANES[0], LANES[1], LANES[2]].map(lane => {
+              const items = model.lanes[lane.key]
+              return (
+                <section key={lane.key} className={`${s.bdCol} ${s['bdCol_' + lane.key]} ${dropOn === `${m}:${lane.key}` ? s.isDrop : ''}`} {...colDrop(lane)}>
+                  <div className={s.bdHead}>
+                    <lane.Icon size={16} /> {lane.label} <span className={s.foldCount}>{items.length}</span>
+                    {lane.key === 'next' && <><span className={s.spacer} /><button type="button" className={s.addBtn} onClick={() => openAdd(m)} title="Add games to this month"><IconPlus size={14} stroke={2} /></button></>}
+                  </div>
+                  <div className={s.bdList}>
+                    {items.map(i => <BoardCard key={i.id} item={i} n={model.num(i)} dropMark={markOf(i)} h={h} />)}
+                    {!items.length && <div className={s.bdEmpty}>{lane.key === 'next' ? 'Drop games here to queue them' : lane.key === 'playing' ? 'Drop a game here to start it' : 'Drop a game here when you finish it'}</div>}
+                  </div>
+                </section>
+              )
+            })}
+          </div>
+        )}
+      </>
+    )
+  }
+
+  function wall() {
+    return (
+      <div className={s.wall}>
         {flowMonths.map(m => {
           const model = monthModel(boards[m])
           return (
-            <section key={m} className={`${s.lgroup} ${dropOn === m ? s.isDrop : ''}`} {...monthDrop(m)}>
+            <section key={m} className={`${s.wallMonth} ${dropOn === m ? s.isDrop : ''}`} {...monthDrop(m)}>
               <MonthTitle m={m} model={model} isNow={m === thisMonth} onAdd={openAdd} />
               {boards[m] === undefined ? <div className={s.muted}>Loading…</div>
                 : model.total ? (
-                  <div className={s.scGrid} data-axis="x">
-                    {model.order.map(i => <ShowCard key={i.id} item={i} n={model.num(i)} maxSec={model.maxSec} dropMark={markOf(i)} h={h} />)}
+                  <div className={s.wlGrid} data-axis="x">
+                    {model.order.map(i => <WallTile key={i.id} item={i} n={model.num(i)} dropMark={markOf(i)} h={h} />)}
                   </div>
                 ) : <EmptyMonth m={m} onAdd={openAdd} />}
             </section>
@@ -721,15 +877,16 @@ export default function PlayPlan() {
           ))}
         </div>
         <div className={s.spacer} />
-        <button className={s.btnPrimary} onClick={() => openAdd(view === 'roadmap' ? rmStart : thisMonth)}>
+        <button className={s.btnPrimary} onClick={() => openAdd(view === 'roadmap' ? rmStart : (view === 'focus' || view === 'board') ? oneMonth : thisMonth)}>
           <IconPlus size={14} stroke={2} /> Add games
         </button>
       </div>
 
       <div className={s.content} ref={contentRef}>
         {view === 'timeline' && timeline()}
-        {view === 'shelves' && shelves()}
-        {view === 'showcase' && showcase()}
+        {view === 'focus' && focus()}
+        {view === 'board' && board()}
+        {view === 'wall' && wall()}
         {view === 'roadmap' && roadmap()}
         {view === 'list' && list()}
 

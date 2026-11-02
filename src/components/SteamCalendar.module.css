@@ -577,3 +577,53 @@
   gap: var(--sp-16);
   padding: var(--sp-8) var(--sp-4);
 }
+
+/* ── Picked for you: match %, the reason, quiet days ─────────── */
+.match {
+  position: absolute;
+  z-index: 2;
+  padding: 2px var(--sp-8);
+  border-radius: var(--r-pill);
+  font-size: var(--fs-2xs);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.match_high { background: color-mix(in srgb, var(--success) 22%, rgba(10, 10, 18, 0.9)); color: var(--success); }
+.match_mid { background: color-mix(in srgb, var(--a) 22%, rgba(10, 10, 18, 0.9)); color: var(--a); }
+.match_low { background: rgba(10, 10, 18, 0.88); color: var(--text-secondary); }
+.matchOnCap { top: var(--sp-6); left: var(--sp-6); }
+.matchOnPoster { top: calc(var(--sp-8) + 24px); left: var(--sp-8); }
+.matchOnWide { bottom: var(--sp-8); left: var(--sp-8); }
+.capReason {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  padding: var(--sp-16) var(--sp-8) var(--sp-6);
+  background: linear-gradient(0deg, rgba(8, 8, 14, 0.92), transparent);
+  color: #fff;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.steamCap:hover .capReason, .steamCap:focus-within .capReason { opacity: 1; }
+/* Hover shows Track at the bottom; the reason moves up out of its way. */
+.steamCap:hover .capReason { bottom: 34px; background: none; text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9); }
+.steamDayQuiet { background: transparent; border-style: dashed; }
+.steamDayQuiet .steamDayHead { color: var(--text-muted); }
+.moreRow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-6);
+  min-height: 48px;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}

@@ -64,6 +64,10 @@ export function parseRelease(str) {
   const trimmed = str.trim()
   const yearOnly = trimmed.match(/^(\d{4})$/)
   if (yearOnly) return yearRelease(parseInt(yearOnly[1], 10), trimmed)
+  // "Q1 2027", "Early 2027", "Late 2026", "Spring 2027": no day or month is
+  // promised, so these are as vague as their year (never a wrong exact day).
+  const loose = trimmed.match(/^(Q[1-4]|H[12]|early|mid|late|spring|summer|fall|autumn|winter|end of)\s+(\d{4})$/i)
+  if (loose) return yearRelease(parseInt(loose[2], 10), trimmed)
   const wordYear = trimmed.match(WORD_YEAR)
   if (wordYear) {
     const y  = parseInt(wordYear[2], 10)
@@ -79,6 +83,39 @@ export function parseRelease(str) {
   const t = Date.parse(trimmed)
   if (!Number.isFinite(t)) return { ts: null }
   return { ts: t, until: t, vague: false, precision: 'day' }
+}
+
+// The release Steam's store record gives (steamApi.releaseOf via GetItems),
+// which beats the search page's text: a full date is the real unlock moment,
+// shown on the LOCAL day it lands on. Month, quarter and year dates stay vague.
+// `fallback` is the search page's text, used until the store record arrives.
+export function storeRelease(r, fallback) {
+  if (!r || !r.display) return parseRelease(fallback)
+  if (r.display === 'date_full' && r.ts) return { ts: r.ts, until: r.ts, vague: false, precision: 'day', exact: true }
+  if (r.display === 'date_month' && r.ts) {
+    const d = new Date(r.ts)
+    const y = d.getUTCFullYear(), m = d.getUTCMonth()
+    return {
+      ts: new Date(y, m, 1).getTime(), until: new Date(y, m + 1, 1).getTime(), vague: true, precision: 'month',
+      label: new Date(y, m, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
+    }
+  }
+  if ((r.display === 'date_quarter' || r.display === 'date_year') && r.ts) {
+    const y = new Date(r.ts).getUTCFullYear()
+    return yearRelease(y, r.text || fallback || String(y))
+  }
+  return { ts: null, label: r.text || fallback || 'To be announced' }
+}
+
+// "in 3d 4h", "in 5h", "in 42m" until an exact release; null for vague ones.
+export function countdownTo(rel, now = Date.now()) {
+  if (!rel || rel.ts == null || rel.precision !== 'day') return null
+  const ms = rel.ts - now
+  if (ms <= 0) return 'Out now'
+  const m = Math.floor(ms / 60000), h = Math.floor(m / 60), d = Math.floor(h / 24)
+  if (d >= 1) return `in ${d}d ${h % 24}h`
+  if (h >= 1) return `in ${h}h ${m % 60}m`
+  return `in ${Math.max(1, m)}m`
 }
 
 // Play-plan month keys ('YYYY-MM') ↔ labels like "Nov 2026".

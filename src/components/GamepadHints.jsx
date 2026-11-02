@@ -8,7 +8,7 @@ const HINTS = {
   page:   [['A', 'Select'], ['B', 'Back'], ['X', 'Options'], ['Y', 'Search'], ['LB RB', 'Tabs'], ['LT RT', 'Views']],
   dialog: [['A', 'Select'], ['B', 'Close']],
   menu:   [['A', 'Select'], ['B', 'Close']],
-  big:    [['A', 'Play'], ['X', 'Options'], ['B', 'Exit']],   // Big Picture
+  big:    [['A', 'Open'], ['X', 'Options'], ['B', 'Back'], ['Y', 'Search'], ['LB RB', 'Tabs']],   // Big Picture
 }
 
 function Glyph({ k }) {

@@ -116,7 +116,8 @@ function syncScope() {
   if (!_active) return
   if (scope) {
     const t = visibleTargets()
-    setFocus(t.find(el => el.getAttribute('aria-checked') === 'true' || el.getAttribute('aria-selected') === 'true') || t[0] || null)
+    setFocus(t.find(el => el.matches('[data-gpautofocus]')) ||
+      t.find(el => el.getAttribute('aria-checked') === 'true' || el.getAttribute('aria-selected') === 'true') || t[0] || null)
   } else if (_focused && !document.contains(_focused)) {
     clearFocus()
   }
@@ -125,6 +126,9 @@ function syncScope() {
 // Where the ring lands when nothing has it (a fresh page after LB/RB): the
 // top-left control in view inside the page, not the first sidebar link.
 function firstTarget(targets) {
+  // A screen can name its main control (Big Picture's Play button).
+  const auto = targets.find(el => el.matches('[data-gpautofocus]'))
+  if (auto) return auto
   if (_scopeEl) return targets[0]
   // Big Picture: start on the first game, not on Exit in the top bar.
   if (document.querySelector('[data-bigpicture-root]')) {
@@ -293,11 +297,17 @@ function openOptions() {
 }
 
 function focusSearch() {
-  const box = document.querySelector('.app-main input[type="search"], .app-main input[placeholder^="Search" i]')
+  const box = document.querySelector('.app-main input[type="search"], .app-main input[placeholder^="Search" i], [data-bigpicture-root] input[type="search"]')
   if (box) { setFocus(box); box.focus() }
 }
 
 function cycleSidebar(step) {
+  // Big Picture has its own tabs (Home / Library / Up next) and no sidebar.
+  if (document.documentElement.hasAttribute('data-bigpicture')) {
+    window.dispatchEvent(new CustomEvent('kozo:bp-tab', { detail: { step } }))
+    clearFocus()
+    return
+  }
   const links = Array.from(document.querySelectorAll('aside a[data-tour^="nav-"]'))
     .filter(a => a.dataset.tour !== 'nav-settings' && isShown(a))
   if (!links.length) return
@@ -340,6 +350,12 @@ function poll() {
   const gp = Array.from(navigator.getGamepads?.() || []).find(g => g && g.connected)
   if (!gp) return
   syncScope()
+
+  // The focused control went away (a new screen): land on its main control.
+  if (_active && _focused && !document.contains(_focused)) {
+    const auto = visibleTargets().find(el => el.matches('[data-gpautofocus]'))
+    if (auto) setFocus(auto)
+  }
 
   const pressedAny = gp.buttons.some(b => b?.pressed) || (gp.axes || []).some(a => Math.abs(a) > STICK_THRESHOLD)
   if (pressedAny && !_active) {
