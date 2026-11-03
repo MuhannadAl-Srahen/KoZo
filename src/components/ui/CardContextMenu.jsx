@@ -1,5 +1,5 @@
 import React from 'react'
-import { IconStar, IconEye, IconEyeOff, IconCircleOff, IconPencil, IconTrash, IconBrandSteam, IconArchive, IconArrowBackUp, IconCircleDot } from '@tabler/icons-react'
+import { IconPlayerPlayFilled, IconStar, IconEye, IconEyeOff, IconCircleOff, IconPencil, IconTrash, IconBrandSteam, IconArchive, IconArrowBackUp, IconCircleDot, IconSparkles } from '@tabler/icons-react'
 import { STATUS_META } from '../GameCard'
 import { fileUrl } from '../../lib/utils'
 import ContextMenu from './ContextMenu'
@@ -12,6 +12,7 @@ import ContextMenu from './ContextMenu'
  */
 export default function CardContextMenu({
   x, y, game, onClose,
+  onPlay,                  // optional: "Play" item at the top
   onSetStatus,
   onToggleFavorite,
   onToggleHidden,          // optional: hide item rendered only when provided
@@ -46,6 +47,8 @@ export default function CardContextMenu({
   ]
 
   const items = [
+    onPlay && { label: 'Play', Icon: IconPlayerPlayFilled, color: 'var(--a)', onClick: () => onPlay(game) },
+    onPlay && { divider: true },
     onSetStatus && { label: 'Status', Icon: statuses[current]?.Icon || IconCircleDot, color: statuses[current]?.color, sub: statusItems, hint: statuses[current]?.label },
     onToggleFavorite && {
       label: game.is_favorite ? 'Remove from favorites' : 'Add to favorites',
@@ -53,6 +56,10 @@ export default function CardContextMenu({
     },
     onEdit && { label: 'Edit…', Icon: IconPencil, onClick: () => onEdit(game) },
     ...extraItems.map(({ label, Icon, onClick }) => ({ label, Icon, onClick: () => onClick(game) })),
+    steamAppId && {
+      label: 'Find games like this', Icon: IconSparkles,
+      onClick: () => { window.location.hash = `#/like?app=${steamAppId}` },
+    },
     steamAppId && {
       label: 'Open Steam page', Icon: IconBrandSteam,
       onClick: () => window.kozo?.api?.shell?.openExternal(`https://store.steampowered.com/app/${steamAppId}`),

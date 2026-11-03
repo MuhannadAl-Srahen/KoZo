@@ -39,7 +39,7 @@ export default function PlanMonthModal({ count, current, onClose, onSave }) {
       <div className={s.field}>
         <label className={s.label}>Month</label>
         <MonthPicker value={month} onChange={setMonth} />
-        <div className={s.inputHint}>Filter the Game List by this month to see your plan.</div>
+        <div className={s.inputHint}>It shows up in Play Plan under that month.</div>
       </div>
     </Modal>
   )

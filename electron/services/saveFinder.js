@@ -92,6 +92,21 @@ function buildMatcher(game) {
   }
 }
 
+// Newest modified time under a folder (or of a file), so the user can tell
+// which candidate the game actually writes to.
+function newestMtime(p, depth = 3) {
+  let newest = 0
+  const walk = (d, lvl) => {
+    let st
+    try { st = fs.statSync(d) } catch { return }
+    if (st.isFile()) { newest = Math.max(newest, st.mtimeMs); return }
+    if (lvl > depth) return
+    for (const e of safeList(d).slice(0, 400)) walk(path.join(d, e.name), lvl + 1)
+  }
+  walk(p, 0)
+  return newest ? new Date(newest).toISOString() : null
+}
+
 function findSaveLocations(game) {
   const home     = os.homedir()
   const appdata  = process.env.APPDATA      || path.join(home, 'AppData', 'Roaming')
@@ -121,6 +136,20 @@ function findSaveLocations(game) {
     const { files, saveLike } = inspect(p)
     results.push({ path: p, source, files, saveLike, confidence })
   }
+
+  // Known save locations from the Ludusavi manifest (saveManifest.js) first:
+  // these are what the game really writes, not a guess from folder names.
+  try {
+    for (const hit of require('./saveManifest').pathsFor(game)) {
+      const key = hit.path.toLowerCase()
+      if (seen.has(key)) continue
+      let st
+      try { st = fs.statSync(hit.path) } catch { continue }
+      seen.add(key)
+      const info = st.isDirectory() ? inspect(hit.path) : { files: 1, saveLike: true }
+      results.push({ path: hit.path, source: 'Known save location', files: info.files, saveLike: true, confidence: 99, known: true })
+    }
+  } catch {}
 
   // Walk each base dir up to 2 levels, scoring folder names. A name match at any
   // level is a candidate; if its name is only a weak (acronym) match we still
@@ -182,7 +211,7 @@ function findSaveLocations(game) {
   // Keep only trustworthy candidates: a strong name match, OR a weaker match that
   // actually looks like a save folder. Drop empty folders.
   const trustworthy = results.filter(r =>
-    r.files > 0 && (r.confidence >= 78 || r.saveLike || r.source === 'Steam Cloud' || r.source === 'Game folder')
+    r.files > 0 && (r.known || r.confidence >= 78 || r.saveLike || r.source === 'Steam Cloud' || r.source === 'Game folder')
   )
 
   // Rank: confidence, then save-like, then file count.
@@ -190,7 +219,7 @@ function findSaveLocations(game) {
     (b.confidence - a.confidence) || (Number(b.saveLike) - Number(a.saveLike)) || (b.files - a.files)
   )
 
-  return trustworthy.map(({ path: p, source, files, saveLike }) => ({ path: p, source, files, saveLike }))
+  return trustworthy.map(({ path: p, source, files, saveLike, known }) => ({ path: p, source, files, saveLike, known: !!known, modifiedAt: newestMtime(p) }))
 }
 
-module.exports = { findSaveLocations }
+module.exports = { findSaveLocations, buildMatcher }

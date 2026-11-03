@@ -219,77 +219,237 @@ handle('games:reorder', (orderedIds) => {
 })
 
 // Locate a game's save files across the standard Windows/Steam locations.
-handle('saves:find', (gameId) => {
+// ── Game-save backups (services/saveVault.js, autoSaveBackup.js) ─────────────
+function saveGame(gameId) {
   const game = gamesQ.getGame(gameId)
   if (!game) throw new Error('Game not found')
-  const { findSaveLocations } = require('./services/saveFinder')
-  return { game: game.name, locations: findSaveLocations(game) }
-})
-
-// Save backup / restore (folders keyed by game NAME, see saveBackup.js)
-function gameNameOf(gameId) {
-  const game = gamesQ.getGame(gameId)
-  if (!game) throw new Error('Game not found')
-  return game.name
+  return game
 }
-handle('saves:backup', (gameId, sourcePath) =>
-  require('./services/saveBackup').backupSave(gameNameOf(gameId), sourcePath))
-handle('saves:listBackups', (gameId) =>
-  require('./services/saveBackup').listBackups(gameNameOf(gameId)))
-handle('saves:restore', (gameId, backupId, target) =>
-  require('./services/saveBackup').restoreBackup(gameNameOf(gameId), backupId, target))
-handle('saves:deleteBackup', (gameId, backupId) =>
-  require('./services/saveBackup').deleteBackup(gameNameOf(gameId), backupId))
+handle('saves:find', (gameId) => {
+  const game = saveGame(gameId)
+  const { findSaveLocations } = require('./services/saveFinder')
+  const { getSavePaths } = require('./services/autoSaveBackup')
+  return { game: game.name, locations: findSaveLocations(game), confirmed: getSavePaths(game) }
+})
+handle('saves:setPaths', (gameId, paths) => require('./services/autoSaveBackup').setSavePaths(saveGame(gameId).id, paths))
+// Back up now: the confirmed locations, or one given path.
+handle('saves:backup', (gameId, sourcePath) => {
+  const game = saveGame(gameId)
+  const paths = sourcePath ? [sourcePath] : require('./services/autoSaveBackup').resolvePaths(game)
+  if (!paths.length) throw new Error('Confirm where this game keeps its saves first')
+  const r = require('./services/saveVault').snapshot(game, paths, 'manual')
+  if (r.skipped) throw new Error(r.skipped === 'empty' ? 'That save folder is empty' : `Nothing backed up (${r.skipped})`)
+  return r
+})
+handle('saves:listBackups', (gameId) => {
+  const game = saveGame(gameId)
+  const vault = require('./services/saveVault')
+  return { snapshots: vault.listSnapshots(game), bytes: vault.usage(game) }
+})
+handle('saves:compare', (gameId, id) => require('./services/saveVault').compare(saveGame(gameId), id))
+handle('saves:restore', (gameId, id) => require('./services/saveVault').restore(saveGame(gameId), id))
+handle('saves:deleteBackup', (gameId, id) => require('./services/saveVault').remove(saveGame(gameId), id))
+handle('saves:export', async (gameId, id) => {
+  const { app } = require('electron')
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  const res = await dialog.showOpenDialog(win, { title: 'Copy this restore point to...', defaultPath: app.getPath('desktop'), properties: ['openDirectory', 'createDirectory'] })
+  if (res.canceled || !res.filePaths?.[0]) return null
+  const out = require('./services/saveVault').exportSnapshot(saveGame(gameId), id, res.filePaths[0])
+  await shell.openPath(out)
+  return out
+})
 handle('saves:backupsDir', () => require('./services/saveBackup').rootPath())
 
-// Per-game backup overview for the Backups tab — count + newest snapshot, so
-// the user can see at a glance what's protected and what isn't.
+// Every game: where its saves are, how many restore points, newest, space used.
+// Cheap: no disk search here (saves:detect does that).
 handle('saves:overview', () => {
-  const { listBackups } = require('./services/saveBackup')
+  const vault = require('./services/saveVault')
+  const { getSavePaths } = require('./services/autoSaveBackup')
   const db = require('./db/database').getDb()
-  const games = db.prepare('SELECT id, name FROM games ORDER BY name COLLATE NOCASE').all()
+  const games = db.prepare('SELECT * FROM games WHERE is_archived = 0 ORDER BY last_played_at IS NULL, last_played_at DESC, name COLLATE NOCASE').all()
   return games.map(g => {
-    let backups = []
-    try { backups = listBackups(g.name) } catch {}
+    const paths = getSavePaths(g)
+    let list = [], bytes = 0
+    try { list = vault.listSnapshots(g); bytes = vault.usage(g) } catch {}
     return {
-      id: g.id,
-      name: g.name,
-      count: backups.length,
-      latestAt: backups[0]?.createdAt || null,
+      id: g.id, name: g.name, art: g.banner_local_path || null, artUrl: g.banner_url || null,
+      confirmed: paths.length > 0, paths, count: list.length, latestAt: list[0]?.createdAt || null,
+      latestBytes: list[0]?.bytes || 0, bytes, lastPlayed: g.last_played_at || null,
     }
   })
 })
 
-// Auto-backup of game saves after each session (mirrors the app-data auto-backup).
 handle('saves:getAutoBackup', () => settingsQ.getSetting('auto_save_backup_enabled') === '1')
 handle('saves:setAutoBackup', (enabled) => {
   settingsQ.setSetting('auto_save_backup_enabled', enabled ? '1' : '0')
   return true
 })
 
-// Back up the best-found save location for EVERY game in the library at once
-// (e.g. before formatting the PC). Returns a per-game summary.
+// The Backups page header: where backups live, space, cap, Drive.
+handle('saves:storage', () => {
+  const vault = require('./services/saveVault')
+  const home = require('./services/backupHome')
+  const db = require('./db/database').getDb()
+  const games = db.prepare('SELECT id, name FROM games').all()
+  let bytes = 0
+  for (const g of games) { try { bytes += vault.usage(g) } catch {} }
+  const root = require('./services/saveBackup').rootPath()
+  return {
+    bytes,
+    root,
+    base: home.base() || path.dirname(root),
+    free: home.freeSpace(root),
+    lowSpaceAt: settingsQ.getSetting('save_low_space') || null,
+    capGb: vault.capGb(),
+    manifest: require('./services/saveManifest').status(),
+    dataAt: (() => { try { return require('fs').statSync(path.join(settingsQ.getSetting('auto_backup_dir') || '', 'kozo-autobackup.json')).mtime.toISOString() } catch { return null } })(),
+  }
+})
+handle('saves:setCap', (gb) => { settingsQ.setSetting('save_vault_cap_gb', String(Number(gb) || 0)); return true })
+handle('saves:refreshManifest', async () => {
+  const r = await require('./services/saveManifest').refresh({ force: true })
+  require('./services/saveDetect').confirmAll()
+  return r
+})
+// Find every game's saves now (the Backups page runs it when opened).
+handle('saves:detect', () => require('./services/saveDetect').confirmAll())
+// Move all backups to a folder the user picks.
+handle('saves:moveBase', async () => {
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  const res = await dialog.showOpenDialog(win, { title: 'Where should KoZo keep its backups?', properties: ['openDirectory', 'createDirectory'] })
+  if (res.canceled || !res.filePaths?.[0]) return null
+  return require('./services/backupHome').setBase(res.filePaths[0])
+})
+
+// Restore everything: each game's newest restore point, for the games picked.
+handle('saves:restorePlan', () => {
+  const vault = require('./services/saveVault')
+  const db = require('./db/database').getDb()
+  const fs = require('fs')
+  const out = []
+  for (const g of db.prepare('SELECT * FROM games WHERE is_archived = 0 ORDER BY name COLLATE NOCASE').all()) {
+    let list = []
+    try { list = vault.listSnapshots(g) } catch {}
+    if (!list.length) continue
+    const latest = list[0]
+    const here = (latest.sources || []).some(s => { try { return fs.existsSync(s) } catch { return false } })
+    out.push({ id: g.id, name: g.name, snapshot: latest.id, createdAt: latest.createdAt, files: latest.files, hasSaveHere: here })
+  }
+  return out
+})
+handle('saves:restoreMany', async (items) => {
+  const vault = require('./services/saveVault')
+  const results = []
+  for (const it of items || []) {
+    await new Promise(r => setImmediate(r))
+    try { vault.restore(saveGame(it.id), it.snapshot); results.push({ id: it.id, ok: true }) }
+    catch (e) { results.push({ id: it.id, ok: false, error: e.message }) }
+  }
+  return results
+})
+
+// Google Drive (services/googleDrive.js)
+handle('drive:status', () => require('./services/googleDrive').status())
+// The Google client the user made (Set up Google Drive in Connections).
+handle('drive:setClient', ({ id, secret } = {}) => {
+  const cid = String(id || '').trim(), sec = String(secret || '').trim()
+  if (cid && !/\.apps\.googleusercontent\.com$/.test(cid)) throw new Error('That Client ID should end with .apps.googleusercontent.com')
+  settingsQ.setSetting('gdrive_client_id', cid)
+  settingsQ.setSetting('gdrive_client_secret', sec)
+  return require('./services/googleDrive').status()
+})
+handle('drive:connect', () => require('./services/googleDrive').connect())
+handle('drive:disconnect', () => require('./services/googleDrive').disconnect())
+handle('drive:sync', () => require('./services/googleDrive').sync())
+handle('drive:setBudget', (gb) => { settingsQ.setSetting('gdrive_budget_gb', String(Number(gb) || 0)); require('./services/googleDrive').syncSoon(3000); return true })
+// Bring everything back from Drive: the save backups, then the library.
+handle('drive:restore', async () => {
+  const r = await require('./services/googleDrive').restoreDown((done, total) => broadcast('drive:restoreProgress', { done, total }))
+  let data = null
+  if (r.dataPath) { data = await importBackupFile(r.dataPath); try { require('fs').rmSync(r.dataPath, { force: true }) } catch {} }
+  try { require('./services/saveDetect').confirmAll() } catch {}
+  return { files: r.files, data }
+})
+// One file with everything (services/kozoPack.js): Save everything to one
+// file / Open a KoZo file (Backups, first-run RestoreOffer).
+handle('pack:export', async () => {
+  const { app } = require('electron')
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  const day = new Date().toISOString().slice(0, 10)
+  const res = await dialog.showSaveDialog(win, {
+    title: 'Save everything to one file',
+    defaultPath: path.join(app.getPath('documents'), `KoZo backup ${day}.kozo`),
+    filters: [{ name: 'KoZo backup', extensions: ['kozo'] }],
+  })
+  if (res.canceled || !res.filePath) return null
+  const r = await require('./services/kozoPack').exportAll(res.filePath, (done, total) => broadcast('pack:progress', { done, total }))
+  shell.showItemInFolder(res.filePath)
+  return { ...r, path: res.filePath }
+})
+handle('pack:import', async () => {
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  const res = await dialog.showOpenDialog(win, {
+    title: 'Open a KoZo file', properties: ['openFile'],
+    filters: [{ name: 'KoZo backup', extensions: ['kozo'] }],
+  })
+  if (res.canceled || !res.filePaths?.[0]) return null
+  const r = require('./services/kozoPack').importAll(res.filePaths[0], (done, total) => broadcast('pack:progress', { done, total }))
+  let data = null
+  if (r.dataPath) { data = await importBackupFile(r.dataPath); try { require('fs').rmSync(r.dataPath, { force: true }) } catch {} }
+  try { require('./services/saveDetect').confirmAll() } catch {}
+  return { files: r.files, data }
+})
+
+// A "KoZo Backup" folder already on one of this PC's drives (after a reinstall).
+handle('backup:findExisting', () => {
+  const fs = require('fs')
+  const current = require('./services/backupHome').base()
+  return require('./services/backupHome').findExisting().map(p => {
+    // The current file, or one kept beside it (written by an earlier install):
+    // the newest that has games in it.
+    let at = null, games = null
+    let files = []
+    try { files = fs.readdirSync(path.join(p, 'Data')).filter(n => /^kozo-autobackup.*\.json$/.test(n)).map(n => path.join(p, 'Data', n)) } catch {}
+    files.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)
+    for (const f of files) {
+      try {
+        const n = (JSON.parse(fs.readFileSync(f, 'utf8')).games || []).length
+        if (n > 0) { games = n; at = fs.statSync(f).mtime.toISOString(); break }
+      } catch {}
+    }
+    return { path: p, at, games, current: !!current && current.toLowerCase() === p.toLowerCase() }
+  })
+})
+handle('backup:restoreFolder', async (folder) => {
+  const fs = require('fs')
+  const dataDir = path.join(String(folder), 'Data')
+  // The newest data file there (the current one, or one kept beside it).
+  let files = []
+  try { files = fs.readdirSync(dataDir).filter(n => /^kozo-autobackup.*\.json$/.test(n)).map(n => path.join(dataDir, n)) } catch {}
+  const best = files.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs).find(f => {
+    try { return (JSON.parse(fs.readFileSync(f, 'utf8')).games || []).length > 0 } catch { return false }
+  })
+  const data = best ? await importBackupFile(best) : null
+  require('./services/backupHome').setBase(String(folder))
+  try { require('./services/saveDetect').confirmAll() } catch {}
+  return { data }
+})
+
+// Back up every game with a confirmed (or known) save location at once.
 handle('saves:backupAll', async () => {
   const db = require('./db/database').getDb()
-  const { findSaveLocations } = require('./services/saveFinder')
-  const { backupSave } = require('./services/saveBackup')
-  const games = db.prepare('SELECT * FROM games').all()
+  const { resolvePaths } = require('./services/autoSaveBackup')
+  const vault = require('./services/saveVault')
+  const games = db.prepare('SELECT * FROM games WHERE is_archived = 0').all()
   const results = []
-  // Both findSaveLocations (walks AppData/Documents/Saved Games for every game)
-  // and backupSave (recursive fs.cpSync) are fully synchronous. Run back to
-  // back over a whole library they blocked the main process for as long as the
-  // copy took — the window froze, the process-watcher tick couldn't fire, and a
-  // session running at the time stopped being heartbeated. Yielding between
-  // games doesn't make the copies async, but it does let the event loop turn.
   for (const g of games) {
-    await new Promise(r => setImmediate(r))
-    let locs = []
-    try { locs = findSaveLocations(g) } catch {}
-    if (!locs.length) { results.push({ name: g.name, status: 'no_saves' }); continue }
-    await new Promise(r => setImmediate(r))
+    await new Promise(r => setImmediate(r))   // let the event loop turn between games
+    let paths = []
+    try { paths = resolvePaths(g) } catch {}
+    if (!paths.length) { results.push({ name: g.name, status: 'no_saves' }); continue }
     try {
-      const meta = backupSave(g.name, locs[0].path)
-      results.push({ name: g.name, status: 'ok', files: meta.files })
+      const r = vault.snapshot(g, paths, 'manual')
+      results.push({ name: g.name, status: r.skipped ? 'no_saves' : 'ok', files: r.files })
     } catch (e) {
       results.push({ name: g.name, status: 'error', error: e.message })
     }
@@ -299,6 +459,7 @@ handle('saves:backupAll', async () => {
     backedUp: results.filter(r => r.status === 'ok').length,
     noSaves:  results.filter(r => r.status === 'no_saves').length,
     failed:   results.filter(r => r.status === 'error').length,
+    needConfirm: results.filter(r => r.status === 'no_saves').map(r => r.name),
     results,
     dir: require('./services/saveBackup').rootPath(),
   }
@@ -357,9 +518,45 @@ handle('games:launch', async (id) => {
   } finally { launchInFlight.delete(id) }
 })
 
+// Start a program the way Explorer does (ShellExecute via Start-Process).
+// A direct spawn() from KoZo hands the game every inheritable handle KoZo has
+// open (sockets, pipes, files), so they stayed held for as long as the game
+// ran, even after KoZo itself quit. ShellExecute passes none. Resolves with
+// { pid } once the program has stayed up for `holdMs`, or { exitedCode } if it
+// was already gone by then (a launcher stub, or a game that died at once).
+function shellStart(file, cwd, { holdMs = 1200 } = {}) {
+  const { spawn } = require('child_process')
+  const q = (v) => String(v).replace(/'/g, "''")
+  const script =
+    `$ErrorActionPreference='Stop'; ` +
+    `try { ` +
+      `$p = Start-Process -FilePath '${q(file)}' -WorkingDirectory '${q(cwd)}' -PassThru; ` +
+      `if (${holdMs} -gt 0 -and $p) { Start-Sleep -Milliseconds ${holdMs}; ` +
+        `if ($p.HasExited) { $c = ''; try { $c = $p.ExitCode } catch {}; [Console]::Out.WriteLine('KOZO_EXITED=' + $c); exit 0 } }; ` +
+      `if ($p) { [Console]::Out.WriteLine('KOZO_PID=' + $p.Id) }; exit 0 ` +
+    `} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }`
+  return new Promise((resolve, reject) => {
+    const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', script], { windowsHide: true })
+    let out = '', err = ''
+    ps.stdout.on('data', d => { out += d })
+    ps.stderr.on('data', d => { err += d })
+    ps.once('error', reject)
+    ps.once('close', (code) => {
+      if (code !== 0) return reject(Object.assign(new Error(String(err).trim() || `Start-Process exited with ${code}`), { code: 'SHELL_START' }))
+      const exited = out.match(/KOZO_EXITED=(-?\d*)/)
+      if (exited) return resolve({ exitedCode: exited[1] === '' ? null : Number(exited[1]) })
+      const pid = out.match(/KOZO_PID=(\d+)/)?.[1]
+      resolve({ pid: pid ? Number(pid) : undefined })
+    })
+  })
+}
+
 async function doLaunch(id) {
   const game = gamesQ.getGame(id)
   if (!game) throw new Error('Game not found')
+  // Back up the save before the game can touch it (quick: unchanged files are
+  // already stored; gives up after a few seconds rather than delay the launch).
+  try { require('./services/autoSaveBackup').beforePlay(game) } catch {}
 
   const fs = require('fs')
 
@@ -378,13 +575,25 @@ async function doLaunch(id) {
   // copy on disk expects to be started. Run from its own folder, like a
   // double-click; processWatcher picks the game up by exe_name as usual.
   if (game.launch_file && fs.existsSync(game.launch_file)) {
-    const { spawn } = require('child_process')
-    const child = spawn('cmd.exe', ['/c', 'start', '""', '/d', path.dirname(game.launch_file), game.launch_file], {
-      cwd: path.dirname(game.launch_file), detached: true, stdio: 'ignore', windowsHide: true,
-    })
-    child.on('error', (e) => logger.warn(`launcher start failed for "${game.name}": ${e.message}`))
-    child.unref()
+    // A .bat exits once it has started the game, so don't wait on it.
+    await shellStart(game.launch_file, path.dirname(game.launch_file), { holdMs: 0 })
     return { launched: 'launcher', path: game.launch_file }
+  }
+
+  // A store launcher starts the game itself (Epic needs its sign-in; Xbox
+  // games live in protected WindowsApps folders). services/launcherImport.js.
+  if (game.launch_uri) {
+    if (/^shell:AppsFolder\\/i.test(game.launch_uri)) {
+      const { spawn } = require('child_process')
+      const child = spawn('explorer.exe', [game.launch_uri], { detached: true, stdio: 'ignore', windowsHide: true })
+      child.on('error', (e) => logger.warn(`store launch failed for "${game.name}": ${e.message}`))
+      child.unref()
+      return { launched: 'store', uri: game.launch_uri }
+    }
+    if (/^(com\.epicgames\.launcher|goggalaxy):\/\//i.test(game.launch_uri)) {
+      await shell.openExternal(game.launch_uri)
+      return { launched: 'store', uri: game.launch_uri }
+    }
   }
 
   if (hasUsableLocalExe) {
@@ -457,46 +666,28 @@ async function doLaunch(id) {
     if (game.run_as_admin) return await launchElevated()
 
     try {
-      await new Promise((resolve, reject) => {
-        const child = spawn(fullPath, [], {
-          detached: true,
-          stdio: 'ignore',
-          cwd: game.install_path,
-        })
-        let settled = false
-        child.once('spawn', () => {
-          // Don't resolve yet — an elevation-requiring exe can still spawn
-          // "successfully" via CreateProcess and then exit right back out
-          // with no window ever shown and no 'error' event. Give it a beat
-          // to prove it's actually staying up.
-          setTimeout(() => {
-            if (!settled) { settled = true; child.unref(); resolve() }
-          }, 1200)
-        })
-        child.once('exit', async (code) => {
-          if (settled) return
-          settled = true
-          // It exited within 1.2s. That's either (a) a launcher stub that
-          // handed off to the real game exe and quit — completely normal, lots
-          // of repacks do this — or (b) the game dying instantly because it
-          // couldn't write where it needed to without admin. Exit code doesn't
-          // distinguish them (a silent admin-death is usually code 0), so ask
-          // Windows whether anything named like this game is actually running.
-          const alive = await isExeRunning(game.exe_name).catch(() => null)
-          child.unref()
-          if (alive !== false) resolve()   // running, or we couldn't tell — assume fine
-          else reject(Object.assign(
-            new Error(`exited immediately (code ${code}) and no "${game.exe_name}" process is running`),
-            { code: 'EARLY_EXIT' }))
-        })
-        child.once('error', (e) => {
-          if (settled) return
-          settled = true
-          reject(e)
-        })
-      })
+      const r = await shellStart(fullPath, game.install_path)
+      if (r.exitedCode !== undefined) {
+        // It exited within 1.2s. That's either (a) a launcher stub that
+        // handed off to the real game exe and quit — completely normal, lots
+        // of repacks do this — or (b) the game dying instantly because it
+        // couldn't write where it needed to without admin. Exit code doesn't
+        // distinguish them (a silent admin-death is usually code 0), so ask
+        // Windows whether anything named like this game is actually running.
+        const alive = await isExeRunning(game.exe_name).catch(() => null)
+        if (alive === false) {
+          throw Object.assign(
+            new Error(`exited immediately (code ${r.exitedCode}) and no "${game.exe_name}" process is running`),
+            { code: 'EARLY_EXIT' })
+        }
+      }
       return { launched: 'spawn', path: fullPath }
     } catch (e) {
+      // ShellExecute shows the admin prompt itself for exes that ask for it;
+      // a dismissed prompt is the user's answer, not a reason to ask again.
+      if (/cancell?ed by the user|operation was cancell?ed/i.test(e.message)) {
+        throw new Error(`"${game.name}" needs administrator rights, and the Windows permission prompt was dismissed. Click Play again and choose Yes.`)
+      }
       // EACCES/EPERM/EARLY_EXIT all point the same way here: the exe needs
       // admin rights. Fall back to the elevated launch now, and remember it
       // so future Play clicks go straight there.
@@ -685,6 +876,7 @@ handle('gameList:add', async (data) => {
   const r = gameListQ.addGameListItem(data); bk(); return r
 })
 handle('gameList:update', (id, data) => {
+  if (data?.status || data?.rating !== undefined) require('./services/steamApi').clearTasteProfile()
   const prev = data?.status ? gameListQ.getGameListItem(id) : null
   const r = gameListQ.updateGameListItem(id, data)
   // Mirror a status change onto the linked library game (and vice versa elsewhere).
@@ -774,6 +966,16 @@ handle('gameList:planBoard', (month, from, to) => {
   `).all(String(from || ''), String(to || ''), month)
 })
 // Every month that has plans: how many games, and how many of them are done.
+// Game List header: how many rows per status, and the average rating.
+handle('gameList:statusCounts', () => {
+  const db = require('./db/database').getDb()
+  const out = { all: 0 }
+  for (const r of db.prepare('SELECT status, COUNT(*) AS n FROM game_list GROUP BY status').all()) { out[r.status] = r.n; out.all += r.n }
+  const rt = db.prepare('SELECT COUNT(*) AS n, AVG(rating) AS avg FROM game_list WHERE rating IS NOT NULL AND rating > 0').get()
+  out.rated = rt.n || 0
+  out.avgRating = rt.avg || null
+  return out
+})
 handle('gameList:planSummary', () => require('./db/database').getDb().prepare(`
   SELECT planned_month AS month, COUNT(*) AS total,
          SUM(CASE WHEN status = 'finished' THEN 1 ELSE 0 END) AS done
@@ -809,7 +1011,11 @@ handle('genres:distinct', () => gameListQ.distinctGenres())
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 handle('settings:get', (key) => settingsQ.getSetting(key))
-handle('settings:set', (key, value) => { settingsQ.setSetting(key, value); return true })
+handle('settings:set', (key, value) => {
+  settingsQ.setSetting(key, value)
+  if (key === 'pad_wake_combo') require('./services/controllerWake').setCombo(value)
+  return true
+})
 handle('settings:getAll', () => settingsQ.getAllSettings())
 
 // ── Active sessions (from process watcher) ───────────────────────────────────
@@ -1282,8 +1488,99 @@ handle('scanner:scan', async (paths) => {
     logger.warn('scanner: relocate pass failed', { message: e.message })
   }
 
+  // Games already in the library show the cover they have there (a cracked
+  // copy has no Steam id, so the modal had nothing to draw).
+  try {
+    const norm = (s) => String(s || '').trim().toLowerCase().replace(/[\\/]+$/, '')
+    const lib = db.prepare('SELECT name, install_path, steam_app_id, banner_local_path, banner_url FROM games').all()
+    for (const g of results) {
+      if (!g.alreadyInLibrary) continue
+      const row = lib.find(r =>
+        (r.install_path && norm(r.install_path) === norm(g.install_path)) ||
+        (r.steam_app_id && g.steam_app_id && String(r.steam_app_id) === String(g.steam_app_id)) ||
+        norm(r.name) === norm(g.name))
+      if (row) { g.library_cover_path = row.banner_local_path || null; g.library_cover_url = row.banner_url || null }
+    }
+  } catch {}
+
   return results
 })
+
+// ── Import from launchers (Epic, GOG, Xbox) ───────────────────────────────────
+// Reads each launcher's own records (services/launcherImport.js), flags what
+// the Library already has, and name-matches the rest to Steam for covers and
+// genres, the same way Scan PC treats cracked games.
+async function scanLaunchers({ match = true } = {}) {
+  const li = require('./services/launcherImport')
+  const { findAppByName } = require('./services/steamApi')
+  const db = require('./db/database').getDb()
+  const found = await li.readAll()
+  const rows = db.prepare('SELECT install_path, name, launch_uri, steam_app_id FROM games').all()
+  const paths = new Set(rows.filter(r => r.install_path).map(r => r.install_path.toLowerCase().replace(/[\\/]+$/, '')))
+  const names = new Set(rows.map(r => String(r.name || '').trim().toLowerCase()))
+  const uris = new Set(rows.filter(r => r.launch_uri).map(r => r.launch_uri.toLowerCase()))
+  const appIds = new Set(rows.filter(r => r.steam_app_id).map(r => String(r.steam_app_id)))
+  for (const g of found) {
+    g.key = li.keyOf(g)
+    g.alreadyInLibrary = paths.has(g.install_path.toLowerCase().replace(/[\\/]+$/, '')) ||
+      names.has(g.name.toLowerCase()) || (g.launch_uri && uris.has(g.launch_uri.toLowerCase()))
+  }
+  const timeout = (ms) => new Promise(r => setTimeout(() => r(null), ms))
+  const toMatch = match ? found.filter(g => !g.alreadyInLibrary) : []
+  let i = 0
+  async function worker() {
+    while (i < toMatch.length) {
+      const g = toMatch[i++]
+      try {
+        const k = g.name.toLowerCase()
+        let match = scanMatchCache.get(k)
+        if (match === undefined) {
+          match = await Promise.race([findAppByName(g.name).catch(() => null), timeout(6000)])
+          scanMatchCache.set(k, match || null)
+        }
+        if (match) {
+          g.steam_app_id = match.steam_app_id
+          if (appIds.has(String(match.steam_app_id))) g.alreadyInLibrary = true
+        }
+      } catch {}
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(6, toMatch.length) }, worker))
+  return found
+}
+
+handle('launchers:scan', () => scanLaunchers())
+
+// Found games the user hasn't added or dismissed yet (the Library strip).
+function launcherSeen() {
+  try { return new Set(JSON.parse(settingsQ.getSetting('launcher_seen') || '[]')) } catch { return new Set() }
+}
+let launcherPending = []
+handle('launchers:pending', () => launcherPending)
+handle('launchers:dismiss', (keys) => {
+  const seen = launcherSeen()
+  for (const k of (keys || [])) seen.add(k)
+  settingsQ.setSetting('launcher_seen', JSON.stringify([...seen].slice(-2000)))
+  launcherPending = launcherPending.filter(g => !seen.has(g.key))
+  return true
+})
+
+// "Found automatically": on each launch, once nothing is playing, look for
+// new launcher games and tell the Library. Local reads only (no Steam
+// lookups; the review dialog does those). Nothing is added without the user.
+setTimeout(() => {
+  require('./services/processWatcher').runWhenIdle('launcherScan', async () => {
+    try {
+      const seen = launcherSeen()
+      const found = await scanLaunchers({ match: false })
+      launcherPending = found.filter(g => !g.alreadyInLibrary && !seen.has(g.key))
+      if (launcherPending.length) {
+        logger.info(`launchers: ${launcherPending.length} new game(s) found`)
+        broadcast('launchers:found', launcherPending.length)
+      }
+    } catch (e) { logger.warn('launchers: scan failed', { message: e.message }) }
+  })
+}, 50000)
 
 // Map the scanner's detected launcher to the persisted `source` so the library
 // shows a correct Steam/Epic/GOG/Xbox/EA/Ubisoft badge (not a generic "Manual").
@@ -1317,6 +1614,7 @@ handle('scanner:addGames', async (games) => {
         source: TYPE_TO_SOURCE[g.detected_type] || (g.steam_app_id ? 'steam' : 'manual'),
         is_cracked: g.is_cracked ? 1 : 0,
         is_installed: g.isInstalled === false ? 0 : 1,
+        launch_uri: g.launch_uri || null,
         banner_url: g.steam_app_id
           ? `https://cdn.akamai.steamstatic.com/steam/apps/${g.steam_app_id}/library_600x900_2x.jpg`
           : null,
@@ -1377,6 +1675,14 @@ handle('steam:storeDetails', (appId) => require('./services/steamApi').getStoreD
 handle('steam:comingSoon', (feed, page) => require('./services/steamApi').getComingSoon(feed, page))
 // appIds → { [appid]: { portrait, hero, header, capsule } } real store art URLs.
 handle('steam:tasteProfile', () => require('./services/steamApi').getTasteProfile())
+handle('steam:picks', () => require('./services/steamApi').getPicks())
+handle('steam:reviews', (appId) => require('./services/steamApi').getReviews(Number(appId)))
+// Discount games (pages/Deals.jsx, services/deals.js).
+handle('deals:list', (opts) => require('./services/deals').getDeals(opts || {}))
+handle('deals:markSeen', () => require('./services/deals').markSeen())
+handle('deals:unseen', () => require('./services/deals').unseen())
+// Games like (pages/GamesLike.jsx, Game Detail): steamApi.similarGames.
+handle('steam:similar', (appId) => require('./services/steamApi').similarGames(Number(appId)))
 handle('steam:appAssets', async (appIds) => Object.fromEntries(await require('./services/steamApi').getAppAssets(appIds)))
 
 // Called when the Upcoming tab opens: warms the store-details cache for every
@@ -1468,6 +1774,11 @@ handle('steam:refreshAllBanners', async () => {
 
 // ── SteamGridDB (covers for non-Steam games) ─────────────────────────────────
 handle('sgdb:test', (key) => require('./services/steamGridDb').testKey(key))
+// Which keys KoZo brings itself (Settings shows "built in" for those).
+handle('keys:builtIn', () => {
+  const d = require('./defaults')
+  return { steamgriddb: !!d.STEAMGRIDDB_KEY, discord: !!d.DISCORD_CLIENT_ID, discordId: d.DISCORD_CLIENT_ID || null }
+})
 handle('sgdb:search', (name) => require('./services/steamGridDb').searchGame(name))
 // Rate a finished game 1 to 10. The rating lives on the Game List row; a
 // Library game without one gets its row created first.
@@ -1481,6 +1792,7 @@ handle('gameList:rate', ({ listId = null, gameId = null } = {}, rating) => {
   }
   if (!id) throw new Error('Game not found')
   gameListQ.updateGameListItem(id, { rating: value })
+  require('./services/steamApi').clearTasteProfile()
   bk(); broadcast('game:updated', null)
   return value
 })
@@ -1732,16 +2044,92 @@ handle('app:getStartup', () => {
   }
 })
 
+// The command Windows runs at logon. In a packaged build process.execPath is
+// KoZo.exe → launching it bare starts the app. In dev it is electron.exe, and
+// launching THAT bare opens Electron's default welcome window, so dev also
+// passes the app directory. --startup tells main.js it was Windows that
+// started KoZo (Start minimized applies only then).
+function startupCommand() {
+  const { app } = require('electron')
+  return { execPath: process.execPath, args: [...(app.isPackaged ? [] : [app.getAppPath()]), '--startup'] }
+}
+
+function xmlEsc(v) { return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') }
+
+// A plain `schtasks /create /sc ONLOGON` keeps Task Scheduler's defaults: it
+// won't start on battery, kills KoZo after 72 hours and runs it at below
+// normal priority. The XML form sets all of that explicitly.
+function startupTaskXml({ execPath, args }, runLevel = 'HighestAvailable') {
+  const user = [process.env.USERDOMAIN, process.env.USERNAME].filter(Boolean).join('\\')
+  const argStr = args.map(a => (/\s/.test(a) ? `"${a}"` : a)).join(' ')
+  return `<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>Start KoZo when you sign in to Windows.</Description></RegistrationInfo>
+  <Triggers><LogonTrigger><Enabled>true</Enabled>${user ? `<UserId>${xmlEsc(user)}</UserId>` : ''}</LogonTrigger></Triggers>
+  <Principals><Principal id="Author">${user ? `<UserId>${xmlEsc(user)}</UserId>` : ''}<LogonType>InteractiveToken</LogonType><RunLevel>${runLevel}</RunLevel></Principal></Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>false</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle></IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>5</Priority>
+  </Settings>
+  <Actions Context="Author"><Exec><Command>${xmlEsc(execPath)}</Command>${argStr ? `<Arguments>${xmlEsc(argStr)}</Arguments>` : ''}</Exec></Actions>
+</Task>`
+}
+
+// Task Scheduler first (works even when KoZo runs as administrator, no UAC at
+// boot), the Run key as a fallback. Both start KoZo with --startup.
+function registerStartup(taskName = TASK_NAME) {
+  const { app } = require('electron')
+  const { execSync } = require('child_process')
+  const fs = require('fs')
+  const os = require('os')
+  const cmd = startupCommand()
+  const tmp = path.join(os.tmpdir(), `kozo-startup-${process.pid}.xml`)
+  try {
+    // schtasks wants the XML as UTF-16 (with a BOM) to match its declaration.
+    // The highest run level only registers while KoZo itself runs as
+    // administrator (otherwise "Access is denied"), so a normal-level task is
+    // the next try before falling all the way back to the Run key.
+    for (const level of ['HighestAvailable', 'LeastPrivilege']) {
+      fs.writeFileSync(tmp, '\ufeff' + startupTaskXml(cmd, level), 'utf16le')
+      try {
+        execSync(`schtasks /create /tn "${taskName}" /xml "${tmp}" /f`, { stdio: 'pipe', timeout: 5000 })
+        break
+      } catch (e) {
+        if (level === 'LeastPrivilege') throw e
+      }
+    }
+    // An older Run value would start a second copy next to the task.
+    for (const name of findRunEntries()) {
+      try { execSync(`reg delete "${RUN_KEY}" /v "${name}" /f`, { stdio: 'pipe' }) } catch {}
+    }
+    return { ok: true, method: 'task_scheduler' }
+  } catch (taskErr) {
+    try {
+      app.setLoginItemSettings({ openAtLogin: true, path: cmd.execPath, args: cmd.args })
+      return { ok: true, method: 'registry' }
+    } catch (regErr) {
+      return { ok: false, error: regErr.message }
+    }
+  } finally {
+    try { fs.unlinkSync(tmp) } catch {}
+  }
+}
+
 handle('app:setStartup', (enable) => {
   const { app } = require('electron')
   const { execSync } = require('child_process')
-
-  // In a packaged build process.execPath is KoZo.exe → launching it bare starts
-  // the app. In dev it is electron.exe, and launching THAT bare opens Electron's
-  // default "run a local app" welcome window (a confusing ghost window at boot).
-  // So in dev we must also pass the app directory as an argument.
-  const execPath = process.execPath
-  const launchArgs = app.isPackaged ? [] : [app.getAppPath()]
+  const { execPath, args: launchArgs } = startupCommand()
 
   if (!enable) {
     // Remove EVERY entry that is actually there, then verify BOTH mechanisms.
@@ -1749,7 +2137,9 @@ handle('app:setStartup', (enable) => {
     // so a surviving scheduled task — or a Run value under a name it didn't
     // guess — reported "off" while Windows kept starting the app.
     try { execSync(`schtasks /delete /tn "${TASK_NAME}" /f`, { stdio: 'pipe' }) } catch {}
-    try { app.setLoginItemSettings({ openAtLogin: false, path: execPath, args: launchArgs }) } catch {}
+    for (const args of [launchArgs, launchArgs.filter(a => a !== '--startup')]) {
+      try { app.setLoginItemSettings({ openAtLogin: false, path: execPath, args }) } catch {}
+    }
     for (const name of findRunEntries()) {
       try { execSync(`reg delete "${RUN_KEY}" /v "${name}" /f`, { stdio: 'pipe' }) } catch {}
     }
@@ -1773,25 +2163,87 @@ handle('app:setStartup', (enable) => {
     }
   }
 
-  // Try Task Scheduler — works even when app runs as admin, no UAC at boot.
-  try {
-    // The /tr value is "<exe>" "<arg>" — each path independently quoted, with the
-    // surrounding schtasks quotes escaped.
-    const tr = [execPath, ...launchArgs].map(p => `\\"${p.replace(/"/g, '')}\\"`).join(' ')
-    execSync(
-      `schtasks /create /tn "${TASK_NAME}" /tr "${tr}" /sc ONLOGON /rl HIGHEST /f`,
-      { stdio: 'pipe', timeout: 5000 }
-    )
-    return { ok: true, method: 'task_scheduler' }
-  } catch (taskErr) {
-    // Fall back to the standard Electron registry approach
+  settingsQ.setSetting('startup_v2', '1')
+  return registerStartup()
+})
+
+// One-time: startup entries made before --startup and the XML task existed
+// are re-registered, so they gain the argument and the battery/time-limit fix.
+setTimeout(() => {
+  require('./services/processWatcher').runWhenIdle('startupUpgrade', () => {
     try {
-      app.setLoginItemSettings({ openAtLogin: true, path: execPath, args: launchArgs })
-      return { ok: true, method: 'registry' }
-    } catch (regErr) {
-      return { ok: false, error: regErr.message }
-    }
-  }
+      // Only the installed app: a dev or smoke-test run must never point
+      // Windows startup at electron.exe.
+      if (!require('electron').app.isPackaged) return
+      if (settingsQ.getSetting('startup_v2') === '1') return
+      if (hasScheduledTask() || findRunEntries().length) {
+        const r = registerStartup()
+        logger.info('startup entry upgraded', r)
+      }
+      settingsQ.setSetting('startup_v2', '1')
+    } catch (e) { logger.warn('startup upgrade failed', { message: e.message }) }
+  })
+}, 30000)
+
+// Big Picture runs the main window full screen while it's open.
+// Graphics acceleration (read at startup by main.js from gpu.json).
+function gpuFile() { return path.join(require('electron').app.getPath('userData'), 'gpu.json') }
+handle('app:getGpu', () => {
+  let saved = true
+  try { saved = JSON.parse(require('fs').readFileSync(gpuFile(), 'utf8')).acceleration !== false } catch {}
+  let active = true
+  try { active = require('electron').app.getGPUFeatureStatus().gpu_compositing?.startsWith('enabled') ?? true } catch {}
+  return { acceleration: saved, active }
+})
+handle('app:setGpu', (on) => {
+  require('fs').writeFileSync(gpuFile(), JSON.stringify({ acceleration: !!on }))
+  return !!on
+})
+handle('app:relaunch', () => {
+  const { app } = require('electron')
+  app.relaunch()
+  app.isQuitting = true
+  app.quit()
+  return true
+})
+
+// Big Picture gets out of the way once a game starts (like Steam's does).
+handle('app:minimize', () => {
+  const win = require('./main').getMainWindow()
+  if (win && !win.isDestroyed()) win.minimize()
+  return true
+})
+
+// Big Picture after a game it started closes: back in front (Windows refuses
+// a plain focus() from the background, so briefly always-on-top).
+handle('app:bringToFront', () => {
+  const { app } = require('electron')
+  const win = require('./main').getMainWindow()
+  if (!win || win.isDestroyed()) return false
+  if (win.isMinimized()) win.restore()
+  win.show()
+  try {
+    win.setAlwaysOnTop(true)
+    app.focus({ steal: true })
+    win.focus()
+    setTimeout(() => { if (!win.isDestroyed()) win.setAlwaysOnTop(false) }, 400)
+  } catch {}
+  return true
+})
+
+handle('app:setFullScreen', (on) => {
+  const win = require('./main').getMainWindow()
+  if (win && !win.isDestroyed()) win.setFullScreen(!!on)
+  return !!on
+})
+
+// ── Discord Rich Presence ─────────────────────────────────────────────────────
+handle('discord:status', () => require('./services/discordPresence').getStatus())
+handle('discord:apply', () => {
+  const d = require('./services/discordPresence')
+  d.stop()
+  d.refresh()
+  return d.getStatus()
 })
 
 handle('app:getStartMinimized', () => {
@@ -1941,7 +2393,8 @@ async function importBackupFile(filePath) {
   const TABLES = ['categories', 'games', 'game_list', 'custom_lists', 'custom_list_games', 'sessions', 'achievements', 'achievement_unlocks', 'settings']
   // Paths are per-machine (a restore on a new PC must keep the folders just set
   // up there) and the API key is never exported — keep the local values.
-  const LOCAL_SETTINGS = new Set(['sync_folder', 'auto_backup_dir', 'saves_backup_dir', 'steam_api_key', 'steamgriddb_key'])
+  const LOCAL_SETTINGS = new Set(['sync_folder', 'auto_backup_dir', 'saves_backup_dir', 'backup_base', 'steam_api_key', 'steamgriddb_key',
+    'gdrive_token', 'gdrive_folder_id', 'gdrive_email', 'gdrive_last_sync', 'gdrive_client_id', 'gdrive_client_secret', 'install_id', 'backup_defaults_v1'])
   const rowsFor = (t) => t === 'settings' && Array.isArray(data[t])
     ? data[t].filter(r => !LOCAL_SETTINGS.has(r?.key))
     : data[t]

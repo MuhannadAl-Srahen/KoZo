@@ -1,5 +1,10 @@
 const { getDb } = require('../database')
 
+// Sessions shorter than this aren't kept: a launcher flash, a crash on start
+// or a quick check isn't a play session. A relaunch within the 3 minute merge
+// window still joins the session before it, so nothing real is lost.
+const MIN_SESSION_SEC = 60
+
 function listSessions(filters = {}) {
   let query = `
     SELECT s.*, g.name AS game_name, g.banner_local_path, g.banner_url
@@ -91,7 +96,7 @@ function resumeOrStartSession(gameId) {
     const dur = Math.max(0, Math.floor((beatMs - startMs) / 1000) - storedIdle)
     db.prepare('UPDATE sessions SET ended_at = ?, duration_seconds = ? WHERE id = ?')
       .run(new Date(beatMs).toISOString(), dur, orphan.id)
-    if (dur >= 3) {
+    if (dur >= MIN_SESSION_SEC) {
       db.prepare('UPDATE games SET total_playtime_seconds = total_playtime_seconds + ? WHERE id = ?').run(dur, gameId)
     } else {
       db.prepare('DELETE FROM sessions WHERE id = ?').run(orphan.id)
@@ -174,4 +179,4 @@ function getWeeklyPlaytime() {
   `).get(since)
 }
 
-module.exports = { listSessions, getSession, getActiveSessions, startSession, resumeOrStartSession, endSession, getSessionsStats, getWeeklyPlaytime }
+module.exports = { MIN_SESSION_SEC, listSessions, getSession, getActiveSessions, startSession, resumeOrStartSession, endSession, getSessionsStats, getWeeklyPlaytime }

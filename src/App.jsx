@@ -10,24 +10,72 @@ import Library from './pages/Library'
 import GameDetail from './pages/GameDetail'
 import GameList from './pages/GameList'
 import Upcoming from './pages/Upcoming'
+import GamesLike from './pages/GamesLike'
+import Deals from './pages/Deals'
 import Activity from './pages/Activity'
 import PlayPlan from './pages/PlayPlan'
 import Finished from './pages/Finished'
 import RateGameModal from './components/modals/RateGameModal'
 import MakePlayableModal from './components/modals/MakePlayableModal'
 import Profile from './pages/Profile'
+import BigPicture from './pages/BigPicture'
 import Settings from './pages/Settings'
 import UnknownGamePrompt from './components/UnknownGamePrompt'
 import Tour from './components/Tour'
+import RestoreOffer from './components/RestoreOffer'
 import LevelUpCelebration from './components/LevelUpCelebration'
 import UpdateBanner from './components/UpdateBanner'
 import GamepadHints from './components/GamepadHints'
 
 // Controller navigation — must live under the router so useNavigate works.
+// Set up once: `navigate` changes on every route change under HashRouter, and
+// re-running the setup used to stop the controller after the first page change.
 function GamepadNav() {
   const navigate = useNavigate()
-  useEffect(() => initGamepadNav({ navigate }), [navigate])
+  const navRef = useRef(navigate)
+  navRef.current = navigate
+  useEffect(() => initGamepadNav({
+    // B with nothing to go back to (KoZo opened straight onto a page) goes Home.
+    navigate: (to, ...rest) => (to === -1 && (window.history.state?.idx ?? 0) === 0)
+      ? navRef.current('/')
+      : navRef.current(to, ...rest),
+    // The controller wake combo (Settings > Shortcuts) opens Big Picture.
+    onBigPicture: () => navRef.current('/big'),
+  }), [])
   return null
+}
+
+// Big Picture takes the whole window (no sidebar); every other page sits in
+// the normal layout.
+function Shell() {
+  const location = useLocation()
+  if (location.pathname === '/big') return <BigPicture />
+  return (
+    <div className="app-layout">
+      <Sidebar />
+      <div className="app-main">
+        <UpdateBanner />
+        <Routes>
+          <Route path="/" element={<Library />} />
+          <Route path="/game/:id" element={<GameDetail />} />
+          <Route path="/game-list" element={<GameList />} />
+          <Route path="/plan" element={<PlayPlan />} />
+          <Route path="/finished" element={<Finished />} />
+          <Route path="/upcoming" element={<Upcoming />} />
+          <Route path="/like" element={<GamesLike />} />
+          <Route path="/deals" element={<Deals />} />
+          <Route path="/activity" element={<Activity />} />
+          {/* The three pages Activity combined: old links land on their section. */}
+          <Route path="/statistics" element={<Navigate to="/activity?tab=overview" replace />} />
+          <Route path="/sessions" element={<Navigate to="/activity?tab=sessions" replace />} />
+          <Route path="/achievements" element={<Navigate to="/activity?tab=achievements" replace />} />
+          <Route path="/profile" element={<Profile />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </div>
+    </div>
+  )
 }
 
 // Settings → Appearance → Start page: open there once, on launch.
@@ -58,6 +106,7 @@ function CtrlWheelZoom() {
       if (!e.ctrlKey) return
       e.preventDefault()   // never Chromium's own page zoom
       if (zoomGridAt(e.target) || document.querySelector('[role="dialog"]')) return   // over a card grid: useCardZoom resizes it
+      if (window.location.hash.startsWith('#/big')) return   // Big Picture keeps its own size
       const next = Math.round(Math.min(1.5, Math.max(0.8, scaleRef.current + (e.deltaY < 0 ? 0.05 : -0.05))) * 100) / 100
       scaleRef.current = next
       setPrefs({ scale: next })
@@ -92,6 +141,7 @@ function Wallpaper() {
 
 export default function App() {
   const [showOnboarding, setShowOnboarding] = useState(false)
+  const [restoreOffer, setRestoreOffer] = useState(null)   // { found, drive } on a fresh install with a backup around
   // A game was just marked Finished somewhere: ask for a 1 to 10 rating.
   const [rateGame, setRateGame] = useState(null)
   // Move to Library (Game List, Now out) hands its moved games here so the
@@ -147,6 +197,14 @@ export default function App() {
         await window.kozo.api.settings.set('onboarding_done', '1')   // existing user
         return
       }
+      // A new Windows with a KoZo backup on another drive (or Google Drive
+      // set up): offer it before the walkthrough.
+      const [found, drive] = await Promise.all([
+        window.kozo.api.backup?.findExisting?.().catch(() => null),
+        window.kozo.api.drive?.status?.().catch(() => null),
+      ])
+      const list = found?.ok ? found.data.filter(f => f.games > 0) : []
+      if (list.length || drive?.data?.configured) { setRestoreOffer({ found: list, drive: drive?.data || null }); return }
       setShowOnboarding(true)
     }
     check()
@@ -164,34 +222,14 @@ export default function App() {
         <StartPage />
         <CtrlWheelZoom />
         <Wallpaper />
-        <div className="app-layout">
-          <Sidebar />
-          <div className="app-main">
-            <UpdateBanner />
-            <Routes>
-              <Route path="/" element={<Library />} />
-              <Route path="/game/:id" element={<GameDetail />} />
-              <Route path="/game-list" element={<GameList />} />
-              <Route path="/plan" element={<PlayPlan />} />
-              <Route path="/finished" element={<Finished />} />
-              <Route path="/upcoming" element={<Upcoming />} />
-              <Route path="/activity" element={<Activity />} />
-              {/* The three pages Activity combined: old links land on their section. */}
-              <Route path="/statistics" element={<Navigate to="/activity?tab=overview" replace />} />
-              <Route path="/sessions" element={<Navigate to="/activity?tab=sessions" replace />} />
-              <Route path="/achievements" element={<Navigate to="/activity?tab=achievements" replace />} />
-              <Route path="/profile" element={<Profile />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </div>
-        </div>
+        <Shell />
         {/* Achievement/level-up toasts come ONLY from the always-on-top overlay
             window — an in-app copy here would show duplicates. */}
         <GamepadNav />
         <UnknownGamePrompt />
         <LevelUpCelebration />
         {showOnboarding && <Tour onDone={() => setShowOnboarding(false)} />}
+        {restoreOffer && <RestoreOffer found={restoreOffer.found} drive={restoreOffer.drive} onClose={() => { setRestoreOffer(null); setShowOnboarding(true) }} />}
         {rateGame && <RateGameModal game={rateGame} onClose={() => setRateGame(null)} />}
         <GamepadHints />
         {playable && <MakePlayableModal games={playable} onClose={() => setPlayable(null)} />}

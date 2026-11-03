@@ -3,13 +3,11 @@ import {
   IconPlus, IconLayoutGrid, IconList, IconLayoutColumns,
   IconDeviceGamepad2, IconPencil, IconSearch,
   IconCheckbox, IconSquare, IconTrash, IconX, IconCheck, IconStar, IconLoader2,
-  IconBooks, IconCalendarEvent,
+  IconBooks, IconCalendarEvent, IconDice5,
 } from '@tabler/icons-react'
 import { getBannerBg, parseGenres, formatMonthKey, fileUrl } from '../lib/utils'
 import { LIST_STATUSES, LIST_STATUS_ORDER } from '../lib/cardModel'
 import AddGameToListModal from '../components/modals/AddGameToListModal'
-import AddGamesToCustomListModal from '../components/modals/AddGamesToCustomListModal'
-import CreateEditListModal from '../components/modals/CreateEditListModal'
 import EditGameListModal from '../components/modals/EditGameListModal'
 import PlanMonthModal from '../components/modals/PlanMonthModal'
 import SearchableSelect from '../components/ui/SearchableSelect'
@@ -18,6 +16,7 @@ import EmptyState from '../components/ui/EmptyState'
 import GeneratedCover from '../components/GeneratedCover'
 import useCardZoom from '../lib/useCardZoom'
 import InfoModal from '../components/ui/InfoModal'
+import PickForMeModal from '../components/modals/PickForMeModal'
 import { CardSkeletonGrid } from '../components/ui/Skeleton'
 import s from './GameList.module.css'
 
@@ -199,6 +198,15 @@ function ListRow({ item, onClick, selectionMode, selected, onToggle, onToggleFav
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
+const STATUS_TABS = [
+  { value: 'want_to_play', label: 'Want to play' },
+  { value: 'playing',      label: 'Playing' },
+  { value: 'on_hold',      label: 'On hold' },
+  { value: 'finished',     label: 'Finished' },
+  { value: 'dropped',      label: 'Dropped' },
+  { value: 'upcoming',     label: 'Upcoming' },
+]
+
 export default function GameList() {
   const [items, setItems]       = useState([])
   const [total, setTotal]       = useState(0)
@@ -215,6 +223,9 @@ export default function GameList() {
   const [searchText, setSearchText]     = useState('')
   const [genreOptions, setGenreOptions] = useState([])
   const [customLists, setCustomLists]   = useState([])
+  const [counts, setCounts]             = useState(null)   // per status, for the header and chips
+  const loadCounts = () => window.kozo?.api?.gameList?.statusCounts?.().then(r => { if (r?.ok) setCounts(r.data) })
+  useEffect(() => { loadCounts() }, [allTotal, items])
   const [activeListId, setActiveListId] = useState(null)   // null = All
   // Big grid or list (Small grid is gone: Ctrl + mouse wheel sizes the cards).
   const [view, setView]         = useState(() => (localStorage.getItem('kozo:view:gamelist') === 'list' ? 'list' : 'big'))
@@ -225,10 +236,9 @@ export default function GameList() {
   useEffect(() => { itemsRef.current = items }, [items])
 
   const [showAdd, setShowAdd]   = useState(false)
-  const [listModal, setListModal] = useState(null)   // 'new' | list object | null
+  const [picking, setPicking]   = useState(false)   // Pick for me
   const [editItem, setEditItem] = useState(null)
   const [ctxMenu, setCtxMenu]   = useState(null)     // null | { x, y, item }
-  const [addToList, setAddToList] = useState(false)  // add-games picker for the active custom list
   const [dragOverId, setDragOverId] = useState(null) // drop-target highlight
   const dragIdRef = useRef(null)
 
@@ -461,7 +471,6 @@ export default function GameList() {
         <div className={s.toolbar}>
           <h1 className={s.pageTitle}>
             Game List
-            {allTotal > 0 && <span className={s.pageTitleCount}>{allTotal}</span>}
             {switching && (
               <IconLoader2
                 size={14}
@@ -488,21 +497,6 @@ export default function GameList() {
           </div>
 
           <div className={s.filters}>
-            <SearchableSelect
-              value={statusFilter}
-              onChange={handleStatusChange}
-              searchable={false}
-              placeholder="All statuses"
-              width={145}
-              options={[
-                { value: 'want_to_play', label: 'Want to play' },
-                { value: 'playing',      label: 'Playing' },
-                { value: 'finished',     label: 'Finished' },
-                { value: 'on_hold',      label: 'On hold' },
-                { value: 'dropped',      label: 'Dropped' },
-                { value: 'upcoming',     label: 'Upcoming' },
-              ]}
-            />
             {genreOptions.length > 0 && (
               <SearchableSelect
                 value={genreFilter}
@@ -534,9 +528,14 @@ export default function GameList() {
             ))}
           </div>
 
+          <button className={s.btnSecondary} onClick={() => setPicking(true)} title="Let KoZo choose your next game from Want to play, weighted by your favourite genres">
+            <IconDice5 size={14} stroke={1.7} />
+            Pick for me
+          </button>
+
           <button className={s.btnPrimary} onClick={() => setShowAdd(true)}>
             <IconPlus size={15} stroke={2} />
-            Add Game
+            Add games
           </button>
         </div>
       ) : (
@@ -594,52 +593,28 @@ export default function GameList() {
         </div>
       )}
 
-      {/* Custom lists — one slim row of chips (genre filtering moved into the
-          toolbar dropdown, so the header stays compact) */}
+      {/* Status tabs. Custom lists were removed from the page (the user found
+          them clutter); the lists in the database stay untouched. */}
       {!selectionMode && (
-        <div className={s.listsBar}>
-          <button
-            className={`${s.listChip} ${activeListId == null ? s.listChipActive : ''}`}
-            onClick={() => handleListChange(null)}
-          >
-            All
-            <span className={s.listChipCount}>{allTotal}</span>
-          </button>
-          {customLists.map(l => (
-            <button
-              key={l.id}
-              className={`${s.listChip} ${activeListId === l.id ? s.listChipActive : ''}`}
-              onClick={() => handleListChange(l.id)}
-              style={activeListId === l.id && l.color
-                ? { borderColor: l.color, background: l.color + '22', color: l.color }
-                : undefined}
-            >
-              {l.color && <span className={s.listChipDot} style={{ background: l.color }} />}
-              {l.emoji ? `${l.emoji} ` : ''}{l.name}
-              <span className={s.listChipCount}>{l.game_count}</span>
-              <span
-                className={s.listChipEdit}
-                title="Edit list"
-                onClick={(e) => { e.stopPropagation(); setListModal(l) }}
-              >
-                <IconPencil size={12} stroke={1.8} />
-              </span>
+        <div className={s.listsBar} onWheel={(e) => {
+          // One row that scrolls sideways in a narrow window instead of
+          // wrapping over the cards; the wheel scrolls it.
+          const el = e.currentTarget
+          if (el.scrollWidth > el.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) el.scrollLeft += e.deltaY
+        }}>
+          <div className={s.statusTabs} role="tablist" aria-label="Status">
+            <button type="button" role="tab" aria-selected={!statusFilter}
+              className={`${s.statusTab} ${!statusFilter ? s.statusTabOn : ''}`} onClick={() => handleStatusChange('')}>
+              All <span className={s.listChipCount}>{counts?.all ?? allTotal}</span>
             </button>
-          ))}
-          <button className={s.listChipNew} onClick={() => setListModal('new')}>
-            <IconPlus size={13} stroke={2} />
-            New list
-          </button>
-          {activeList && (
-            <button
-              className={s.addToListBtn}
-              onClick={() => setAddToList(true)}
-              title={`Pick games from your Game List to add to "${activeList.name}"`}
-            >
-              <IconPlus size={14} stroke={2} />
-              Add games to "{activeList.name.length > 16 ? activeList.name.slice(0, 16) + '…' : activeList.name}"
-            </button>
-          )}
+            {STATUS_TABS.map(t => (
+              <button key={t.value} type="button" role="tab" aria-selected={statusFilter === t.value}
+                className={`${s.statusTab} ${statusFilter === t.value ? s.statusTabOn : ''}`} style={{ '--st': STATUS_CONFIG[t.value]?.color }}
+                onClick={() => handleStatusChange(statusFilter === t.value ? '' : t.value)}>
+                <span className={s.statusTabDot} />{t.label} <span className={s.listChipCount}>{counts?.[t.value] ?? 0}</span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -655,11 +630,8 @@ export default function GameList() {
         {!loading && items.length === 0 && (
           <EmptyState
             Icon={IconDeviceGamepad2}
-            title={activeList ? `Nothing in "${activeList.name}" yet` : 'No games here yet'}
-            desc={activeList
-              ? 'Pick games from your Game List, or open any game and tick this list.'
-              : "Add games to your backlog, wishlist, or track what you're playing."}
-            action={activeList ? { label: 'Add games', Icon: IconPlus, onClick: () => setAddToList(true) } : undefined}
+            title="No games here yet"
+            desc="Add games to your backlog, wishlist, or track what you're playing."
           />
         )}
 
@@ -742,6 +714,8 @@ export default function GameList() {
         )}
       </div>
 
+      {picking && <PickForMeModal onClose={() => setPicking(false)} onChanged={() => loadItems(page, { silent: true })} />}
+
       {showAdd && (
         <AddGameToListModal
           onClose={() => setShowAdd(false)}
@@ -768,32 +742,6 @@ export default function GameList() {
           onClose={() => setEditItem(null)}
           onSaved={afterSave}
           onDeleted={afterDelete}
-        />
-      )}
-
-      {listModal && (
-        <CreateEditListModal
-          list={listModal === 'new' ? null : listModal}
-          onClose={() => setListModal(null)}
-          onSaved={() => { setListModal(null); loadLists() }}
-          onDeleted={() => {
-            setListModal(null)
-            if (listModal !== 'new' && activeListId === listModal.id) handleListChange(null)
-            loadLists()
-          }}
-        />
-      )}
-
-      {addToList && activeList && (
-        <AddGamesToCustomListModal
-          list={activeList}
-          onClose={() => setAddToList(false)}
-          onAdded={() => {
-            setAddToList(false)
-            loadItems(1, { listId: activeListId })
-            setPage(1)
-            loadLists()
-          }}
         />
       )}
 

@@ -486,7 +486,10 @@ async function enableGoldbergAchievements(gameId) {
   }
   if (!target) {
     for (const r of roots) {
-      if (exists(path.join(r, 'steam_api64.dll')) || exists(path.join(r, 'steam_api.dll'))) {
+      // steam_api*.dll, or Goldberg's ColdClient loader (steamclient64.dll +
+      // ColdClientLoader.ini beside the exe), which reads steam_settings there.
+      if (exists(path.join(r, 'steam_api64.dll')) || exists(path.join(r, 'steam_api.dll')) ||
+          exists(path.join(r, 'ColdClientLoader.ini')) || exists(path.join(r, 'steamclient64.dll'))) {
         target = path.join(r, 'steam_settings'); break
       }
     }
@@ -783,6 +786,7 @@ function collectCandidates(game, fresh = false, allowWalk = true, extraPaths = [
 
 // ── Main per-game scan ────────────────────────────────────────────────────────
 
+const goldbergFixTried = new Set()
 async function scanGameForCrackAchievements(gameId, opts = {}) {
   const { getDb }     = require('../db/database')
   const achievementsQ = require('../db/queries/achievements')
@@ -790,6 +794,20 @@ async function scanGameForCrackAchievements(gameId, opts = {}) {
 
   const game = gamesQ.getGame(gameId)
   if (!game) return { added: 0, hits: [], scannedPaths: [], candidatesTried: 0 }
+
+  // A Goldberg game without its achievement list never saves an unlock at
+  // all. Write the list (from the Steam schema) once per run, automatically:
+  // the same fix as Check achievements, without the user having to find it.
+  if (!goldbergFixTried.has(gameId) && game.install_path && detectEmulator(game.install_path) === 'Goldberg') {
+    goldbergFixTried.add(gameId)
+    try {
+      const gi = inspectGoldberg(game.install_path)
+      if (gi && !gi.hasAchList) {
+        const r = await enableGoldbergAchievements(gameId)
+        if (r?.ok) logger.info(`crackWatcher: turned on achievement saving for "${game.name}"`)
+      }
+    } catch (e) { logger.debug('crackWatcher: Goldberg auto-fix skipped', { message: e.message }) }
+  }
 
   // Make sure the achievement schema is present BEFORE matching. Without it
   // `localAchs` is empty and every crack unlock is silently skipped — the same
@@ -962,7 +980,8 @@ async function diagnoseGame(gameId) {
   const holdsNoEntries = (text) => {
     const t = String(text || '').trim()
     if (!t || t === '{}' || t === '[]') return true
-    if (/^[{[]/.test(t)) return false
+    // JSON with something in it. Not an INI "[Section]", which also starts with "[".
+    if (/^(\{|\[\s*[{["\d])/.test(t)) return false
     const lines = t.split(/\r?\n/).map(l => l.trim()).filter(l => l && !/^[;#]/.test(l))
     return lines.every(l => /^\[(steam)?achievements\]$/i.test(l) || /^count\s*=/i.test(l))
   }

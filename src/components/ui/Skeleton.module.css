@@ -22,9 +22,7 @@
   to { transform: translateX(100%); }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .sk::after { animation: none; opacity: 0; }
-}
+:global(html[data-motion="off"]) .sk::after { animation: none; opacity: 0; }
 
 /* ── Card ghost ──────────────────────────────────────────────────────── */
 .card {

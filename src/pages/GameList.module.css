@@ -913,3 +913,40 @@
 :global(html[data-hide-stats]) .cardInfo { display: none; }
 :global(html[data-hide-status-dot]) .cardStatusLed { display: none; }
 :global(html[data-hide-plan-chip]) .planChip { display: none; }
+
+/* ── Status tabs (replace the status dropdown) ──────────────────── */
+.statusTabs { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); }
+.statusTab {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: 999px; border: 0;
+  background: transparent; color: var(--text-secondary); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer;
+}
+.statusTab:hover { color: var(--text-primary); }
+.statusTabOn { background: var(--surface-3); color: var(--text-primary); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--st, var(--a)) 55%, transparent); }
+.statusTabDot { width: 7px; height: 7px; border-radius: 50%; background: var(--st, var(--a)); }
+.listsDivider { width: 1px; height: 22px; background: var(--border); margin: 0 4px; }
+
+
+/* ── Card style (Settings → Appearance → Game cards), like GameCard ── */
+:global(html[data-card-style="poster"]) .cardInfo { display: none; }
+:global(html[data-card-style="poster"]) .cardArtInfo,
+:global(html[data-card-style="poster"]) .cardArtScrim { opacity: 0; transition: opacity var(--dur-base) var(--ease); }
+:global(html[data-card-style="poster"]) .card:hover .cardArtInfo,
+:global(html[data-card-style="poster"]) .card:hover .cardArtScrim,
+:global(html[data-card-style="poster"]) :global([data-gpfocus]) .cardArtInfo,
+:global(html[data-card-style="poster"]) :global([data-gpfocus]) .cardArtScrim { opacity: 1; }
+:global(html[data-card-style="glass"]) .card { display: block; }
+:global(html[data-card-style="glass"]) .cardArtInfo { bottom: 38px; }
+:global(html[data-card-style="glass"]) .cardInfo {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+  border-top: 1px solid color-mix(in srgb, var(--a) 35%, transparent);
+  background: linear-gradient(0deg, color-mix(in srgb, var(--surface-1) 94%, transparent), color-mix(in srgb, var(--surface-1) 72%, transparent));
+}
+:global(html[data-card-style="minimal"]) .cardInfo,
+:global(html[data-card-style="minimal"]) .cardGenresLine { display: none; }
+
+/* Status tabs and lists stay ONE row that scrolls sideways (the Upcoming
+   This week strip): many lists used to wrap into rows that covered the cards. */
+.listsBar { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.listsBar > * { flex-shrink: 0; }
+.listsBar .statusTabs { flex-wrap: nowrap; }
+.listsBar .statusTab { white-space: nowrap; }

@@ -146,14 +146,16 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
           playtime — the date back in the middle, like the layout the user
           asked to keep. */}
       <div className={`${s.gameInfo} ${variant === 'small' ? s.gameInfoSmall : ''}`}>
-        {game._total > 0 && (
-          <div className={s.achTrack} aria-hidden="true">
+        {/* Always there (an empty line without achievements): a card with the
+            bar and one without must be the same height. */}
+        <div className={`${s.achTrack} ${game._total > 0 ? '' : s.achTrackNone}`} aria-hidden="true">
+          {game._total > 0 && (
             <div
               className={s.achFill}
               style={{ width: `${Math.min(100, Math.round(((game._unlocked ?? 0) / game._total) * 100))}%` }}
             />
-          </div>
-        )}
+          )}
+        </div>
         <div className={s.meta}>
           <span className={`${s.trophies} ${!game._total ? s.metaEmpty : ''}`}>
             <IconTrophy size={12} stroke={1.5} />

@@ -4,6 +4,8 @@ import Modal, { modalStyles as ms } from '../ui/Modal'
 import { LIST_STATUSES, LIST_STATUS_ORDER } from '../../lib/cardModel'
 import MonthPicker from '../ui/MonthPicker'
 import MediaGallery from '../ui/MediaGallery'
+import RatingPicker from '../ui/RatingPicker'
+import { useSteamArt } from '../../lib/steamArt'
 import { formatMonthKey } from '../../lib/utils'
 import s from './AddGameModal.module.css'
 
@@ -19,26 +21,23 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
   const [errors, setErrors]         = useState({})
   const [plannedMonth, setPlannedMonth] = useState(item.planned_month || null)   // play plan 'YYYY-MM'
   const [pickingMonth, setPickingMonth] = useState(false)
-  // Game media for the header gallery: Steam art + store screenshots.
-  const [media, setMedia] = useState([])
+  // Game media for the header gallery: trailers first, then Steam art (the
+  // same art the cards use, lib/steamArt) and the store screenshots.
+  const art = useSteamArt(item.steam_app_id)
+  const [details, setDetails] = useState(null)
   useEffect(() => {
     const appId = item.steam_app_id
     if (!appId) return
     let alive = true
-    Promise.all([
-      window.kozo?.api?.steam?.appAssets?.([appId]),
-      window.kozo?.api?.steam?.storeDetails?.(appId),
-    ]).then(([assets, details]) => {
-      if (!alive) return
-      const a = assets?.ok ? assets.data?.[appId] : null
-      const lead = a?.hero || a?.capsule || a?.header
-      setMedia([
-        ...(lead ? [{ thumb: a.capsule || a.header || lead, full: lead }] : []),
-        ...(details?.ok ? (details.data?.media || []) : []),
-      ])
-    })
+    window.kozo?.api?.steam?.storeDetails?.(appId).then(r => { if (alive && r?.ok) setDetails(r.data) })
     return () => { alive = false }
   }, [item.steam_app_id])
+  const lead = art?.hero || art?.capsule || art?.header
+  const media = [
+    ...(details?.videos || []).map(v => ({ thumb: v.thumb, video: v })),
+    ...(lead ? [{ thumb: art.capsule || art.header || lead, full: lead }] : []),
+    ...(details?.media || []),
+  ]
   const [confirmingClose, setConfirmingClose] = useState(false)
 
   // Custom-list membership (Spotify-playlist style, many-to-many).
@@ -83,19 +82,9 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
     else onClose()
   }
 
-  function clampRating(val) {
-    const n = parseFloat(val)
-    if (isNaN(n)) return val
-    return String(Math.min(10, Math.max(0, Math.round(n * 10) / 10)))
-  }
-
   async function handleSave() {
     const newErrors = {}
     if (!name.trim()) newErrors.name = 'Game name is required'
-    const ratingNum = rating !== '' ? Number(rating) : null
-    if (status === 'finished' && ratingNum !== null && (isNaN(ratingNum) || ratingNum < 0 || ratingNum > 10)) {
-      newErrors.rating = 'Rating must be between 0 and 10'
-    }
     if (Object.keys(newErrors).length) { setErrors(newErrors); return }
 
     setSaving(true)
@@ -229,48 +218,21 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
         )}
       </div>
 
+      {/* The same 1 to 10 picker as Finished games. An older decimal score
+          (8.5) shows rounded and is only replaced when a new one is picked. */}
       {status === 'finished' && (
         <div className={s.field}>
           <label className={s.label}>
             <IconStar size={12} stroke={1.6} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />
-            Rating <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(0 to 10)</span>
+            Your rating
+            {rating !== '' && (
+              <button type="button" className={s.labelAction} onClick={() => setRating('')}>Clear</button>
+            )}
           </label>
-          <input
-            type="number"
-            className={`${s.input} ${errors.rating ? s.inputError : ''}`}
-            min={0}
-            max={10}
-            step={0.1}
-            value={rating}
-            onChange={e => { setRating(e.target.value); setErrors(p => ({ ...p, rating: '' })) }}
-            onBlur={e => setRating(e.target.value !== '' ? clampRating(e.target.value) : '')}
-            placeholder="e.g. 8.5"
+          <RatingPicker
+            value={rating !== '' ? Math.min(10, Math.max(1, Math.round(Number(rating)))) : null}
+            onChange={(n) => setRating(String(n))}
           />
-          {errors.rating && <div className={s.errorText}>{errors.rating}</div>}
-          {!errors.rating && rating !== '' && (
-            <div className={s.inputHint}>★ {Number(rating).toFixed(1)} / 10</div>
-          )}
-        </div>
-      )}
-
-      {lists.length > 0 && (
-        <div className={s.field}>
-          <label className={s.label}>Lists <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(a game can be in several)</span></label>
-          <div className={s.pills}>
-            {lists.map(l => {
-              const on = memberIds.has(l.id)
-              return (
-                <button
-                  key={l.id}
-                  className={`${s.pill} ${on ? s.pillActive : ''}`}
-                  onClick={() => toggleList(l.id)}
-                >
-                  {on && <IconCheck size={11} stroke={2.5} style={{ marginRight: 3, verticalAlign: 'middle' }} />}
-                  {l.emoji ? `${l.emoji} ` : ''}{l.name}
-                </button>
-              )
-            })}
-          </div>
         </div>
       )}
 

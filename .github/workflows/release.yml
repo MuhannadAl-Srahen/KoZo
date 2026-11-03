@@ -30,6 +30,15 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # Unit tests, then the whole app on a throwaway profile (every page,
+      # menus, controller, Big Picture). A failure stops the release.
+      - name: Test
+        run: |
+          node scripts/test-parsers.js
+          bunx electron-builder install-app-deps
+          bunx vite build
+          bunx electron scripts/smoke-test.js
+
       - name: Build and publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

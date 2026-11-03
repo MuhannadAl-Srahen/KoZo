@@ -1,0 +1,73 @@
+/* ── Animations: Settings → Appearance → Animations ──────────────────────
+   html[data-motion] is 'heavy', 'soft' (default) or 'off' (AppearanceContext).
+   This setting decides on its own: Windows "Show animations" no longer turns
+   KoZo's motion off (global.css applies it only where data-motion isn't set).
+
+   Rules that keep it from breaking layouts:
+   - Entrances use fill-mode backwards, so once they end no transform is left
+     on the element.
+   - Nothing here sets `transform`, `transition` or `filter` on hover for
+     elements in general: that overrode each component's own (blurred art lost
+     its scale-up and showed its edges, centred buttons jumped, lifted cards
+     were cut by their scroll panels). Hover effects live in each component's
+     stylesheet under :global(html[data-motion=…]), where the box is known
+     (GameCard, PlayPlan, Finished, BigPicture).
+   - Menus only fade: ContextMenu measures itself on mount to stay on screen,
+     and a scaled first frame made it measure too small.
+   html[data-inactive] (global.css) still parks every animation while KoZo is
+   hidden or unfocused. */
+
+@keyframes kzPageIn   { from { opacity: 0; transform: translateY(10px); } }
+@keyframes kzPageInHv { from { opacity: 0; transform: translateY(24px); } }
+@keyframes kzRiseSoft { from { opacity: 0; transform: translateY(10px); } }
+@keyframes kzRise     { from { opacity: 0; transform: translateY(24px) scale(0.94); } }
+@keyframes kzFade     { from { opacity: 0; } }
+@keyframes kzPopHv    { from { opacity: 0; transform: scale(0.9) translateY(14px); } }
+@keyframes kzSlideL   { from { opacity: 0; transform: translateX(-18px); } }
+
+/* ── Page changes ── */
+html[data-motion="soft"] .app-main > * { animation: kzPageIn 0.3s var(--ease-out) backwards; }
+html[data-motion="heavy"] .app-main > * { animation: kzPageInHv 0.45s var(--ease-out) backwards; }
+
+/* ── Cards and rows arrive one after another ── */
+html[data-motion="soft"] .app-main [data-gpnav] { animation: kzRiseSoft 0.32s var(--ease-out) backwards; }
+html[data-motion="heavy"] .app-main [data-gpnav] { animation: kzRise 0.55s var(--ease-spring) backwards; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(2),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(2)  { animation-delay: 35ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(3),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(3)  { animation-delay: 70ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(4),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(4)  { animation-delay: 105ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(5),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(5)  { animation-delay: 140ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(6),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(6)  { animation-delay: 175ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(7),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(7)  { animation-delay: 210ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(8),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(8)  { animation-delay: 245ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(9),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(9)  { animation-delay: 280ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(10), html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(10) { animation-delay: 315ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(n+11), html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(n+11) { animation-delay: 350ms; }
+
+/* ── Dialogs and menus ── */
+html[data-motion="heavy"] [role="dialog"] { animation: kzPopHv 0.38s var(--ease-spring) backwards; }
+html[data-motion="soft"] [role="menu"], html[data-motion="heavy"] [role="menu"] { animation: kzFade 0.16s ease backwards; }
+
+/* ── Sidebar: items slide in on launch (heavy) ── */
+html[data-motion="heavy"] .app-layout > aside nav a { animation: kzSlideL 0.45s var(--ease-out) backwards; }
+html[data-motion="heavy"] .app-layout > aside nav a:nth-of-type(2) { animation-delay: 50ms; }
+html[data-motion="heavy"] .app-layout > aside nav a:nth-of-type(3) { animation-delay: 100ms; }
+html[data-motion="heavy"] .app-layout > aside nav a:nth-of-type(4) { animation-delay: 150ms; }
+html[data-motion="heavy"] .app-layout > aside nav a:nth-of-type(5) { animation-delay: 200ms; }
+html[data-motion="heavy"] .app-layout > aside nav a:nth-of-type(n+6) { animation-delay: 250ms; }
+
+/* ── Off: nothing moves. Spinners keep turning (slowly) so progress shows. ── */
+html[data-motion="off"] *,
+html[data-motion="off"] *::before,
+html[data-motion="off"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  animation-delay: 0s !important;
+  transition-duration: 0.01ms !important;
+  transition-delay: 0s !important;
+  scroll-behavior: auto !important;
+}
+html[data-motion="off"] .spin {
+  animation-duration: 1.6s !important;
+  animation-iteration-count: infinite !important;
+}
+html[data-motion="off"] .confetti { display: none !important; }

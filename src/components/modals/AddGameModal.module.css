@@ -453,3 +453,10 @@
   color: var(--text-muted);
 }
 .resultIconPortrait { width: 46px; }
+
+/* A small text button at the end of a field label (Edit Game: Clear rating). */
+.labelAction {
+  margin-left: auto; float: right; border: 0; background: none; padding: 0 2px; cursor: pointer;
+  font: inherit; font-size: var(--fs-2xs); font-weight: 600; letter-spacing: 0.04em; color: var(--text-muted);
+}
+.labelAction:hover { color: var(--a); }

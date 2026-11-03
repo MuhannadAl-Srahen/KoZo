@@ -4,10 +4,12 @@ import {
   IconPlus, IconList, IconLayoutColumns,
   IconDeviceGamepad2, IconScan, IconLoader2, IconCheckbox, IconSquare,
   IconX, IconCheck, IconSearch, IconEyeOff, IconChevronRight, IconChevronDown,
-  IconArchive, IconFlag, IconCalendarEvent, IconTrash,
+  IconArchive, IconFlag, IconCalendarEvent, IconTrash, IconDownload,
 } from '@tabler/icons-react'
 import GameCard, { formatPlaytime, STATUS_META } from '../components/GameCard'
 import AddGameModal from '../components/modals/AddGameModal'
+import EditGameModal from '../components/modals/EditGameModal'
+import InfoModal from '../components/ui/InfoModal'
 import ScanResultModal from '../components/modals/ScanResultModal'
 import SearchableSelect from '../components/ui/SearchableSelect'
 import CardContextMenu from '../components/ui/CardContextMenu'
@@ -97,6 +99,11 @@ export default function Library() {
   const [scanning, setScanning]     = useState(false)
   const [scanProgress, setScanProgress] = useState(null)   // { stage, done, total }
   const [scanModal, setScanModal]   = useState(null)  // null | scan results[]
+  // Import from launchers (Epic, GOG, Xbox): the review list, the background
+  // "N new games found" count, and the busy flag of the toolbar button.
+  const [launcherModal, setLauncherModal] = useState(null)
+  const [launcherNew, setLauncherNew] = useState(0)
+  const [launcherBusy, setLauncherBusy] = useState(false)
 
   const [search, setSearch]         = useState('')
   const [sortBy, setSortBy]         = useState(() => {
@@ -118,6 +125,8 @@ export default function Library() {
   const [statusFilter, setStatusFilter] = useState(() => localStorage.getItem('kozo:status:library') || '')
   const [planIds, setPlanIds] = useState(null)   // game ids for the Plan-for-month modal
   const [ctxMenu, setCtxMenu]       = useState(null)  // null | { x, y, game }
+  const [editGame, setEditGame]     = useState(null)  // game opened in Edit from the card menu
+  const [launchMsg, setLaunchMsg]   = useState(null)  // { variant, title, message } after Play from the menu
   const [dragOverId, setDragOverId] = useState(null)  // drop-target highlight (custom sort)
   const dragIdRef = React.useRef(null)
 
@@ -170,7 +179,34 @@ export default function Library() {
       navigate('/', { replace: true })
       runScan()
     }
+    // ?launchers=1: Settings → Features → Import from launchers
+    if (params.get('launchers') === '1') {
+      navigate('/', { replace: true })
+      runLauncherScan()
+    }
   }, [location.search])
+
+  // New launcher games found in the background (main process, on launch).
+  useEffect(() => {
+    window.kozo?.api?.launchers?.pending?.().then(r => { if (r?.ok) setLauncherNew((r.data || []).length) })
+    const off = window.kozo?.events?.onLaunchersFound?.((n) => setLauncherNew(n || 0))
+    return () => off?.()
+  }, [])
+
+  async function runLauncherScan() {
+    if (launcherBusy || !window.kozo?.api?.launchers) return
+    setLauncherBusy(true)
+    const res = await window.kozo.api.launchers.scan()
+    setLauncherBusy(false)
+    setLauncherModal(res?.ok ? res.data || [] : [])
+  }
+  // Closing the review counts as seen: the strip doesn't come back for them.
+  function closeLauncherModal() {
+    const keys = (launcherModal || []).map(g => g.key).filter(Boolean)
+    if (keys.length) window.kozo?.api?.launchers?.dismiss?.(keys)
+    setLauncherNew(0)
+    setLauncherModal(null)
+  }
 
   // ── Selection mode ──────────────────────────────────────────────────────────
   const [selectionMode, setSelectionMode]         = useState(false)
@@ -435,7 +471,6 @@ export default function Library() {
           <SearchableSelect
             value={sortBy}
             onChange={v => {
-              // Clearing (X) resets to the default sort rather than no-op'ing.
               const next = v || 'last_played'
               setSortBy(next)
               localStorage.setItem('kozo:sort:library', next)
@@ -443,6 +478,7 @@ export default function Library() {
             options={SORT_OPTIONS}
             placeholder="Sort by"
             searchable={false}
+            clearable={false}
             width={148}
           />
 
@@ -474,6 +510,19 @@ export default function Library() {
             {!scanning ? 'Scan PC'
               : scanProgress?.stage === 'matching' ? `Matching ${scanProgress.done}/${scanProgress.total}`
               : 'Scanning…'}
+          </button>
+
+          <button
+            className={s.btnSecondary}
+            title="Add the games installed through Epic, GOG and Xbox"
+            disabled={launcherBusy}
+            aria-busy={launcherBusy || undefined}
+            onClick={runLauncherScan}
+          >
+            {launcherBusy
+              ? <IconLoader2 size={15} stroke={1.6} style={{ animation: 'spin 1s linear infinite' }} />
+              : <IconDownload size={15} stroke={1.6} />}
+            {launcherBusy ? 'Looking…' : 'Launchers'}
           </button>
 
           {games.length > 0 && (
@@ -563,6 +612,24 @@ export default function Library() {
 
       {/* Game grid */}
       <div className={s.content}>
+        {launcherNew > 0 && (
+          <div className={s.launcherStrip} role="status">
+            <IconDownload size={16} stroke={1.7} />
+            <span>
+              {launcherNew} game{launcherNew === 1 ? '' : 's'} found in your Epic, GOG and Xbox launchers.
+            </span>
+            <button type="button" className={s.launcherReview} onClick={runLauncherScan}>Review</button>
+            <button type="button" className={s.launcherClose} aria-label="Dismiss"
+              onClick={async () => {
+                const r = await window.kozo?.api?.launchers?.pending?.()
+                const keys = (r?.ok ? r.data || [] : []).map(g => g.key)
+                window.kozo?.api?.launchers?.dismiss?.(keys)
+                setLauncherNew(0)
+              }}>
+              <IconX size={14} stroke={2} />
+            </button>
+          </div>
+        )}
         <ReleasedPanel onChanged={() => loadGames({ silent: true })} />
         {/* Three distinct states. The old version could show two messages at
             once (empty search AND empty library), and showed NOTHING at all
@@ -640,6 +707,21 @@ export default function Library() {
         />
       )}
 
+      {launcherModal && (
+        launcherModal.length ? (
+          <ScanResultModal
+            title="Games from your launchers"
+            results={launcherModal}
+            onClose={closeLauncherModal}
+            onAdd={() => { closeLauncherModal(); loadGames() }}
+          />
+        ) : (
+          <InfoModal title="No launcher games found"
+            message="KoZo didn't find games installed through Epic Games, GOG or Xbox on this PC. Games from folders can still be found with Scan PC."
+            onClose={() => setLauncherModal(null)} />
+        )
+      )}
+
       {scanModal && (
         <ScanResultModal
           results={scanModal}
@@ -666,6 +748,12 @@ export default function Library() {
             window.kozo?.api?.games?.update(game.id, { is_hidden: next })
           }}
           onToggleFavorite={handleFavorite}
+          onPlay={ctxMenu.game.is_archived ? undefined : async (game) => {
+            const res = await window.kozo?.api?.games?.launch(game.id)
+            if (!res?.ok) setLaunchMsg({ variant: 'error', title: "Couldn't launch", message: `${game.name}: ${res?.error || 'Failed to launch'}` })
+            else if (res?.data?.warning) setLaunchMsg({ variant: 'warning', title: game.name, message: res.data.warning })
+          }}
+          onEdit={(game) => setEditGame(game)}
           onDelete={ctxMenu.game.is_archived ? undefined : async (game) => {
             setGames(prev => { const u = prev.map(g => g.id === game.id ? { ...g, is_archived: 1 } : g); libraryCache = u; return u })
             await window.kozo?.api?.games?.archive([game.id])
@@ -689,6 +777,15 @@ export default function Library() {
           ]}
         />
       )}
+
+      {editGame && (
+        <EditGameModal
+          game={editGame}
+          onClose={() => setEditGame(null)}
+          onSaved={() => loadGames({ silent: true })}
+        />
+      )}
+      {launchMsg && <InfoModal {...launchMsg} onClose={() => setLaunchMsg(null)} />}
 
       {planIds && (
         <PlanMonthModal

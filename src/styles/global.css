@@ -26,10 +26,17 @@ body {
 }
 
 /* ── Scrollbar ───────────────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 5px; height: 5px; }
+/* One calm style everywhere: an 8px lane with a 4px pill inside (the
+   transparent border + padding-box clip), faint at rest, clearer on hover. */
+::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: var(--r-sm); }
-::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-muted) 38%, transparent) padding-box;
+  border: 2px solid transparent;
+  border-radius: 99px;
+}
+*:hover::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, var(--text-muted) 60%, transparent); }
+::-webkit-scrollbar-thumb:hover, ::-webkit-scrollbar-thumb:active { background-color: var(--text-secondary); }
 ::-webkit-scrollbar-corner { background: transparent; }
 ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 
@@ -83,16 +90,28 @@ select:focus-visible {
 
 /* Controller-navigation ring (see src/lib/gamepadNav.js). Declared last so it
    wins ties at equal specificity when a click also grants DOM focus. */
+/* Buttons, tabs and fields: a tight ring with a soft accent glow. */
 [data-gpfocus] {
   outline: 2px solid var(--a);
-  outline-offset: 3px;
-  box-shadow: 0 0 0 6px color-mix(in srgb, var(--a) 22%, transparent), 0 12px 28px rgba(0, 0, 0, 0.45);
-  transition: outline-offset 0.12s ease, box-shadow 0.12s ease;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--a) 16%, transparent), 0 0 18px color-mix(in srgb, var(--a) 30%, transparent);
+  transition: outline-offset 0.15s ease, box-shadow 0.15s ease;
 }
-/* Cards lift a little under the controller ring. Scale, not translate: a
-   transformed card never holds a fixed-position child (menus portal out). */
-[data-gpnav][data-gpfocus] { transform: scale(1.03); }
+/* Cards and rows: the ring is drawn INSIDE the edge, so a scroll panel can
+   never cut it (the old outside ring plus a 3% scale-up was clipped at the
+   top of every grid), and the card keeps its own shadow. Components zoom
+   their art for [data-gpfocus] the same way they do on hover. */
+/* :where() keeps these at the lowest priority, so a component's own
+   `.card[data-gpfocus]` rule (ring on the art only, its own glow) wins. */
+:where([data-gpnav])[data-gpfocus] {
+  outline: 3px solid var(--a);
+  outline-offset: -3px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--a) 35%, transparent), 0 0 26px color-mix(in srgb, var(--a) 42%, transparent);
+}
 html[data-gamepad] .app-main { scroll-behavior: smooth; }
+/* Scrolling to the ring leaves room for the hint bar (GamepadHints) at the
+   bottom and a little air at the top, so the focused card is never under it. */
+html[data-gamepad] [data-gpfocus] { scroll-margin: 20px 12px 76px; }
 
 /* ── Motion ──────────────────────────────────────────────────────────── */
 @keyframes spin {
@@ -160,7 +179,7 @@ ul, ol { list-style: none; }
 html[data-wallpaper] .app-main {
   background: radial-gradient(1100px 420px at 16% -8%, var(--ad), transparent 62%);
 }
-html[data-wallpaper] aside { background: color-mix(in srgb, var(--surface-1) 72%, transparent); }
+html[data-wallpaper] aside { --sidebar-bg: color-mix(in srgb, var(--surface-1) 72%, transparent); }
 .app-wallpaper { position: fixed; inset: 0; z-index: -1; overflow: hidden; background: var(--bg); pointer-events: none; }
 .app-wallpaper-img {
   position: absolute;
@@ -172,32 +191,40 @@ html[data-wallpaper] aside { background: color-mix(in srgb, var(--surface-1) 72%
 .app-wallpaper-dim { position: absolute; inset: 0; background: var(--bg); }
 
 /* ── Reduced motion ──────────────────────────────────────────────────── */
+/* Only where Settings → Appearance → Animations isn't applied (the overlay and
+   tray windows): in the main window html[data-motion] decides, and "Off"
+   there does the same as this (motion.css). Windows "Show animations" off
+   used to switch every animation and hover transition off with no way back. */
 /* !important is load-bearing, not stylistic: a dozen spinners are inline
    `style={{ animation: … }}`, and only an important declaration outranks an
    inline style. Every animation's final keyframe is a sensible resting state
    (live dots land at opacity 1, entrances land at their end position), so
    collapsing the duration leaves the UI correct rather than half-drawn. */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  html:not([data-motion]) *, html:not([data-motion]) *::before, html:not([data-motion]) *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
   /* A spinner communicates progress — slow it, never freeze it. */
-  .spin {
+  html:not([data-motion]) .spin {
     animation-duration: 1.6s !important;
     animation-iteration-count: infinite !important;
   }
   /* Skip the confetti nodes outright rather than snapping them. */
-  .confetti { display: none !important; }
+  html:not([data-motion]) .confetti { display: none !important; }
 }
 
-/* KoZo is hidden or behind another window: stop every animation (see App.jsx). */
+/* KoZo is hidden or behind another window: stop every animation (see App.jsx).
+   The negative delay parks one-shot entrances (fade-ins starting at opacity 0)
+   on their finished frame; paused alone froze anything that appeared while
+   KoZo was unfocused on its invisible first frame. */
 html[data-inactive] *,
 html[data-inactive] *::before,
 html[data-inactive] *::after {
   animation-play-state: paused !important;
+  animation-delay: -60s !important;
 }
 
 /* Ctrl + mouse wheel UI scale readout (App.jsx CtrlWheelZoom) */

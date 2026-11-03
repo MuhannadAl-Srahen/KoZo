@@ -1,7 +1,7 @@
 {
   "name": "kozo",
   "productName": "KoZo",
-  "version": "1.5.0",
+  "version": "1.7.0",
   "description": "KoZo — Desktop Game Tracker for Windows",
   "author": "Muhannad Al-Srahen",
   "repository": {
@@ -14,7 +14,8 @@
     "geticon": "node scripts/gen-icon.js",
     "build": "node scripts/gen-icon.js && vite build && electron-builder",
     "rebuild": "cd node_modules/better-sqlite3 && npx prebuild-install --runtime electron --target 41.7.1 --arch x64 --tag-prefix v",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "electron-builder install-app-deps",
+    "test": "node scripts/test-parsers.js && vite build && electron scripts/smoke-test.js"
   },
   "build": {
     "appId": "com.kozo.gametracker",
@@ -59,12 +60,24 @@
     "wait-on": "^9.0.10"
   },
   "dependencies": {
+    "@fontsource/atkinson-hyperlegible": "^5.3.0",
+    "@fontsource/chakra-petch": "^5.3.0",
     "@fontsource/dm-sans": "^5.2.8",
+    "@fontsource/exo-2": "^5.3.0",
+    "@fontsource/inter": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@fontsource/nunito": "^5.3.0",
+    "@fontsource/orbitron": "^5.3.0",
+    "@fontsource/oxanium": "^5.3.0",
+    "@fontsource/poppins": "^5.3.0",
+    "@fontsource/rajdhani": "^5.3.0",
     "@tabler/icons-react": "^3.44.0",
     "axios": "^1.17.0",
     "better-sqlite3": "^12.10.0",
     "chokidar": "^5.0.0",
     "electron-updater": "^6.8.9",
+    "hls.js": "^1.7.4",
+    "js-yaml": "^5.5.0",
     "ps-list": "^9.0.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

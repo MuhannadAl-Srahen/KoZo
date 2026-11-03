@@ -31,6 +31,10 @@ function listAllAchievements(filters = {}) {
     params.push(filters.gameId)
   }
 
+  // Unlocked within a time range (Profile: one day's details).
+  if (filters.unlockedFrom) { query += ' AND au.unlocked_at >= ?'; params.push(filters.unlockedFrom) }
+  if (filters.unlockedTo) { query += ' AND au.unlocked_at < ?'; params.push(filters.unlockedTo) }
+
   if (filters.search && filters.search.trim()) {
     const term = `%${filters.search.trim()}%`
     query += ' AND (a.display_name LIKE ? OR a.description LIKE ?)'

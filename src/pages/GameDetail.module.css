@@ -1,52 +1,45 @@
-/* GameDetail — hero, notes, tabs, achievements, sessions.
+/* GameDetail: two layouts the user picks (Settings → Appearance → Game page,
+   or the switch in the top bar), prefs.gamePage:
+   - store:     a 300px art banner, the cover poster overlapping it with the
+                name and actions beside it, then tabs + content on the left and
+                a sticky side panel (your stats, game info) on the right.
+   - cinematic: tall art with the name, a stats line and actions on the left
+                over it; tabs and content full width below.
+   Shared: Overview / Achievements / Sessions / Games like this tabs.
 
-   OVERRIDE PATTERN: `composes:` pulls rules in from controls.module.css, and the
-   bundler emits that file AFTER this one — so a same-specificity declaration
-   here loses to the composed one. Anything that must differ from the shared
-   control (an on-artwork plate, a left-aligned menu row, a tab's bottom rule) is
-   therefore written in a scoped `.hero .x` / `.tabs .x` rule: one extra level of
-   specificity, no !important anywhere. */
+   OVERRIDE PATTERN: `composes:` pulls rules in from controls.module.css, and
+   the bundler emits that file AFTER this one, so anything that must differ
+   from the shared control is written as `.actions .x` / `.tabs .x` (one more
+   level of specificity, never an important flag). */
 
 .page {
   composes: page from '../styles/page.module.css';
 }
 
-/* ── Hero ────────────────────────────────────────────────────────────── */
-/* Height is responsive, not the old fixed 440px — that was 73% of the 600px
-   minimum window height, so the page opened with almost no content visible.
-   overflow stays VISIBLE and the hero gets no z-index or isolation of its own:
-   the ⋮ and status dropdowns open downward out of this box, and either property
-   would trap them behind the tabs. .heroArt does the clipping instead. */
-/* The hero fills the full width, edge to edge. Steam's library_hero art is
-   already wide, so `cover` is the right fit here — the blurred-fill pattern is
-   for PORTRAIT cards, where landscape art would otherwise be cropped to a
-   sliver. Height scales with the window instead of the old fixed 440px, which
-   ate 73% of a minimum-height window. */
-/* The scroller that hosts the collapsing header. Everything (hero, tabs,
-   panels) scrolls in ONE surface so the hero can pin with position: sticky. */
+/* One scroller for the whole page: art, header, tabs and content. */
 .scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   transform: translateZ(0);
-  /* Height of the hero's pinned (collapsed) strip. Declared here — not on
-     .hero — because BOTH .hero (its negative sticky top) and .tabs (which
-     pins directly beneath the strip) read it, and siblings don't inherit
-     custom properties from each other. */
-  --hero-min: 172px;   /* fits the roomier title block (gap 16 + pb 20) */
 }
 
-/* Collapsing header: opens tall (the bigger cover the user asked for), then
-   pins once scrolled so only its bottom strip — title block + scrim — stays
-   at the top while achievements scroll beneath. Pure sticky with a negative
-   top: no per-frame height animation, no JS, no layout cost. */
+/* Header and body share one column, so the content lines up with the name. */
+.frame {
+  width: 100%;
+  max-width: 1480px;
+  margin: 0 auto;
+  padding: 0 var(--gutter);
+}
+
+/* ── Art ─────────────────────────────────────────────────────────────── */
 .hero {
-  position: sticky;
-  --hero-h: clamp(340px, 50vh, 600px);
-  top: calc(var(--hero-min) - var(--hero-h));
-  height: var(--hero-h);
-  z-index: var(--z-sticky);
+  position: relative;
   flex-shrink: 0;
+  height: 300px;
+}
+.page[data-layout="cinematic"] .hero {
+  height: clamp(420px, 62vh, 720px);
   display: flex;
   flex-direction: column;
 }
@@ -54,7 +47,6 @@
 .heroArt {
   position: absolute;
   inset: 0;
-  z-index: var(--z-base);
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -63,13 +55,9 @@
 
 .heroIcon {
   position: relative;
-  z-index: var(--z-base);
   color: color-mix(in srgb, var(--on-art) 9%, transparent);
 }
 
-/* Blurred-fill pair (CLAUDE.md section 3): a cover-fit blurred plate underneath,
-   the real art contain-fit on top. Hero art is 16:6-ish landscape and the old
-   object-fit: cover cropped every one of them. */
 .heroBlur,
 .heroImg {
   position: absolute;
@@ -78,187 +66,199 @@
   height: 100%;
   animation: heroFade var(--dur-slow) var(--ease);
 }
-
-/* Kept only as the backdrop for art that is NARROWER than the hero box (a
-   portrait cover used as a fallback); for normal wide hero art the foreground
-   covers it completely. */
 .heroBlur {
   object-fit: cover;
   filter: blur(16px) brightness(0.55) saturate(1.1);
   transform: scale(1.18);
-  z-index: var(--z-base);
 }
-
 .heroImg {
   object-fit: cover;
   object-position: center 22%;
-  z-index: var(--z-raised);
 }
+@keyframes heroFade { from { opacity: 0; } to { opacity: 1; } }
 
-@keyframes heroFade {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-
-/* Two gradients: one down the bottom so the title block stays legible, one
-   across the top-left so the back button and action row read over bright art. */
+/* Store: the art melts into the page under the header. */
 .heroScrim {
   position: absolute;
   inset: 0;
-  z-index: var(--z-card);
   pointer-events: none;
   background:
-    linear-gradient(to bottom,
-      color-mix(in srgb, var(--scrim) 55%, transparent) 0%,
-      transparent 26%,
-      var(--scrim-soft) 62%,
-      var(--scrim-strong) 100%
-    );
+    linear-gradient(to bottom, color-mix(in srgb, var(--scrim) 50%, transparent) 0%, transparent 30%, transparent 55%, var(--bg) 100%);
+}
+/* Cinematic: dark from the left (the text side) and from the bottom. */
+.page[data-layout="cinematic"] .heroScrim {
+  background:
+    linear-gradient(to right, color-mix(in srgb, var(--bg) 92%, transparent) 0%, color-mix(in srgb, var(--bg) 70%, transparent) 30%, transparent 62%),
+    linear-gradient(to bottom, color-mix(in srgb, var(--scrim) 45%, transparent) 0%, transparent 25%, transparent 60%, var(--bg) 100%);
 }
 
-/* ── Hero top bar ────────────────────────────────────────────────────── */
-/* A real flex row, replacing the two magic numbers that used to hold this
-   together (`left: 110px` to clear the back button, `right: 56px` to clear the
-   menu). It wraps at narrow widths instead of overlapping. z-index is raised
-   above .heroBottom AND above the tabs/content that follow, because both
-   dropdowns open downward out of this row. */
-.heroTop {
+/* ── Top bar over the art ────────────────────────────────────────────── */
+.topBar {
   position: relative;
-  z-index: var(--z-dropdown);
+  z-index: var(--z-raised);
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;   /* only bites on a wrapped line — .heroTopSpacer
-                                  eats the free space on the first one */
-  gap: var(--sp-8);
-  padding: var(--sp-12) var(--gutter) 0;
-}
-
-.heroActions {
-  display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: var(--sp-8);
-  min-width: 0;
+  padding-top: var(--sp-12);
 }
-
-.heroTopSpacer {
-  flex: 1 1 auto;
-  min-width: var(--sp-8);
-}
+.topSpacer { flex: 1; }
 
 .backBtn {
   composes: btn btnSm btnPill from '../styles/controls.module.css';
 }
-
-.playBtn {
-  composes: btn btnPrimary btnSm btnPill from '../styles/controls.module.css';
-}
-
-.statusBtn {
-  composes: btn btnSm btnPill from '../styles/controls.module.css';
-}
-
-.menuTrigger {
-  composes: btn btnIcon from '../styles/controls.module.css';
-}
-
-/* On-artwork controls need their own opaque plate — whatever sits behind them
-   is the game's own cover art. */
-.hero .backBtn,
-.hero .statusBtn,
-.hero .menuTrigger {
+.topBar .backBtn {
   background: var(--scrim-chip);
   color: var(--on-art);
   border-color: color-mix(in srgb, var(--on-art) 14%, transparent);
   box-shadow: var(--elev-1);
 }
+.topBar .backBtn:hover { background: var(--a); color: var(--accent-ink); border-color: var(--a); }
 
-.hero .backBtn:hover,
-.hero .statusBtn:hover:not(:disabled),
-.hero .menuTrigger:hover {
-  background: var(--a);
-  color: var(--accent-ink);
-  border-color: var(--a);
+.heroSyncing {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--scrim-chip); color: var(--on-art-dim); flex-shrink: 0;
 }
 
-.hero .menuTrigger {
-  border-radius: 50%;
-}
-
-.hero .playBtn {
+/* Layout switch: two icons on one plate. */
+.layoutSwitch {
+  display: inline-flex; padding: 3px; gap: 2px; border-radius: var(--r-pill);
+  background: var(--scrim-chip); border: 1px solid color-mix(in srgb, var(--on-art) 14%, transparent);
   box-shadow: var(--elev-1);
 }
-
-/* The one live-able control on this surface: hover earns the full accent glow. */
-.hero .playBtn:hover {
-  box-shadow: var(--elev-1), var(--glow-2);
+.layoutBtn {
+  display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 0; border-radius: var(--r-pill);
+  background: transparent; color: var(--on-art-dim); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer;
 }
+.layoutBtn:hover { color: var(--on-art); }
+.layoutOn, .layoutOn:hover { background: var(--a); color: var(--accent-ink); }
 
-/* Status set but not finished: tinted with that status' own colour, handed in
-   as --st so the border can be mixed from it. */
-.hero .statusBtnSet {
-  color: var(--st);
-  border-color: color-mix(in srgb, var(--st) 45%, transparent);
+/* ── Store header: cover + name + actions ────────────────────────────── */
+.storeHead {
+  position: relative;
+  z-index: var(--z-raised);
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-24);
+  margin-top: -150px;
+  padding-bottom: var(--sp-20);
 }
-
-/* Finished — solid accent, so it reads as an achieved milestone. */
-.hero .statusBtnFinished {
-  background: var(--a);
-  color: var(--accent-ink);
-  border-color: var(--a);
-}
-
-.hero .statusBtnFinished:hover:not(:disabled) {
-  background: var(--a);
-  color: var(--accent-ink);
-  filter: brightness(1.08);
-}
-
-/* Subtle spinner while a background achievement sync runs */
-.heroSyncing {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: var(--scrim-chip);
-  color: var(--on-art-dim);
+.cover {
+  position: relative;
   flex-shrink: 0;
+  width: 170px;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--r-card);
+  overflow: hidden;
+  background: var(--surface-2);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px color-mix(in srgb, var(--on-art) 10%, transparent);
+}
+.cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.headText {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-10);
+  min-width: 0;
+  flex: 1;
+  padding-bottom: var(--sp-4);
 }
 
-.liveBadge {
-  composes: chip from '../styles/controls.module.css';
+/* ── Cinematic info block ────────────────────────────────────────────── */
+.cineInfo {
+  position: relative;
+  z-index: var(--z-raised);
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+  max-width: 760px;
+  padding-bottom: var(--sp-32, 32px);
+}
+.page[data-layout="cinematic"] .gameName { font-size: clamp(32px, 3.6vw, 60px); white-space: normal; line-height: 1.05; }
+.statLine {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px;
+  font-size: var(--fs-md); color: var(--on-art-dim);
+}
+.statLine b { color: var(--on-art); font-weight: 700; font-variant-numeric: tabular-nums; }
+.statLine .dot { width: 4px; height: 4px; border-radius: 50%; background: color-mix(in srgb, var(--on-art) 35%, transparent); }
+
+/* ── Name, chips ─────────────────────────────────────────────────────── */
+.gameName {
+  min-width: 0;
+  max-width: 100%;
+  font-size: clamp(26px, 2.6vw, 44px);
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 2px 14px color-mix(in srgb, var(--bg) 70%, transparent);
+}
+.chipRow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-6); }
+.genreChip {
+  padding: 3px 10px; border-radius: var(--r-pill); font-size: var(--fs-xs); font-weight: 600;
+  background: color-mix(in srgb, var(--surface-3) 80%, transparent); color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+.crackBadge {
+  padding: 3px 10px; border-radius: var(--r-pill); font-size: var(--fs-2xs); font-weight: 700; letter-spacing: 0.08em;
+  background: var(--warning-bg); color: var(--warning); border: 1px solid var(--warning-border-strong);
+}
+.crackBadgeSource { font-weight: 400; letter-spacing: 0; opacity: 0.8; }
+.statusChip {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: var(--r-pill);
+  font-size: var(--fs-xs); font-weight: 700; color: var(--st, var(--a));
+  background: color-mix(in srgb, var(--st, var(--a)) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--st, var(--a)) 40%, transparent);
 }
 
-.hero .liveBadge {
-  padding: var(--sp-4) var(--sp-10);
-  background: var(--scrim-chip);
-  color: var(--success);
-  border-color: var(--success-border-strong);
-  box-shadow: var(--glow-live);   /* light means life — the running session glows */
+/* ── Actions: Play, status, ⋮ ────────────────────────────────────────── */
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-8); }
+.playBig {
+  display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 30px;
+  border-radius: var(--r-pill); border: 0; cursor: pointer;
+  background: var(--a); color: var(--accent-ink, #0b0b12); font: inherit; font-size: var(--fs-md); font-weight: 800;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--a) 38%, transparent);
+  transition: transform var(--dur-fast) var(--ease), filter var(--dur-fast) var(--ease);
 }
-
+.playBig:hover { filter: brightness(1.08); }
+.playBig:active { transform: scale(0.97); }
+.livePill, .notInstalled {
+  display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 18px; border-radius: var(--r-pill);
+  font-size: var(--fs-sm); font-weight: 700; background: var(--surface-2); border: 1px solid var(--border);
+}
+.livePill { color: var(--success); border-color: var(--success-border-strong); box-shadow: var(--glow-live); }
+.notInstalled { color: var(--text-muted); }
 .liveDot {
   composes: chipDot from '../styles/controls.module.css';
-  /* The indirection is load-bearing. This bundler hashes every bare identifier
-     it finds in an `animation` value, so writing `livePulse` here would compile
-     to a scoped name with no matching @keyframes — a dot that never pulses.
-     PostCSS rejects `:global(...)` inside a value, but it leaves var() alone,
-     so the shared keyframe in global.css survives the round trip. */
   --pulse-name: livePulse;
   animation: var(--pulse-name) 1.4s var(--ease) infinite;
 }
 
-/* ── Game options menu ───────────────────────────────────────────────── */
-.gameMenu,
-.statusWrap {
-  position: relative;
+.statusBtn { composes: btn btnPill from '../styles/controls.module.css'; }
+.menuTrigger { composes: btn btnIcon from '../styles/controls.module.css'; }
+.actions .statusBtn, .actions .menuTrigger {
+  height: 44px; background: var(--surface-2); border-color: var(--border); color: var(--text-primary);
+}
+.actions .statusBtn { padding: 0 16px; gap: 6px; }
+.actions .menuTrigger { width: 44px; border-radius: 50%; }
+.actions .statusBtn:hover:not(:disabled), .actions .menuTrigger:hover {
+  border-color: color-mix(in srgb, var(--a) 55%, var(--border)); color: var(--a);
+}
+.actions .statusBtnSet { color: var(--st); border-color: color-mix(in srgb, var(--st) 45%, transparent); }
+.actions .statusBtnFinished, .actions .statusBtnFinished:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--a) 18%, transparent); color: var(--a); border-color: color-mix(in srgb, var(--a) 55%, transparent);
+}
+.page[data-layout="cinematic"] .actions .statusBtn,
+.page[data-layout="cinematic"] .actions .menuTrigger {
+  background: var(--scrim-chip); border-color: color-mix(in srgb, var(--on-art) 16%, transparent); color: var(--on-art);
 }
 
-.menuDropdown,
-.statusDropdown {
+/* Menus */
+.gameMenu, .statusWrap { position: relative; }
+.menuDropdown, .statusDropdown {
   position: absolute;
   top: calc(100% + var(--sp-6));
   z-index: var(--z-dropdown);
@@ -269,287 +269,157 @@
   overflow: hidden;
   animation: menuIn var(--dur-fast) var(--ease);
 }
-
-.menuDropdown   { right: 0; min-width: 210px; }
-.statusDropdown { left: 0;  min-width: 180px; }
-
-@keyframes menuIn {
-  from { opacity: 0; transform: translateY(-4px); }
-  to   { opacity: 1; transform: none; }
+.menuDropdown   { left: 0; min-width: 220px; }
+.statusDropdown { left: 0; min-width: 180px; }
+@keyframes menuIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.menuItem { composes: btn from '../styles/controls.module.css'; }
+.actions .menuItem {
+  justify-content: flex-start; gap: var(--sp-10); width: 100%; height: auto;
+  padding: var(--sp-10) var(--sp-12); border-radius: 0; border: 0; text-align: left; color: var(--text-secondary); background: transparent;
 }
-
-.menuItem {
-  composes: btn from '../styles/controls.module.css';
-}
-
-.hero .menuItem {
-  justify-content: flex-start;
-  gap: var(--sp-10);
-  width: 100%;
-  padding: var(--sp-10) var(--sp-12);
-  border-radius: 0;
-  text-align: left;
-  color: var(--text-secondary);
-}
-
-.hero .menuItem:hover:not(:disabled) {
-  background: var(--ad);
-  color: var(--a);
-}
-
-.hero .menuItemDanger {
-  color: var(--error);
-}
-
-.hero .menuItemDanger:hover:not(:disabled) {
-  background: var(--error-bg);
-  color: var(--error);
-}
-
-/* Busy, not disabled — the row keeps its label and stays readable to AT while
-   the sync it kicked off is running. */
-.menuItemBusy {
-  composes: btnLoading from '../styles/controls.module.css';
-}
-
-.menuConfirm {
-  padding: var(--sp-12);
-  border-top: 1px solid var(--border-subtle);
-}
-
-.menuConfirmText {
-  font-size: var(--fs-sm);
-  color: var(--text-secondary);
-  line-height: var(--lh-base);
-  margin-bottom: var(--sp-10);
-}
-
-.menuConfirmBtns {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-8);
-  justify-content: flex-end;
-}
+.actions .menuItem:hover:not(:disabled) { background: var(--ad); color: var(--a); }
+.menuItemBusy { composes: btnLoading from '../styles/controls.module.css'; }
+.menuConfirm { padding: var(--sp-12); border-top: 1px solid var(--border-subtle); }
+.menuConfirmText { font-size: var(--fs-sm); color: var(--text-secondary); line-height: var(--lh-base); margin-bottom: var(--sp-10); }
+.menuConfirmBtns { display: flex; flex-wrap: wrap; gap: var(--sp-8); justify-content: flex-end; }
 .menuConfirmBtns > button { white-space: nowrap; }
+.menuCancelBtn { composes: btn btnSm btnSecondary from '../styles/controls.module.css'; }
+.menuDeleteBtn { composes: btn btnSm btnDanger from '../styles/controls.module.css'; }
 
-.menuCancelBtn {
-  composes: btn btnSm btnSecondary from '../styles/controls.module.css';
-}
-
-.menuDeleteBtn {
-  composes: btn btnSm btnDanger from '../styles/controls.module.css';
-}
-
-/* ── Hero bottom (title + meta) ──────────────────────────────────────── */
-/* Breathing room scaled to the bigger type (user: rows read glued together
-   after the font bump) — wider row gap, taller bottom padding. */
-.heroBottom {
-  position: relative;
-  z-index: var(--z-card);
-  margin-top: auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-16);
-  min-width: 0;
-  padding: var(--sp-16) var(--gutter) var(--sp-20);
-}
-
-.gameNameRow {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-10);
-  flex-wrap: wrap;
-  min-width: 0;
-}
-
-.gameName {
-  min-width: 0;
-  max-width: 100%;
-  font-size: var(--fs-2xl);
-  font-weight: 500;
-  color: var(--on-art);
-  letter-spacing: -0.01em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  /* Legibility shadow over bright art — plain dark scrim, deliberately not an
-     accent glow. */
-  text-shadow: 0 1px 2px var(--scrim-strong), 0 2px 10px var(--scrim-soft);
-}
-
-.crackBadge {
-  composes: chip chipSm from '../styles/controls.module.css';
-}
-
-.hero .crackBadge {
-  background: var(--scrim-chip);
-  color: var(--warning);
-  border-color: var(--warning-border-strong);
-  letter-spacing: 0.08em;
-}
-
-.crackBadgeSource {
-  font-weight: 400;
-  letter-spacing: 0;
-  opacity: 0.8;
-}
-
-.genreChips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-6);
-}
-
-.genreChip {
-  composes: chip chipSm chipOnArt from '../styles/controls.module.css';
-}
-
-.heroMeta {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-24);
-  flex-wrap: wrap;
-}
-
-.metaItem {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-4);
-  font-size: var(--fs-sm);
-  color: var(--on-art-dim);
-}
-
-/* HUD values: the numbers that matter read brighter than their labels, and
-   tabular so they don't wobble as a live session ticks them up. */
-.metaValue {
-  color: var(--text-accent-bright);
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-}
-
-.metaPct {
-  color: var(--on-art-muted);
-  font-size: var(--fs-xs);
-}
-
-.achProgress {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-8);
-}
-
-.progressBar {
-  width: clamp(64px, 14vw, 160px);
-  height: 3px;
-  background: color-mix(in srgb, var(--on-art) 15%, transparent);
-  border-radius: var(--r-xs);
-  overflow: hidden;
-}
-
-.progressFill {
-  height: 100%;
-  /* Brightest at the leading edge — progress reads as a charge meter. */
-  background: linear-gradient(90deg, var(--a), var(--text-accent-bright));
-  box-shadow: 0 0 8px -2px var(--a);
-  border-radius: var(--r-xs);
-  transition: width var(--dur-slower) var(--ease);
-}
-
-/* ── Tabs ────────────────────────────────────────────────────────────── */
-/* Segmented PILLS, not underlined text (third round of "they look
-   stuck together"): each tab now has its own visible bounds — a bordered pill
-   with real space around it — matching the Library's segmented toggles. Gap
-   tweaks could never fix this because flush text runs have no edges. */
+/* ── Tabs (sticky) ───────────────────────────────────────────────────── */
 .tabs {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
   display: flex;
   align-items: center;
-  gap: var(--sp-24);
-  flex-shrink: 0;
-  padding: var(--sp-12) var(--gutter);
-  border-bottom: 1px solid var(--border);
-  background: var(--bg);
-  /* Pins right beneath the collapsed hero; panels scroll under it. One step
-     below the hero's z so the hero's dropdowns still paint over the tabs. */
-  position: sticky;
-  top: var(--hero-min);
-  z-index: calc(var(--z-sticky) - 1);
-}
-
-.tab {
-  composes: btn from '../styles/controls.module.css';
-}
-
-.tabs .tab {
-  position: relative;
   gap: var(--sp-6);
-  padding: var(--sp-8) var(--sp-16);
-  border: 1px solid transparent;
-  border-radius: var(--r-pill);
-  font-size: var(--fs-md);
-  color: var(--text-secondary);
+  padding: var(--sp-10) 0;
+  margin-bottom: var(--sp-16);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
 }
-
-.tabs .tab:hover {
-  color: var(--text-primary);
-  background: var(--neutral-bg);
+.tab { composes: btn from '../styles/controls.module.css'; }
+.tabs .tab {
+  gap: var(--sp-6); padding: var(--sp-8) var(--sp-16); border: 1px solid transparent; border-radius: var(--r-pill);
+  font-size: var(--fs-md); color: var(--text-secondary); white-space: nowrap; flex-shrink: 0;
 }
-
-/* Active = the app-wide selected-segment recipe (--ad fill, accent text,
-   accent hairline) with a faint glow so it reads as the lit control. */
-.tabs .tabActive {
-  color: var(--a);
-  background: var(--ad);
-  border-color: var(--ab);
-  box-shadow: var(--glow-1);
-}
-
-.tabs .tabActive:hover {
-  color: var(--a);
-  background: var(--ad);
-}
-
-/* Muted on purpose — the count is context, the glow bar marks the selection. */
+.tabs .tab:hover { color: var(--text-primary); background: var(--neutral-bg); }
+.tabs .tabActive, .tabs .tabActive:hover { color: var(--a); background: var(--ad); border-color: var(--ab); box-shadow: var(--glow-1); }
 .tabCount {
-  composes: chip chipSm chipNeutral from '../styles/controls.module.css';
+  padding: 1px 7px; border-radius: var(--r-pill); background: var(--surface-3); color: var(--text-muted);
+  font-size: var(--fs-2xs); font-weight: 700; font-variant-numeric: tabular-nums;
 }
 
-.tabs .tabCount {
-  font-variant-numeric: tabular-nums;
+/* ── Body: content + side panel ──────────────────────────────────────── */
+.body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-20);
+  padding-bottom: var(--content-pb);
+}
+.page[data-layout="store"] .body { grid-template-columns: minmax(0, 1fr) 300px; }
+@media (max-width: 980px) { .page[data-layout="store"] .body { grid-template-columns: minmax(0, 1fr); } }
+.main { min-width: 0; }
+
+.side {
+  display: flex; flex-direction: column; gap: var(--sp-12);
+  position: sticky; top: 72px; align-self: start;
 }
 
-/* ── Content ─────────────────────────────────────────────────────────── */
-/* NOT composed from page.module.css here: .scroll owns the scrolling now, so
-   this is a plain padded block (the shared .content is itself a scroller and
-   two nested scrollers would break the sticky hero). */
-.content {
-  flex: 1;
-  min-height: 0;
-  /* A taller top gap than the shared 10px — the first section sits directly
-     under the pinned tabs and needs the extra air at the new type size. */
-  padding: var(--sp-16) var(--gutter) var(--content-pb);
+/* Cards (Overview, side panel): the Connections / Backups surface. */
+.card {
+  min-width: 0;
+  border-radius: var(--r-card);
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  padding: var(--sp-16);
 }
+.cardHead {
+  display: flex; align-items: center; gap: var(--sp-8); margin-bottom: var(--sp-12);
+  font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary);
+}
+.cardHead svg { color: var(--a); }
+.cardHeadSpacer { flex: 1; }
+.linkBtn {
+  border: 0; background: none; padding: 0; cursor: pointer; font: inherit; font-size: var(--fs-xs); font-weight: 600;
+  text-transform: none; letter-spacing: 0; color: var(--a);
+}
+.linkBtn:hover { text-decoration: underline; }
+.muted { color: var(--text-muted); font-size: var(--fs-sm); line-height: var(--lh-base); }
 
-.contentInner {
-  composes: contentInner from '../styles/page.module.css';
+/* Side panel: your stats */
+.bigStat { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--sp-12); }
+.bigValue { font-size: 30px; font-weight: 800; color: var(--text-primary); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.bigLabel { font-size: var(--fs-xs); color: var(--text-muted); }
+.ringRow { display: flex; align-items: center; gap: var(--sp-12); padding: var(--sp-10) 0; border-top: 1px solid var(--border-subtle); border-bottom: 1px solid var(--border-subtle); margin-bottom: var(--sp-6); }
+.ring { width: 56px; height: 56px; flex-shrink: 0; transform: rotate(-90deg); }
+.ringTrack { fill: none; stroke: var(--surface-3); stroke-width: 6; }
+.ringFill { fill: none; stroke: var(--a); stroke-width: 6; stroke-linecap: round; transition: stroke-dashoffset var(--dur-slower) var(--ease); }
+.ringText { display: flex; flex-direction: column; min-width: 0; }
+.ringText b { font-size: var(--fs-lg); color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.ringText span { font-size: var(--fs-xs); color: var(--text-muted); }
+.factRow { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-10); padding: 7px 0; font-size: var(--fs-sm); min-width: 0; }
+.factRow + .factRow { border-top: 1px solid var(--border-subtle); }
+.factRow > span:first-child { color: var(--text-muted); flex-shrink: 0; }
+.factRow > :last-child { color: var(--text-primary); font-weight: 600; text-align: right; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.factRow > .factBtn { border: 0; background: none; padding: 0; cursor: pointer; font: inherit; color: var(--a); }
+.factRow > .factBtn:hover { text-decoration: underline; }
+
+/* Overview */
+.overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: var(--sp-12); }
+.wide { grid-column: 1 / -1; }
+.miniList { display: flex; flex-direction: column; gap: 4px; }
+.miniAch {
+  display: flex; align-items: center; gap: var(--sp-10); padding: 6px; border-radius: var(--r-md, 8px);
+  border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; min-width: 0;
 }
+.miniAch:hover { background: var(--surface-2); }
+.miniIcon { width: 38px; height: 38px; border-radius: 8px; overflow: hidden; flex-shrink: 0; background: var(--surface-3); display: grid; place-items: center; color: var(--text-muted); }
+.miniIcon img { width: 100%; height: 100%; object-fit: cover; }
+.miniLocked img { filter: grayscale(1) brightness(0.6); }
+.miniText { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.miniName { font-size: var(--fs-sm); font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.miniSub { font-size: var(--fs-xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.miniPct { font-size: var(--fs-xs); font-weight: 700; color: var(--rar, var(--a)); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+
+.monthChart { display: flex; align-items: flex-end; gap: 3px; height: 92px; }
+.monthBar { flex: 1; min-width: 0; display: flex; align-items: flex-end; height: 100%; }
+.monthFill {
+  width: 100%; border-radius: 3px 3px 1px 1px; background: color-mix(in srgb, var(--a) 70%, transparent);
+  transition: height var(--dur-slower) var(--ease);
+}
+.monthZero .monthFill { background: var(--surface-3); }
+.monthToday .monthFill { background: var(--a); box-shadow: 0 0 10px -2px var(--a); }
+.monthAxis { display: flex; justify-content: space-between; margin-top: 6px; font-size: var(--fs-2xs); color: var(--text-muted); }
+.monthTotal { font-size: var(--fs-xs); color: var(--text-muted); text-transform: none; letter-spacing: 0; font-weight: 600; }
+
+.about { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: var(--sp-16); }
+@media (max-width: 900px) { .about { grid-template-columns: minmax(0, 1fr); } }
+.aboutText { font-size: var(--fs-sm); line-height: 1.6; color: var(--text-secondary); margin: 0 0 var(--sp-10); }
+.aboutFacts { display: flex; flex-direction: column; }
+.ghostBtn {
+  display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: var(--r-pill);
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary);
+  font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer;
+}
+.ghostBtn:hover { border-color: color-mix(in srgb, var(--a) 50%, var(--border)); color: var(--a); }
 
 .privacyBanner {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--sp-8);
-  margin-bottom: var(--sp-12);
-  padding: var(--sp-10) var(--sp-12);
-  border-radius: var(--r-input);
-  border: 1px solid var(--warning-border-strong);
-  background: var(--warning-bg);
-  color: var(--warning);
-  font-size: var(--fs-md);
-  line-height: var(--lh-snug);
+  display: flex; align-items: flex-start; gap: var(--sp-8); margin-bottom: var(--sp-12); padding: var(--sp-10) var(--sp-12);
+  border-radius: var(--r-input); border: 1px solid var(--warning-border-strong); background: var(--warning-bg);
+  color: var(--warning); font-size: var(--fs-md); line-height: var(--lh-snug);
 }
+.privacyIcon { flex-shrink: 0; margin-top: var(--sp-2); }
 
-.privacyIcon {
-  flex-shrink: 0;
-  margin-top: var(--sp-2);
+.progressBar { width: 100%; height: 4px; background: var(--surface-3); border-radius: var(--r-xs); overflow: hidden; }
+.progressFill { height: 100%; background: linear-gradient(90deg, var(--a), var(--accent-2, var(--text-accent-bright))); border-radius: var(--r-xs); transition: width var(--dur-slower) var(--ease); }
+
+@media (max-width: 700px) {
+  .storeHead { flex-direction: column; align-items: flex-start; margin-top: -120px; gap: var(--sp-12); }
+  .cover { width: 120px; }
 }
 
 /* ── Achievement grid ────────────────────────────────────────────────── */
@@ -585,7 +455,7 @@
    anything wide — never more. */
 .achGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(460px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
   gap: var(--sp-10);
   max-width: 1400px;
   contain: layout style;
@@ -846,3 +716,61 @@
   min-width: 40px;
   justify-content: flex-end;
 }
+
+/* ── Entrances (Settings → Appearance → Animations) ─────────────────────── */
+@keyframes gdUp { from { opacity: 0; transform: translateY(14px); } }
+@keyframes gdPop { from { opacity: 0; transform: scale(0.92); } }
+@keyframes gdCover { from { opacity: 0; transform: translateY(18px) scale(0.96); } }
+:global(html[data-motion]) .cover { animation: gdCover 0.5s var(--ease-out) backwards; }
+:global(html[data-motion]) .headText > *,
+:global(html[data-motion]) .cineInfo > * { animation: gdUp 0.4s var(--ease-out) backwards; }
+:global(html[data-motion]) .headText > :nth-child(2), :global(html[data-motion]) .cineInfo > :nth-child(2) { animation-delay: 0.05s; }
+:global(html[data-motion]) .headText > :nth-child(3), :global(html[data-motion]) .cineInfo > :nth-child(3) { animation-delay: 0.1s; }
+:global(html[data-motion]) .headText > :nth-child(4), :global(html[data-motion]) .cineInfo > :nth-child(4) { animation-delay: 0.15s; }
+:global(html[data-motion="heavy"]) .playBig { animation: gdPop 0.45s var(--ease-spring) 0.15s backwards; }
+:global(html[data-motion="heavy"]) .playBig:hover { transform: scale(1.04); }
+:global(html[data-motion]) .tabView { animation: gdUp 0.3s var(--ease-out) backwards; }
+:global(html[data-motion]) .side > * { animation: gdUp 0.4s var(--ease-out) backwards; }
+:global(html[data-motion]) .side > :nth-child(2) { animation-delay: 0.08s; }
+:global(html[data-motion]) .overview > * { animation: gdUp 0.4s var(--ease-out) backwards; }
+:global(html[data-motion]) .overview > :nth-child(2) { animation-delay: 0.05s; }
+:global(html[data-motion]) .overview > :nth-child(3) { animation-delay: 0.1s; }
+:global(html[data-motion]) .overview > :nth-child(4) { animation-delay: 0.15s; }
+:global(html[data-motion]) .overview > :nth-child(5) { animation-delay: 0.2s; }
+:global(html[data-motion]) .achCard { animation: gdUp 0.35s var(--ease-out) backwards; }
+:global(html[data-motion="heavy"]) .sessionRow { animation: gdUp 0.35s var(--ease-out) backwards; }
+:global(html[data-motion="heavy"]) .heroImg { animation: gdZoom 1.2s var(--ease-out) backwards; }
+@keyframes gdZoom { from { opacity: 0; transform: scale(1.06); } }
+:global(html[data-motion]) .achGrid > :nth-child(1) { animation-delay: 0.02s; }
+:global(html[data-motion]) .achGrid > :nth-child(2) { animation-delay: 0.04s; }
+:global(html[data-motion]) .achGrid > :nth-child(3) { animation-delay: 0.06s; }
+:global(html[data-motion]) .achGrid > :nth-child(4) { animation-delay: 0.08s; }
+:global(html[data-motion]) .achGrid > :nth-child(5) { animation-delay: 0.10s; }
+:global(html[data-motion]) .achGrid > :nth-child(6) { animation-delay: 0.12s; }
+:global(html[data-motion]) .achGrid > :nth-child(7) { animation-delay: 0.14s; }
+:global(html[data-motion]) .achGrid > :nth-child(8) { animation-delay: 0.16s; }
+:global(html[data-motion]) .achGrid > :nth-child(9) { animation-delay: 0.18s; }
+:global(html[data-motion]) .achGrid > :nth-child(10) { animation-delay: 0.20s; }
+:global(html[data-motion]) .achGrid > :nth-child(11) { animation-delay: 0.22s; }
+:global(html[data-motion]) .achGrid > :nth-child(12) { animation-delay: 0.24s; }
+:global(html[data-motion]) .achGrid > :nth-child(13) { animation-delay: 0.26s; }
+:global(html[data-motion]) .achGrid > :nth-child(14) { animation-delay: 0.28s; }
+:global(html[data-motion]) .achGrid > :nth-child(15) { animation-delay: 0.30s; }
+:global(html[data-motion]) .achGrid > :nth-child(16) { animation-delay: 0.32s; }
+:global(html[data-motion]) .achGrid > :nth-child(17) { animation-delay: 0.34s; }
+:global(html[data-motion]) .achGrid > :nth-child(18) { animation-delay: 0.36s; }
+:global(html[data-motion]) .achGrid > :nth-child(19) { animation-delay: 0.38s; }
+:global(html[data-motion]) .achGrid > :nth-child(20) { animation-delay: 0.40s; }
+
+/* Loading and "not found" states */
+.content { flex: 1; min-height: 0; padding: var(--sp-16) var(--gutter) var(--content-pb); }
+.contentInner { composes: contentInner from '../styles/page.module.css'; }
+
+/* Header blocks sit above the sticky tabs, so their menus open over them. */
+.storeHead, .cineInfo, .topBar { z-index: calc(var(--z-sticky) + 2); }
+.page[data-layout="cinematic"] .hero { position: relative; z-index: calc(var(--z-sticky) + 1); }
+/* Cinematic: the text lines up with the window's left edge, not a centred
+   column, however wide the window is. */
+.page[data-layout="cinematic"] .frame { max-width: none; }
+.aboutTab { display: flex; flex-direction: column; gap: var(--sp-12); align-items: flex-start; }
+.aboutTab > section { width: 100%; }

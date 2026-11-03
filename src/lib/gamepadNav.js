@@ -15,7 +15,7 @@
 // or dialog is open only its controls count. The ring is the `data-gpfocus`
 // attribute (not a class: React rewrites className on re-render and would drop
 // it); real mouse or keyboard input hides it and the hint bar. Polling runs
-// ONLY after the first `gamepadconnected` (or a View + Menu wake from the
+// ONLY after the first `gamepadconnected` (or a controller wake combo from the
 // main process), and pauses while the window is hidden or unfocused.
 
 const POLL_MS = 90
@@ -116,10 +116,35 @@ function syncScope() {
   if (!_active) return
   if (scope) {
     const t = visibleTargets()
-    setFocus(t.find(el => el.getAttribute('aria-checked') === 'true' || el.getAttribute('aria-selected') === 'true') || t[0] || null)
+    setFocus(t.find(el => el.matches('[data-gpautofocus]')) ||
+      t.find(el => el.getAttribute('aria-checked') === 'true' || el.getAttribute('aria-selected') === 'true') || t[0] || null)
   } else if (_focused && !document.contains(_focused)) {
     clearFocus()
   }
+}
+
+// Where the ring lands when nothing has it (a fresh page after LB/RB): the
+// top-left control in view inside the page, not the first sidebar link.
+function firstTarget(targets) {
+  // A screen can name its main control (Big Picture's Play button).
+  const auto = targets.find(el => el.matches('[data-gpautofocus]'))
+  if (auto) return auto
+  if (_scopeEl) return targets[0]
+  // Big Picture: start on the first game, not on Exit in the top bar.
+  if (document.querySelector('[data-bigpicture-root]')) {
+    const card = targets.find(el => el.matches('[data-gpnav][data-game-id]'))
+    if (card) return card
+  }
+  const inView = targets.filter(el => {
+    if (!el.closest('.app-main, [data-bigpicture-root]')) return false
+    const r = el.getBoundingClientRect()
+    return r.bottom > 0 && r.top < innerHeight
+  })
+  if (!inView.length) return targets[0]
+  return inView.reduce((best, el) => {
+    const a = el.getBoundingClientRect(), b = best.getBoundingClientRect()
+    return (a.top < b.top - 8 || (Math.abs(a.top - b.top) <= 8 && a.left < b.left)) ? el : best
+  })
 }
 
 // Geometric nearest neighbour in `dir` from the current focus rect.
@@ -127,31 +152,90 @@ function moveFocus(dir) {
   const targets = visibleTargets()
   if (!targets.length) return
   if (!_focused || !document.contains(_focused) || !targets.includes(_focused)) {
-    setFocus(targets[0])
+    setFocus(firstTarget(targets))
     return
   }
   const from = _focused.getBoundingClientRect()
   const fx = from.left + from.width / 2
   const fy = from.top + from.height / 2
 
-  let best = null
-  let bestScore = Infinity
-  for (const el of targets) {
-    if (el === _focused) continue
-    const r = el.getBoundingClientRect()
-    const cx = r.left + r.width / 2
-    const cy = r.top + r.height / 2
-    const dx = cx - fx
-    const dy = cy - fy
-    let primary, cross
-    if (dir === 'left')       { primary = -dx; cross = Math.abs(dy) }
-    else if (dir === 'right') { primary = dx;  cross = Math.abs(dy) }
-    else if (dir === 'up')    { primary = -dy; cross = Math.abs(dx) }
-    else                      { primary = dy;  cross = Math.abs(dx) }
-    if (primary < 8) continue                 // must actually be in that direction
-    const score = primary + cross * 2         // bias against sideways drift
-    if (score < bestScore) { bestScore = score; best = el }
+  // Prefer targets wholly past the current element's edge: centre distance
+  // alone let a sidebar link just under a tall poster's middle beat the card
+  // below it. Centre-only scoring stays as the fallback for overlaps.
+  const pick = (strict) => {
+    let best = null
+    let bestScore = Infinity
+    for (const el of targets) {
+      if (el === _focused) continue
+      const r = el.getBoundingClientRect()
+      if (strict) {
+        if (dir === 'down'  && r.top    < from.bottom - 4) continue
+        if (dir === 'up'    && r.bottom > from.top + 4)    continue
+        if (dir === 'right' && r.left   < from.right - 4)  continue
+        if (dir === 'left'  && r.right  > from.left + 4)   continue
+      }
+      const cx = r.left + r.width / 2
+      const cy = r.top + r.height / 2
+      const dx = cx - fx
+      const dy = cy - fy
+      // Sideways drift is the distance to the target's span, not its centre:
+      // a wide row straight below (Play Plan List) is 0 off, so a small
+      // sidebar link next door no longer wins.
+      const offX = Math.max(0, r.left - fx, fx - r.right)
+      const offY = Math.max(0, r.top - fy, fy - r.bottom)
+      let primary, cross
+      if (dir === 'left')       { primary = -dx; cross = offY }
+      else if (dir === 'right') { primary = dx;  cross = offY }
+      else if (dir === 'up')    { primary = -dy; cross = offX }
+      else                      { primary = dy;  cross = offX }
+      if (primary < 8) continue               // must actually be in that direction
+      let score = primary + cross * 2         // bias against sideways drift
+      // Up / down stay in the page or in the sidebar; LB / RB and left / right
+      // cross between them.
+      if ((dir === 'up' || dir === 'down') && !!el.closest('aside') !== !!_focused.closest('aside')) score += 600
+      if (score < bestScore) { bestScore = score; best = el }
+    }
+    return best
   }
+  // Row-first, like a TV: up / down go to the nearest row that has something
+  // within reach sideways (a lone poster starting the next row beats a wide
+  // panel two rows down; a far-right button alone in a header row is passed
+  // over), and left / right stay on the same line when they can.
+  const REACH = 480
+  const pickAligned = () => {
+    const inAside = !!_focused.closest('aside')
+    const vertical = dir === 'up' || dir === 'down'
+    let cands = targets.filter(el => {
+      if (el === _focused || !!el.closest('aside') !== inAside) return false
+      const r = el.getBoundingClientRect()
+      if (dir === 'down')  return r.top >= from.bottom - 4
+      if (dir === 'up')    return r.bottom <= from.top + 4
+      if (dir === 'right') return r.left >= from.right - 4
+      return r.right <= from.left + 4
+    }).map(el => {
+      const r = el.getBoundingClientRect()
+      const gap = dir === 'down' ? r.top - from.bottom : dir === 'up' ? from.top - r.bottom
+        : dir === 'right' ? r.left - from.right : from.left - r.right
+      const off = vertical ? Math.max(0, r.left - fx, fx - r.right) : Math.max(0, r.top - fy, fy - r.bottom)
+      return { el, gap, off }
+    })
+    // Inside a vertical menu (Settings sections), stay in it until its end.
+    const group = vertical && _focused.closest('nav, [role="tablist"][aria-orientation="vertical"]')
+    if (group && cands.some(x => group.contains(x.el))) cands = cands.filter(x => group.contains(x.el))
+    if (!vertical) {
+      const line = cands.filter(x => x.off <= 4).sort((a, b) => a.gap - b.gap)
+      return line[0]?.el || null
+    }
+    cands.sort((a, b) => a.gap - b.gap)
+    while (cands.length) {
+      const nearest = cands[0].gap
+      const band = cands.filter(x => x.gap <= nearest + 24).sort((a, b) => a.off - b.off || a.gap - b.gap)
+      if (band[0].off <= REACH) return band[0].el
+      cands = cands.filter(x => x.gap > nearest + 24)
+    }
+    return null
+  }
+  const best = pickAligned() || pick(true) || pick(false)
   if (best) { setFocus(best); return }
   // Left from a flyout with nothing further left: back to its parent menu.
   if (dir === 'left' && document.querySelectorAll('[role="menu"]').length > 1) pressEscape()
@@ -178,6 +262,12 @@ function readDirection(gp) {
 function justPressed(gp, index) {
   return !!gp.buttons[index]?.pressed && !_prevButtons[index]
 }
+function justReleased(gp, index) {
+  return !gp.buttons[index]?.pressed && !!_prevButtons[index]
+}
+// LB, RB and Menu act on release, and not at all when they were part of a
+// held combo (the "open KoZo" wake combos LB + RB + Menu and View + Menu).
+let _chord = false
 
 function pressEscape() {
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }))
@@ -197,18 +287,27 @@ function openOptions() {
   const el = _focused?.closest?.('[data-gpnav]') || _focused
   if (!el || !document.contains(el)) return
   const r = el.getBoundingClientRect()
-  el.dispatchEvent(new MouseEvent('contextmenu', {
+  // Events only bubble up: a card whose menu handler sits on its inner click
+  // target (GameCard in Library / Game List grids) needs it dispatched there.
+  const target = (el.matches('[data-gpnav]') && el.querySelector('[data-gpclick]')) || el
+  target.dispatchEvent(new MouseEvent('contextmenu', {
     bubbles: true, cancelable: true, button: 2,
     clientX: Math.round(r.left + r.width / 2), clientY: Math.round(r.top + Math.min(r.height / 2, 80)),
   }))
 }
 
 function focusSearch() {
-  const box = document.querySelector('.app-main input[type="search"], .app-main input[placeholder^="Search" i]')
+  const box = document.querySelector('.app-main input[type="search"], .app-main input[placeholder^="Search" i], [data-bigpicture-root] input[type="search"]')
   if (box) { setFocus(box); box.focus() }
 }
 
 function cycleSidebar(step) {
+  // Big Picture has its own tabs (Home / Library / Up next) and no sidebar.
+  if (document.documentElement.hasAttribute('data-bigpicture')) {
+    window.dispatchEvent(new CustomEvent('kozo:bp-tab', { detail: { step } }))
+    clearFocus()
+    return
+  }
   const links = Array.from(document.querySelectorAll('aside a[data-tour^="nav-"]'))
     .filter(a => a.dataset.tour !== 'nav-settings' && isShown(a))
   if (!links.length) return
@@ -252,6 +351,12 @@ function poll() {
   if (!gp) return
   syncScope()
 
+  // The focused control went away (a new screen): land on its main control.
+  if (_active && _focused && !document.contains(_focused)) {
+    const auto = visibleTargets().find(el => el.matches('[data-gpautofocus]'))
+    if (auto) setFocus(auto)
+  }
+
   const pressedAny = gp.buttons.some(b => b?.pressed) || (gp.axes || []).some(a => Math.abs(a) > STICK_THRESHOLD)
   if (pressedAny && !_active) {
     setActive(true)
@@ -284,13 +389,17 @@ function poll() {
   }
   if (justPressed(gp, B.X)) openOptions()
   if (justPressed(gp, B.Y) && !_scopeEl) focusSearch()
+  const held = (i) => !!gp.buttons[i]?.pressed
+  const heldCount = [B.LB, B.RB, B.MENU, B.VIEW].filter(held).length
+  if (heldCount >= 2) _chord = true
   if (!_scopeEl) {
-    if (justPressed(gp, B.LB)) cycleSidebar(-1)
-    if (justPressed(gp, B.RB)) cycleSidebar(1)
+    if (justReleased(gp, B.LB) && !_chord) cycleSidebar(-1)
+    if (justReleased(gp, B.RB) && !_chord) cycleSidebar(1)
     if (justPressed(gp, B.LT)) cycleInPageTabs(-1)
     if (justPressed(gp, B.RT)) cycleInPageTabs(1)
-    if (justPressed(gp, B.MENU)) { _navigate?.('/settings'); clearFocus() }
+    if (justReleased(gp, B.MENU) && !_chord) { _navigate?.('/settings'); clearFocus() }
   }
+  if (heldCount === 0) _chord = false
 
   _prevButtons = gp.buttons.map(x => !!x?.pressed)
 }
@@ -307,7 +416,9 @@ function stopPolling() {
   _heldDir = null
 }
 
-export function initGamepadNav({ navigate }) {
+export function isGamepadActive() { return _active }
+
+export function initGamepadNav({ navigate, onBigPicture }) {
   _navigate = navigate
 
   const onConnect = () => { _padSeen = true; if (document.visibilityState === 'visible') startPolling() }
@@ -328,15 +439,22 @@ export function initGamepadNav({ navigate }) {
   // controller stays connected; no reason to poll for navigation nobody can
   // see. Pause on hide/blur, resume on show/focus (only if a pad is there).
   const onHidden = () => stopPolling()
-  const onVisible = () => { if (_padSeen && connected()) startPolling() }
+  const onVisible = () => {
+    if (!_padSeen || !connected()) return
+    // A button still held from before the switch must not fire again.
+    const gp = Array.from(navigator.getGamepads?.() || []).find(g => g && g.connected)
+    startPolling()
+    if (gp) _prevButtons = gp.buttons.map(x => !!x?.pressed)
+  }
   const onVisibilityChange = () => {
     if (document.visibilityState === 'visible') onVisible()
     else onHidden()
   }
-  // View + Menu held while KoZo was in the tray (main process): the pad is
+  // The wake combo held while KoZo was in the tray (main process): the pad is
   // certainly there, so start driving at once.
-  const offWake = window.kozo?.events?.onGamepadWake?.(() => {
+  const offWake = window.kozo?.events?.onGamepadWake?.((info) => {
     _padSeen = true
+    if (info?.bigPicture) onBigPicture?.()
     startPolling()
     setActive(true)
     setTimeout(() => { if (!_focused) moveFocus('down') }, 300)
@@ -350,6 +468,9 @@ export function initGamepadNav({ navigate }) {
   document.addEventListener('visibilitychange', onVisibilityChange)
   window.addEventListener('blur', onHidden)
   window.addEventListener('focus', onVisible)
+  // A pad already in use (a reload, or setup running again) gets no new
+  // gamepadconnected event, so pick polling back up here.
+  if (_padSeen && connected() && document.visibilityState === 'visible') startPolling()
 
   return () => {
     stopPolling()

@@ -29,6 +29,15 @@ if (!gotLock) {
   process.exit(0)
 }
 
+// Settings → General → Graphics acceleration. Off is the fix for graphics
+// drivers that time out or crash with KoZo open (seen with some AMD cards and
+// a transparent overlay over a full-screen game). It must be decided before
+// the app is ready, so it lives in a tiny file next to the DB, not in the DB.
+try {
+  const gpu = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'gpu.json'), 'utf8'))
+  if (gpu?.acceleration === false) app.disableHardwareAcceleration()
+} catch {}
+
 // Suppress Chrome DevTools Autofill warnings (not implemented in Electron)
 app.commandLine.appendSwitch('disable-features', 'AutofillServerCommunication')
 
@@ -93,10 +102,17 @@ function createWindow() {
   // Resolve "start minimized to tray" BEFORE loading so we can also skip opening
   // DevTools in dev — openDevTools() force-shows the (otherwise hidden) window,
   // which is exactly why start-minimized appeared not to work during development.
+  // Only when Windows started KoZo: opening it yourself always shows the
+  // window. The startup entries pass --startup; the uptime check covers
+  // entries registered before they did.
   let startMin = false
-  try { startMin = require('./db/queries/settings').getSetting('start_minimized') === '1' } catch {}
+  try {
+    const atBoot = process.argv.includes('--startup') || require('os').uptime() < 180
+    startMin = atBoot && require('./db/queries/settings').getSetting('start_minimized') === '1'
+  } catch {}
 
-  if (!app.isPackaged) {
+  // scripts/smoke-test.js runs the built renderer without packaging.
+  if (!app.isPackaged && process.env.KOZO_RENDERER !== 'dist') {
     mainWindow.loadURL('http://localhost:5173')
     if (!startMin) mainWindow.webContents.openDevTools()
   } else {
@@ -141,7 +157,7 @@ function createWindow() {
   // Never navigate the window itself away from the app bundle — a remote page
   // there would get the full preload API.
   mainWindow.webContents.on('will-navigate', (e, url) => {
-    const isApp = app.isPackaged ? url.startsWith('file://') : url.startsWith('http://localhost:5173')
+    const isApp = (app.isPackaged || process.env.KOZO_RENDERER === 'dist') ? url.startsWith('file://') : url.startsWith('http://localhost:5173')
     if (!isApp) e.preventDefault()
   })
   // Windows shutdown / logoff skips before-quit + will-quit entirely.
@@ -194,7 +210,8 @@ function showFromAnywhere({ gamepad = false } = {}) {
       win.focus()
       setTimeout(() => { if (!win.isDestroyed()) win.setAlwaysOnTop(false) }, 400)
     } catch {}
-    if (gamepad) { try { win.webContents.send('gamepad:wake') } catch {} }
+    // A controller wake opens Big Picture (the renderer navigates there).
+    if (gamepad) { try { win.webContents.send('gamepad:wake', { bigPicture: true }) } catch {} }
   })
 }
 
@@ -300,6 +317,8 @@ Close any program that may be using it and start KoZo again.`)
   try { require('./services/crackWatcher').myDocsDir?.() } catch {}
 
   watcher.start()
+  // Discord Rich Presence (off unless enabled in Settings; idle costs nothing).
+  try { require('./services/discordPresence').start() } catch {}
 
   // The overlay window is created lazily on the first session-start / achievement
   // (overlayWindow.sendX queues the message until it finishes loading), so there's
@@ -337,7 +356,7 @@ Close any program that may be using it and start KoZo again.`)
   }
 
   // Open KoZo from anywhere, even closed in the tray: Ctrl + Shift + K on the
-  // keyboard, or View + Menu held for a second on a controller.
+  // keyboard, or a held controller combo (Settings > Shortcuts, Xbox button by default).
   try {
     const ok = globalShortcut.register('Control+Shift+K', () => showFromAnywhere())
     if (!ok) require('./logger').warn('globalShortcut Ctrl+Shift+K registration failed (in use by another app)')
@@ -395,11 +414,42 @@ Close any program that may be using it and start KoZo again.`)
       // API key and — unlike the Web API — works with a private profile, which
       // is why it's the primary path rather than a fallback.
       require('./services/steamStatsWatcher').scanAllSteamGames().catch(() => {})
+      // Steam Web: new achievements in a game's list, and unlocks earned on
+      // another PC (the stats files above only know this one).
+      require('./services/achievementSync').sweepSteamGames().catch(() => {})
     })
   }, 20000)
 
+  // Game-save backups: refresh the list of known save locations (weekly), turn
+  // old-style folder backups into versioned ones (once), and fill the second
+  // copy if it was offline. All disk work, so only while no game is running.
+  setTimeout(() => {
+    watcher.runWhenIdle('saveVaultStartup', async () => {
+      // Backups live somewhere safe (never Temp), automatic backups on once.
+      try { require('./services/backupHome').ensure() } catch (e) { require('./logger').warn('backupHome failed', { message: e.message }) }
+      try { await require('./services/saveManifest').refresh() } catch (e) { require('./logger').warn('saveManifest refresh failed', { message: e.message }) }
+      try { require('./services/saveVault').cleanEmpty() } catch {}
+      // Every game's saves, found on their own (saveDetect).
+      try { require('./services/saveDetect').confirmAll() } catch {}
+      try {
+        const settingsQ = require('./db/queries/settings')
+        if (settingsQ.getSetting('save_vault_migrated') !== '1') {
+          const vault = require('./services/saveVault')
+          const games = require('./db/database').getDb().prepare('SELECT id, name FROM games').all()
+          let n = 0
+          for (const g of games) n += vault.migrateLegacy(g)
+          settingsQ.setSetting('save_vault_migrated', '1')
+          if (n) require('./logger').info(`saveVault: imported ${n} older backup(s)`)
+        }
+        require('./services/saveVault').syncMirror()
+      } catch (e) { require('./logger').warn('saveVault startup failed', { message: e.message }) }
+      try { require('./services/googleDrive').syncSoon(5000) } catch {}
+    })
+  }, 45000)
+
   // "It's out now!" — notify when a tracked upcoming game's release date passes.
   try { require('./services/releaseWatch').start() } catch {}
+  try { require('./services/deals').start() } catch {}
 
   // Auto-update from GitHub Releases (packaged builds only; silent when the
   // release repo isn't configured yet).
@@ -442,6 +492,7 @@ function flushOnExit() {
   try { require('./services/processWatcher').stop() } catch {}
   try { require('./services/crackWatcher').stopWatching() } catch {}
   try { require('./services/controllerWake').stop() } catch {}
+  try { require('./services/discordPresence').stop() } catch {}
   try { require('./services/autoBackup').flush() } catch {}
   // Save snapshots deferred to idle would otherwise die with the process.
   try { require('./services/autoSaveBackup').flushPending() } catch {}

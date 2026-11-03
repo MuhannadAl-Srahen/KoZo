@@ -239,7 +239,7 @@ const schemaFailAt = new Map()   // `${gameId}:${appid}` → last failed fetch m
 // again on every single launch: one guaranteed-failing request and a WARN in the
 // log, forever. Persist "this appid has nothing" and back off for a week, so a
 // game that later adds achievements is still picked up without the noise.
-const NO_SCHEMA_RETRY_MS = 7 * 24 * 60 * 60_000
+const NO_SCHEMA_RETRY_MS = 2 * 24 * 60 * 60_000   // games often publish achievements after launch
 const NO_SCHEMA_SETTING = 'schema_empty_appids'   // { appid: lastCheckedMs }
 let _noSchema = null
 
@@ -274,13 +274,15 @@ function clearEmptySchema(appid) {
   } catch {}
 }
 
-async function ensureSchema(gameId, { force = false } = {}) {
+// `refresh`: fetch even when a list is stored, and add what's new (a game
+// update that adds achievements; the stored list never grew before).
+async function ensureSchema(gameId, { force = false, refresh = false } = {}) {
   const { getDb }     = require('../db/database')
   const settingsQ     = require('../db/queries/settings')
   const achievementsQ = require('../db/queries/achievements')
 
   let local = achievementsQ.listAchievementsForGame(gameId)
-  if (local.length > 0) return local
+  if (local.length > 0 && !refresh) return local
 
   const game = getDb().prepare('SELECT * FROM games WHERE id = ?').get(gameId)
   // Cracked/unzipped games often carry only a name-matched manual_appid — use it
@@ -578,8 +580,14 @@ async function syncPlayerUnlocks(gameId) {
     return { added: 0, total: 0, reason: result.error }
   }
   const steamUnlocks = result.unlocks
-  // Ensure the schema exists, otherwise nothing can be matched.
-  const localAchs = await ensureSchema(gameId)
+  // Ensure the schema exists, otherwise nothing can be matched. An unlock
+  // whose achievement isn't in the stored list means the game added some:
+  // fetch the list again before matching, or that unlock is lost.
+  let localAchs = await ensureSchema(gameId)
+  const known = new Set(localAchs.map(a => a.steam_api_name))
+  if (steamUnlocks.some(su => !known.has(su.name))) {
+    localAchs = await ensureSchema(gameId, { force: true, refresh: true })
+  }
   const nameToAch = {}
   const alreadyUnlocked = new Set()
   for (const a of localAchs) {
@@ -610,4 +618,48 @@ async function syncPlayerUnlocks(gameId) {
   return { added, total: steamUnlocks.length, newUnlocks }
 }
 
-module.exports = { fetchAndStoreAchievements, syncAfterSession, syncPlayerUnlocks, ensureSchema, importSchemaFromAppId, autoImportSchemaByName, emitNewUnlocks, isForeignLauncher, getLastSyncError, revalidateProfilePrivacy }
+// Every Steam game, now and then (startup when idle, at most every 12 hours a
+// game): refresh the achievement list once a week (new achievements from game
+// updates), then import unlocks from Steam, which also catches ones earned on
+// another PC or a Steam Deck. The local stats-file scan only sees this PC.
+const SWEEP_MS = 12 * 3600_000
+const SCHEMA_REFRESH_MS = 7 * 24 * 3600_000
+async function sweepSteamGames() {
+  const { getDb } = require('../db/database')
+  const settingsQ = require('../db/queries/settings')
+  if (!settingsQ.getSetting('steam_user_id')) return { games: 0 }
+  let marks = {}
+  try { marks = JSON.parse(settingsQ.getSetting('ach_sweep_at') || '{}') } catch {}
+  const games = getDb().prepare('SELECT * FROM games WHERE is_archived = 0 AND (steam_app_id IS NOT NULL OR manual_appid IS NOT NULL)').all()
+  let added = 0, refreshed = 0
+  for (const g of games) {
+    try { if (require('./processWatcher').isSessionActive()) break } catch {}
+    if (isForeignLauncher(g)) continue
+    const m = marks[g.id] || {}
+    if (Date.now() - (m.sync || 0) < SWEEP_MS) continue
+    try {
+      // Weekly, or every sweep while the game has no list at all (games often
+      // publish achievements after release).
+      const empty = !require('../db/queries/achievements').listAchievementsForGame(g.id).length
+      if (empty || Date.now() - (m.schema || 0) > SCHEMA_REFRESH_MS) {
+        const before = require('../db/queries/achievements').listAchievementsForGame(g.id).length
+        const after = (await ensureSchema(g.id, { refresh: true, force: before === 0 })).length
+        if (after > before) { refreshed++; logger.info(`achievementSync: "${g.name}" has ${after - before} new achievement(s) in its list`) }
+        m.schema = Date.now()
+      }
+      if (g.steam_app_id && !g.is_cracked) {
+        silenceGame(g.id)
+        try { const r = await syncPlayerUnlocks(g.id); added += r?.added || 0 } finally { unsilenceGame(g.id) }
+      }
+      m.sync = Date.now()
+      marks[g.id] = m
+    } catch (e) { logger.debug(`achievementSync: sweep skipped "${g.name}"`, { message: e.message }) }
+    await new Promise(r => setTimeout(r, 1200))   // gentle on Steam
+  }
+  settingsQ.setSetting('ach_sweep_at', JSON.stringify(marks))
+  if (added || refreshed) broadcastToRenderers('game:updated', null)
+  if (added) logger.info(`achievementSync: sweep imported ${added} Steam unlock(s)`)
+  return { games: games.length, added, refreshed }
+}
+
+module.exports = { sweepSteamGames, fetchAndStoreAchievements, syncAfterSession, syncPlayerUnlocks, ensureSchema, importSchemaFromAppId, autoImportSchemaByName, emitNewUnlocks, isForeignLauncher, getLastSyncError, revalidateProfilePrivacy }

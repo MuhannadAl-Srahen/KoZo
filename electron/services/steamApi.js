@@ -317,6 +317,37 @@ function capSet(map, key, value, max = CACHE_MAX) {
   while (map.size > max) map.delete(map.keys().next().value)
 }
 
+// A short silent loop of the first trailer (Steam's "microtrailer"), for a
+// muted background video. New store trailers are DASH/HLS only, but the same
+// folder keeps microtrailer.webm/.mp4; older ones list webm/mp4 directly.
+function trailerOf(movies) {
+  const m = (movies || []).find(x => x.highlight) || (movies || [])[0]
+  if (!m) return null
+  const stream = m.dash_h264 || m.dash_av1 || m.hls_h264
+  if (stream) {
+    const base = stream.split('?')[0].replace(/\/[^/]+$/, '')
+    return { webm: `${base}/microtrailer.webm`, mp4: `${base}/microtrailer.mp4`, poster: m.thumbnail || null }
+  }
+  const webm = m.webm?.['480'] || m.webm?.max
+  const mp4 = m.mp4?.['480'] || m.mp4?.max
+  return webm || mp4 ? { webm: webm || null, mp4: mp4 || null, poster: m.thumbnail || null } : null
+}
+
+// Steam review summary: "Very Positive", 92% of 12,400. Cached 6h.
+const reviewsCache = new Map()
+async function getReviews(appId) {
+  const hit = reviewsCache.get(appId)
+  if (hit && Date.now() - hit.at < 6 * 3600000) return hit.data
+  let data = null
+  try {
+    const r = await getJSON(`https://store.steampowered.com/appreviews/${appId}`, { json: 1, num_per_page: 0, language: 'all', purchase_type: 'all' })
+    const q = r?.query_summary
+    if (q) data = { label: q.review_score_desc || null, total: q.total_reviews || 0, positive: q.total_positive || 0 }
+  } catch {}
+  capSet(reviewsCache, appId, { at: Date.now(), data })
+  return data
+}
+
 const _detailsCache = new Map()
 async function getStoreDetails(appId) {
   const hit = _detailsCache.get(appId)
@@ -343,6 +374,27 @@ async function getStoreDetails(appId) {
         price: d.is_free ? 'Free to play' : (d.price_overview?.final_formatted || null),
         categories: (d.categories || []).map(c => c.description).filter(Boolean).slice(0, 6),
         website: d.website || null,
+        trailer: trailerOf(d.movies),
+        videos: (d.movies || []).slice(0, 8).map(m => ({
+          name: m.name || '',
+          thumb: m.thumbnail || null,
+          hls: m.hls_h264 || null,
+          mp4: m.mp4?.['480'] || m.mp4?.max || null,
+          webm: m.webm?.['480'] || m.webm?.max || null,
+        })).filter(v => v.hls || v.mp4 || v.webm),
+        about: d.about_the_game || d.detailed_description || null,
+        requirements: {
+          minimum: d.pc_requirements?.minimum || null,
+          recommended: d.pc_requirements?.recommended || null,
+        },
+        languages: d.supported_languages || null,
+        platforms: Object.entries(d.platforms || {}).filter(([, v]) => v).map(([k]) => k),
+        controller: d.controller_support || null,
+        achievements: d.achievements?.total || 0,
+        dlc: (d.dlc || []).length,
+        metacritic: d.metacritic?.score || null,
+        recommendations: d.recommendations?.total || 0,
+        ageRating: d.required_age ? Number(d.required_age) : null,
       }
     }
   } catch (e) {
@@ -405,14 +457,30 @@ function assetUrl(a, ...keys) {
   return null
 }
 
-// appIds → Map(appid → { portrait, hero, header, capsule } absolute URLs, any may be null).
+// The store's own release record. `ts` is the real unlock moment (ms), so a
+// game out at 05:00 UTC lands on the right LOCAL day; the search page only
+// shows the US date. `display`: date_full | date_month | date_quarter |
+// date_year | text_comingsoon | text_tba. null when Steam sent nothing.
+function releaseOf(r) {
+  if (!r || typeof r !== 'object') return null
+  const ts = Number(r.steam_release_date) > 0 ? Number(r.steam_release_date) * 1000 : null
+  return {
+    ts,
+    display: r.coming_soon_display || (ts ? 'date_full' : null),
+    soon: !!r.is_coming_soon,
+    text: r.custom_release_date_message || null,
+  }
+}
+
+// appIds → Map(appid → { portrait, hero, header, capsule, tags, release } (URLs may be null).
 async function getAppAssets(appIds) {
   const ids = [...new Set((appIds || []).map(Number).filter(n => Number.isFinite(n) && n > 0))]
   const out = new Map()
   const missing = []
   for (const id of ids) {
     const hit = assetCache.get(id)
-    if (hit && Date.now() - hit.at < ASSET_TTL_MS) out.set(id, hit.assets)
+    // Entries from before release data was asked for are refetched once.
+    if (hit && Date.now() - hit.at < ASSET_TTL_MS && hit.assets.release !== undefined) out.set(id, hit.assets)
     else missing.push(id)
   }
   const batches = []
@@ -423,7 +491,7 @@ async function getAppAssets(appIds) {
       const input = {
         ids: batch.map(appid => ({ appid })),
         context: { language: 'english', country_code: 'US' },
-        data_request: { include_assets: true, include_tag_count: 12 },
+        data_request: { include_assets: true, include_tag_count: 12, include_release: true },
       }
       const data = await getJSON('https://api.steampowered.com/IStoreBrowseService/GetItems/v1/', { input_json: JSON.stringify(input) })
       for (const item of data?.response?.store_items || []) {
@@ -434,6 +502,8 @@ async function getAppAssets(appIds) {
           header:   assetUrl(a, 'header_2x', 'header'),
           capsule:  assetUrl(a, 'main_capsule_2x', 'main_capsule'),
           tags:     Array.isArray(item.tagids) ? item.tagids.slice(0, 12) : [],   // Steam tag ids, most voted first
+          release:  releaseOf(item.release),
+          name:     item.name || null,
         }
         capSet(assetCache, item.appid, { at: Date.now(), assets }, 2000)
         out.set(item.appid, assets)
@@ -445,21 +515,10 @@ async function getAppAssets(appIds) {
   return out
 }
 
-// Steam's tag id → name list (keyless), cached for a week.
-let tagNameCache = null   // { at, names: { id: name } }
-async function getTagNames() {
-  if (tagNameCache && Date.now() - tagNameCache.at < 7 * 86400000) return tagNameCache.names
-  const data = await getJSON('https://api.steampowered.com/IStoreService/GetTagList/v1/', { language: 'english' })
-  const names = {}
-  for (const t of data?.response?.tags || []) names[t.tagid] = t.name
-  tagNameCache = { at: Date.now(), names }
-  return names
-}
-
-// What you play, for the calendar's "Picked for you": every genre of your
-// Library games, weighted by playtime (a game you never launched still counts
-// a little). Weights are normalised to 0..1, keyed by lower-case name.
-async function getTasteProfile() {
+// Pick for me (Game List): every genre of your Library games, weighted by
+// playtime (a game you never launched still counts a little). Weights are
+// normalised to 0..1, keyed by lower-case genre name.
+function getTasteProfile() {
   const db = require('../db/database').getDb()
   const rows = db.prepare('SELECT genres, total_playtime_seconds FROM games WHERE genres IS NOT NULL AND is_archived = 0').all()
   const w = {}
@@ -474,9 +533,335 @@ async function getTasteProfile() {
   }
   const max = Math.max(1, ...Object.values(w))
   for (const k of Object.keys(w)) w[k] = +(w[k] / max).toFixed(3)
-  let tagNames = {}
-  try { tagNames = await getTagNames() } catch {}
-  return { weights: w, tagNames }
+  return { weights: w }
+}
+
+// How much a Game List / Library row says about your taste: a 9/10 or a game
+// you're playing counts most, a dropped or low-rated one counts against.
+// Hours played add a little. Used to choose the "Picked for you" favourites.
+// A rating or status change makes the picks stale, not empty: the old ones
+// keep showing while new ones are worked out (getPicks).
+function clearTasteProfile() { if (picksCache) picksCache.at = 0 }
+function sourceWeight(row) {
+  const r = Number(row.rating) || 0
+  let w
+  if (r >= 8) w = 3
+  else if (r >= 6) w = 2
+  else if (r > 0 && r <= 4) w = -1.5
+  else if (r > 0) w = 1
+  else if (row.status === 'finished') w = 1.5
+  else if (row.status === 'playing') w = 2
+  else if (row.status === 'dropped') w = -1
+  else if (row.status === 'on_hold') w = 0.6
+  else w = 1.2   // want to play, upcoming
+  if (w > 0) w += Math.log1p((row.seconds || 0) / 3600) * 0.5
+  return w
+}
+// "Picked for you" on Upcoming, from Steam's own similarity: each favourite
+// game's "More like this" page lists the upcoming games Steam considers like
+// it (store.steampowered.com/recommended/morelike/app/<id>, its "comingsoon"
+// section). A game several favourites agree on, high in their lists, scores
+// highest. Sources = your whole Game List and Library (pickSources): half
+// what you liked, half what you want to play; dropped and low-rated never.
+let picksCache = null
+const moreLikeCache = new Map()   // appid -> { at, ids }
+// Both caches live on disk too (userData/picks-cache.json), so Upcoming shows
+// "Picked for you" at once after a restart instead of asking Steam ~16 times.
+let picksDiskLoaded = false
+function picksFile() { return path.join(require('electron').app.getPath('userData'), 'picks-cache.json') }
+function loadPicksDisk() {
+  if (picksDiskLoaded) return
+  picksDiskLoaded = true
+  try {
+    const d = JSON.parse(fs.readFileSync(picksFile(), 'utf8'))
+    if (d?.picks?.data) picksCache = d.picks
+    for (const [k, v] of Object.entries(d?.moreLike || {})) moreLikeCache.set(Number(k), v)
+  } catch {}
+}
+function savePicksDisk() {
+  try {
+    const moreLike = Object.fromEntries([...moreLikeCache].filter(([, v]) => Date.now() - v.at < 24 * 3600000))
+    fs.writeFileSync(picksFile(), JSON.stringify({ picks: picksCache, moreLike }))
+  } catch {}
+}
+async function moreLikeComingSoon(appId) {
+  const hit = moreLikeCache.get(appId)
+  if (hit && Date.now() - hit.at < 24 * 3600000) return hit.ids
+  const res = await getAxios().get(`https://store.steampowered.com/recommended/morelike/app/${appId}/`, {
+    timeout: 15000,
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', ...adultSearchOpts().headers },
+  })
+  const html = String(res.data || '')
+  const at = html.indexOf('id="comingsoon"')
+  let ids = []
+  if (at >= 0) {
+    const next = ['id="released"', 'id="newreleases"', 'id="topsellers"']
+      .map(m => html.indexOf(m, at + 10)).filter(i => i > at)
+    const chunk = html.slice(at, next.length ? Math.min(...next) : html.length)
+    ids = [...new Set([...chunk.matchAll(/data-ds-appid="(\d+)"/g)].map(m => Number(m[1])))]
+  }
+  capSet(moreLikeCache, appId, { at: Date.now(), ids }, 300)
+  return ids
+}
+
+// Pure: sources [{ name, appid, weight, ids: [upcoming appids, best first] }]
+// -> { appid: { pct, because: [names] } }.
+function scorePicks(sources) {
+  const acc = new Map()
+  for (const src of sources) {
+    src.ids.forEach((id, rank) => {
+      const e = acc.get(id) || { score: 0, because: [] }
+      e.score += src.weight * Math.max(0.1, 1 - rank / 40)
+      if (e.because.length < 3) e.because.push(src.name)
+      acc.set(id, e)
+    })
+  }
+  const top = Math.max(1e-6, ...[...acc.values()].map(e => e.score))
+  const out = {}
+  for (const [id, e] of acc) out[id] = { pct: Math.round(45 + 54 * Math.sqrt(e.score / top)), because: e.because }
+  return out
+}
+
+// Which Game List games "Picked for you" asks Steam about. Pure.
+// rows: [{ appid, name, status, rating, seconds, addedAt }]
+// Half from what you liked (rated, finished, playing, played a lot), half from
+// what you WANT to play (Want to play, Upcoming, On hold; newest first), taken
+// in turn so neither side drowns the other. Dropped and low-rated: never.
+function pickSources(rows, max = 16) {
+  const liked = rows
+    .map(r => ({ ...r, weight: sourceWeight(r) }))
+    .filter(r => r.weight >= 1.5 && !['want_to_play', 'upcoming', 'on_hold'].includes(r.status))
+    .sort((a, b) => b.weight - a.weight)
+  const wanted = rows
+    .filter(r => ['want_to_play', 'upcoming', 'on_hold'].includes(r.status) && !(Number(r.rating) > 0 && Number(r.rating) <= 4))
+    .sort((a, b) => String(b.addedAt || '').localeCompare(String(a.addedAt || '')))
+    .map(r => ({ ...r, weight: r.status === 'on_hold' ? 0.8 : 1.3 }))
+  const out = [], seen = new Set()
+  for (let i = 0; out.length < max && (i < liked.length || i < wanted.length); i++) {
+    for (const r of [liked[i], wanted[i]]) {
+      if (!r || out.length >= max || seen.has(r.appid ?? r.name)) continue
+      seen.add(r.appid ?? r.name)
+      out.push({ appid: r.appid ?? null, name: r.name, weight: r.weight, kind: liked.includes(r) ? 'liked' : 'wanted' })
+    }
+  }
+  return out
+}
+
+const nameAppCache = new Map()   // name -> appid | null
+// Stale-while-refresh: a cached answer (memory or disk) comes back at once;
+// when it is older than 6 hours a fresh one is worked out in the background
+// and the next visit gets it. Only the very first run waits.
+let picksRun = null
+async function getPicks() {
+  loadPicksDisk()
+  const fresh = picksCache && Date.now() - picksCache.at < 6 * 3600000
+  if (picksCache && !fresh && !picksRun) picksRun = computePicks().finally(() => { picksRun = null })
+  if (picksCache) return picksCache.data
+  if (!picksRun) picksRun = computePicks().finally(() => { picksRun = null })
+  return picksRun
+}
+
+async function computePicks() {
+  const db = require('../db/database').getDb()
+  const rows = db.prepare(`
+    SELECT gl.name, gl.status, gl.rating, gl.added_at AS addedAt, COALESCE(gl.steam_app_id, g.steam_app_id) AS appid,
+           COALESCE(g.total_playtime_seconds, 0) AS seconds
+    FROM game_list gl LEFT JOIN games g ON g.id = gl.game_id`).all()
+  const lib = db.prepare('SELECT name, steam_app_id AS appid, total_playtime_seconds AS seconds FROM games WHERE steam_app_id IS NOT NULL AND is_archived = 0').all()
+  const byKey = new Map()
+  for (const r of rows) byKey.set(r.appid ? `a${Number(r.appid)}` : `n${String(r.name).toLowerCase()}`, { ...r, appid: r.appid ? Number(r.appid) : null })
+  for (const g of lib) if (!byKey.has(`a${Number(g.appid)}`)) byKey.set(`a${Number(g.appid)}`, { ...g, appid: Number(g.appid), status: 'playing' })
+  const chosen = pickSources([...byKey.values()])
+  // Game List rows without a Steam id (added by name): find it by name.
+  const unnamed = chosen.filter(c => !c.appid && !nameAppCache.has(c.name.toLowerCase())).slice(0, 8)
+  await Promise.all(unnamed.map(async (c) => {
+    const k = c.name.toLowerCase()
+    try { const m = await findAppByName(c.name); capSet(nameAppCache, k, m ? Number(m.steam_app_id) : null, 500) } catch { capSet(nameAppCache, k, null, 500) }
+  }))
+  for (const c of chosen) if (!c.appid) c.appid = nameAppCache.get(c.name.toLowerCase()) || null
+  // Four at a time (it used to be one by one with a pause: ~10 seconds).
+  const withId = chosen.filter(c => c.appid)
+  const found = new Array(withId.length)
+  let next = 0
+  await Promise.all(Array.from({ length: 4 }, async () => {
+    while (next < withId.length) {
+      const i = next++
+      try { found[i] = { ...withId[i], ids: await moreLikeComingSoon(withId[i].appid) } } catch {}
+    }
+  }))
+  const sources = found.filter(Boolean)
+  const data = { picks: scorePicks(sources), sources: sources.length, names: sources.map(x => x.name), wanted: sources.filter(x => x.kind === 'wanted').map(x => x.name) }
+  picksCache = { at: Date.now(), data }
+  savePicksDisk()
+  return data
+}
+
+// ── Games like (the /like page and Game Detail's "Games like this") ─────────
+// Candidates: Steam's own "More like this" page (released, new and top-selling
+// sections, rank kept) plus a store search on the seed's three strongest tags,
+// best reviewed first. Every candidate's tags (with vote weights), reviews and
+// type come from GetItems; scoreSimilar ranks them.
+const TAG_TTL = 7 * 24 * 3600000
+let tagNames = null   // { at, map: Map(tagid -> name) }
+async function getTagNames() {
+  if (tagNames && Date.now() - tagNames.at < TAG_TTL) return tagNames.map
+  const data = await getJSON('https://api.steampowered.com/IStoreService/GetTagList/v1/', { language: 'english' })
+  const map = new Map((data?.response?.tags || []).map(t => [t.tagid, t.name]))
+  if (map.size) tagNames = { at: Date.now(), map }
+  return map
+}
+
+const STORE_UA = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+const MORELIKE_SECTIONS = ['released', 'newreleases', 'topsellers', 'comingsoon']
+async function moreLikeSections(appId) {
+  const res = await getAxios().get(`https://store.steampowered.com/recommended/morelike/app/${appId}/`, {
+    timeout: 15000, headers: { ...STORE_UA, ...adultSearchOpts().headers },
+  })
+  const html = String(res.data || '')
+  const out = {}
+  for (const sec of MORELIKE_SECTIONS) {
+    const at = html.indexOf(`id="${sec}"`)
+    if (at < 0) continue
+    const next = MORELIKE_SECTIONS.map(m => html.indexOf(`id="${m}"`, at + 10)).filter(i => i > at)
+    const chunk = html.slice(at, next.length ? Math.min(...next) : html.length)
+    out[sec] = [...new Set([...chunk.matchAll(/data-ds-appid="(\d+)"/g)].map(m => Number(m[1])))]
+  }
+  return out
+}
+
+async function tagSearch(tagIds) {
+  const adult = adultSearchOpts()
+  const res = await getAxios().get('https://store.steampowered.com/search/results/', {
+    timeout: 15000, headers: { ...STORE_UA, ...adult.headers },
+    params: { ...adult.params, tags: tagIds.join(','), category1: 998, sort_by: 'Reviews_DESC', infinite: 1, start: 0, count: 50, supportedlang: 'english' },
+  })
+  return [...new Set([...String(res.data?.results_html || '').matchAll(/data-ds-appid="(\d+)"/g)].map(m => Number(m[1])))]
+}
+
+// GetItems with what similarity needs (its own cache: more fields than art).
+const factsCache = new Map()   // appid -> { at, facts }
+async function getGameFacts(appIds) {
+  const ids = [...new Set(appIds.map(Number).filter(n => n > 0))]
+  const out = new Map(), missing = []
+  for (const id of ids) {
+    const hit = factsCache.get(id)
+    if (hit && Date.now() - hit.at < 24 * 3600000) out.set(id, hit.facts); else missing.push(id)
+  }
+  const batches = []
+  for (let i = 0; i < missing.length; i += 50) batches.push(missing.slice(i, i + 50))
+  await Promise.all(batches.map(async (batch) => {
+    try {
+      const input = {
+        ids: batch.map(appid => ({ appid })),
+        context: { language: 'english', country_code: 'US' },
+        data_request: { include_assets: true, include_tag_count: 20, include_reviews: true, include_basic_info: true, include_release: true },
+      }
+      const data = await getJSON('https://api.steampowered.com/IStoreBrowseService/GetItems/v1/', { input_json: JSON.stringify(input) })
+      for (const item of data?.response?.store_items || []) {
+        if (!item.appid) continue
+        const rv = item.reviews?.summary_filtered
+        const a = item.assets
+        const facts = {
+          appid: item.appid,
+          name: item.name || '',
+          type: item.type ?? null,   // 0 = game
+          tags: (item.tags || []).map(t => ({ id: t.tagid, w: t.weight || 0 })),
+          reviews: rv ? { count: rv.review_count || 0, pct: rv.percent_positive || 0, label: rv.review_score_label || '' } : null,
+          release: releaseOf(item.release),
+          releasedAt: item.release?.steam_release_date ? item.release.steam_release_date * 1000 : null,
+          header: assetUrl(a, 'header_2x', 'header'),
+          capsule: assetUrl(a, 'main_capsule_2x', 'main_capsule'),
+          portrait: assetUrl(a, 'library_capsule_2x', 'library_capsule'),
+          developers: (item.basic_info?.developers || []).map(d => d.name).filter(Boolean),
+        }
+        capSet(factsCache, item.appid, { at: Date.now(), facts }, 3000)
+        out.set(item.appid, facts)
+      }
+    } catch (e) { logger.warn('getGameFacts failed', { message: e.message, count: batch.length }) }
+  }))
+  return out
+}
+
+// "Sekiro - GOTY Edition", "Sekiro Demo" -> "sekiro": editions of the seed are
+// not games like it.
+function baseName(name) {
+  return String(name || '').toLowerCase()
+    .replace(/[™®©]/g, '')
+    .replace(/\s*[:\-–—]\s*(goty|game of the year|definitive|deluxe|complete|ultimate|gold|director.?s cut|remastered|enhanced|anniversary|special|standard|premium)\b.*$/i, '')
+    .replace(/\b(demo|playtest|prologue|soundtrack|ost)\b.*$/i, '')
+    .replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+// Pure. seed: facts; cands: [facts]; rank: Map(appid -> position on Steam's
+// More like this, 0 = first). Returns [{ appid, pct, score, shared: [tagid] }]
+// best first. Tag overlap is a cosine over the top 20 tags weighted by their
+// position (a game's first tags say most about it); Steam's rank adds its own
+// signal; reviews add quality through a Wilson lower bound (a few reviews
+// count little), and a poorly reviewed game (under 70%) is pushed down.
+function scoreSimilar(seed, cands, rank = new Map()) {
+  const vec = (tags) => { const m = new Map(); (tags || []).slice(0, 20).forEach((t, i) => m.set(t.id, (1 - i / 22) ** 2)); return m }
+  const norm = (m) => Math.sqrt([...m.values()].reduce((a, b) => a + b * b, 0)) || 1
+  const sv = vec(seed.tags), sn = norm(sv)
+  const seedBase = baseName(seed.name)
+  const out = []
+  for (const c of cands) {
+    if (!c || c.appid === seed.appid || (c.type != null && c.type !== 0)) continue
+    if (seedBase && baseName(c.name) === seedBase) continue
+    const n = c.reviews?.count || 0
+    const upcoming = !!c.release?.soon || (!n && !c.releasedAt)
+    if (n < 50 && !upcoming) continue
+    const cv = vec(c.tags)
+    let dot = 0
+    const shared = []
+    for (const [k, w] of cv) if (sv.has(k)) { const x = w * sv.get(k); dot += x; shared.push([k, x]) }
+    const cos = dot / (sn * norm(cv))
+    const p = (c.reviews?.pct || 0) / 100, z = 1.96
+    const wilson = n ? (p + z * z / (2 * n) - z * Math.sqrt((p * (1 - p) + z * z / (4 * n)) / n)) / (1 + z * z / n) : 0.6
+    const r = rank.has(c.appid) ? Math.max(0, 1 - rank.get(c.appid) / 40) : 0
+    let score = 0.55 * cos + 0.3 * r + 0.15 * wilson
+    if (n >= 50 && p < 0.7) score *= 0.85
+    out.push({ appid: c.appid, score, shared: shared.sort((a, b) => b[1] - a[1]).slice(0, 4).map(x => x[0]) })
+  }
+  out.sort((a, b) => b.score - a.score)
+  const top = out[0]?.score || 1
+  for (const o of out) o.pct = Math.round(Math.min(99, 50 + 49 * (o.score / top) ** 1.5))
+  return out
+}
+
+const similarCache = new Map()   // appid -> { at, data }
+async function similarGames(appId) {
+  const id = Number(appId)
+  if (!id) throw new Error('No Steam id')
+  const hit = similarCache.get(id)
+  if (hit && Date.now() - hit.at < 24 * 3600000) return hit.data
+  const [seedFacts, names] = await Promise.all([getGameFacts([id]), getTagNames().catch(() => new Map())])
+  const seed = seedFacts.get(id)
+  if (!seed) throw new Error('Steam has no store page for this game')
+  const [secs, byTags] = await Promise.all([
+    moreLikeSections(id).catch(() => ({})),
+    seed.tags.length >= 3 ? tagSearch(seed.tags.slice(0, 3).map(t => t.id)).catch(() => []) : [],
+  ])
+  const rank = new Map()
+  const note = (list, offset) => (list || []).forEach((x, i) => { if (!rank.has(x) || rank.get(x) > i + offset) rank.set(x, i + offset) })
+  note(secs.released, 0); note(secs.newreleases, 5); note(secs.topsellers, 5); note(secs.comingsoon, 8)
+  const ids = [...new Set([...rank.keys(), ...byTags])].filter(x => x !== id)
+  const facts = await getGameFacts(ids)
+  const scored = scoreSimilar(seed, ids.map(x => facts.get(x)).filter(Boolean), rank)
+  const tagName = (t) => names.get(t) || null
+  const data = {
+    seed: { appid: id, name: seed.name, header: seed.header, capsule: seed.capsule, portrait: seed.portrait, tags: seed.tags.slice(0, 8).map(t => tagName(t.id)).filter(Boolean) },
+    games: scored.slice(0, 60).map(o => {
+      const f = facts.get(o.appid)
+      return {
+        appid: o.appid, name: f.name, pct: o.pct, shared: o.shared.map(tagName).filter(Boolean),
+        header: f.header, capsule: f.capsule, portrait: f.portrait, reviews: f.reviews,
+        release: f.release, releasedAt: f.releasedAt, soon: !!f.release?.soon || (!f.reviews?.count && !f.releasedAt),
+        developers: f.developers,
+      }
+    }),
+  }
+  capSet(similarCache, id, { at: Date.now(), data }, 200)
+  return data
 }
 
 async function assetsFor(appId) {
@@ -1031,9 +1416,9 @@ async function getComingSoon(feed = 'soon', page = 0) {
 }
 
 module.exports = {
-  shrinkCover, getTasteProfile,
+  shrinkCover, getTasteProfile, clearTasteProfile, getPicks, scorePicks, pickSources, getReviews,
   getBannersDir, downloadFile,
-  getAppAssets, downloadHero,
+  getAppAssets, downloadHero, similarGames, scoreSimilar, baseName, getGameFacts, getTagNames, assetUrl,
   getComingSoon, parseComingSoonHtml,
   testApiKey, searchGames, findAppByName, parentArtAppId, refreshGameData, refreshBanners, downloadBanner,
   getStoreArt, getStoreDetails, resolveBannerUrl, resolveSteamId, runGenreBackfill, storeRemoteFallback,

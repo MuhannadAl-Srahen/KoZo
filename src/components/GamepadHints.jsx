@@ -8,6 +8,7 @@ const HINTS = {
   page:   [['A', 'Select'], ['B', 'Back'], ['X', 'Options'], ['Y', 'Search'], ['LB RB', 'Tabs'], ['LT RT', 'Views']],
   dialog: [['A', 'Select'], ['B', 'Close']],
   menu:   [['A', 'Select'], ['B', 'Close']],
+  big:    [['A', 'Open'], ['X', 'Options'], ['B', 'Back'], ['Y', 'Search'], ['LB RB', 'Tabs']],   // Big Picture
 }
 
 function Glyph({ k }) {
@@ -25,7 +26,7 @@ export default function GamepadHints() {
   if (!state.active) return null
   return (
     <div className={s.bar} role="note" aria-label="Controller buttons">
-      {(HINTS[state.scope] || HINTS.page).map(([k, label]) => (
+      {(HINTS[state.scope === 'page' && document.documentElement.hasAttribute('data-bigpicture') ? 'big' : state.scope] || HINTS.page).map(([k, label]) => (
         <span key={k} className={s.hint}><Glyph k={k} />{label}</span>
       ))}
     </div>

@@ -26,7 +26,7 @@ const fs   = require('fs')
 const path = require('path')
 const logger = require('../logger')
 
-const SECRET_SETTINGS = new Set(['steam_api_key', 'steamgriddb_key'])
+const SECRET_SETTINGS = new Set(['steam_api_key', 'steamgriddb_key', 'gdrive_token', 'gdrive_folder_id', 'gdrive_email', 'gdrive_client_id', 'gdrive_client_secret', 'install_id'])
 
 const TABLES = ['games', 'sessions', 'achievements', 'achievement_unlocks', 'game_list', 'categories', 'custom_lists', 'custom_list_games', 'settings']
 
@@ -54,7 +54,7 @@ function getConfig() {
 
 function buildPayload() {
   const db = require('../db/database').getDb()
-  const payload = { version: 1, app: 'kozo', exported_at: new Date().toISOString(), auto: true }
+  const payload = { version: 1, app: 'kozo', install: installId(), exported_at: new Date().toISOString(), auto: true }
   for (const t of TABLES) {
     try { payload[t] = db.prepare(`SELECT * FROM ${t}`).all() } catch { payload[t] = [] }
   }
@@ -62,6 +62,14 @@ function buildPayload() {
   // API key in it.
   payload.settings = payload.settings.filter(r => !SECRET_SETTINGS.has(r.key))
   return payload
+}
+
+// Random id of this install (setting install_id, never exported or restored).
+function installId() {
+  const settingsQ = require('../db/queries/settings')
+  let id = settingsQ.getSetting('install_id')
+  if (!id) { id = require('crypto').randomUUID(); settingsQ.setSetting('install_id', id) }
+  return id
 }
 
 function sessionActive() {
@@ -88,6 +96,14 @@ async function writeNow({ force = false } = {}) {
     await fs.promises.mkdir(dir, { recursive: true })
     const file = path.join(dir, 'kozo-autobackup.json')
     const tmp  = `${file}.tmp`
+    // A file another install wrote (a fresh Windows, the same backup drive) is
+    // kept beside, never overwritten, so it can still be restored.
+    const me = installId()
+    try {
+      const head = (await fs.promises.readFile(file, 'utf8')).slice(0, 400)
+      const owner = /"install":"([^"]+)"/.exec(head)?.[1] || null
+      if (owner !== me) await fs.promises.rename(file, path.join(dir, `kozo-autobackup-${new Date().toISOString().slice(0, 10)}-${(owner || 'old').slice(0, 6)}.json`))
+    } catch {}
     // Atomic replace: a half-written temp file can never become the backup.
     // Compact JSON: about a third smaller to write and to cloud-sync.
     dirty = false

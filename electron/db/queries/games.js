@@ -35,14 +35,14 @@ function flag(value, fallback = 0) {
 
 function addGame(data) {
   const stmt = getDb().prepare(`
-    INSERT INTO games (steam_app_id, name, exe_name, install_path, banner_url, banner_local_path, source, is_installed, is_cracked)
-    VALUES (@steam_app_id, @name, @exe_name, @install_path, @banner_url, @banner_local_path, @source, @is_installed, @is_cracked)
+    INSERT INTO games (steam_app_id, name, exe_name, install_path, banner_url, banner_local_path, source, is_installed, is_cracked, launch_uri)
+    VALUES (@steam_app_id, @name, @exe_name, @install_path, @banner_url, @banner_local_path, @source, @is_installed, @is_cracked, @launch_uri)
   `)
   // Named params throw when a key is missing, so default every bound column —
   // callers only need to pass what they know.
   const result = stmt.run({
     steam_app_id: null, exe_name: null, install_path: null,
-    banner_url: null, banner_local_path: null, source: null,
+    banner_url: null, banner_local_path: null, source: null, launch_uri: null,
     ...data,
     is_installed: flag(data.is_installed, 1),
     is_cracked: flag(data.is_cracked, 0),
@@ -51,7 +51,7 @@ function addGame(data) {
 }
 
 function updateGame(id, data) {
-  const allowed = ['name', 'exe_name', 'install_path', 'banner_url', 'banner_local_path', 'source', 'steam_app_id', 'is_installed', 'is_cracked', 'is_favorite', 'is_hidden', 'completion_status', 'completion_status_at', 'manual_appid', 'crack_dir', 'total_playtime_seconds', 'first_played_at', 'last_played_at', 'genres', 'display_order', 'notes', 'run_as_admin', 'is_archived', 'launch_file']
+  const allowed = ['name', 'exe_name', 'install_path', 'banner_url', 'banner_local_path', 'source', 'steam_app_id', 'is_installed', 'is_cracked', 'is_favorite', 'is_hidden', 'completion_status', 'completion_status_at', 'manual_appid', 'crack_dir', 'total_playtime_seconds', 'first_played_at', 'last_played_at', 'genres', 'display_order', 'notes', 'run_as_admin', 'is_archived', 'launch_file', 'launch_uri']
   const keys = Object.keys(data).filter(k => allowed.includes(k))
   const sets = keys.map(k => `${k} = @${k}`).join(', ')
 

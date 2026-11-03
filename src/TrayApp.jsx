@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import {
   IconPlayerPlayFilled, IconPlayerPause, IconPlayerPlay, IconTrophy, IconClock,
   IconLayoutDashboard, IconChartBar, IconPower, IconDeviceGamepad2, IconMoonStars,
+  IconDeviceTv,
 } from '@tabler/icons-react'
 import HoneycombLogo from './components/HoneycombLogo'
 import { applyAccent } from './context/AccentColorContext'
@@ -133,6 +134,9 @@ export default function TrayApp() {
       <footer className={s.foot}>
         <button className={s.primary} onClick={() => act('open')}>
           <IconLayoutDashboard size={15} /> Open KoZo
+        </button>
+        <button className={s.iconBtn} title="Big Picture" onClick={() => act('openAt', '/big')}>
+          <IconDeviceTv size={16} />
         </button>
         <button className={s.iconBtn} title="Statistics" onClick={() => act('openAt', '/statistics')}>
           <IconChartBar size={16} />

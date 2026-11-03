@@ -6,8 +6,10 @@ import {
   IconStethoscope, IconFolderOpen, IconDeviceFloppy, IconDownload,
   IconCircleCheck, IconCircleOff, IconEye, IconEyeOff, IconChevronDown,
   IconChevronRight, IconAlertTriangle, IconDeviceGamepad2,
+  IconLayoutDashboard, IconSparkles, IconLayoutSidebarRight, IconMovie, IconTarget, IconChartBar,
+  IconInfoCircle, IconBrandSteam, IconClock,
 } from '@tabler/icons-react'
-import { getBannerBg, getBannerIcon, formatPlaytime, formatDate, formatDateTime, fileUrl, isSteamTracked, launcherLabel, localDayKey, rarityColor } from '../lib/utils'
+import { getBannerBg, getBannerIcon, formatPlaytime, formatDate, formatDateTime, fileUrl, isSteamTracked, launcherLabel, localDayKey, rarityColor, timeAgo } from '../lib/utils'
 import { STATUS_META } from '../components/GameCard'
 import AchievementModal from '../components/modals/AchievementModal'
 import EditGameModal from '../components/modals/EditGameModal'
@@ -15,6 +17,11 @@ import SaveManagerModal from '../components/modals/SaveManagerModal'
 import InfoModal, { PrivacyHelp } from '../components/ui/InfoModal'
 import EmptyState from '../components/ui/EmptyState'
 import { HeroSkeleton, PanelSkeleton } from '../components/ui/Skeleton'
+import GeneratedCover from '../components/GeneratedCover'
+import SteamGameModal, { StoreSections } from '../components/SteamGameModal'
+import { GamesLikeGrid } from './GamesLike'
+import { useAppearance } from '../context/AppearanceContext'
+import { useSteamArt } from '../lib/steamArt'
 import s from './GameDetail.module.css'
 
 const STEAM_PRIVACY_URL = 'https://steamcommunity.com/my/edit/settings'
@@ -24,51 +31,41 @@ const STEAM_PRIVACY_URL = 'https://steamcommunity.com/my/edit/settings'
 // broadcast triggers. Mirrors the sentinel AchievementModal patches with.
 const OPTIMISTIC_UNLOCK_ID = -1
 
-// ── 7-day chart helpers ────────────────────────────────────────────────────
-function buildWeekData(sessions) {
+// ── 30-day chart (Overview, Sessions) ──────────────────────────────────────
+// Local day buckets: started_at is UTC, so a prefix match would credit
+// late-night play to the previous day.
+function buildDays(sessions, count = 30) {
+  const byDay = new Map()
+  for (const x of sessions) {
+    const k = localDayKey(x.started_at)
+    byDay.set(k, (byDay.get(k) || 0) + (x.duration_seconds || 0))
+  }
   const days = []
   const today = new Date()
-  for (let i = 6; i >= 0; i--) {
+  for (let i = count - 1; i >= 0; i--) {
     const d = new Date(today)
     d.setDate(d.getDate() - i)
-    // Local day buckets — the labels below say "Today"/"Yest" in local terms and
-    // started_at is UTC, so a prefix match would credit late-night play to the
-    // previous bar.
-    const dayStr = localDayKey(d)
-    const secs = sessions
-      .filter(s => localDayKey(s.started_at) === dayStr)
-      .reduce((a, s) => a + (s.duration_seconds || 0), 0)
-    const label = i === 0 ? 'Today'
-      : i === 1 ? 'Yest'
-      : d.toLocaleDateString('en-US', { weekday: 'short' })
-    days.push({ dayStr, label, seconds: secs, isToday: i === 0 })
+    const key = localDayKey(d)
+    days.push({ key, seconds: byDay.get(key) || 0, isToday: i === 0, label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) })
   }
   return days
 }
 
-function WeekChart({ sessions }) {
-  const data   = buildWeekData(sessions)
-  const maxSec = Math.max(...data.map(d => d.seconds), 1)
-
+function MonthChart({ sessions }) {
+  const data = buildDays(sessions)
+  const max = Math.max(...data.map(d => d.seconds), 1)
   return (
-    <div className={s.chartSection}>
-      <div className={s.chartTitle}>Last 7 days</div>
-      <div className={s.chart}>
-        {data.map((d, i) => (
-          <div
-            key={i}
-            className={`${s.chartBar} ${d.isToday ? s.chartBarToday : ''} ${d.seconds === 0 ? s.chartBarZero : ''}`}
-          >
-            <div
-              className={s.chartBarFill}
-              style={{ height: `${Math.max((d.seconds / maxSec) * 52, d.seconds > 0 ? 4 : 2)}px` }}
-              title={`${d.label}: ${formatPlaytime(d.seconds)}`}
-            />
-            <div className={s.chartBarLabel}>{d.label}</div>
+    <>
+      <div className={s.monthChart}>
+        {data.map(d => (
+          <div key={d.key} className={`${s.monthBar} ${d.isToday ? s.monthToday : ''} ${d.seconds === 0 ? s.monthZero : ''}`}
+            title={`${d.label}: ${d.seconds ? formatPlaytime(d.seconds) : 'no play'}`}>
+            <div className={s.monthFill} style={{ height: `${Math.max((d.seconds / max) * 100, d.seconds > 0 ? 6 : 3)}%` }} />
           </div>
         ))}
       </div>
-    </div>
+      <div className={s.monthAxis}><span>{data[0].label}</span><span>Today</span></div>
+    </>
   )
 }
 
@@ -168,7 +165,12 @@ export default function GameDetail() {
   const [game, setGame]             = useState(null)
   const [achievements, setAch]      = useState([])
   const [sessions, setSessions]     = useState([])
-  const [tab, setTab]               = useState('achievements')
+  const [tab, setTab]               = useState('overview')
+  const { prefs, setPrefs }         = useAppearance()
+  const [coverFailed, setCoverFailed] = useState(false)
+  const [showStore, setShowStore]   = useState(false)
+  const [store, setStore]           = useState(undefined)   // undefined = loading, null = none
+  const [reviews, setReviews]       = useState(null)
   const [isLive, setIsLive]         = useState(false)
   const [selectedAch, setSelectedAch] = useState(null)
   const [loading, setLoading]       = useState(true)
@@ -311,6 +313,18 @@ export default function GameDetail() {
     })
     return () => { alive = false }
   }, [artAppId])
+  const steamArt = useSteamArt(artAppId)
+  useEffect(() => { setCoverFailed(false) }, [id])
+  // The Steam store facts for Overview's "About the game".
+  useEffect(() => {
+    setStore(artAppId ? undefined : null); setReviews(null)
+    if (!artAppId) return
+    let alive = true
+    window.kozo?.api?.steam?.storeDetails?.(artAppId).then(res => { if (alive) setStore(res?.ok && res.data ? res.data : null) })
+    window.kozo?.api?.steam?.reviews?.(artAppId).then(res => { if (alive && res?.ok) setReviews(res.data) })
+    return () => { alive = false }
+  }, [artAppId])
+
   const heroSources = !game ? [] : [
     game.hero_local_path ? fileUrl(game.hero_local_path, bust) : null,
     heroCdnUrl,
@@ -723,384 +737,468 @@ export default function GameDetail() {
   const pct          = total > 0 ? Math.round((unlocked / total) * 100) : 0
   const maxDuration  = Math.max(...sessions.map(s => s.duration_seconds || 0), 1)
   const status       = STATUS_META[game.completion_status]
+  const layout       = prefs.gamePage === 'cinematic' ? 'cinematic' : 'store'
+  let genres = []
+  try { genres = JSON.parse(game.genres || '[]') } catch {}
+  const coverUrl = !coverFailed && (game.banner_local_path ? fileUrl(game.banner_local_path, bust) : (game.banner_url || steamArt?.portrait || null))
+  const totalSecs = sessions.reduce((a, x) => a + (x.duration_seconds || 0), 0)
+  const avgSession = sessions.length ? Math.round(totalSecs / sessions.length) : 0
+  // Overview: the newest unlocks, and the locked ones most players have (the
+  // likeliest next), plus the last 30 days of play.
+  const recentUnlocks = achievements.filter(a => isUnlocked(a) && a.unlocked_at)
+    .sort((a, b) => String(b.unlocked_at).localeCompare(String(a.unlocked_at))).slice(0, 5)
+  const nextUp = achievements.filter(a => !isUnlocked(a) && a.global_unlock_percent != null)
+    .sort((a, b) => b.global_unlock_percent - a.global_unlock_percent).slice(0, 5)
+  const monthStart = Date.now() - 30 * 86400000
+  const monthSecs = sessions.filter(x => new Date(x.started_at).getTime() >= monthStart).reduce((a, x) => a + (x.duration_seconds || 0), 0)
 
-  return (
-    <div className={s.page}>
-      {/* One scroller wraps hero + tabs + panels: the hero is a sticky
-          collapsing header (big at rest, pins to a compact strip on scroll)
-          and the tabs pin right beneath it. */}
-      <div className={s.scroll}>
-      {/* ── Hero ── */}
-      <div className={s.hero}>
-        {/* Only the ART layer clips; the hero itself stays overflow: visible so
-            the dropdowns below can extend past it. */}
-        <div className={s.heroArt} style={{ background: bannerBg }}>
-          <Icon size={72} stroke={1} className={s.heroIcon} />
-          {heroUrl && (
-            <React.Fragment key={heroUrl}>
-              {heroIsFallback && (
-                <img
-                  src={heroUrl} className={s.heroBlur} alt="" aria-hidden="true"
-                  decoding="async" onError={handleHeroError}
-                />
-              )}
-              <img
-                src={heroUrl} className={s.heroImg} alt=""
-                decoding="async" onError={handleHeroError}
-              />
-            </React.Fragment>
-          )}
-          <div className={s.heroScrim} />
-        </div>
+  const TABS = [
+    { key: 'overview', label: 'Overview', Icon: IconLayoutDashboard },
+    { key: 'achievements', label: 'Achievements', Icon: IconTrophy, count: total > 0 ? `${unlocked}/${total}` : null },
+    { key: 'sessions', label: 'Sessions', Icon: IconHistory, count: sessions.length || null },
+    artAppId && store !== null && { key: 'about', label: 'About', Icon: IconInfoCircle },
+    artAppId && { key: 'like', label: 'Games like this', Icon: IconSparkles },
+  ].filter(Boolean)
+  const shownTab = TABS.some(t => t.key === tab) ? tab : 'overview'
 
-        <div className={s.heroTop}>
-          <button className={s.backBtn} onClick={() => navigate('/')} title="Back to Library">
-            <IconChevronLeft size={15} stroke={2} />
-            Library
-          </button>
+  const chips = (
+    <div className={s.chipRow}>
+      {status && (
+        <span className={s.statusChip} style={{ '--st': status.color }}><status.Icon size={12} /> {status.label}</span>
+      )}
+      {genres.slice(0, 5).map(g => <span key={g} className={s.genreChip} title={g}>{g}</span>)}
+      {!!game.is_cracked && (
+        <span className={s.crackBadge}>
+          CRACKED
+          {crackScanInfo?.sources?.length > 0 && <span className={s.crackBadgeSource}> · {crackScanInfo.sources.join(', ')}</span>}
+        </span>
+      )}
+    </div>
+  )
 
-          <div className={s.heroActions}>
-            {!!game.is_installed && !isLive && (
-              <button onClick={handleLaunch} title={`Launch ${game.name}`} className={s.playBtn}>
-                <IconPlayerPlayFilled size={13} />
-                Play
+  const actions = (
+    <div className={s.actions}>
+      {!!game.is_installed && !isLive && (
+        <button onClick={handleLaunch} title={`Launch ${game.name}`} className={s.playBig} data-gpautofocus>
+          <IconPlayerPlayFilled size={17} />
+          Play
+        </button>
+      )}
+      {isLive && <span className={s.livePill}><span className={s.liveDot} /> Playing now</span>}
+      {!game.is_installed && !isLive && <span className={s.notInstalled}>Not installed on this PC</span>}
+
+      {/* Status picker: Playing / Finished / Dropped / On hold, synced with the Game List */}
+      <div className={s.statusWrap} ref={statusMenuRef}>
+        <button
+          onClick={() => setStatusMenuOpen(v => !v)}
+          title={status ? `Status: ${status.label}. Click to change` : 'Set a status for this game (finishing earns XP)'}
+          className={`${s.statusBtn} ${game.completion_status === 'finished' ? s.statusBtnFinished : status ? s.statusBtnSet : ''}`}
+          style={status ? { '--st': status.color } : undefined}
+        >
+          {status ? <status.Icon size={15} /> : <IconCircleCheck size={15} />}
+          {status ? status.label : 'Set status'}
+          <IconChevronDown size={13} stroke={2} />
+        </button>
+        {statusMenuOpen && (
+          <div className={s.statusDropdown}>
+            {Object.entries(STATUS_META).map(([key, st]) => (
+              <button key={key} className={s.menuItem} onClick={() => setStatus(game.completion_status === key ? null : key)}>
+                <st.Icon size={14} style={{ color: st.color }} />
+                {st.label}
+                {game.completion_status === key && <IconCheck size={13} stroke={2} style={{ marginLeft: 'auto' }} />}
+              </button>
+            ))}
+            {game.completion_status && (
+              <button className={s.menuItem} onClick={() => setStatus(null)}>
+                <IconCircleOff size={14} />
+                Clear status
               </button>
             )}
+          </div>
+        )}
+      </div>
 
-            {/* Status picker — Playing / Finished / Dropped / On hold, synced with the Game List */}
-            <div className={s.statusWrap} ref={statusMenuRef}>
-              <button
-                onClick={() => setStatusMenuOpen(v => !v)}
-                title={status ? `Status: ${status.label}. Click to change` : 'Set a status for this game (finishing earns XP)'}
-                className={`${s.statusBtn} ${
-                  game.completion_status === 'finished' ? s.statusBtnFinished : status ? s.statusBtnSet : ''
-                }`}
-                style={status ? { '--st': status.color } : undefined}
-              >
-                {status ? <status.Icon size={14} /> : <IconCircleCheck size={14} />}
-                {status ? status.label : 'Set status'}
-                <IconChevronDown size={12} stroke={2} />
+      {/* Game options menu */}
+      <div className={s.gameMenu} ref={menuRef}>
+        <button className={s.menuTrigger} onClick={() => { setMenuOpen(v => !v); setConfirmDelete(false) }} title="Game options">
+          <IconDotsVertical size={17} stroke={1.8} />
+        </button>
+        {menuOpen && (
+          <div className={s.menuDropdown}>
+            <button className={s.menuItem} onClick={() => { setShowEdit(true); setMenuOpen(false) }}>
+              <IconEdit size={14} stroke={1.6} />
+              Edit game
+            </button>
+            {/* Auto-import achievement list, for launchers KoZo can't auto-track */}
+            {!steamTracked && !game.is_cracked && (
+              <button className={`${s.menuItem} ${importing ? s.menuItemBusy : ''}`} onClick={handleAutoImport} aria-busy={importing || undefined}>
+                <IconDownload size={14} stroke={1.6} />
+                {importing ? 'Importing…' : (total > 0 ? 'Re-import achievements' : 'Import achievements from Steam')}
               </button>
-
-              {statusMenuOpen && (
-                <div className={s.statusDropdown}>
-                  {Object.entries(STATUS_META).map(([key, st]) => (
-                    <button
-                      key={key}
-                      className={s.menuItem}
-                      onClick={() => setStatus(game.completion_status === key ? null : key)}
-                    >
-                      <st.Icon size={14} style={{ color: st.color }} />
-                      {st.label}
-                      {game.completion_status === key && <IconCheck size={13} stroke={2} style={{ marginLeft: 'auto' }} />}
-                    </button>
-                  ))}
-                  {game.completion_status && (
-                    <button className={s.menuItem} onClick={() => setStatus(null)}>
-                      <IconCircleOff size={14} />
-                      Clear status
-                    </button>
-                  )}
+            )}
+            {/* ONE combined check: syncs for new unlocks AND shows the
+                diagnostic report, via the right pipeline for the game type. */}
+            {(steamTracked || !!game.is_cracked) && (
+              <button
+                className={`${s.menuItem} ${(crackScanning || refreshing) ? s.menuItemBusy : ''}`}
+                onClick={() => { setMenuOpen(false); (game.is_cracked ? handleCrackFiles : handleSteamCheck)() }}
+                aria-busy={(crackScanning || refreshing) || undefined}
+              >
+                <IconStethoscope size={14} stroke={1.6} />
+                {(crackScanning || refreshing) ? 'Checking…' : 'Check achievements'}
+              </button>
+            )}
+            <button className={s.menuItem} onClick={() => { setMenuOpen(false); setShowSaveManager(true) }}>
+              <IconDeviceFloppy size={14} stroke={1.6} />
+              Save files &amp; backup
+            </button>
+            {!!game.install_path && (
+              <button className={s.menuItem} onClick={handleOpenFolder}>
+                <IconFolderOpen size={14} stroke={1.6} />
+                Open game folder
+              </button>
+            )}
+            <button className={s.menuItem} onClick={toggleHidden}>
+              {game.is_hidden ? <IconEye size={14} stroke={1.6} /> : <IconEyeOff size={14} stroke={1.6} />}
+              {game.is_hidden ? 'Unhide from library' : 'Hide from library'}
+            </button>
+            {game.is_archived ? (
+              <button className={s.menuItem} onClick={handleRestore}>
+                <IconArrowBackUp size={14} stroke={1.6} />
+                Restore to Library
+              </button>
+            ) : !confirmDelete ? (
+              <button className={s.menuItem} onClick={() => setConfirmDelete(true)}>
+                <IconArchive size={14} stroke={1.6} />
+                Remove from Library
+              </button>
+            ) : (
+              <div className={s.menuConfirm}>
+                <div className={s.menuConfirmText}>Remove "{game.name}" from the Library?</div>
+                <div className={s.menuConfirmBtns}>
+                  <button className={s.menuCancelBtn} onClick={() => setConfirmDelete(false)} disabled={deleting}>Cancel</button>
+                  <button className={s.menuCancelBtn} onClick={() => handleDelete(false)} disabled={deleting}>Keep history</button>
+                  <button className={`${s.menuDeleteBtn} ${deleting ? s.menuItemBusy : ''}`} onClick={() => handleDelete(true)} aria-busy={deleting || undefined}>
+                    {deleting ? 'Removing…' : 'Delete with history'}
+                  </button>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
 
-            {/* Achievements sync automatically (on open + live during sessions);
-                a subtle spinner appears while a background sync is running.
-                Manual sync/diagnose now live in the ⋯ menu for the rare case. */}
+  const statBits = [
+    game.total_playtime_seconds ? <><b>{formatPlaytime(game.total_playtime_seconds)}</b> played</> : <>Not played yet</>,
+    total > 0 && <><b>{unlocked}/{total}</b> achievements</>,
+    sessions.length > 0 && <><b>{sessions.length}</b> {sessions.length === 1 ? 'session' : 'sessions'}</>,
+    game.last_played_at && <>last played <b>{timeAgo(game.last_played_at)}</b></>,
+  ].filter(Boolean)
+
+  const RING = 2 * Math.PI * 24
+
+  return (
+    <div className={s.page} data-layout={layout}>
+      <div className={s.scroll}>
+        {/* ── Art ── */}
+        <div className={s.hero}>
+          <div className={s.heroArt} style={{ background: bannerBg }}>
+            <Icon size={72} stroke={1} className={s.heroIcon} />
+            {heroUrl && (
+              <React.Fragment key={heroUrl}>
+                {heroIsFallback && (
+                  <img src={heroUrl} className={s.heroBlur} alt="" aria-hidden="true" decoding="async" onError={handleHeroError} />
+                )}
+                <img src={heroUrl} className={s.heroImg} alt="" decoding="async" onError={handleHeroError} />
+              </React.Fragment>
+            )}
+            <div className={s.heroScrim} />
+          </div>
+
+          <div className={`${s.frame} ${s.topBar}`}>
+            <button className={s.backBtn} onClick={() => navigate('/')} title="Back to Library">
+              <IconChevronLeft size={15} stroke={2} />
+              Library
+            </button>
             {(refreshing || crackScanning || importing) && (
               <span className={s.heroSyncing} title="Syncing achievements…">
                 <IconRefresh size={13} className="spin" />
               </span>
             )}
+            <div className={s.topSpacer} />
+            {/* Which layout this page uses (also Settings > Appearance > Game page). */}
+            <div className={s.layoutSwitch} role="radiogroup" aria-label="Page layout">
+              <button type="button" role="radio" aria-checked={layout === 'store'} title="Store layout: cover, side panel"
+                className={`${s.layoutBtn} ${layout === 'store' ? s.layoutOn : ''}`} onClick={() => setPrefs({ gamePage: 'store' })}>
+                <IconLayoutSidebarRight size={14} /> Store
+              </button>
+              <button type="button" role="radio" aria-checked={layout === 'cinematic'} title="Cinematic layout: big art"
+                className={`${s.layoutBtn} ${layout === 'cinematic' ? s.layoutOn : ''}`} onClick={() => setPrefs({ gamePage: 'cinematic' })}>
+                <IconMovie size={14} /> Cinematic
+              </button>
+            </div>
           </div>
 
-          <div className={s.heroTopSpacer} />
-
-          {isLive && (
-            <div className={s.liveBadge} title="A session is running right now">
-              <span className={s.liveDot} />
-              LIVE
+          {layout === 'cinematic' && (
+            <div className={`${s.frame} ${s.cineInfo}`}>
+              <div className={s.gameName} title={game.name}>{game.name}</div>
+              {chips}
+              <div className={s.statLine}>
+                {statBits.map((b, i) => <React.Fragment key={i}>{i > 0 && <span className={s.dot} />}<span>{b}</span></React.Fragment>)}
+              </div>
+              {actions}
             </div>
           )}
-
-          {/* Game options menu */}
-          <div className={s.gameMenu} ref={menuRef}>
-            <button
-              className={s.menuTrigger}
-              onClick={() => { setMenuOpen(v => !v); setConfirmDelete(false) }}
-              title="Game options"
-            >
-              <IconDotsVertical size={16} stroke={1.8} />
-            </button>
-
-            {menuOpen && (
-              <div className={s.menuDropdown}>
-                <button
-                  className={s.menuItem}
-                  onClick={() => { setShowEdit(true); setMenuOpen(false) }}
-                >
-                  <IconEdit size={14} stroke={1.6} />
-                  Edit game
-                </button>
-
-                {/* Auto-import achievement list — for launchers KoZo can't auto-track */}
-                {!steamTracked && !game.is_cracked && (
-                  <button
-                    className={`${s.menuItem} ${importing ? s.menuItemBusy : ''}`}
-                    onClick={handleAutoImport}
-                    aria-busy={importing || undefined}
-                  >
-                    <IconDownload size={14} stroke={1.6} />
-                    {importing ? 'Importing…' : (total > 0 ? 'Re-import achievements' : 'Import achievements from Steam')}
-                  </button>
-                )}
-
-                {/* ONE combined check — syncs for new unlocks AND shows the
-                    diagnostic report, via the right pipeline for the game type
-                    (crack files vs Steam). */}
-                {(steamTracked || !!game.is_cracked) && (
-                  <button
-                    className={`${s.menuItem} ${(crackScanning || refreshing) ? s.menuItemBusy : ''}`}
-                    onClick={() => { setMenuOpen(false); (game.is_cracked ? handleCrackFiles : handleSteamCheck)() }}
-                    aria-busy={(crackScanning || refreshing) || undefined}
-                  >
-                    <IconStethoscope size={14} stroke={1.6} />
-                    {(crackScanning || refreshing) ? 'Checking…' : 'Check achievements'}
-                  </button>
-                )}
-
-                <button className={s.menuItem} onClick={() => { setMenuOpen(false); setShowSaveManager(true) }}>
-                  <IconDeviceFloppy size={14} stroke={1.6} />
-                  Save files &amp; backup
-                </button>
-
-                {!!game.install_path && (
-                  <button className={s.menuItem} onClick={handleOpenFolder}>
-                    <IconFolderOpen size={14} stroke={1.6} />
-                    Open game folder
-                  </button>
-                )}
-
-                <button className={s.menuItem} onClick={toggleHidden}>
-                  {game.is_hidden ? <IconEye size={14} stroke={1.6} /> : <IconEyeOff size={14} stroke={1.6} />}
-                  {game.is_hidden ? 'Unhide from library' : 'Hide from library'}
-                </button>
-
-                {game.is_archived ? (
-                  <button className={s.menuItem} onClick={handleRestore}>
-                    <IconArrowBackUp size={14} stroke={1.6} />
-                    Restore to Library
-                  </button>
-                ) : !confirmDelete ? (
-                  <button
-                    className={s.menuItem}
-                    onClick={() => setConfirmDelete(true)}
-                  >
-                    <IconArchive size={14} stroke={1.6} />
-                    Remove from Library
-                  </button>
-                ) : (
-                  <div className={s.menuConfirm}>
-                    <div className={s.menuConfirmText}>
-                      Remove "{game.name}" from the Library?
-                    </div>
-                    <div className={s.menuConfirmBtns}>
-                      <button className={s.menuCancelBtn} onClick={() => setConfirmDelete(false)} disabled={deleting}>Cancel</button>
-                      <button className={s.menuCancelBtn} onClick={() => handleDelete(false)} disabled={deleting}>Keep history</button>
-                      <button
-                        className={`${s.menuDeleteBtn} ${deleting ? s.menuItemBusy : ''}`}
-                        onClick={() => handleDelete(true)}
-                        aria-busy={deleting || undefined}
-                      >
-                        {deleting ? 'Removing…' : 'Delete with history'}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
         </div>
 
-        <div className={s.heroBottom}>
-          <div className={s.gameNameRow}>
-            <div className={s.gameName} title={game.name}>{game.name}</div>
-            {!!game.is_cracked && (
-              <div className={s.crackBadge}>
-                CRACKED
-                {crackScanInfo?.sources?.length > 0 && (
-                  <span className={s.crackBadgeSource}> · {crackScanInfo.sources.join(', ')}</span>
-                )}
-              </div>
-            )}
-          </div>
-
-          {(() => {
-            let genres = []
-            try { genres = JSON.parse(game.genres || '[]') } catch {}
-            if (!genres.length) return null
-            return (
-              <div className={s.genreChips}>
-                {genres.slice(0, 5).map(g => (
-                  <span key={g} className={s.genreChip} title={g}>{g}</span>
-                ))}
-              </div>
-            )
-          })()}
-
-          <div className={s.heroMeta}>
-            <div className={s.metaItem}>
-              <span>Playtime</span>
-              <span className={s.metaValue}>{formatPlaytime(game.total_playtime_seconds)}</span>
+        {layout === 'store' && (
+          <div className={`${s.frame} ${s.storeHead}`}>
+            <div className={s.cover}>
+              {coverUrl
+                ? <img src={coverUrl} alt="" onError={() => setCoverFailed(true)} />
+                : <GeneratedCover name={game.name} />}
             </div>
-            {total > 0 && (
-              <div className={s.achProgress}>
-                <span className={s.metaItem}>
-                  <IconTrophy size={12} stroke={1.5} />
-                  <span className={s.metaValue}>{unlocked}/{total}</span>
-                  <span className={s.metaPct}>({pct}%)</span>
-                </span>
-                <div
-                  className={s.progressBar}
-                  role="progressbar"
-                  aria-valuenow={pct}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-label="Achievements unlocked"
-                  title={`${unlocked} of ${total} achievements unlocked`}
-                >
-                  <div className={s.progressFill} style={{ width: `${pct}%` }} />
-                </div>
-              </div>
-            )}
-            {game.first_played_at && (
-              <div className={s.metaItem}>
-                <span>Since</span>
-                <span className={s.metaValue}>{formatDate(game.first_played_at)}</span>
-              </div>
-            )}
+            <div className={s.headText}>
+              <div className={s.gameName} title={game.name}>{game.name}</div>
+              {chips}
+              {actions}
+            </div>
           </div>
-        </div>
-      </div>
+        )}
 
-      {/* Tabs */}
-      <div className={s.tabs}>
-        <button
-          className={`${s.tab} ${tab === 'achievements' ? s.tabActive : ''}`}
-          onClick={() => setTab('achievements')}
-        >
-          <IconTrophy size={14} stroke={1.6} />
-          Achievements
-          {total > 0 && <span className={s.tabCount}>{unlocked}/{total}</span>}
-        </button>
-        <button
-          className={`${s.tab} ${tab === 'sessions' ? s.tabActive : ''}`}
-          onClick={() => setTab('sessions')}
-        >
-          <IconHistory size={14} stroke={1.6} />
-          Sessions
-          {sessions.length > 0 && <span className={s.tabCount}>{sessions.length}</span>}
-        </button>
-      </div>
+        <div className={s.frame}>
+          {/* Tabs (sticky while the page scrolls) */}
+          <div className={s.tabs} role="tablist">
+            {TABS.map(t => (
+              <button key={t.key} role="tab" aria-selected={shownTab === t.key}
+                className={`${s.tab} ${shownTab === t.key ? s.tabActive : ''}`} onClick={() => setTab(t.key)}>
+                <t.Icon size={15} stroke={1.6} />
+                {t.label}
+                {t.count != null && <span className={s.tabCount}>{t.count}</span>}
+              </button>
+            ))}
+          </div>
 
-      {/* Tab content */}
-      <div className={s.content}>
-        <div className={s.contentInner}>
-          {tab === 'achievements' && (
-            <>
-              {syncPrivacyError && total > 0 && (
-                <div className={s.privacyBanner}>
-                  <IconAlertTriangle size={15} stroke={1.8} className={s.privacyIcon} />
-                  <div>
-                    {syncPrivacyError === 'profile_not_found'
-                      ? 'Your Steam profile could not be read. Check the Steam ID in Settings → Steam.'
-                      : 'Steam won\'t return unlocks for this game over the web, usually because it isn\'t owned on your Steam account (Steam reports that as "profile is not public" either way), or because your profile\'s Game details are private. KoZo still reads unlocks from the Steam app on this PC, so this only costs you Steam\'s unlock dates.'}
-                  </div>
-                </div>
-              )}
-
-              {total === 0 ? (
-                game.is_cracked ? (
-                  <EmptyState
-                    Icon={IconTrophy}
-                    title="No achievements yet"
-                    desc="They appear here as soon as the crack writes your first unlock to disk."
-                  />
-                ) : steamTracked ? (
-                  <EmptyState
-                    Icon={IconTrophy}
-                    title="No achievements found"
-                    desc={'Run "Check achievements" from the ⋮ menu to pull this game\'s list from Steam.'}
-                  />
-                ) : (
-                  <EmptyState
-                    Icon={IconTrophy}
-                    title="No achievements imported"
-                    desc={`${launcherLabel(game.source)} unlocks can't be read automatically, but KoZo can pull the achievement list from Steam so you can tick off the ones you've earned.`}
-                    action={{
-                      label: importing ? 'Importing…' : 'Import achievements from Steam',
-                      Icon: IconDownload,
-                      onClick: handleAutoImport,
-                    }}
-                  />
-                )
-              ) : (
-                // Split rather than one long mixed list: what you have earned and
-                // what is left are two different questions, and answering both in
-                // one 50-row grid is what made this page unreadable.
-                (() => {
-                  const unlockedAchs = achievements.filter(isUnlocked)
-                  const lockedAchs   = achievements.filter(a => !isUnlocked(a))
-                  const section = (label, list) => list.length > 0 && (
-                    <div className={s.achSection}>
-                      <div className={s.achSectionHead}>
-                        {label}<span className={s.achSectionCount}>{list.length}</span>
+          <div className={s.body}>
+            {/* Tab content (keyed, so switching tabs plays the same entrance) */}
+            <div key={shownTab} className={`${s.main} ${s.tabView}`}>
+              {shownTab === 'overview' && (
+                <div className={s.overview}>
+                  {total > 0 && (
+                    <div className={s.card}>
+                      <div className={s.cardHead}>
+                        <IconTrophy size={14} /> Recent unlocks
+                        <span className={s.cardHeadSpacer} />
+                        <button type="button" className={s.linkBtn} onClick={() => setTab('achievements')}>All {total}</button>
                       </div>
-                      <div className={s.achGrid}>
-                        {list.map(a => (
-                          <AchCard
-                            key={a.id}
-                            ach={a}
-                            onClick={setSelectedAch}
-                            onQuickToggle={quickToggleAch}
-                          />
+                      {recentUnlocks.length === 0
+                        ? <p className={s.muted}>Nothing unlocked yet. They show up here the moment you earn one.</p>
+                        : (
+                          <div className={s.miniList}>
+                            {recentUnlocks.map(a => (
+                              <button key={a.id} type="button" className={s.miniAch} onClick={() => setSelectedAch(a)}>
+                                <span className={s.miniIcon}>{a.icon_url ? <img src={a.icon_url} alt="" loading="lazy" /> : <IconTrophy size={16} />}</span>
+                                <span className={s.miniText}>
+                                  <span className={s.miniName}>{a.display_name}</span>
+                                  <span className={s.miniSub}>{a.unlocked_at ? timeAgo(a.unlocked_at) : 'Unlocked'}</span>
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                    </div>
+                  )}
+
+                  {nextUp.length > 0 && (
+                    <div className={s.card}>
+                      <div className={s.cardHead}><IconTarget size={14} /> Next to unlock</div>
+                      <div className={s.miniList}>
+                        {nextUp.map(a => (
+                          <button key={a.id} type="button" className={s.miniAch} onClick={() => setSelectedAch(a)}>
+                            <span className={`${s.miniIcon} ${s.miniLocked}`}>{a.icon_url ? <img src={a.icon_url} alt="" loading="lazy" /> : <IconLock size={16} />}</span>
+                            <span className={s.miniText}>
+                              <span className={s.miniName}>{a.display_name}</span>
+                              <span className={s.miniSub}>{a.description || 'Hidden achievement'}</span>
+                            </span>
+                            {a.global_unlock_percent != null && (
+                              <span className={s.miniPct} style={{ '--rar': rarityColor(a.global_unlock_percent) || undefined }}
+                                title="Players who have it">{Number(a.global_unlock_percent).toFixed(1)}%</span>
+                            )}
+                          </button>
                         ))}
                       </div>
                     </div>
-                  )
-                  return (
-                    <>
-                      {section('Unlocked', unlockedAchs)}
-                      {section('Locked', lockedAchs)}
-                    </>
-                  )
-                })()
-              )}
-            </>
-          )}
+                  )}
 
-          {tab === 'sessions' && (
-            sessions.length === 0 ? (
-              <EmptyState
-                Icon={IconHistory}
-                title="No sessions recorded"
-                desc="KoZo logs one automatically the next time you play this game."
-              />
-            ) : (
-              <>
-                <WeekChart sessions={sessions} />
-                <div className={s.sessionList}>
-                  {sessions.map(session => (
-                    <SessionRow key={session.id} session={session} maxDuration={maxDuration} />
-                  ))}
+                  <div className={s.card}>
+                    <div className={s.cardHead}>
+                      <IconChartBar size={14} /> Last 30 days
+                      <span className={s.cardHeadSpacer} />
+                      <span className={s.monthTotal}>{monthSecs ? formatPlaytime(monthSecs) : 'No play'}</span>
+                    </div>
+                    {monthSecs ? <MonthChart sessions={sessions} /> : <p className={s.muted}>No play in the last 30 days.{game.last_played_at ? ` Last played ${timeAgo(game.last_played_at)}.` : ''}</p>}
+                  </div>
+
+                  <div className={s.card}>
+                    <div className={s.cardHead}>
+                      <IconHistory size={14} /> Recent sessions
+                      <span className={s.cardHeadSpacer} />
+                      {sessions.length > 3 && <button type="button" className={s.linkBtn} onClick={() => setTab('sessions')}>All {sessions.length}</button>}
+                    </div>
+                    {sessions.length === 0
+                      ? <p className={s.muted}>KoZo logs one automatically the next time you play.</p>
+                      : <div className={s.sessionList}>{sessions.slice(0, 3).map(x => <SessionRow key={x.id} session={x} maxDuration={maxDuration} />)}</div>}
+                  </div>
+
+                  {artAppId && store !== null && (
+                    <div className={`${s.card} ${s.wide}`}>
+                      <div className={s.cardHead}>
+                        <IconInfoCircle size={14} /> About the game
+                        <span className={s.cardHeadSpacer} />
+                        {store && <button type="button" className={s.linkBtn} onClick={() => setShowStore(true)}>Store details, trailers</button>}
+                      </div>
+                      {store === undefined ? <PanelSkeleton lines={3} /> : (
+                        <div className={s.about}>
+                          <div>
+                            {store.description && <p className={s.aboutText}>{store.description}</p>}
+                            <button type="button" className={s.ghostBtn} onClick={() => setShowStore(true)}><IconBrandSteam size={14} /> More about the game</button>
+                          </div>
+                          <div className={s.aboutFacts}>
+                            {store.developers?.length > 0 && <div className={s.factRow}><span>Developer</span><span title={store.developers.join(', ')}>{store.developers.join(', ')}</span></div>}
+                            {store.publishers?.length > 0 && <div className={s.factRow}><span>Publisher</span><span title={store.publishers.join(', ')}>{store.publishers.join(', ')}</span></div>}
+                            {store.release_date && <div className={s.factRow}><span>Released</span><span>{store.release_date}</span></div>}
+                            {reviews?.total > 0 && <div className={s.factRow}><span>Reviews</span><span>{reviews.label}, {Math.round((reviews.positive / reviews.total) * 100)}%</span></div>}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-              </>
-            )
-          )}
+              )}
+
+              {shownTab === 'achievements' && (
+                <>
+                  {syncPrivacyError && total > 0 && (
+                    <div className={s.privacyBanner}>
+                      <IconAlertTriangle size={15} stroke={1.8} className={s.privacyIcon} />
+                      <div>
+                        {syncPrivacyError === 'profile_not_found'
+                          ? 'Your Steam profile could not be read. Check the Steam ID in Settings → Steam.'
+                          : 'Steam won\'t return unlocks for this game over the web, usually because it isn\'t owned on your Steam account (Steam reports that as "profile is not public" either way), or because your profile\'s Game details are private. KoZo still reads unlocks from the Steam app on this PC, so this only costs you Steam\'s unlock dates.'}
+                      </div>
+                    </div>
+                  )}
+
+                  {total === 0 ? (
+                    game.is_cracked ? (
+                      <EmptyState Icon={IconTrophy} title="No achievements yet" desc="They appear here as soon as the crack writes your first unlock to disk." />
+                    ) : steamTracked ? (
+                      <EmptyState Icon={IconTrophy} title="No achievements found" desc={'Run "Check achievements" from the ⋮ menu to pull this game\'s list from Steam.'} />
+                    ) : (
+                      <EmptyState
+                        Icon={IconTrophy}
+                        title="No achievements imported"
+                        desc={`${launcherLabel(game.source)} unlocks can't be read automatically, but KoZo can pull the achievement list from Steam so you can tick off the ones you've earned.`}
+                        action={{ label: importing ? 'Importing…' : 'Import achievements from Steam', Icon: IconDownload, onClick: handleAutoImport }}
+                      />
+                    )
+                  ) : (
+                    // Split rather than one long mixed list: what you have earned and
+                    // what is left are two different questions.
+                    (() => {
+                      const unlockedAchs = achievements.filter(isUnlocked)
+                      const lockedAchs   = achievements.filter(a => !isUnlocked(a))
+                      const section = (label, list) => list.length > 0 && (
+                        <div className={s.achSection}>
+                          <div className={s.achSectionHead}>{label}<span className={s.achSectionCount}>{list.length}</span></div>
+                          <div className={s.achGrid}>
+                            {list.map(a => <AchCard key={a.id} ach={a} onClick={setSelectedAch} onQuickToggle={quickToggleAch} />)}
+                          </div>
+                        </div>
+                      )
+                      return <>{section('Unlocked', unlockedAchs)}{section('Locked', lockedAchs)}</>
+                    })()
+                  )}
+                </>
+              )}
+
+              {shownTab === 'sessions' && (
+                sessions.length === 0 ? (
+                  <EmptyState Icon={IconHistory} title="No sessions recorded" desc="KoZo logs one automatically the next time you play this game." />
+                ) : (
+                  <>
+                    <div className={s.card} style={{ marginBottom: 'var(--sp-12)' }}>
+                      <div className={s.cardHead}>
+                        <IconChartBar size={14} /> Last 30 days
+                        <span className={s.cardHeadSpacer} />
+                        <span className={s.monthTotal}>{monthSecs ? formatPlaytime(monthSecs) : 'No play'}</span>
+                      </div>
+                      {monthSecs ? <MonthChart sessions={sessions} /> : <p className={s.muted}>No play in the last 30 days.{game.last_played_at ? ` Last played ${timeAgo(game.last_played_at)}.` : ''}</p>}
+                    </div>
+                    <div className={s.sessionList}>
+                      {sessions.map(session => <SessionRow key={session.id} session={session} maxDuration={maxDuration} />)}
+                    </div>
+                  </>
+                )
+              )}
+
+              {shownTab === 'about' && (
+                <div className={s.aboutTab}>
+                  <StoreSections details={store} reviews={reviews} cardClass={s.card} headClass={s.cardHead} />
+                  {store && (
+                    <button type="button" className={s.ghostBtn} onClick={() => setShowStore(true)}><IconBrandSteam size={14} /> Trailers and screenshots</button>
+                  )}
+                </div>
+              )}
+
+              {shownTab === 'like' && <GamesLikeGrid appId={artAppId} pageKey="gameLike" compact />}
+            </div>
+
+            {layout === 'store' && (
+              <aside className={s.side}>
+                <div className={s.card}>
+                  <div className={s.cardHead}><IconClock size={14} /> Your stats</div>
+                  <div className={s.bigStat}>
+                    <span className={s.bigValue}>{game.total_playtime_seconds ? formatPlaytime(game.total_playtime_seconds) : '0m'}</span>
+                    <span className={s.bigLabel}>played in total</span>
+                  </div>
+                  {total > 0 && (
+                    <div className={s.ringRow} title={`${unlocked} of ${total} achievements unlocked`}>
+                      <svg className={s.ring} viewBox="0 0 56 56" aria-hidden="true">
+                        <circle className={s.ringTrack} cx="28" cy="28" r="24" />
+                        <circle className={s.ringFill} cx="28" cy="28" r="24" strokeDasharray={RING} strokeDashoffset={RING * (1 - pct / 100)} />
+                      </svg>
+                      <div className={s.ringText}>
+                        <b>{unlocked}/{total}</b>
+                        <span>{pct}% of the achievements</span>
+                      </div>
+                    </div>
+                  )}
+                  <div className={s.factRow}><span>Sessions</span><span>{sessions.length || 'None'}</span></div>
+                  {avgSession > 0 && <div className={s.factRow}><span>Average session</span><span>{formatPlaytime(avgSession)}</span></div>}
+                  <div className={s.factRow}><span>Last played</span><span>{game.last_played_at ? timeAgo(game.last_played_at) : 'Never'}</span></div>
+                  {game.first_played_at && <div className={s.factRow}><span>First played</span><span>{formatDate(game.first_played_at)}</span></div>}
+                </div>
+
+                <div className={s.card}>
+                  <div className={s.cardHead}><IconDeviceGamepad2 size={14} /> Game info</div>
+                  <div className={s.factRow}><span>Launcher</span><span>{game.is_cracked ? 'Cracked' : launcherLabel(game.source)}</span></div>
+                  <div className={s.factRow}><span>On this PC</span><span>{game.is_installed ? 'Installed' : 'Not installed'}</span></div>
+                  {!!game.install_path && <div className={s.factRow}><span>Folder</span><button type="button" className={s.factBtn} onClick={handleOpenFolder} title={game.install_path}>Open folder</button></div>}
+                  {artAppId && <div className={s.factRow}><span>Steam</span><button type="button" className={s.factBtn} onClick={() => window.kozo?.api?.shell?.openExternal(`https://store.steampowered.com/app/${artAppId}`)}>Store page</button></div>}
+                  {game.created_at && <div className={s.factRow}><span>Added</span><span>{formatDate(game.created_at)}</span></div>}
+                </div>
+              </aside>
+            )}
+          </div>
         </div>
       </div>
-      </div>
+
+      {showStore && artAppId && (
+        <SteamGameModal appId={artAppId} name={game.name} art={{ hero: steamArt?.hero, capsule: steamArt?.capsule, header: steamArt?.header }} onClose={() => setShowStore(false)} />
+      )}
 
       {selectedAch && (
         <AchievementModal

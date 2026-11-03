@@ -3,7 +3,7 @@ import {
   IconSearch, IconPlus, IconCheck, IconDeviceGamepad2, IconX, IconAlertTriangle,
 } from '@tabler/icons-react'
 import Modal, { modalStyles as ms } from '../ui/Modal'
-import { LAUNCHERS } from '../../lib/utils'
+import { LAUNCHERS, fileUrl } from '../../lib/utils'
 import s from './ScanResultModal.module.css'
 
 const BANNER_BG = ['#1a0f2e','#0f1e3a','#0f2a1e','#2a1a0a','#2a0f0f','#1e1a0a','#1a2a0a','#0a1a2a']
@@ -186,11 +186,12 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
           const name = nameEdits[key] ?? r.name
           // resolvedUrls[appId]: undefined=not tried, null=fetching, ''=failed, string=url
           const resolved = r.steam_app_id ? resolvedUrls[r.steam_app_id] : undefined
-          const bannerUrl = (resolved != null && resolved !== '')
+          const libraryCover = r.alreadyInLibrary && (fileUrl(r.library_cover_path) || r.library_cover_url)
+          const bannerUrl = libraryCover || ((resolved != null && resolved !== '')
             ? resolved
             : (r.steam_app_id
               ? `https://cdn.akamai.steamstatic.com/steam/apps/${r.steam_app_id}/library_600x900_2x.jpg`
-              : null)
+              : null))
 
           function handleImgError(e) {
             const img = e.target

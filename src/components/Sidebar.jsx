@@ -4,10 +4,12 @@ import {
   IconLayoutGrid,
   IconList,
   IconCalendar,
+  IconSparkles,
+  IconDiscount2,
   IconCalendarEvent,
   IconFlag,
   IconChartBar,
-  IconSettings,
+  IconSettings, IconDeviceTv, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand,
 } from '@tabler/icons-react'
 import HoneycombLogo from './HoneycombLogo'
 import { fileUrl } from '../lib/utils'
@@ -21,14 +23,24 @@ function initials(name) {
 }
 
 export const NAV_ITEMS = [
-  { path: '/',              label: 'Library',      Icon: IconLayoutGrid },
-  { path: '/game-list',     label: 'Game List',    Icon: IconList },
-  { path: '/plan',          label: 'Play Plan',    Icon: IconCalendarEvent },
-  { path: '/finished',      label: 'Finished',     Icon: IconFlag },
-  { path: '/upcoming',      label: 'Upcoming',     Icon: IconCalendar },
+  { path: '/',              label: 'Library',      Icon: IconLayoutGrid,    group: 'Play' },
+  { path: '/game-list',     label: 'Game List',    Icon: IconList,          group: 'Play' },
+  { path: '/plan',          label: 'Play Plan',    Icon: IconCalendarEvent, group: 'Play' },
+  { path: '/finished',      label: 'Finished',     Icon: IconFlag,          group: 'Play' },
+  { path: '/upcoming',      label: 'Upcoming',     Icon: IconCalendar,      group: 'Discover' },
+  { path: '/like',          label: 'Games like',   Icon: IconSparkles,      group: 'Discover' },
+  { path: '/deals',         label: 'Discounts',    Icon: IconDiscount2,     group: 'Discover' },
   // Statistics, Sessions and Achievements live together under Activity.
-  { path: '/activity',      label: 'Activity',     Icon: IconChartBar },
+  { path: '/activity',      label: 'Activity',     Icon: IconChartBar,      group: 'Discover' },
 ]
+
+// Group titles show only while each group's tabs sit together (a custom tab
+// order that mixes them just drops the titles).
+function withGroups(items) {
+  const runs = items.reduce((n, it, i) => n + (i === 0 || items[i - 1].group !== it.group ? 1 : 0), 0)
+  const groups = new Set(items.map(i => i.group)).size
+  return items.map((it, i) => ({ ...it, head: runs === groups && (i === 0 || items[i - 1].group !== it.group) ? it.group : null }))
+}
 
 function formatSessionTime(startedAt, idleSeconds = 0) {
   // Show real played time = wall time minus AFK idle, so the counter reflects
@@ -36,17 +48,19 @@ function formatSessionTime(startedAt, idleSeconds = 0) {
   const diff = Math.max(0, Math.floor((Date.now() - new Date(startedAt)) / 1000) - (idleSeconds || 0))
   const h = Math.floor(diff / 3600)
   const m = Math.floor((diff % 3600) / 60)
-  if (h > 0) return `${h}h ${m}m`
-  return `${m}m`
+  const sec = diff % 60
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+  return `${m}:${String(sec).padStart(2, '0')}`
 }
 
 export default function Sidebar() {
   // Tab order and hidden tabs come from Settings → Appearance.
-  const { prefs } = useAppearance()
-  const navItems = prefs.nav
+  const { prefs, setPrefs } = useAppearance()
+  const navItems = withGroups(prefs.nav
     .filter(n => !n.hidden)
     .map(n => NAV_ITEMS.find(i => i.path === n.path))
-    .filter(Boolean)
+    .filter(Boolean))
+  const rail = prefs.sidebar === 'rail'
   const [activeSession, setActiveSession] = useState(null)
   const [sessionTick, setSessionTick] = useState(0)
   const [profile, setProfile] = useState({ name: 'Player', avatar: '' })
@@ -56,6 +70,14 @@ export default function Sidebar() {
     let alive = true
     window.kozo?.api?.releases?.unseen?.().then(res => { if (alive && res?.ok) setNewReleases((res.data || []).length) })
     const off = window.kozo?.events?.onReleasesChanged?.((list) => setNewReleases((list || []).length))
+    return () => { alive = false; off?.() }
+  }, [])
+  // Game List games newly on sale (services/deals.js) → badge on "Discounts".
+  const [newDeals, setNewDeals] = useState(0)
+  useEffect(() => {
+    let alive = true
+    window.kozo?.api?.deals?.unseen?.().then(res => { if (alive && res?.ok) setNewDeals((res.data || []).length) })
+    const off = window.kozo?.events?.onDealsChanged?.((n) => setNewDeals(Number(n) || 0))
     return () => { alive = false; off?.() }
   }, [])
   const [xp, setXp] = useState(null)
@@ -144,66 +166,101 @@ export default function Sidebar() {
     }
   }, [])
 
-  // Tick every minute to update session timer
+  // Live timer: every second while the window is in front, nothing while
+  // it's hidden or behind a game (html[data-inactive], App.jsx).
   useEffect(() => {
-    if (!activeSession) return
-    const id = setInterval(() => setSessionTick(t => t + 1), 60000)
+    if (!activeSession || activeSession.idle) return
+    const id = setInterval(() => {
+      if (!document.documentElement.hasAttribute('data-inactive')) setSessionTick(t => t + 1)
+    }, 1000)
     return () => clearInterval(id)
   }, [activeSession])
 
+  // The running game's art for the Now Playing card.
+  const [playingArt, setPlayingArt] = useState(null)
+  useEffect(() => {
+    const id = activeSession?.gameId
+    if (!id) { setPlayingArt(null); return }
+    let alive = true
+    window.kozo?.api?.games?.get?.(id).then(r => {
+      const g = r?.ok ? r.data : null
+      if (!alive || !g) return
+      setPlayingArt(g.hero_local_path ? fileUrl(g.hero_local_path) : g.banner_local_path ? fileUrl(g.banner_local_path, g.banner_rev) : g.banner_url || null)
+    })
+    return () => { alive = false }
+  }, [activeSession?.gameId])
+
   return (
-    <aside className={s.sidebar}>
+    <aside className={`${s.sidebar} ${rail ? s.rail : ''}`}>
+     <div className={s.panel}>
       {/* Logo */}
       <div className={s.logoArea}>
         <HoneycombLogo size={28} />
         <div className={s.logoText}>
           <span className={s.appName}>KoZo</span>
-          <span className={s.appSub}>Game Vault</span>
         </div>
+        {/* Full and slim sidebar, one click (also in Settings → Appearance). */}
+        <button
+          type="button"
+          className={s.collapseBtn}
+          onClick={() => setPrefs({ sidebar: rail ? 'full' : 'rail' })}
+          title={rail ? 'Show the full sidebar' : 'Make the sidebar slim'}
+          aria-label={rail ? 'Show the full sidebar' : 'Make the sidebar slim'}
+        >
+          {rail ? <IconLayoutSidebarLeftExpand size={17} stroke={1.7} /> : <IconLayoutSidebarLeftCollapse size={17} stroke={1.7} />}
+        </button>
       </div>
 
       {/* Navigation */}
       <nav className={s.nav}>
-        {navItems.map(({ path, label, Icon }) => (
-          <NavLink
-            key={path}
-            to={path}
-            end={path === '/'}
-            data-gpnav=""
-            data-tour={`nav-${path === '/' ? 'library' : path.slice(1)}`}
-            className={({ isActive }) =>
-              `${s.navItem} ${isActive ? s.navItemActive : ''}`
-            }
-          >
-            <span className={s.navIcon}>
-              <Icon size={17} stroke={1.6} />
-            </span>
-            {label}
-            {path === '/upcoming' && newReleases > 0 && (
-              <span className={s.navBadge} title={`${newReleases} tracked game${newReleases !== 1 ? 's' : ''} just released`}>{newReleases}</span>
-            )}
-          </NavLink>
+        {navItems.map(({ path, label, Icon, head }) => (
+          <React.Fragment key={path}>
+            {head && <div className={s.groupHead}>{head}</div>}
+            <NavLink
+              to={path}
+              end={path === '/'}
+              data-gpnav=""
+              data-tour={`nav-${path === '/' ? 'library' : path.slice(1)}`}
+              title={rail ? label : undefined}
+              className={({ isActive }) => `${s.navItem} ${isActive ? s.navItemActive : ''}`}
+            >
+              <span className={s.navIcon}>
+                <Icon size={17} stroke={1.7} />
+              </span>
+              <span className={s.navLabel}>{label}</span>
+              {path === '/upcoming' && newReleases > 0 && (
+                <span className={s.navBadge} title={`${newReleases} tracked game${newReleases !== 1 ? 's' : ''} just released`}>{newReleases}</span>
+              )}
+              {path === '/deals' && newDeals > 0 && (
+                <span className={s.navBadge} title={`${newDeals} game${newDeals !== 1 ? 's' : ''} on your Game List just went on sale`}>{newDeals}</span>
+              )}
+            </NavLink>
+          </React.Fragment>
         ))}
       </nav>
 
       {/* Bottom */}
       <div className={s.bottomArea}>
         {activeSession && (
-          <div className={`${s.nowPlaying} ${activeSession.idle ? s.nowPlayingIdle : ''}`}>
-            <div className={s.nowPlayingHeader}>
-              <span className={`${s.liveDot} ${activeSession.idle ? s.liveDotIdle : ''}`} />
-              {activeSession.idle ? 'Away · paused' : 'Now Playing'}
-            </div>
-            <div className={s.nowPlayingName} title={activeSession.game_name}>{activeSession.game_name}</div>
-            <div className={s.nowPlayingTime}>
+          <NavLink
+            to={`/game/${activeSession.gameId}`}
+            data-gpnav=""
+            title={activeSession.game_name}
+            className={`${s.nowPlaying} ${activeSession.idle ? s.nowPlayingIdle : ''}`}
+          >
+            {playingArt && <img className={s.nowPlayingArt} src={playingArt} alt="" />}
+            <span className={s.nowPlayingShade} />
+            <span className={s.nowPlayingBody}>
+              <span className={s.nowPlayingHeader}>
+                <span className={`${s.liveDot} ${activeSession.idle ? s.liveDotIdle : ''}`} />
+                <span className={s.navLabel}>{activeSession.idle ? 'Away, paused' : activeSession.pending ? 'Starting' : 'Now playing'}</span>
+              </span>
+              <span className={s.nowPlayingName}>{activeSession.game_name}</span>
               <span className={s.nowPlayingElapsed}>
                 {formatSessionTime(activeSession.started_at, activeSession.idle_seconds)}
               </span>
-              {activeSession.idle && (
-                <span className={s.nowPlayingAfk} title="AFK, not counting time">AFK, paused</span>
-              )}
-            </div>
-          </div>
+            </span>
+          </NavLink>
         )}
 
         <NavLink
@@ -212,39 +269,44 @@ export default function Sidebar() {
           data-tour="nav-profile"
           className={({ isActive }) => `${s.profileChip} ${isActive ? s.profileChipActive : ''}`}
         >
-          <span className={s.profileAvatar}>
-            {profile.avatar
-              ? <img src={fileUrl(profile.avatar, profile.bust)} alt="" onError={e => { e.target.style.display = 'none' }} />
-              : <span className={s.profileInitials}>{initials(profile.name)}</span>}
+          {/* The ring around the avatar is the progress to the next level. */}
+          <span className={s.avatarRing} style={{ '--xp': `${xp?.progress ?? 0}%` }}
+            title={xp ? `${xp.toNextLevel.toLocaleString()} XP to level ${xp.level + 1}` : undefined}>
+            <span className={s.profileAvatar}>
+              {profile.avatar
+                ? <img src={fileUrl(profile.avatar, profile.bust)} alt="" onError={e => { e.target.style.display = 'none' }} />
+                : <span className={s.profileInitials}>{initials(profile.name)}</span>}
+            </span>
+            {xp && <span className={s.levelBadge}>{xp.level}</span>}
           </span>
           <span className={s.profileMeta}>
             <span className={s.profileName} title={profile.name}>{profile.name}</span>
-            {xp ? (
-              <>
-                <span className={s.profileXpRow}>
-                  <span className={s.profileLevel}>Lv {xp.level}</span>
-                  <span className={s.profileTier} title={xp.tier}>{xp.tier}</span>
-                </span>
-                <span className={s.profileXpBar} title={`${xp.toNextLevel.toLocaleString()} XP to level ${xp.level + 1}`}>
-                  <span className={s.profileXpFill} style={{ width: `${xp.progress}%` }} />
-                </span>
-              </>
-            ) : (
-              <span className={s.profileLink}>View profile</span>
-            )}
+            <span className={s.profileTier}>{xp ? `${xp.tier} · ${Math.round(xp.progress)}%` : 'View profile'}</span>
           </span>
         </NavLink>
 
-        <NavLink
-          to="/settings"
-          data-gpnav=""
-          data-tour="nav-settings"
-          className={({ isActive }) => `${s.settingsLink} ${isActive ? s.settingsLinkActive : ''}`}
-        >
-          <span className={s.navIcon}><IconSettings size={17} stroke={1.6} /></span>
-          Settings
-        </NavLink>
+        <div className={s.footRow}>
+          <NavLink
+            to="/big"
+            data-gpnav=""
+            className={s.footBtn}
+            title="Big Picture: full screen for the TV and the controller (or hold the controller shortcut from Settings > Shortcuts)"
+          >
+            <IconDeviceTv size={17} stroke={1.7} />
+            <span className={s.navLabel}>Big Picture</span>
+          </NavLink>
+          <NavLink
+            to="/settings"
+            data-gpnav=""
+            data-tour="nav-settings"
+            title="Settings"
+            className={({ isActive }) => `${s.footBtn} ${s.footIcon} ${isActive ? s.footBtnActive : ''}`}
+          >
+            <IconSettings size={17} stroke={1.7} />
+          </NavLink>
+        </div>
       </div>
+     </div>
     </aside>
   )
 }

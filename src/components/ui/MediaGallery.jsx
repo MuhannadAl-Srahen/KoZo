@@ -1,12 +1,35 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { IconChevronLeft, IconChevronRight, IconX, IconMaximize } from '@tabler/icons-react'
+import { IconChevronLeft, IconChevronRight, IconX, IconMaximize, IconPlayerPlayFilled } from '@tabler/icons-react'
 import s from './MediaGallery.module.css'
 
 // Game media, laid out like a Steam store page: a big viewer, a scrollable
 // strip of every screenshot with arrow buttons at its ends, and a full-screen
 // lightbox (click the big image, ←/→ to browse, Esc to close).
-// `items` = [{ thumb, full }]; the first item is shown first.
+// `items` = [{ thumb, full }] or a trailer { thumb, video: { hls, mp4, webm } };
+// the first item is shown first. Trailers play with hls.js (Steam's new
+// trailers are HLS streams), loaded only when a trailer is shown.
+
+function VideoPlayer({ video, poster, className }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    let hls = null, dead = false
+    if (video.hls) {
+      import('hls.js').then(({ default: Hls }) => {
+        if (dead) return
+        if (Hls.isSupported()) {
+          hls = new Hls({ capLevelToPlayerSize: true, maxBufferLength: 20 })
+          hls.loadSource(video.hls)
+          hls.attachMedia(el)
+        } else el.src = video.mp4 || video.webm || ''
+      }).catch(() => { el.src = video.mp4 || video.webm || '' })
+    } else el.src = video.mp4 || video.webm || ''
+    return () => { dead = true; hls?.destroy() }
+  }, [video.hls, video.mp4])
+  return <video ref={ref} className={className} poster={poster} controls autoPlay playsInline onClick={(e) => e.stopPropagation()} />
+}
 
 // Shows the (already cached) thumbnail the instant the picture changes, then
 // fades the full-size image in once it has downloaded. Keyed by the image, so
@@ -35,13 +58,13 @@ function usePreloadAround(items, index) {
     if (items.length < 2) return
     for (const d of [1, -1, 2]) {
       const m = items[(index + d + items.length) % items.length]
-      if (m?.full) { const img = new Image(); img.decoding = 'async'; img.src = m.full }
+      if (m?.full && !m.video) { const img = new Image(); img.decoding = 'async'; img.src = m.full }
     }
   }, [items.length, index])   // items is rebuilt every render; its length + index are what matter
 }
 
 export default function MediaGallery({ items = [], height }) {
-  const list = items.filter(m => m && (m.full || m.thumb))
+  const list = items.filter(m => m && (m.full || m.thumb || m.video))
   const [index, setIndex] = useState(0)
   const [zoom, setZoom] = useState(false)
   const [broken, setBroken] = useState(() => new Set())
@@ -54,8 +77,8 @@ export default function MediaGallery({ items = [], height }) {
   function measure() {
     const el = stripRef.current
     if (!el) return
-    const left = el.scrollLeft > 2
-    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 2
+    const left = el.scrollLeft > 8
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 8
     setEdges(prev => (prev.left === left && prev.right === right ? prev : { left, right }))
   }
   useEffect(() => {
@@ -88,19 +111,21 @@ export default function MediaGallery({ items = [], height }) {
           if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1) }
         }}
       >
-        <ProgressiveImg
-          key={cur.full || cur.thumb}
-          item={cur}
-          onClick={() => setZoom(true)}
-          onError={() => markBroken(cur)}
-        />
+        {cur.video
+          ? <VideoPlayer key={cur.video.hls || cur.video.mp4} video={cur.video} poster={cur.thumb} className={s.video} />
+          : <ProgressiveImg
+              key={cur.full || cur.thumb}
+              item={cur}
+              onClick={() => setZoom(true)}
+              onError={() => markBroken(cur)}
+            />}
         {shown.length > 1 && (
           <>
             <button className={`${s.arrow} ${s.arrowLeft}`} onClick={() => step(-1)} aria-label="Previous"><IconChevronLeft size={18} /></button>
             <button className={`${s.arrow} ${s.arrowRight}`} onClick={() => step(1)} aria-label="Next"><IconChevronRight size={18} /></button>
           </>
         )}
-        <button className={s.expand} onClick={() => setZoom(true)} aria-label="View full screen"><IconMaximize size={14} /></button>
+        {!cur.video && <button className={s.expand} onClick={() => setZoom(true)} aria-label="View full screen"><IconMaximize size={14} /></button>}
         {shown.length > 1 && <span className={s.counter}>{i + 1} / {shown.length}</span>}
       </div>
 
@@ -111,6 +136,7 @@ export default function MediaGallery({ items = [], height }) {
               <button key={m.full || m.thumb} data-active={k === i ? '1' : undefined}
                 className={`${s.thumb} ${k === i ? s.thumbActive : ''}`} onClick={() => setIndex(k)}>
                 <img src={m.thumb || m.full} alt="" loading="lazy" onError={() => markBroken(m)} onLoad={measure} />
+                {m.video && <span className={s.thumbPlay}><IconPlayerPlayFilled size={16} /></span>}
               </button>
             ))}
           </div>
@@ -148,7 +174,9 @@ export function Lightbox({ items, index, onIndex, onClose }) {
   return createPortal(
     <div className={s.lightbox} onClick={onClose}>
       <div className={s.lbStage}>
-        <ProgressiveImg key={cur.full || cur.thumb} item={cur} fit="contain" onClick={(e) => e.stopPropagation()} />
+        {cur.video
+          ? <VideoPlayer key={cur.video.hls || cur.video.mp4} video={cur.video} poster={cur.thumb} className={s.lbVideo} />
+          : <ProgressiveImg key={cur.full || cur.thumb} item={cur} fit="contain" onClick={(e) => e.stopPropagation()} />}
       </div>
       {items.length > 1 && (
         <>

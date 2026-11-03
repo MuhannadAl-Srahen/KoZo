@@ -617,6 +617,9 @@ async function tick() {
         logger.info('Session started', { gameId: game.id, name: game.name })
         sendToRenderer('session:started', enriched)
         try { require('./notifications').notifySessionStarted({ gameName: game.name }) } catch {}
+        // Save backup before playing, for games started outside KoZo (one
+        // started from KoZo got it in doLaunch; this one then finds no change).
+        setImmediate(() => { try { require('./autoSaveBackup').beforePlay(game) } catch {} })
         try {
           require('../overlayWindow').sendSessionStarted({
             gameName: game.name,
@@ -813,17 +816,17 @@ function endSession(gameId, session, forcedEndAt) {
     }
   }
 
-  // We already required the process to run for `sensitivity` seconds before
-  // starting a session, so anything reported here is real playtime. Only drop
-  // pathologically short rows (clock-skew/system-sleep edge cases) so a quick
-  // close after a long session still counts.
-  if (ended && (ended.duration_seconds == null || ended.duration_seconds < 3)) {
+  // Under a minute isn't a play session (a launcher flash, a crash on start):
+  // drop it with its playtime, and skip the toast, XP check and notification.
+  if (ended && (ended.duration_seconds == null || ended.duration_seconds < sessionsQ.MIN_SESSION_SEC)) {
     require('../db/database').getDb()
       .prepare('DELETE FROM sessions WHERE id=?').run(session.id)
     require('../db/database').getDb()
       .prepare('UPDATE games SET total_playtime_seconds=MAX(0,total_playtime_seconds-?) WHERE id=?')
       .run(ended.duration_seconds || 0, session.game_id)
-    logger.debug('Dropped sub-3s session', { id: session.id, duration: ended?.duration_seconds })
+    logger.debug('Dropped short session', { id: session.id, duration: ended?.duration_seconds })
+    sendToRenderer('session:discarded', { gameId: session.game_id })
+    emitter.emit('change')
     // Still an end — deferred jobs must be released even for a dropped session,
     // otherwise a stray short launch would strand them until the next real one.
     if (activeSessions.size === 0) emitter.emit('idle')
@@ -834,7 +837,7 @@ function endSession(gameId, session, forcedEndAt) {
   logger.info('Session ended', { gameId: session.game_id, duration: ended?.duration_seconds })
   try { require('./autoBackup').markDirty() } catch {}
   // Auto-snapshot this game's save files (no-op unless the user enabled it).
-  try { require('./autoSaveBackup').backupGameAfterSession(game) } catch {}
+  try { require('./autoSaveBackup').backupGameAfterSession(game, ended || session) } catch {}
   sendToRenderer('session:ended', { session: ended, game_name: game?.name })
   try {
     require('./notifications').notifySessionEnded({
@@ -1068,7 +1071,7 @@ async function resolveOrphanSessions() {
         const endIso      = new Date(beatMs).toISOString()
         db.prepare('UPDATE sessions SET ended_at = ?, duration_seconds = ? WHERE id = ?').run(endIso, dur, orphan.id)
         db.prepare('UPDATE games SET total_playtime_seconds = total_playtime_seconds + ? WHERE id = ?').run(dur, orphan.game_id)
-        if (dur < 3) {
+        if (dur < sessionsQ.MIN_SESSION_SEC) {
           db.prepare('DELETE FROM sessions WHERE id = ?').run(orphan.id)
           db.prepare('UPDATE games SET total_playtime_seconds = MAX(0, total_playtime_seconds - ?) WHERE id = ?').run(dur, orphan.game_id)
         }
@@ -1143,20 +1146,25 @@ function runWhenIdle(key, fn) {
   if (!isSessionActive()) { fn(); return }
   deferredJobs.set(key, fn)
 }
-emitter.on('idle', () => {
-  if (!deferredJobs.size) return
-  // Let the session-end work settle before starting disk-heavy jobs, and
-  // re-check: another game may have been detected in the meantime, in which
-  // case everything stays queued for the next idle.
-  setTimeout(() => {
-    if (isSessionActive()) return
-    const jobs = [...deferredJobs.entries()]
-    deferredJobs.clear()
-    for (const [key, fn] of jobs) {
-      try { fn() } catch (e) { logger.warn(`deferred job "${key}" failed`, { message: e.message }) }
-    }
-  }, 3000)
-})
+// Released one at a time, a few seconds apart, starting 20s after the game
+// closed: running them all in the same instant the game was unloading (crack
+// scans, backups, the catch-up sweep) made the whole PC stutter on exit.
+const IDLE_START_MS = 20000
+const IDLE_GAP_MS = 4000
+let draining = false
+function drainDeferred() {
+  if (draining) return
+  draining = true
+  const step = () => {
+    if (isSessionActive() || !deferredJobs.size) { draining = false; return }
+    const [key, fn] = deferredJobs.entries().next().value
+    deferredJobs.delete(key)
+    try { fn() } catch (e) { logger.warn(`deferred job "${key}" failed`, { message: e.message }) }
+    setTimeout(step, IDLE_GAP_MS)
+  }
+  setTimeout(step, IDLE_START_MS)
+}
+emitter.on('idle', () => { if (deferredJobs.size) drainDeferred() })
 
 /**
  * Returns all running .exe processes with their disk paths.

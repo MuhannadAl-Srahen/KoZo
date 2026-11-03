@@ -1,0 +1,68 @@
+.trigger {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 34px; padding: 0 12px 0 5px; border-radius: var(--r-input);
+  background: var(--surface-3); border: 1px solid var(--border); cursor: pointer;
+  color: var(--text-secondary); font-size: var(--fs-sm); font-weight: 600; font-family: var(--font-mono);
+}
+.trigger:hover, .trigger[aria-expanded="true"] { border-color: var(--border-accent-soft, var(--border)); color: var(--text-primary); }
+.chip {
+  width: 24px; height: 24px; border-radius: 6px; flex-shrink: 0;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+.chipEmpty {
+  background: repeating-conic-gradient(var(--surface-2) 0 25%, var(--surface-1) 0 50%) 0 0 / 10px 10px;
+}
+.triggerText { letter-spacing: 0.02em; }
+
+.pop {
+  position: fixed; z-index: var(--z-popover, 1000); width: 260px;
+  display: flex; flex-direction: column; gap: 12px; padding: 12px;
+  border-radius: var(--r-lg); background: var(--surface-2); border: 1px solid var(--border);
+  box-shadow: var(--elev-3), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  animation: pop var(--dur-base, 160ms) var(--ease, ease-out);
+}
+@keyframes pop { from { opacity: 0; transform: translateY(-4px) scale(0.98); } }
+
+.area {
+  position: relative; height: 150px; border-radius: 10px; cursor: crosshair; touch-action: none;
+  background:
+    linear-gradient(to top, #000, transparent),
+    linear-gradient(to right, #fff, hsl(var(--hue) 100% 50%));
+}
+.area:focus-visible, .hue:focus-visible { outline: 2px solid var(--a); outline-offset: 2px; }
+.areaThumb {
+  position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%;
+  border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.5); pointer-events: none;
+}
+.hueRow { display: flex; align-items: center; gap: 10px; }
+.hue {
+  position: relative; flex: 1; height: 12px; border-radius: 6px; cursor: pointer; touch-action: none;
+  background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+}
+.hueThumb {
+  position: absolute; top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%;
+  border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4); pointer-events: none;
+}
+.iconBtn {
+  width: 30px; height: 30px; flex-shrink: 0; display: grid; place-items: center; border-radius: 8px; cursor: pointer;
+  background: var(--surface-3); border: 1px solid var(--border); color: var(--text-secondary);
+}
+.iconBtn:hover { color: var(--a); }
+.presets { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
+.preset {
+  aspect-ratio: 1; border-radius: 7px; border: 0; cursor: pointer; display: grid; place-items: center; color: #0b0b12;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+.preset:hover { transform: scale(1.1); }
+.hexRow { display: flex; align-items: center; gap: 8px; }
+.hex {
+  flex: 1; min-width: 0; height: 32px; padding: 0 10px; border-radius: var(--r-input);
+  background: var(--surface-1); border: 1px solid var(--border); color: var(--text-primary);
+  font-family: var(--font-mono); font-size: var(--fs-sm); text-transform: uppercase;
+}
+.hex:focus { border-color: var(--a); outline: none; }
+.clear {
+  height: 32px; padding: 0 10px; border-radius: var(--r-input); cursor: pointer;
+  background: transparent; border: 1px solid var(--border); color: var(--text-secondary); font-size: var(--fs-xs); font-weight: 600;
+}
+.clear:hover { color: var(--text-primary); }
