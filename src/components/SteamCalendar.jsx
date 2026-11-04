@@ -21,9 +21,9 @@ import s from './SteamCalendar.module.css'
 // TV-guide row), Week and Month (big grid). Games
 // with no day or month live in the TBA view; your tracked releases in Tracked.
 // "Picked for you" = Steam's own "More like this" for your favourite games
-// (steamApi.getPicks): only games Steam itself rates as similar, with a match %
-// and which of your games they're like. Picks the popular feeds didn't load
-// are added to the calendar too. Release days come from the store's own
+// (steamApi.getPicks): games Steam itself rates as similar, with a match % and
+// which of your games they're like, then the day's most popular to fill it. Picks
+// the popular feeds didn't load are added to the calendar too. Release days come from the store's own
 // record (utils.storeRelease), so a date is the real unlock moment.
 // Track = a release watch on the Game List row (survives status changes).
 
@@ -39,7 +39,7 @@ const VIEWS = [
 ]
 const VIEW_KEYS = new Set([...VIEWS.map(v => v.key), 'tba', 'tracked'])
 const DAY_MS = 86400000
-const DAY_PICK = 5   // Picked for you: best matches shown per day before "+N more"
+const DAY_PICK = 5   // Picked for you: shown per day before "+N more" (matches first, then popular)
 const DAY_ALL = 8    // All releases: most popular shown per day
 
 // Survives tab switches: the feeds are cached in main for 6h anyway.
@@ -318,7 +318,7 @@ function StripView({ buckets, todayKey, wide, dayPick, onMore }) {
 // One column per day that has releases: a header, then the day's capsules
 // (art only; hover for Track). In "Picked for you" a day shows its best few
 // with "+N more" for the rest.
-function SteamView({ days, todayKey, dayPick, picked, loadingPicks, isTracked, renderTrack, onOpen, onMenu, onMore }) {
+function SteamView({ days, todayKey, dayPick, picked, isTracked, renderTrack, onOpen, onMenu, onMore }) {
   if (!days.length) return <div className={s.muted}>No dated releases ahead among the loaded games yet.</div>
   return (
     <>
@@ -328,16 +328,12 @@ function SteamView({ days, todayKey, dayPick, picked, loadingPicks, isTracked, r
         const d = new Date(`${k}T00:00:00`)
         const label = d.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })
         return (
-          <section key={k} className={`${s.steamDay} ${picked && !list.length ? s.steamDayQuiet : ''}`}>
+          <section key={k} className={s.steamDay}>
             <div className={`${s.steamDayHead} ${k === todayKey ? s.steamDayToday : ''}`}>
               {k === todayKey ? `Today, ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : label}
             </div>
             <div className={s.steamDayList}>
-              {/* Picks still on their way: shimmering caps, not "No picks". */}
-              {loadingPicks && full.length > 0 && Array.from({ length: Math.min(2, full.length) }, (_, i) => (
-                <div key={`sk${i}`} className={s.steamCap}><div className={`${s.steamCapFrame} ${s.capSkeleton}`} /></div>
-              ))}
-              {!loadingPicks && list.map(g => (
+              {list.map(g => (
                 <div key={g.appid} className={`${s.steamCap} ${isTracked(g) ? s.steamCapTracked : ''}`} onContextMenu={(e) => { e.preventDefault(); onMenu(e, g) }}>
                   <div className={s.steamCapFrame}>
                     <button className={s.steamCapHit} onClick={() => onOpen(g)} title={g.name}>
@@ -349,9 +345,9 @@ function SteamView({ days, todayKey, dayPick, picked, loadingPicks, isTracked, r
                   {picked && reasonText(g) && <div className={s.capReason} title={reasonText(g)}>{reasonText(g)}</div>}
                 </div>
               ))}
-              {!loadingPicks && full.length > list.length && (
+              {full.length > list.length && (
                 <button className={s.steamMore} onClick={() => onMore(d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }), full)}>
-                  {picked && !list.length ? `No picks, ${full.length} release${full.length !== 1 ? 's' : ''}` : `+${full.length - list.length} more`}
+                  +{full.length - list.length} more
                 </button>
               )}
             </div>
@@ -675,12 +671,15 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
     return { byDay, byMonth, later, all }
   }, [allGames, art, artTried, picks, pickMode])
 
-  // "Picked for you": only games that match your Game List, best match first
-  // (popularity breaks ties). "All releases": every game, most popular first.
+  // "Picked for you": games that match your Game List first, best match on top,
+  // then the day's most popular, so a day is never just a count. A small Game
+  // List only matches a few games a month (2 of 93 for three games), and while
+  // picks are still loading this simply shows the popular ones.
+  // "All releases": every game, most popular first.
   const popOf = (g) => Math.min(g.wishRank ?? 1e4, g.popRank ?? 1e4)
   const dayPick = (list) => (pickMode === 'all'
     ? [...list].sort((a, b) => popOf(a) - popOf(b)).slice(0, DAY_ALL)
-    : list.filter(g => g.match > 0).sort((a, b) => b.match - a.match || popOf(a) - popOf(b)).slice(0, DAY_PICK))
+    : [...list].sort((a, b) => (b.match || 0) - (a.match || 0) || popOf(a) - popOf(b)).slice(0, DAY_PICK))
   function setPick(m) { setPickMode(m); try { localStorage.setItem('kozo:calendar:pick', m) } catch {} }
   const isTracked = (g) => !!(byAppId.get(Number(g.appid))?.watch || g._listId)
   const openMore = (label, games) => setDayOpen({ label, games })
@@ -807,7 +806,7 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
         {['steam', 'strip', 'week'].includes(view) && (
           <div className={s.viewToggle} role="radiogroup" aria-label="Which games">
             <button className={`${s.viewBtn} ${pickMode === 'picked' ? s.viewBtnActive : ''}`} onClick={() => setPick('picked')}
-              title="Only games like the ones on your Game List, with how well each one matches">
+              title="Games like the ones on your Game List first, then what's popular that day">
               <IconSparkles size={14} /> Picked for you
             </button>
             <button className={`${s.viewBtn} ${pickMode === 'all' ? s.viewBtnActive : ''}`} onClick={() => setPick('all')}>All releases</button>
@@ -854,7 +853,7 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
       {loading && !games.length && <PanelSkeleton lines={6} />}
 
       {games.length > 0 && view === 'steam' && (
-        <SteamView days={steamRun} todayKey={todayKey} dayPick={dayPick} picked={pickMode === 'picked'} loadingPicks={pickMode === 'picked' && !picks} isTracked={isTracked}
+        <SteamView days={steamRun} todayKey={todayKey} dayPick={dayPick} picked={pickMode === 'picked'} isTracked={isTracked}
           renderTrack={renderTrack} onOpen={setDetail} onMenu={openMenu} onMore={openMore} />
       )}
       {hasSentinel && (

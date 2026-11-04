@@ -148,6 +148,8 @@ export default function Sidebar() {
       offs.push(
         window.kozo.events.onSessionStarted(() => refresh()),
         window.kozo.events.onSessionEnded(() => refresh()),
+        // A session too short to keep ends with this event, not session:ended.
+        window.kozo.events.onSessionDiscarded?.(() => refresh()),
         window.kozo.events.onGameUpdated(() => refresh()),
         // Optimistic "Now Playing" — appears ~one poll after launch.
         window.kozo.events.onSessionDetected?.(() => refresh()),

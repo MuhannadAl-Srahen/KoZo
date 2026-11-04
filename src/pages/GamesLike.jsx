@@ -5,6 +5,7 @@ import {
 } from '@tabler/icons-react'
 import SteamGameModal from '../components/SteamGameModal'
 import EmptyState from '../components/ui/EmptyState'
+import GeneratedCover from '../components/GeneratedCover'
 import { CardSkeletonGrid } from '../components/ui/Skeleton'
 import useCardZoom from '../lib/useCardZoom'
 import { rankResults } from '../lib/searchRank'
@@ -197,6 +198,15 @@ export function GamesLikeGrid({ appId, pageKey = 'like', compact = false }) {
   )
 }
 
+// A search hit's picture. Steam's own capsule link always exists; the guessed
+// header.jpg answers 404 for newer games, so it's only the second try.
+function HitArt({ game }) {
+  const sources = [game.capsule, game.header_image].filter(Boolean)
+  const [step, setStep] = useState(0)
+  if (step >= sources.length) return <div className={s.hitBlank}><GeneratedCover name={game.name} compact /></div>
+  return <img src={sources[step]} alt="" onError={() => setStep(n => n + 1)} />
+}
+
 export default function GamesLike() {
   const [params, setParams] = useSearchParams()
   const navigate = useNavigate()
@@ -261,7 +271,7 @@ export default function GamesLike() {
               {searching && hits.length === 0 && <div className={s.hitMuted}>Searching...</div>}
               {hits.map(h => (
                 <button key={h.steam_app_id} type="button" className={s.hit} onClick={() => pick(h.steam_app_id)}>
-                  {h.header_image && <img src={h.header_image} alt="" />}
+                  <HitArt game={h} />
                   <span>{h.name}</span>
                 </button>
               ))}

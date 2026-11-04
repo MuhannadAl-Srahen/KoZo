@@ -17,6 +17,19 @@ let _active = null   // { server, finish } of the in-flight sign-in, so a second
 
 function settingsQ() { return require('../db/queries/settings') }
 
+const NONCE_MAX_AGE_MS = 5 * 60 * 1000
+
+// Steam's nonce is "<ISO8601 timestamp><random>"; reject stale ones. The age is
+// measured on Steam's own clock (the Date header of its check_authentication
+// reply), not this PC's: with the PC clock a few hours off, every genuine
+// sign-in used to fail here, which only looked like "needs the Steam app".
+function nonceIsFresh(nonce, steamDateHeader, localNow = Date.now()) {
+  const nonceTs = Date.parse(String(nonce || '').slice(0, 20))
+  if (!Number.isFinite(nonceTs)) return false
+  const steamNow = Date.parse(steamDateHeader)
+  return Math.abs((Number.isFinite(steamNow) ? steamNow : localNow) - nonceTs) < NONCE_MAX_AGE_MS
+}
+
 async function fetchPersona(steamId) {
   try {
     const axios = require('axios')
@@ -84,10 +97,7 @@ function signIn() {
             .every(f => signed.has(f))
           const returnToOk  = params.get('openid.return_to') === attempt.returnTo
           const endpointOk  = params.get('openid.op_endpoint') === 'https://steamcommunity.com/openid/login'
-          // Steam's nonce is "<ISO8601 timestamp><random>"; reject stale ones.
-          const nonce = params.get('openid.response_nonce') || ''
-          const nonceTs = Date.parse(nonce.slice(0, 20))
-          const nonceOk = Number.isFinite(nonceTs) && Math.abs(Date.now() - nonceTs) < 5 * 60 * 1000
+          const nonceOk = nonceIsFresh(params.get('openid.response_nonce'), check.headers?.date)
 
           valid = signatureOk && signsWhatWeRead && returnToOk && endpointOk && nonceOk
           if (signatureOk && !valid) {
@@ -150,4 +160,4 @@ function signIn() {
   })
 }
 
-module.exports = { signIn }
+module.exports = { signIn, nonceIsFresh }

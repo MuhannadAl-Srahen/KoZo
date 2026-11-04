@@ -111,6 +111,7 @@ async function writeNow({ force = false } = {}) {
     await fs.promises.writeFile(tmp, JSON.stringify(buildPayload()), 'utf8')
     await fs.promises.rename(tmp, file)
     logger.info(`autoBackup: saved ${file}`)
+    try { await require('./backupCopy').copyData(file) } catch {}
     return true
   } catch (e) {
     logger.warn('autoBackup: write failed', { message: e.message })
@@ -153,6 +154,7 @@ function flush() {
     fs.writeFileSync(tmp, JSON.stringify(buildPayload()), 'utf8')
     fs.renameSync(tmp, file)
     logger.info(`autoBackup: saved ${file} (flush)`)
+    try { require('./backupCopy').copyDataSync(file) } catch {}
     return true
   } catch (e) {
     logger.warn('autoBackup: flush failed', { message: e.message })

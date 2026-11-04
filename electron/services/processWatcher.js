@@ -99,10 +99,33 @@ function getIdlePauseSec() {
   return 0  // disabled by default
 }
 
-// Controller tracking is implied by AFK being enabled — there's no separate setting.
-// When the user turns on idle/AFK pause, KoZo also watches the gamepad so that
-// controller-only play isn't mistaken for being away (Windows doesn't report
-// gamepad input to the OS idle timer). AFK off → no controller probe.
+// Stop counting once the game has been in the background this long (seconds).
+// 0 = keep counting. Short switches still count: see foregroundProbe.awaySeconds.
+const DEFAULT_AWAY_PAUSE_SEC = 60
+function getAwayPauseSec() {
+  try {
+    const sec = parseInt(settingsQ.getSetting('away_pause_sec'))
+    if (Number.isFinite(sec) && sec >= 0) return sec
+  } catch {}
+  return DEFAULT_AWAY_PAUSE_SEC
+}
+
+// Games that have been the front window on this PC. A game KoZo has never matched
+// doesn't pause (see foregroundProbe.awaySeconds), and this memory has to outlive a
+// KoZo restart: restarted while you were in another app, it kept counting until
+// you went back to the game. The setting only ever grows, one write per game.
+let frontSeenGames = null
+function frontSeenSet() {
+  if (!frontSeenGames) {
+    try { frontSeenGames = new Set(JSON.parse(settingsQ.getSetting('front_seen_games') || '[]')) }
+    catch { frontSeenGames = new Set() }
+  }
+  return frontSeenGames
+}
+
+// Controller tracking is implied by AFK being enabled: there's no separate setting.
+// Windows doesn't report gamepad input to the OS idle timer, so desktopProbe.js
+// watches the gamepad too, and controller-only play isn't mistaken for being away.
 function controllerTrackingOn() {
   return getIdlePauseSec() > 0
 }
@@ -362,14 +385,24 @@ function heartbeatSession(game, session, gapMs, now) {
   // elapsed time as idle (subtracted from playtime when the session ends).
   const idleThresh = getIdlePauseSec()
   const idleNowSec = idleThresh > 0 ? effectiveIdleSeconds() : 0
-  const isIdleNow  = idleThresh > 0 && idleNowSec >= idleThresh
+  const isAfkNow   = idleThresh > 0 && idleNowSec >= idleThresh
+  // Switched to another app: there IS input, so AFK can't see this one.
+  const fgProbe    = require('./foregroundProbe')
+  const seenBefore = frontSeenSet()
+  if (seenBefore.has(game.id)) session._seenInFront = true
+  const awayNowSec = fgProbe.awaySeconds(session, game, fgProbe.current(now), getAwayPauseSec(), now)
+  if (session._seenInFront && !seenBefore.has(game.id)) {
+    seenBefore.add(game.id)
+    try { settingsQ.setSetting('front_seen_games', JSON.stringify([...seenBefore])) } catch {}
+  }
+  const isIdleNow  = isAfkNow || awayNowSec > 0
   if (isIdleNow) {
     let add = Math.round(gapMs / 1000)
     // The tick that first flags AFK also takes back the quiet minutes before
     // the threshold was reached: all of the time since the last input is
     // away time, not just the part after the threshold. Before this, every
     // AFK spell credited the threshold (5 min by default) as playtime.
-    if (!session.idle) add = Math.max(add, Math.round(idleNowSec))
+    if (!session.idle) add = Math.max(add, isAfkNow ? Math.round(idleNowSec) : 0, awayNowSec)
     const elapsedSec = Math.floor((now - new Date(session.started_at).getTime()) / 1000)
     const total = (session.idle_seconds || 0) + add
     session.idle_seconds = Number.isFinite(elapsedSec) ? Math.min(Math.max(0, elapsedSec), total) : total
@@ -382,7 +415,7 @@ function heartbeatSession(game, session, gapMs, now) {
   const wasIdle = !!session.idle
   if (wasIdle !== isIdleNow) {
     session.idle = isIdleNow
-    logger.info(`Session ${isIdleNow ? 'idle (AFK) — pausing playtime' : 'active again'}`, { gameId: game.id })
+    logger.info(`Session ${isIdleNow ? (isAfkNow ? 'idle (AFK)' : 'in the background') + ' — pausing playtime' : 'active again'}`, { gameId: game.id })
   }
   if (isIdleNow || wasIdle !== isIdleNow) {
     sendToRenderer('session:idle', { gameId: game.id, idle: isIdleNow, idle_seconds: session.idle_seconds || 0 })
@@ -438,36 +471,6 @@ function heartbeatSession(game, session, gapMs, now) {
   }
 }
 
-// Start/stop the gamepad probe. Safe to call from both tick() and lightTick().
-//
-// The probe is a persistent PowerShell process, so it is started LAZILY: while
-// the keyboard/mouse are being used the OS idle timer already proves the player
-// is active and the gamepad can't change that answer — running a second process
-// for the whole session to learn nothing is exactly the kind of background cost
-// that shows up as in-game stutter. It spins up only once input has been quiet
-// for half the AFK threshold (still leaving plenty of margin to catch a
-// controller-only player before AFK would fire) and is killed the moment real
-// keyboard/mouse input returns.
-function syncControllerProbe() {
-  const ci = require('./controllerInput')
-  const threshold = getIdlePauseSec()
-  if (threshold <= 0 || activeSessions.size === 0) {
-    if (ci.isRunning()) ci.stop()
-    return
-  }
-  const sysIdleSec = powerMonitor.getSystemIdleTime()
-  if (!ci.isRunning()) {
-    if (sysIdleSec >= Math.max(15, Math.floor(threshold / 2))) {
-      // Seed the probe with the keyboard/mouse idle time — see start()'s note.
-      ci.start({ idleMs: sysIdleSec * 1000 })
-    }
-  }
-  // Once started, the probe stays for the rest of the session. Killing it on
-  // every return of keyboard/mouse input meant a fresh powershell.exe plus a
-  // C# compile (csc.exe, 1-2s of CPU) after every cutscene or pause, mid-game.
-  // It costs next to nothing while running (one check every 2s).
-}
-
 // Cheap heartbeat for ticks between full scans (see FULL_SCAN_EVERY_TICKS):
 // no ps-list call at all, just a free PID-liveness check per already-tracked
 // session. This is the fix for games stuttering every ~5s while KoZo runs —
@@ -503,7 +506,8 @@ async function lightTick() {
     heartbeatSession(game, session, gapMs, now)
   }
 
-  syncControllerProbe()
+  // Starts or stops the desktop probe as settings turn its features on and off.
+  require('./desktopProbe').refresh()
 }
 
 async function tick() {
@@ -594,8 +598,9 @@ async function tick() {
         // visible frame hitch in the running game: a process spawn + bundle
         // load + GPU surface init on the hot path (§perf invariant).
         // warm(), not getOrCreate(): it also arms the idle teardown so a
-        // launch that never becomes a session can't leak the renderer.
-        try { require('../overlayWindow').warm() } catch {}
+        // launch that never becomes a session can't leak the renderer. `show`
+        // moves the window's first appearance to the loading screens too.
+        try { require('../overlayWindow').warm({ show: true }) } catch {}
         // Cracked game → attach the live achievement file watcher NOW (~one poll
         // after the exe appears) instead of after the sensitivity window, so an
         // unlock in the opening seconds still surfaces instantly. Idempotent —
@@ -619,7 +624,7 @@ async function tick() {
         try { require('./notifications').notifySessionStarted({ gameName: game.name }) } catch {}
         // Save backup before playing, for games started outside KoZo (one
         // started from KoZo got it in doLaunch; this one then finds no change).
-        setImmediate(() => { try { require('./autoSaveBackup').beforePlay(game) } catch {} })
+        setImmediate(() => { try { require('./autoSaveBackup').beforePlay(game, { confirmedOnly: true }) } catch {} })
         try {
           require('../overlayWindow').sendSessionStarted({
             gameName: game.name,
@@ -702,7 +707,8 @@ async function tick() {
   }
   if (clearedDetecting && activeSessions.size === 0 && detectingGames.size === 0) emitter.emit('idle')
 
-  syncControllerProbe()
+  // Starts or stops the desktop probe as settings turn its features on and off.
+  require('./desktopProbe').refresh()
 
   // ── Detect unknown game-like processes (not in library) ────────────────────
   const gameExeLower = new Set(games.map(g => (g.exe_name || '').toLowerCase()))
@@ -1087,7 +1093,6 @@ async function resolveOrphanSessions() {
 function stop() {
   tickGen++   // an in-flight tick must not reschedule itself after stop
   if (pollTimer) { clearTimeout(pollTimer); pollTimer = null }
-  try { require('./controllerInput').stop() } catch {}
   try { require('./steamStatsWatcher').unwatchAll() } catch {}
   // Leave active sessions OPEN in the DB (do NOT finalize). On next start,
   // resolveOrphanSessions() resumes them if the game is still running, or caps

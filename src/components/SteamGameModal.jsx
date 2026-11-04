@@ -12,6 +12,8 @@ import s from './SteamGameModal.module.css'
 // Tabs: Overview (trailers + screenshots, key facts, reviews, description),
 // About (the store's full description), Details (every fact) and System
 // requirements. `actions` renders in the footer next to "Steam page".
+// The Game List adds its own: `extraTab` { key, label, node }, `overviewTop`
+// (above the facts), `chips`, `footerLeft`, and a parent-held `tab` / `onTab`.
 
 // Steam's descriptions are HTML: keep text, lists, headings and images only.
 const ALLOWED = new Set(['P', 'BR', 'UL', 'OL', 'LI', 'STRONG', 'B', 'I', 'EM', 'U', 'H1', 'H2', 'H3', 'H4', 'H5', 'IMG', 'SPAN', 'DIV'])
@@ -147,10 +149,15 @@ const TABS = [
   { key: 'reqs', label: 'System requirements' },
 ]
 
-export default function SteamGameModal({ appId, name, release, countdown, art, fallbackArt = [], onClose, actions, match = null }) {
+export default function SteamGameModal({
+  appId, name, release, countdown, art, fallbackArt = [], onClose, onRequestClose, actions, match = null,
+  tab: heldTab, onTab, extraTab = null, overviewTop = null, chips = null, footerLeft = null, children,
+}) {
   const [details, setDetails] = useState(undefined)   // undefined = loading, null = unavailable
   const [reviews, setReviews] = useState(null)
-  const [tab, setTab] = useState('overview')
+  const [ownTab, setOwnTab] = useState('overview')
+  const tab = heldTab ?? ownTab
+  const setTab = onTab ?? setOwnTab
 
   useEffect(() => {
     let alive = true
@@ -161,17 +168,20 @@ export default function SteamGameModal({ appId, name, release, countdown, art, f
   }, [appId])
 
   const lead = [art?.hero, art?.capsule, art?.header, ...fallbackArt].filter(Boolean)
-  // Trailers first, like the store page, then the art and screenshots.
-  const media = [
+  // Trailers first, like the store page, then the art and screenshots. Nothing
+  // shows until Steam answers (the skeleton has the same shape): the art alone
+  // would be on screen for a moment, then be replaced by the trailer.
+  const media = details === undefined ? [] : [
     ...(details?.videos || []).map(v => ({ thumb: v.thumb, video: v })),
     ...(lead.length ? [{ thumb: art?.capsule || art?.header || lead[0], full: lead[0] }] : []),
     ...(details?.media || []),
   ]
   // While Steam answers, every tab shows (with skeletons); then only the ones
   // that have something.
-  const tabs = details === undefined ? TABS
+  const storeTabs = details === undefined ? TABS
     : TABS.filter(t => t.key === 'overview' || details?.[t.key === 'about' ? 'about' : t.key === 'reqs' ? 'requirements' : 'name'])
       .filter(t => t.key !== 'reqs' || details?.requirements?.minimum || details?.requirements?.recommended)
+  const tabs = extraTab ? [...storeTabs, extraTab] : storeTabs
 
   const facts = details ? [
     { Icon: IconCalendar, label: 'Release', value: release || details.release_date || 'To be announced' },
@@ -186,6 +196,7 @@ export default function SteamGameModal({ appId, name, release, countdown, art, f
       title={name}
       icon={<IconBrandSteam size={17} stroke={1.6} />}
       onClose={onClose}
+      onRequestClose={onRequestClose}
       width={1120}
       footer={
         <div className={s.footer}>
@@ -194,6 +205,7 @@ export default function SteamGameModal({ appId, name, release, countdown, art, f
               <IconBrandSteam size={14} /> Steam page
             </button>
           )}
+          {footerLeft}
           <div className={s.spacer} />
           {actions}
         </div>
@@ -219,7 +231,9 @@ export default function SteamGameModal({ appId, name, release, countdown, art, f
           </div>
 
           <div className={s.infoCol}>
+            {overviewTop}
             <div className={s.topChips}>
+              {chips}
               {countdown && <div className={s.countdown}><IconClock size={14} /> {countdown}</div>}
               {match && <div className={`${s.match} ${s['match_' + match.tone]}`}><IconSparkles size={14} /> {match.pct}% match</div>}
               {reviews?.total > 0 && <div className={s.reviewChip} title={`${reviews.positive.toLocaleString()} of ${reviews.total.toLocaleString()} reviews are positive`}><IconThumbUp size={14} /> {reviews.label}</div>}
@@ -290,6 +304,9 @@ export default function SteamGameModal({ appId, name, release, countdown, art, f
           {details?.requirements?.recommended && <div className={s.reqCol}><Html html={details.requirements.recommended} /></div>}
         </div>
       )}
+
+      {extraTab && tab === extraTab.key && extraTab.node}
+      {children}
     </Modal>
   )
 }

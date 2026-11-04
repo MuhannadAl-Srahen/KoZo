@@ -401,10 +401,16 @@ handle('pack:import', async () => {
 })
 
 // A "KoZo Backup" folder already on one of this PC's drives (after a reinstall).
-handle('backup:findExisting', () => {
+// Also the ones in cloud folders (kind: 'copy'), restored without moving them.
+handle('backup:findExisting', async () => {
   const fs = require('fs')
+  const backupCopy = require('./services/backupCopy')
   const current = require('./services/backupHome').base()
-  return require('./services/backupHome').findExisting().map(p => {
+  const copyDir = backupCopy.dir()
+  const copies = await backupCopy.existingCopies()
+  const isCopy = (p) => copies.some(c => c.toLowerCase() === p.toLowerCase())
+  const local = require('./services/backupHome').findExisting().filter(p => !isCopy(p))
+  return [...local, ...copies].map(p => {
     // The current file, or one kept beside it (written by an earlier install):
     // the newest that has games in it.
     let at = null, games = null
@@ -417,11 +423,20 @@ handle('backup:findExisting', () => {
         if (n > 0) { games = n; at = fs.statSync(f).mtime.toISOString(); break }
       } catch {}
     }
-    return { path: p, at, games, current: !!current && current.toLowerCase() === p.toLowerCase() }
+    const inUse = [current, copyDir].some(x => !!x && x.toLowerCase() === p.toLowerCase())
+    return { path: p, at, games, current: inUse, kind: isCopy(p) ? 'copy' : 'local' }
   })
 })
-handle('backup:restoreFolder', async (folder) => {
+// `copy`: the folder stays where it is and becomes the backup copy, with its
+// saves pulled down to this PC. Without it the folder becomes KoZo's backup
+// home (setBase), which must never happen to a cloud folder or a USB stick.
+handle('backup:restoreFolder', async (picked, { copy = false } = {}) => {
   const fs = require('fs')
+  const backupCopy = require('./services/backupCopy')
+  const folder = copy ? backupCopy.resolveBackupFolder(picked) : String(picked)
+  if (!folder) throw new Error('No KoZo backup in that folder')
+  // Before importing anything: a refusal must leave the library untouched.
+  if (copy) backupCopy.validate(folder)
   const dataDir = path.join(String(folder), 'Data')
   // The newest data file there (the current one, or one kept beside it).
   let files = []
@@ -430,10 +445,32 @@ handle('backup:restoreFolder', async (folder) => {
     try { return (JSON.parse(fs.readFileSync(f, 'utf8')).games || []).length > 0 } catch { return false }
   })
   const data = best ? await importBackupFile(best) : null
-  require('./services/backupHome').setBase(String(folder))
+  if (copy) {
+    backupCopy.set(folder)
+    await backupCopy.syncNow()
+  } else {
+    require('./services/backupHome').setBase(String(folder))
+  }
   try { require('./services/saveDetect').confirmAll() } catch {}
   return { data }
 })
+
+// A copy of the backups in a folder the user picks (services/backupCopy.js).
+handle('backup:copyDetect', () => require('./services/cloudFolders').detect())
+handle('backup:copyStatus', () => require('./services/backupCopy').status())
+// A folder from copyDetect, or null to ask. Null back = they cancelled.
+handle('backup:copySet', async (folder) => {
+  let picked = folder
+  if (!picked) {
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    const res = await dialog.showOpenDialog(win, { title: 'Where should KoZo keep a copy of your backups?', properties: ['openDirectory', 'createDirectory'] })
+    if (res.canceled || !res.filePaths?.[0]) return null
+    picked = res.filePaths[0]
+  }
+  return require('./services/backupCopy').set(picked)
+})
+handle('backup:copyNow', () => require('./services/backupCopy').syncNow())
+handle('backup:copyOff', () => require('./services/backupCopy').off())
 
 // Back up every game with a confirmed (or known) save location at once.
 handle('saves:backupAll', async () => {
@@ -1683,7 +1720,7 @@ handle('deals:markSeen', () => require('./services/deals').markSeen())
 handle('deals:unseen', () => require('./services/deals').unseen())
 // Games like (pages/GamesLike.jsx, Game Detail): steamApi.similarGames.
 handle('steam:similar', (appId) => require('./services/steamApi').similarGames(Number(appId)))
-handle('steam:appAssets', async (appIds) => Object.fromEntries(await require('./services/steamApi').getAppAssets(appIds)))
+handle('steam:appAssets', async (appIds) => Object.fromEntries(await require('./services/steamApi').getAppAssets(appIds, { allowStale: true })))
 
 // Called when the Upcoming tab opens: warms the store-details cache for every
 // upcoming game (so popups open instantly) AND backfills missing release dates
@@ -2207,6 +2244,12 @@ handle('app:relaunch', () => {
   return true
 })
 
+// true / false, or null when that isn't known (foregroundProbe.js).
+handle('app:isInFront', () => {
+  const f = require('./services/foregroundProbe').current()
+  return f ? f.pid === process.pid : null
+})
+
 // Big Picture gets out of the way once a game starts (like Steam's does).
 handle('app:minimize', () => {
   const win = require('./main').getMainWindow()
@@ -2274,15 +2317,6 @@ handle('dialog:pickFolder', async () => {
 // ── Overlay window ────────────────────────────────────────────────────────────
 handle('overlay:hide', () => {
   try { require('./overlayWindow').hideOverlay() } catch {}
-  return true
-})
-
-// The achievement-list toast went away — by its safety timeout, a click, or the
-// X. Alt+Down / Alt+Up are only bound while it's on screen (they're far too
-// common to hold globally), so this is what releases them. Must fire for EVERY
-// close route, not just the hotkey one.
-handle('overlay:achListClosed', () => {
-  try { require('./services/achievementListFlash').markClosed() } catch {}
   return true
 })
 
@@ -2393,7 +2427,7 @@ async function importBackupFile(filePath) {
   const TABLES = ['categories', 'games', 'game_list', 'custom_lists', 'custom_list_games', 'sessions', 'achievements', 'achievement_unlocks', 'settings']
   // Paths are per-machine (a restore on a new PC must keep the folders just set
   // up there) and the API key is never exported — keep the local values.
-  const LOCAL_SETTINGS = new Set(['sync_folder', 'auto_backup_dir', 'saves_backup_dir', 'backup_base', 'steam_api_key', 'steamgriddb_key',
+  const LOCAL_SETTINGS = new Set(['sync_folder', 'auto_backup_dir', 'saves_backup_dir', 'backup_base', 'backup_copy_dir', 'backup_copy_error', 'steam_api_key', 'steamgriddb_key',
     'gdrive_token', 'gdrive_folder_id', 'gdrive_email', 'gdrive_last_sync', 'gdrive_client_id', 'gdrive_client_secret', 'install_id', 'backup_defaults_v1'])
   const rowsFor = (t) => t === 'settings' && Array.isArray(data[t])
     ? data[t].filter(r => !LOCAL_SETTINGS.has(r?.key))

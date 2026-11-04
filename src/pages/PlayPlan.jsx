@@ -652,7 +652,7 @@ export default function PlayPlan() {
         { label: 'Other month…', Icon: IconCalendarEvent, onClick: () => setMoveIds([it.id]) },
       ] },
       { divider: true },
-      { label: 'Edit…', Icon: IconPencil, onClick: () => setEdit(it) },
+      { label: 'Edit…', Icon: IconPencil, onClick: () => setEdit({ ...it, _openTab: 'edit' }) },
       it.steam_app_id && { label: 'Steam page', Icon: IconBrandSteam, onClick: () => window.kozo?.api?.shell?.openExternal?.(`https://store.steampowered.com/app/${it.steam_app_id}`) },
       here && { label: 'Remove from the plan', Icon: IconCalendarOff, danger: true, onClick: () => moveTo([it.id], 'none') },
     ]

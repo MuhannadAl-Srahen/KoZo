@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 16,
+  rev: 19,
   // Settings → Appearance → UI scale.
   ui: {
     setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
@@ -182,7 +182,12 @@ contextBridge.exposeInMainWorld('kozo', {
     },
     backup: {
       findExisting: () => ipcRenderer.invoke('backup:findExisting'),
-      restoreFolder: (folder) => ipcRenderer.invoke('backup:restoreFolder', folder),
+      restoreFolder: (folder, opts) => ipcRenderer.invoke('backup:restoreFolder', folder, opts),
+      copyDetect: () => ipcRenderer.invoke('backup:copyDetect'),
+      copyStatus: () => ipcRenderer.invoke('backup:copyStatus'),
+      copySet: (folder) => ipcRenderer.invoke('backup:copySet', folder),
+      copyNow: () => ipcRenderer.invoke('backup:copyNow'),
+      copyOff: () => ipcRenderer.invoke('backup:copyOff'),
       import: () => ipcRenderer.invoke('backup:import'),
       syncSetup: () => ipcRenderer.invoke('sync:setup'),
       syncStatus: () => ipcRenderer.invoke('sync:status'),
@@ -198,8 +203,6 @@ contextBridge.exposeInMainWorld('kozo', {
       setInteractive: (v) => ipcRenderer.invoke('overlay:setInteractive', v),
       applyAccent: (hex) => ipcRenderer.invoke('overlay:applyAccent', hex),
       addUnknownGame: (data) => ipcRenderer.invoke('overlay:addUnknownGame', data),
-      // The achievement list toast is gone — release its scroll hotkeys.
-      achListClosed: () => ipcRenderer.invoke('overlay:achListClosed'),
     },
     sgdb: {
       test: (key) => ipcRenderer.invoke('sgdb:test', key),
@@ -230,6 +233,7 @@ contextBridge.exposeInMainWorld('kozo', {
       whatsNew: () => ipcRenderer.invoke('app:whatsNew'),
       setFullScreen: (on) => ipcRenderer.invoke('app:setFullScreen', on),
       minimize: () => ipcRenderer.invoke('app:minimize'),
+      isInFront: () => ipcRenderer.invoke('app:isInFront'),
       bringToFront: () => ipcRenderer.invoke('app:bringToFront'),
       getGpu: () => ipcRenderer.invoke('app:getGpu'),
       setGpu: (on) => ipcRenderer.invoke('app:setGpu', on),
@@ -264,6 +268,7 @@ contextBridge.exposeInMainWorld('kozo', {
       onSessionStarted: sub('session:started', pass),
       onSessionEnded: sub('session:ended', pass),
       onSessionIdle: sub('session:idle', pass),
+      onAppInFront: sub('app:inFront', pass),
       onSessionDetected: sub('session:detected', pass),
       onSessionUndetected: sub('session:undetected', pass),
       onAchievementUnlocked: sub('achievement:unlocked', pass),
@@ -277,10 +282,6 @@ contextBridge.exposeInMainWorld('kozo', {
       onAchievementOverlay: sub('achievement:overlay', pass),
       onSessionOverlay: sub('session:overlay', pass),
       onStatusOverlay: sub('status:overlay', pass),
-      onAchListOverlay: sub('achList:overlay', pass),
-      // Scroll/close commands for the open achievement list, driven by the
-      // Alt+Down / Alt+Up / Alt+J global hotkeys.
-      onAchListControl: sub('achList:control', pass),
       onUnknownGameOverlay: sub('unknownGame:overlay', pass),
       onReleaseOverlay: sub('release:overlay', pass),
       onXpOverlay: sub('xp:overlay', pass),
@@ -289,6 +290,7 @@ contextBridge.exposeInMainWorld('kozo', {
       onAppUpdate: sub('app:update', pass),
       onReleasesChanged: sub('releases:changed', pass),
       onDriveStatus: sub('drive:status', pass),
+      onBackupCopyStatus: sub('backup:copyStatus', pass),
       onPackProgress: sub('pack:progress', pass),
       onDealsChanged: sub('deals:changed', pass),
       onDealsUpdated: sub('deals:updated', pass),

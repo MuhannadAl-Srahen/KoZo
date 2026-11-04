@@ -8,6 +8,7 @@ let _win     = null
 let _ready    = false   // true once the overlay renderer has registered its listeners
 let _pending  = []      // messages waiting for the renderer to be ready
 let _fallback = null    // safety-net timer that force-flushes if `ready` never arrives
+let _showWhenReady = false   // warm({ show: true }) arrived before the page finished loading
 
 // Creates (or returns) the transparent overlay window. Starts hidden; the first
 // sendX() loads it and queues the message until the renderer signals ready.
@@ -49,12 +50,13 @@ function getOrCreate() {
   // loadFile (not a hand-built file:// string) because path.join returns
   // backslashes and no percent-encoding: an all-users install to
   // "C:\Program Files\KoZo" produced a malformed URL, the overlay never loaded,
-  // and every toast / Alt+K / Alt+J silently did nothing. The main window has
+  // and every toast and Alt+K silently did nothing. The main window has
   // always used loadFile — this keeps the two consistent.
-  if (app.isPackaged) {
-    _win.loadFile(path.join(__dirname, '../renderer-dist/index.html'), { query: { overlay: '1' } })
+  // overlay.html is its own small page: this window starts while a game loads.
+  if (app.isPackaged || process.env.KOZO_RENDERER === 'dist') {
+    _win.loadFile(path.join(__dirname, '../renderer-dist/overlay.html'))
   } else {
-    _win.loadURL('http://localhost:5173?overlay=1')
+    _win.loadURL('http://localhost:5173/overlay.html')
   }
 
   // Safety net: the overlay normally flushes when its renderer calls overlay.ready()
@@ -84,8 +86,7 @@ function getOrCreate() {
     // in that corner of the game, with no toast left to ever turn it back off.
     try { _win.setIgnoreMouseEvents(true, { forward: true }) } catch {}
     // The reloaded renderer starts with zero toasts, so nothing in it will ever
-    // ask for the hide (or release the achievement list's scroll hotkeys) —
-    // hideOverlay does both and re-arms the idle teardown.
+    // ask for the hide. hideOverlay does that and re-arms the idle teardown.
     hideOverlay()
     if (_win && !_win.isDestroyed()) _win.webContents.reload()
   })
@@ -96,9 +97,8 @@ function getOrCreate() {
   })
 
   _win.on('closed', () => {
-    _win = null; _ready = false; _pending = []
+    _win = null; _ready = false; _pending = []; _showWhenReady = false
     clearTimeout(_fallback); _fallback = null
-    releaseAchListKeys()
   })
 
   return _win
@@ -151,6 +151,8 @@ function _send(channel, data) {
 // GPU compositing. Once the toast queue empties AND no game session is running,
 // destroy it after a few idle minutes — it's recreated lazily on the next toast
 // (and a session's start toast pre-warms it, so in-game unlocks stay instant).
+// Keeping it loaded between games was measured: about 37 MB more, and no fewer
+// frames lost when a game starts.
 const IDLE_DESTROY_MS = 3 * 60 * 1000
 let _idleTimer = null
 
@@ -195,18 +197,18 @@ function markReady() {
     const hex = require('./db/queries/settings').getSetting('accent_color')
     if (hex) applyAccent(hex)
   } catch {}
+  if (_showWhenReady) { _showWhenReady = false; raise() }
+  // The page loads after the game was detected, so it missed that event: tell it
+  // now, so its audio opens while the game loads (lib/sounds.js holdAudio).
+  try {
+    if (require('./services/processWatcher').isSessionActive()) _win.webContents.send('session:detected', {})
+  } catch {}
   flush()
 }
 
 function sendAchievements(data)   { _send('achievement:overlay',     data) }
 function sendSessionStarted(data) { _send('session:overlay',         data) }
 function sendStatusFlash(data)    { _send('status:overlay',          data) }
-function sendAchievementListFlash(data) { _send('achList:overlay',   data) }
-// Drive the already-open achievement list from a global hotkey. The overlay is
-// click-through and never takes keyboard focus, and a fullscreen game owns the
-// cursor, so hotkeys are the ONLY way to reach it while you're playing —
-// see achievementListFlash.js.
-function sendAchListControl(data) { _send('achList:control',         data) }
 function sendLevelUp(data)        { _send('xp:overlay',              data) }
 function sendSessionEnded(data)   { _send('sessionEnd:overlay',      data) }
 function sendUnknownGame(data)    { _send('unknownGame:overlay',      data) }
@@ -224,14 +226,6 @@ function setInteractive(interactive) {
   _win.setIgnoreMouseEvents(!interactive, { forward: true })
 }
 
-// Alt+Down / Alt+Up are registered globally only while the achievement list is
-// on screen. The renderer normally reports the close itself, but it can't when
-// its window is going away underneath it — so every teardown route here releases
-// them too, rather than leaving two very common combos hijacked system-wide.
-function releaseAchListKeys() {
-  try { require('./services/achievementListFlash').markClosed() } catch {}
-}
-
 // Pre-warm entry point for game-launch paths (processWatcher detection,
 // games:launch). Distinct from bare getOrCreate() because a pre-warm must ALSO
 // arm the idle teardown: a launch that never becomes a session (launcher stub
@@ -239,8 +233,17 @@ function releaseAchListKeys() {
 // reaches hideOverlay — without the timer the renderer would leak until quit.
 // If a session does start, the timer's isSessionActive() check re-arms instead
 // of destroying, and every _send still cancels it while toasts are live.
-function warm() {
+//
+// `show` also puts the (still empty, fully transparent) window on screen now. The
+// window stays up for the whole session anyway, and its first appearance is the
+// expensive moment: over a loading screen nobody sees it, while waiting for the
+// session-start toast dropped frames with the game already on screen.
+function warm({ show = false } = {}) {
   getOrCreate()
+  if (show) {
+    if (_ready) raise()
+    else _showWhenReady = true
+  }
   scheduleIdleDestroy()
 }
 
@@ -256,14 +259,13 @@ function hideOverlay() {
   // overlay is fully transparent and click-through (invisible in practice),
   // but every hide()/show() pair flips DWM's composition mode over the
   // fullscreen game — the user saw that as a lag spike on every toast. Keeping
-  // it composited for the session means one transition at session start and
+  // it composited for the session means one transition as the game starts and
   // one at the end, none per toast. The real hide happens on the first
   // hideOverlay after the last session ends (the session-end toast's own
   // dismissal), and the idle teardown then reclaims the renderer as before.
   let inSession = false
   try { inSession = require('./services/processWatcher').isSessionActive() } catch {}
   if (!inSession && _win && !_win.isDestroyed()) _win.hide()
-  releaseAchListKeys()
   scheduleIdleDestroy()
 }
 
@@ -279,4 +281,4 @@ function applyAccent(hex) {
 
 // getWindow lets ipc.js tell the overlay apart from the main window (e.g. to
 // focus the main window when an overlay notification is clicked).
-module.exports = { getOrCreate, warm, getWindow: () => _win, sendAchievements, sendSessionStarted, sendStatusFlash, sendAchievementListFlash, sendAchListControl, sendLevelUp, sendSessionEnded, sendUnknownGame, sendReleaseFlash, hideOverlay, markReady, setInteractive, applyAccent }
+module.exports = { getOrCreate, warm, getWindow: () => _win, sendAchievements, sendSessionStarted, sendStatusFlash, sendLevelUp, sendSessionEnded, sendUnknownGame, sendReleaseFlash, hideOverlay, markReady, setInteractive, applyAccent }

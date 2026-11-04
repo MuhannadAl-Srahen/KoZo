@@ -22,6 +22,7 @@ export const DEFAULT_APPEARANCE = {
   theme: 'midnight',              // midnight | tint | custom | oled | slate | nord | mocha | forest | crimson (styles/customize.css)
   bgColor: '#1a1030',             // the Custom theme's color (any hex; made dark, see bgTone)
   gamePage: 'store',              // Game Detail layout: store | cinematic
+  gameListEdit: 'tab',            // Game List window: tab (all in an Edit tab) | overview (status and plan on the Overview)
   font: 'dm',                     // FONTS key, the whole app
   cardStyle: 'classic',           // classic | poster | glass | minimal (GameCard / GameList css)
   textScale: 1,                   // 0.9 to 1.2, scales every --fs-* token
@@ -91,6 +92,7 @@ function normalize(saved) {
   delete p.displayFont
   if (!FONTS[p.font]) p.font = 'dm'
   if (!['store', 'cinematic'].includes(p.gamePage)) p.gamePage = 'store'
+  if (!['tab', 'overview'].includes(p.gameListEdit)) p.gameListEdit = 'tab'
   // 75% was the first default darkness and hid most of the picture.
   if (saved?.bg?.dim === 75 && !saved?.bg?.image && !saved?.bg?.gameArt) p.bg.dim = d.bg.dim
   // Saved order first; a tab added in a later version slots in right after the

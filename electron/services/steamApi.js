@@ -115,7 +115,7 @@ async function searchGames(query) {
   if (!query || query.trim().length < 2) return []
   try {
     const adult = adultSearchOpts()
-    const data = await getJSON('https://store.steampowered.com/search/results/', {
+    const ask = () => getJSON('https://store.steampowered.com/search/results/', {
       ...adult.params,
       term: query.trim(),
       json: 1,
@@ -126,7 +126,13 @@ async function searchGames(query) {
       // user adds playable games, not their add-ons, so filter those out at source.
       category1: 998,
     }, adult.headers)
-    const items = data?.items ?? []
+    // Steam sometimes answers 200 with no items for a search that has 25 a moment
+    // later (seen several times in a row), so an empty answer gets more tries.
+    let items = (await ask())?.items ?? []
+    for (let i = 0; !items.length && i < 2; i++) {
+      await new Promise(r => setTimeout(r, 350))
+      items = (await ask())?.items ?? []
+    }
     return items
       .map(item => {
         const steam_app_id = extractAppId(item.logo)
@@ -473,16 +479,27 @@ function releaseOf(r) {
 }
 
 // appIds → Map(appid → { portrait, hero, header, capsule, tags, release } (URLs may be null).
-async function getAppAssets(appIds) {
+// `allowStale` (the Upcoming page): a record up to a week old comes back at once
+// and is refreshed in the background, so the next visit has the new one.
+async function getAppAssets(appIds, { allowStale = false } = {}) {
+  loadUpcomingDisk()
   const ids = [...new Set((appIds || []).map(Number).filter(n => Number.isFinite(n) && n > 0))]
   const out = new Map()
   const missing = []
+  const stale = []
   for (const id of ids) {
     const hit = assetCache.get(id)
     // Entries from before release data was asked for are refetched once.
-    if (hit && Date.now() - hit.at < ASSET_TTL_MS && hit.assets.release !== undefined) out.set(id, hit.assets)
+    if (hit && hit.assets.release !== undefined && Date.now() - hit.at < ASSET_TTL_MS) out.set(id, hit.assets)
+    else if (allowStale && hit && hit.assets.release !== undefined && Date.now() - hit.at < UPCOMING_MAX_AGE_MS) { out.set(id, hit.assets); stale.push(id) }
     else missing.push(id)
   }
+  if (stale.length) fetchAssets(stale, new Map()).then(saveUpcomingSoon).catch(() => {})
+  if (missing.length) { await fetchAssets(missing, out); saveUpcomingSoon() }
+  return out
+}
+
+async function fetchAssets(missing, out) {
   const batches = []
   for (let i = 0; i < missing.length; i += 50) batches.push(missing.slice(i, i + 50))
   // Batches run in parallel — the calendar asks for a few hundred at once.
@@ -512,7 +529,6 @@ async function getAppAssets(appIds) {
       logger.warn('getAppAssets failed', { message: e.message, count: batch.length })
     }
   }))
-  return out
 }
 
 // Pick for me (Game List): every genre of your Library games, weighted by
@@ -1374,6 +1390,48 @@ const COMING_SOON_TTL_MS = 6 * 60 * 60 * 1000
 const COMING_SOON_PAGE = 50
 const comingSoonCache = new Map()   // `${feed}:${page}` → { at, items, total }
 
+// The feeds and store records live on disk too (userData/upcoming-cache.json), so
+// Upcoming opens at once after a restart. Anything up to a week old is shown
+// straight away and refreshed in the background; older is thrown away.
+const UPCOMING_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
+let upcomingDiskLoaded = false
+let upcomingSaveTimer = null
+function upcomingFile() { return path.join(require('electron').app.getPath('userData'), 'upcoming-cache.json') }
+function loadUpcomingDisk() {
+  if (upcomingDiskLoaded) return
+  upcomingDiskLoaded = true
+  try {
+    const d = JSON.parse(fs.readFileSync(upcomingFile(), 'utf8'))
+    const fresh = (e) => e && Date.now() - e.at < UPCOMING_MAX_AGE_MS
+    for (const [k, v] of Object.entries(d.feeds || {})) if (fresh(v)) comingSoonCache.set(k, v)
+    for (const [k, v] of Object.entries(d.assets || {})) if (fresh(v)) assetCache.set(Number(k), v)
+  } catch {}
+}
+function saveUpcomingSoon() {
+  clearTimeout(upcomingSaveTimer)
+  upcomingSaveTimer = setTimeout(() => {
+    const write = () => {
+      const file = upcomingFile()
+      const json = JSON.stringify({ feeds: Object.fromEntries(comingSoonCache), assets: Object.fromEntries(assetCache) })
+      fs.promises.writeFile(`${file}.tmp`, json)
+        .then(() => fs.promises.rename(`${file}.tmp`, file))
+        .catch(e => logger.warn('upcoming cache not saved', { message: e.message }))
+    }
+    try { require('./processWatcher').runWhenIdle('upcomingCacheSave', write) } catch { write() }
+  }, 5000)
+  upcomingSaveTimer.unref?.()
+}
+
+// Upcoming's first pages (SteamCalendar's START_PAGES), its covers and the picks,
+// fetched in the quiet after launch so the first visit has nothing to wait for.
+// Costs nothing while the cache is fresh.
+async function warmUpcoming() {
+  const pages = [['soon', 0], ['soon', 1], ['wishlist', 0], ['wishlist', 1], ['wishlist', 2]]
+  const results = await Promise.all(pages.map(([f, p]) => getComingSoon(f, p).catch(() => null)))
+  await getAppAssets(results.flatMap(r => (r?.items || []).map(g => g.appid)), { allowStale: true })
+  await getPicks()
+}
+
 function decodeEntities(str) {
   return String(str || '')
     .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'")
@@ -1397,25 +1455,41 @@ function parseComingSoonHtml(html) {
   return items
 }
 
-async function getComingSoon(feed = 'soon', page = 0) {
-  const filter = COMING_SOON_FEEDS[feed] || COMING_SOON_FEEDS.soon
-  const p = Math.max(0, Math.floor(Number(page) || 0))
+const comingSoonRuns = new Map()   // key → the request in flight, so a page is only asked for once
+function fetchComingSoon(key, filter, p) {
+  if (comingSoonRuns.has(key)) return comingSoonRuns.get(key)
   const adult = adultSearchOpts()
-  const key = `${filter}:${p}:${showAdult() ? 'adult' : 'safe'}`
-  const hit = comingSoonCache.get(key)
-  if (hit && Date.now() - hit.at < COMING_SOON_TTL_MS) return { items: hit.items, total: hit.total, page: p, pageSize: COMING_SOON_PAGE }
-  const res = await getAxios().get('https://store.steampowered.com/search/results/', {
+  const run = getAxios().get('https://store.steampowered.com/search/results/', {
     params: { ...adult.params, filter, infinite: 1, start: p * COMING_SOON_PAGE, count: COMING_SOON_PAGE, cc: 'us', l: 'english', category1: 998 },
     timeout: 15000,
     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', ...adult.headers },
-  })
-  const items = parseComingSoonHtml(res.data?.results_html)
-  const total = Number(res.data?.total_count) || 0
-  capSet(comingSoonCache, key, { at: Date.now(), items, total }, 100)
-  return { items, total, page: p, pageSize: COMING_SOON_PAGE }
+  }).then((res) => {
+    const entry = { at: Date.now(), items: parseComingSoonHtml(res.data?.results_html), total: Number(res.data?.total_count) || 0 }
+    // A failed parse (Steam changed the page) must not wipe a good cached page.
+    if (entry.items.length || !comingSoonCache.has(key)) capSet(comingSoonCache, key, entry, 100)
+    saveUpcomingSoon()
+    return entry
+  }).finally(() => { comingSoonRuns.delete(key) })
+  comingSoonRuns.set(key, run)
+  return run
+}
+
+async function getComingSoon(feed = 'soon', page = 0) {
+  loadUpcomingDisk()
+  const filter = COMING_SOON_FEEDS[feed] || COMING_SOON_FEEDS.soon
+  const p = Math.max(0, Math.floor(Number(page) || 0))
+  const key = `${filter}:${p}:${showAdult() ? 'adult' : 'safe'}`
+  const answer = (e) => ({ items: e.items, total: e.total, page: p, pageSize: COMING_SOON_PAGE })
+  const hit = comingSoonCache.get(key)
+  if (hit && Date.now() - hit.at < UPCOMING_MAX_AGE_MS) {
+    if (Date.now() - hit.at >= COMING_SOON_TTL_MS) fetchComingSoon(key, filter, p).catch(e => logger.debug('getComingSoon refresh failed', { message: e.message }))
+    return answer(hit)
+  }
+  return answer(await fetchComingSoon(key, filter, p))
 }
 
 module.exports = {
+  warmUpcoming,
   shrinkCover, getTasteProfile, clearTasteProfile, getPicks, scorePicks, pickSources, getReviews,
   getBannersDir, downloadFile,
   getAppAssets, downloadHero, similarGames, scoreSimilar, baseName, getGameFacts, getTagNames, assetUrl,

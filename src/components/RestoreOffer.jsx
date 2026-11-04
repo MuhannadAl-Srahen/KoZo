@@ -12,12 +12,17 @@ export default function RestoreOffer({ found, drive, onClose }) {
   const [done, setDone] = useState(null)
   const [error, setError] = useState(null)
 
-  async function fromFolder(path) {
+  // `copy`: a cloud folder or USB stick, which stays where it is.
+  async function fromFolder(path, copy) {
     setBusy(path); setError(null)
-    const r = await window.kozo?.api?.backup?.restoreFolder?.(path)
+    const r = await window.kozo?.api?.backup?.restoreFolder?.(path, { copy })
     setBusy('')
     if (r?.ok) setDone(r.data?.data?.games ?? 0)
     else setError(r?.error || 'Restore failed')
+  }
+  async function pickFolder() {
+    const p = await window.kozo?.api?.dialog?.pickFolder?.()
+    if (p?.ok && p.data) fromFolder(p.data, true)
   }
   async function fromFile() {
     setBusy('file'); setError(null)
@@ -50,7 +55,7 @@ export default function RestoreOffer({ found, drive, onClose }) {
           <p className={b.foldNote}>KoZo found a backup of your library and game saves. Bring everything back?</p>
           <div className={b.actions} style={{ marginTop: 12 }}>
             {found.map(f => (
-              <button key={f.path} type="button" className={b.action} disabled={!!busy} onClick={() => fromFolder(f.path)}>
+              <button key={f.path} type="button" className={b.action} disabled={!!busy} onClick={() => fromFolder(f.path, f.kind === 'copy')}>
                 {busy === f.path ? <IconLoader2 size={18} className="spin" /> : <IconFolder size={18} />}
                 <span><strong>{f.path}</strong><small>{f.games} games{f.at ? `, saved ${timeAgo(f.at)}` : ''}</small></span>
               </button>
@@ -61,6 +66,10 @@ export default function RestoreOffer({ found, drive, onClose }) {
                 <span><strong>From Google Drive</strong><small>Sign in and download your backup</small></span>
               </button>
             )}
+            <button type="button" className={b.action} disabled={!!busy} onClick={pickFolder}>
+              <IconFolder size={18} />
+              <span><strong>From a folder</strong><small>A KoZo Backup folder in your cloud folder or on a USB stick</small></span>
+            </button>
             <button type="button" className={b.action} disabled={!!busy} onClick={fromFile}>
               {busy === 'file' ? <IconLoader2 size={18} className="spin" /> : <IconFileZip size={18} />}
               <span><strong>From a KoZo file</strong><small>A .kozo file you saved on your old PC</small></span>

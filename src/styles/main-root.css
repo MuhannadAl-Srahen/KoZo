@@ -1,0 +1,9 @@
+/* The main window has always had these rules: they used to reach it by accident
+   from OverlayApp.module.css when both shared one bundle. Kept in the same place
+   in the load order, so the main window looks exactly as it did. */
+html,
+body,
+#root {
+  background: transparent !important;
+  overflow: hidden;
+}

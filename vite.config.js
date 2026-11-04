@@ -12,6 +12,11 @@ export default defineConfig({
     // local disk in Electron, so this is about clean chunking (and silencing
     // the >500 kB warning), not network performance.
     rollupOptions: {
+      // The overlay window is its own small page (it starts while a game loads).
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        overlay: path.resolve(__dirname, 'overlay.html'),
+      },
       output: {
         // Rolldown (Vite 8) only supports the function form.
         manualChunks(id) {
