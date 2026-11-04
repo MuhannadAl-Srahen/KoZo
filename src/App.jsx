@@ -162,20 +162,38 @@ export default function App() {
   // shimmers and spinners kept the GPU drawing frames nobody could see.
   // Only here, in the main window: the overlay and tray popup run the same
   // bundle but never take focus, and their toast slide-ins must still play.
+  // Windows' own answer (app:inFront) counts too: a window opened while a game
+  // had focus believes it has focus and never gets a blur. Its animations kept
+  // drawing behind the game, about 14% of a CPU core for the whole session.
   useEffect(() => {
+    let otherAppInFront = false
     const mark = () => {
-      const inactive = document.hidden || !document.hasFocus()
+      const inactive = document.hidden || !document.hasFocus() || otherAppInFront
       if (inactive) document.documentElement.dataset.inactive = ''
       else delete document.documentElement.dataset.inactive
     }
     document.addEventListener('visibilitychange', mark)
     window.addEventListener('blur', mark)
-    window.addEventListener('focus', mark)
+    const ask = () => window.kozo?.api?.app?.isInFront?.().then(r => { if (r?.ok) { otherAppInFront = r.data === false; mark() } })
+    // Windows' answer takes up to 2 s, so a focus event counts at once and is
+    // checked after: that's the event a window opened during a game gets wrongly.
+    let recheck = null
+    const onFocus = () => {
+      otherAppInFront = false
+      mark()
+      clearTimeout(recheck)
+      recheck = setTimeout(ask, 2500)
+    }
+    window.addEventListener('focus', onFocus)
     mark()
+    const offFront = window.kozo?.events?.onAppInFront?.((inFront) => { otherAppInFront = inFront === false; mark() })
+    ask()
     return () => {
+      offFront?.()
+      clearTimeout(recheck)
       document.removeEventListener('visibilitychange', mark)
       window.removeEventListener('blur', mark)
-      window.removeEventListener('focus', mark)
+      window.removeEventListener('focus', onFocus)
       delete document.documentElement.dataset.inactive
     }
   }, [])

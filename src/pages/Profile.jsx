@@ -11,6 +11,7 @@ import { useAccentColor } from '../context/AccentColorContext'
 import ImageCropModal from '../components/modals/ImageCropModal'
 import Modal from '../components/ui/Modal'
 import EmptyState from '../components/ui/EmptyState'
+import AchImg from '../components/ui/AchImg'
 import { Skeleton } from '../components/ui/Skeleton'
 import s from './Profile.module.css'
 
@@ -177,7 +178,7 @@ function DayModal({ date, onClose }) {
               <div className={s.dayAchs}>
                 {data.achievements.map(a => (
                   <div key={a.unlock_id || a.id} className={s.dayAch}>
-                    {a.icon_url ? <img src={a.icon_url} alt="" /> : <span className={s.dayAchBlank} />}
+                    <AchImg src={a.icon_url} fallback={<span className={s.dayAchBlank} />} />
                     <span className={s.dayGameText}>
                       <strong>{a.display_name}</strong>
                       <span>{a.game_name} · {time(a.unlocked_at)}</span>

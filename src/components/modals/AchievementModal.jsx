@@ -4,6 +4,7 @@ import {
   IconBulb, IconBook, IconSearch, IconExternalLink,
 } from '@tabler/icons-react'
 import Modal from '../ui/Modal'
+import AchImg from '../ui/AchImg'
 import { rarityLabel, formatDateTime } from '../../lib/utils'
 import s from './AchievementModal.module.css'
 
@@ -77,10 +78,8 @@ export default function AchievementModal({ achievement: initialAch, game, onClos
     >
       <div className={s.body}>
         <div className={`${s.iconWrap} ${unlocked ? s.iconUnlocked : s.iconLocked}`}>
-          {ach.icon_url
-            ? <img src={ach.icon_url} alt="" className={s.iconImg} />
-            : <IconTrophy size={44} stroke={1.1} style={{ color: unlocked ? 'var(--a)' : 'var(--text-muted)' }} />
-          }
+          <AchImg src={ach.icon_url} className={s.iconImg}
+            fallback={<IconTrophy size={44} stroke={1.1} style={{ color: unlocked ? 'var(--a)' : 'var(--text-muted)' }} />} />
           {unlocked && (
             <div className={s.checkBadge}>
               <IconCheck size={11} stroke={3} />

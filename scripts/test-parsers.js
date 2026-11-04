@@ -513,6 +513,69 @@ async function discordTests() {
   server.close()
 }
 
+// ── Achievement icon links ───────────────────────────────────────────────────
+console.log('\nachIconUrl')
+{
+  const { achIconUrl } = require(path.join(__dirname, '..', 'electron', 'db', 'achIcons.js'))
+  const NEW = 'https://shared.fastly.steamstatic.com/community_assets/images/apps/2218750/abc.jpg'
+  check('old server moves to the new one', achIconUrl('https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/2218750/abc.jpg') === NEW)
+  check('any host with the old path moves', achIconUrl('https://cdn.akamai.steamstatic.com/steamcommunity/public/images/apps/2218750/abc.jpg') === NEW)
+  check('a new link stays as it is', achIconUrl(NEW) === NEW)
+  check('an unrelated link stays as it is', achIconUrl('https://example.com/a.jpg') === 'https://example.com/a.jpg')
+  check('no icon stays null', achIconUrl(null) === null && achIconUrl(undefined) === null)
+}
+
+// ── Switching away from a game ───────────────────────────────────────────────
+console.log('\nforegroundProbe')
+{
+  const fp = require(path.join(__dirname, '..', 'electron', 'services', 'foregroundProbe.js'))
+  const game = { exe_name: 'Game.exe', install_path: 'D:\\Games\\Halls\\' }
+  const app = (name, at = 1000, pid = 77, p = 'C:\\Windows\\' + name + '.exe') => ({ pid, name, path: p, since: at })
+
+  const f = fp.parseLine('F\t123\tChrome\tC:\\Apps\\chrome.exe', 5)
+  check('parses a front app line', f && f.pid === 123 && f.name === 'chrome' && f.path === 'C:\\Apps\\chrome.exe' && f.since === 5)
+  check('an elevated app with no path still parses', fp.parseLine('F\t9\tgame\t', 1)?.path === '')
+  check('a heartbeat is not a front app', fp.parseLine('H') === null)
+
+  check('own pid counts as the game', fp.isGameWindow(app('x', 0, 42), { pid: 42 }, game))
+  check('exe name counts as the game', fp.isGameWindow(app('game'), { pid: 1 }, game))
+  check('a file inside the install folder counts', fp.isGameWindow(app('launcher', 0, 7, 'd:\\games\\halls\\bin\\launcher.exe'), { pid: 1 }, game))
+  check('a sibling folder with the same start does not', !fp.isGameWindow(app('x', 0, 7, 'D:\\Games\\Halls2\\x.exe'), { pid: 1 }, game))
+  check('another app is not the game', !fp.isGameWindow(app('chrome'), { pid: 1 }, game))
+  check('unknown front app is not the game', !fp.isGameWindow(null, { pid: 1 }, game))
+
+  const inFront = app('game', 0, 42)
+  let s = { pid: 42 }
+  check('never seen in front: never away', fp.awaySeconds(s, game, app('chrome', 0), 60, 500000) === 0)
+  check('in front: not away', fp.awaySeconds(s, game, inFront, 60, 1000) === 0 && s._seenInFront === true)
+  check('under the limit: nothing taken off', fp.awaySeconds(s, game, app('chrome', 10000), 60, 40000) === 0)
+  check('at the limit: the whole span counts', fp.awaySeconds(s, game, app('chrome', 10000), 60, 70000) === 60)
+  check('another app keeps the same start', fp.awaySeconds(s, game, app('discord', 65000), 60, 90000) === 80)
+  check('back in the game: not away', fp.awaySeconds(s, game, inFront, 60, 91000) === 0)
+  check('then away again counts from the new start', fp.awaySeconds(s, game, app('chrome', 100000), 60, 130000) === 0)
+  check('an unknown front app never counts as away', fp.awaySeconds(s, game, null, 60, 999000) === 0)
+  s = { pid: 42, _seenInFront: true }
+  check('setting off: never away', fp.awaySeconds(s, game, app('chrome', 0), 0, 999000) === 0)
+  check('no probe running: no front app', fp.current() === null)
+
+  let seen = null
+  const off = fp.onChange(x => { seen = x })
+  fp.onLine('F\t88\tgame\t', 1000)
+  check('a report becomes the front app', fp.current(1500)?.pid === 88 && seen?.pid === 88)
+  fp.onLine('H', 50000)
+  check('a heartbeat keeps it fresh', fp.current(120000)?.pid === 88)
+  check('no line for 90 s: unknown, so nothing is taken off', fp.current(150000) === null)
+  fp.onLine('F\t99\tchrome\t', 200000)
+  fp.reset()
+  check('the process ending clears it', fp.current(200001) === null)
+  off()
+
+  const ci = require(path.join(__dirname, '..', 'electron', 'services', 'controllerInput.js'))
+  check('a controller never used counts as idle', ci.msSinceInput() === Infinity)
+  ci.noteInput()
+  check('a controller just used is not idle', ci.msSinceInput() < 1000)
+}
+
 ;(async () => {
   try { await discordTests() } catch (e) { check('discord tests ran', false, e.message) }
   console.log(`\n${pass} passed, ${fail} failed`)

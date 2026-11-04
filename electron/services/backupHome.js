@@ -6,8 +6,8 @@
 // <base> is "KoZo Backup" on the fixed drive other than Windows' with the most
 // free space (a Windows reinstall usually only wipes C:), else Documents.
 // Never Temp, Downloads or a removable drive: people clean those. A folder
-// found in one of those is moved out on startup. The off-PC copy is Google
-// Drive (googleDrive.js).
+// found in one of those is moved out on startup. Off-PC copies: a folder the
+// user picks (backupCopy.js) and Google Drive (googleDrive.js).
 
 const fs   = require('fs')
 const path = require('path')
@@ -59,6 +59,8 @@ function documentsDir() {
 // Pick the base: the non-system fixed drive with the most free space (at
 // least 10 GB), else Documents.
 function chooseBase() {
+  // The smoke test's throwaway profile must never settle on a real drive.
+  if (process.env.KOZO_SMOKE) return path.join(documentsDir(), 'KoZo Backup')
   const sys = (process.env.SystemDrive || 'C:').toUpperCase()
   const other = fixedDrives().filter(d => d.drive !== sys && d.free > 10 * 1024 ** 3).sort((a, b) => b.free - a.free)[0]
   return other ? `${other.drive}\\KoZo Backup` : path.join(documentsDir(), 'KoZo Backup')
@@ -123,6 +125,9 @@ function setBase(dir) {
   if (isVolatile(dir)) throw new Error('That folder gets cleaned out (Temp, Downloads or Desktop). Pick another one')
   const s = settings()
   const b = path.join(dir, path.basename(dir).toLowerCase() === 'kozo backup' ? '' : 'KoZo Backup')
+  // The second copy must stay a separate place, or it would copy into itself.
+  const copy = require('./backupCopy')
+  if (copy.dir() && copy.overlaps(b, copy.dir())) throw new Error('Your backup copy is in that folder. Pick a different one, or stop copying first')
   fs.mkdirSync(b, { recursive: true })
   const saveBackup = require('./saveBackup')
   saveBackup.migrateRoot(saveBackup.rootPath(), path.join(b, 'Saves'))

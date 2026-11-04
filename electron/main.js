@@ -65,6 +65,16 @@ function armDestroyTimer() {
 
 Menu.setApplicationMenu(null)
 
+// "Start minimized" applies only when Windows started KoZo: opening it yourself
+// always shows the window. The startup entries pass --startup; the uptime check
+// covers entries registered before they did.
+function shouldStartMinimized() {
+  try {
+    const atBoot = process.argv.includes('--startup') || require('os').uptime() < 180
+    return atBoot && require('./db/queries/settings').getSetting('start_minimized') === '1'
+  } catch { return false }
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -102,14 +112,7 @@ function createWindow() {
   // Resolve "start minimized to tray" BEFORE loading so we can also skip opening
   // DevTools in dev — openDevTools() force-shows the (otherwise hidden) window,
   // which is exactly why start-minimized appeared not to work during development.
-  // Only when Windows started KoZo: opening it yourself always shows the
-  // window. The startup entries pass --startup; the uptime check covers
-  // entries registered before they did.
-  let startMin = false
-  try {
-    const atBoot = process.argv.includes('--startup') || require('os').uptime() < 180
-    startMin = atBoot && require('./db/queries/settings').getSetting('start_minimized') === '1'
-  } catch {}
+  const startMin = shouldStartMinimized()
 
   // scripts/smoke-test.js runs the built renderer without packaging.
   if (!app.isPackaged && process.env.KOZO_RENDERER !== 'dist') {
@@ -304,7 +307,11 @@ Close any program that may be using it and start KoZo again.`)
 
   require('./ipc')
 
-  createWindow()
+  // Started minimized: no window at all until you open one. Loading a hidden
+  // page only to unload it 60 s later cost the most exactly when it hurts, with
+  // Windows still starting up or a game already running. Tracking, toasts and
+  // hotkeys all run from this process and never needed it.
+  if (!shouldStartMinimized()) createWindow()
 
   const watcher = require('./services/processWatcher')
 
@@ -339,22 +346,6 @@ Close any program that may be using it and start KoZo again.`)
     require('./logger').warn('globalShortcut Alt+K error: ' + e.message)
   }
 
-  // Global hotkey: show the current game's achievement list over the game, and
-  // press again to dismiss it. Read-only — there is deliberately no way to mark
-  // anything from here (an earlier manual-marking panel on this same hotkey was
-  // removed on purpose; this is a display-only successor).
-  // While the list is open, achievementListFlash also binds Alt+Down / Alt+Up
-  // to scroll it — those are registered only for as long as it's on screen,
-  // since the overlay can never take keyboard focus itself.
-  try {
-    const ok = globalShortcut.register('Alt+J', () => {
-      try { require('./services/achievementListFlash').flash() } catch {}
-    })
-    if (!ok) require('./logger').warn('globalShortcut Alt+J registration failed (in use by another app)')
-  } catch (e) {
-    require('./logger').warn('globalShortcut Alt+J error: ' + e.message)
-  }
-
   // Open KoZo from anywhere, even closed in the tray: Ctrl + Shift + K on the
   // keyboard, or a held controller combo (Settings > Shortcuts, Xbox button by default).
   try {
@@ -364,6 +355,17 @@ Close any program that may be using it and start KoZo again.`)
     require('./logger').warn('globalShortcut Ctrl+Shift+K error: ' + e.message)
   }
   require('./services/controllerWake').start(() => showFromAnywhere({ gamepad: true }))
+  // Tell the main window when KoZo isn't the app in front, so nothing draws
+  // behind a game. Its own focus events miss this when it opens during one.
+  {
+    let inFront = null
+    require('./services/foregroundProbe').onChange((f) => {
+      const now = f.pid === process.pid
+      if (now === inFront) return
+      inFront = now
+      try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:inFront', now) } catch {}
+    })
+  }
 
   // Periodic safety-net for automatic backup (no-op unless the user enabled it)
   require('./services/autoBackup').startPeriodic()
@@ -441,11 +443,19 @@ Close any program that may be using it and start KoZo again.`)
           settingsQ.setSetting('save_vault_migrated', '1')
           if (n) require('./logger').info(`saveVault: imported ${n} older backup(s)`)
         }
-        require('./services/saveVault').syncMirror()
+        require('./services/backupCopy').syncNow().catch(e => require('./logger').warn('backupCopy: startup sync failed', { message: e.message }))
       } catch (e) { require('./logger').warn('saveVault startup failed', { message: e.message }) }
       try { require('./services/googleDrive').syncSoon(5000) } catch {}
     })
   }, 45000)
+
+  // Upcoming's data, ready before the first visit (network only, and nothing at
+  // all while its cache is fresh).
+  setTimeout(() => {
+    watcher.runWhenIdle('upcomingWarm', () => {
+      require('./services/steamApi').warmUpcoming().catch(e => require('./logger').debug('warmUpcoming failed', { message: e.message }))
+    })
+  }, 15000)
 
   // "It's out now!" — notify when a tracked upcoming game's release date passes.
   try { require('./services/releaseWatch').start() } catch {}

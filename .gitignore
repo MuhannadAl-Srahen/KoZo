@@ -9,3 +9,4 @@ userData/
 .claude/settings.local.json
 *.bak
 png/
+electron/defaults.local.js

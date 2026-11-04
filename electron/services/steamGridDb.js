@@ -33,18 +33,28 @@ async function call(pathname, key = getKey(), params = {}) {
   return res.data.data || []
 }
 
+// The request must reach SteamGridDB itself: Cloudflare answers popular requests
+// (/search/autocomplete/portal, /grids/steam/400) from its cache with a 200 for
+// ANY key, so a wrong key was reported as saved and then rejected by every real
+// request. A search term nobody has asked for before can't be cached.
 async function testKey(key) {
   try {
-    await call('/search/autocomplete/portal', String(key || '').trim())
+    const term = `kozo-key-check-${require('crypto').randomBytes(8).toString('hex')}`
+    await call(`/search/autocomplete/${term}`, String(key || '').trim())
     return { valid: true }
   } catch (e) {
-    return { valid: false, message: e.message === 'invalid_key' ? 'SteamGridDB rejected this key.' : e.message }
+    return e.message === 'invalid_key'
+      ? { valid: false, rejected: true, message: 'SteamGridDB rejected this key. A key has 32 characters: copy the whole key from your SteamGridDB API page.' }
+      : { valid: false, message: e.message }
   }
 }
 
 // [{ id, name, year }] best matches first.
 async function searchGame(name) {
-  const term = String(name || '').trim()
+  let term = String(name || '').trim()
+  // A name taken from a folder ("Command-and-Conquer-Generals-Zero-Hour") has no
+  // spaces: search for the words instead.
+  if (!/\s/.test(term)) term = term.replace(/[-_.]+/g, ' ').trim()
   if (!term) return []
   const data = await call(`/search/autocomplete/${encodeURIComponent(term)}`)
   return data.map(g => ({

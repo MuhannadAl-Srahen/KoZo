@@ -18,8 +18,9 @@
 // - Smart history for automatic snapshots (prunePolicy), manual ones are kept.
 // - Logs, caches, crash dumps and videos inside a save folder are left out
 //   (saveDetect.isJunk); nothing is written when the drive is nearly full.
-// - The off-PC copy is Google Drive (googleDrive.js). The older optional
-//   folder copy (`save_mirror_dir`) still works when it was set.
+// - Off-PC copies: a folder the user picks (backupCopy.js, using the mirror
+//   below) and Google Drive (googleDrive.js). The older `save_mirror_dir`
+//   still works when it was set.
 
 const fs     = require('fs')
 const path   = require('path')
@@ -64,24 +65,42 @@ function safeId(id) {
 }
 
 // ── Second copy (mirror) ────────────────────────────────────────────────────
+// Two ways to have one: `backup_copy_dir` (backupCopy.js, <dir>\Saves), or the
+// older `save_mirror_dir` (<dir>\KoZo Saves), which still works when it was set.
 function mirrorRoot() {
+  const c = String(settings().getSetting('backup_copy_dir') || '').trim()
+  if (c) return c
   const m = String(settings().getSetting('save_mirror_dir') || '').trim()
   return m || null
 }
+function mirrorSaves() {
+  const c = String(settings().getSetting('backup_copy_dir') || '').trim()
+  if (c) return path.join(c, 'Saves')
+  const m = mirrorRoot()
+  return m ? path.join(m, 'KoZo Saves') : null
+}
 // The mirror is a replica of the backups root: same relative layout.
 function mirrorPathOf(abs) {
-  const m = mirrorRoot()
+  const m = mirrorSaves()
   if (!m) return null
   const rel = path.relative(backupRoot(), abs)
   if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null
-  return path.join(m, 'KoZo Saves', rel)
+  return path.join(m, rel)
+}
+function gameBusy() {
+  try { return require('./processWatcher').isSessionActive() } catch { return false }
 }
 function mirrorWrite(abs) {
   const dest = mirrorPathOf(abs)
   if (!dest) return
+  // The folder may be a slow synced drive, and nothing heavy runs while a game
+  // does. backupCopy.syncSoon() picks these files up after the session.
+  if (gameBusy()) return
   try {
     fs.mkdirSync(path.dirname(dest), { recursive: true })
-    fs.copyFileSync(abs, dest)
+    // Via a temp name: a half-copied file would otherwise look finished forever.
+    fs.copyFileSync(abs, `${dest}.tmp`)
+    fs.renameSync(`${dest}.tmp`, dest)
     settings().setSetting('save_mirror_last', new Date().toISOString())
   } catch (e) {
     logger.warn('saveVault: second copy failed', { message: e.message })
@@ -457,32 +476,61 @@ function enforceCap(games) {
 // Copy anything the second copy is missing (after it was first set, or after
 // it was offline). Also the other way round: a fresh install pointed at an
 // old second copy gets everything back.
+//
+// Async: a first copy of a large vault must not freeze the app. Sorted, so blobs
+// go before snapshots and a snapshot never arrives ahead of its files. Stops if
+// a game starts ({ paused: true }); the caller runs it again afterwards.
+let mirrorRun = null
 function syncMirror() {
-  const m = mirrorRoot()
-  if (!m) return { copied: 0 }
+  if (mirrorRun) return mirrorRun
+  mirrorRun = runSyncMirror().finally(() => { mirrorRun = null })
+  return mirrorRun
+}
+async function runSyncMirror() {
+  const mroot = mirrorSaves()
+  if (!mroot) return { copied: 0 }
   const root = backupRoot()
-  const mroot = path.join(m, 'KoZo Saves')
-  let copied = 0
-  const sync = (from, to) => {
-    let entries = []
-    try { entries = fs.readdirSync(from, { withFileTypes: true }) } catch { return }
-    for (const e of entries) {
+  // Unplugged, or the cloud drive isn't mounted: say so rather than report a
+  // copy that never happened.
+  try { await fs.promises.mkdir(mroot, { recursive: true }) } catch (e) {
+    logger.warn('saveVault: second copy folder unreachable', { message: e.message })
+    return { copied: 0, error: 'unreachable' }
+  }
+  const list = async (dir) => {
+    try {
+      const entries = await fs.promises.readdir(dir, { withFileTypes: true })
+      return entries.sort((x, y) => (x.name < y.name ? -1 : x.name > y.name ? 1 : 0))
+    } catch { return [] }
+  }
+  const exists = (p) => fs.promises.access(p).then(() => true, () => false)
+  let copied = 0, failed = 0, paused = false
+  const sync = async (from, to) => {
+    for (const e of await list(from)) {
+      if (paused) return
       const a = path.join(from, e.name), b = path.join(to, e.name)
-      if (e.isDirectory()) sync(a, b)
-      else if (e.isFile() && !e.name.endsWith('.tmp') && !fs.existsSync(b)) {
-        try { fs.mkdirSync(to, { recursive: true }); fs.copyFileSync(a, b); copied++ } catch {}
+      if (e.isDirectory()) { await sync(a, b); continue }
+      if (!e.isFile() || e.name.endsWith('.tmp') || await exists(b)) continue
+      if (gameBusy()) { paused = true; return }
+      try {
+        await fs.promises.mkdir(to, { recursive: true })
+        await fs.promises.copyFile(a, `${b}.tmp`)
+        await fs.promises.rename(`${b}.tmp`, b)
+        copied++
+      } catch (err) {
+        failed++
+        logger.warn('saveVault: second copy failed', { message: err.message })
       }
     }
   }
   // Only vault folders travel; old-style folder copies stay local.
-  for (const g of (() => { try { return fs.readdirSync(root, { withFileTypes: true }) } catch { return [] } })()) {
-    if (g.isDirectory()) sync(path.join(root, g.name, 'vault'), path.join(mroot, g.name, 'vault'))
+  for (const g of await list(root)) {
+    if (g.isDirectory()) await sync(path.join(root, g.name, 'vault'), path.join(mroot, g.name, 'vault'))
   }
-  for (const g of (() => { try { return fs.readdirSync(mroot, { withFileTypes: true }) } catch { return [] } })()) {
-    if (g.isDirectory()) sync(path.join(mroot, g.name, 'vault'), path.join(root, g.name, 'vault'))
+  for (const g of await list(mroot)) {
+    if (g.isDirectory()) await sync(path.join(mroot, g.name, 'vault'), path.join(root, g.name, 'vault'))
   }
-  settings().setSetting('save_mirror_last', new Date().toISOString())
-  return { copied }
+  if (!paused && !failed) settings().setSetting('save_mirror_last', new Date().toISOString())
+  return { copied, failed, paused, error: failed ? 'failed' : undefined }
 }
 
 // Game folders holding nothing but an empty vault (an older build made one

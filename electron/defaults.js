@@ -12,12 +12,19 @@
 //   OAuth client, for the Google Drive copy of backups (googleDrive.js). A
 //   desktop client's secret isn't secret (Google says so); it only names the app.
 //   Empty = the Google Drive row says it isn't set up in this build.
+//   The repo is public, so they aren't written here: release builds get them
+//   from GitHub secrets, through the gitignored defaults.local.js below (see
+//   docs/google-drive.md).
 // The Steam Web API key has no default: Steam limits each key to 100,000 calls
 // a day and its terms don't allow sharing one, and public profiles don't need it.
+
+let local = {}
+try { local = require('./defaults.local') } catch {}
 
 module.exports = {
   DISCORD_CLIENT_ID: '1566355924489338952',
   STEAMGRIDDB_KEY: '',
   GOOGLE_CLIENT_ID: '',
   GOOGLE_CLIENT_SECRET: '',
+  ...local,
 }

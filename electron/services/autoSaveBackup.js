@@ -40,10 +40,10 @@ function resolvePaths(game) {
 
 const pending = new Map()
 
-function take(game, reason, opts) {
+function take(game, reason, opts = {}) {
   try {
     const fresh = require('../db/queries/games').getGame(game.id) || game
-    const paths = resolvePaths(fresh)
+    const paths = opts.confirmedOnly ? getSavePaths(fresh) : resolvePaths(fresh)
     if (!paths.length) { logger.debug(`autoSaveBackup: "${fresh.name}" has no confirmed save location`); return null }
     const r = require('./saveVault').snapshot(fresh, paths, reason, opts)
     if (r?.skipped) logger.debug(`autoSaveBackup: "${fresh.name}" ${reason}: ${r.skipped}`)
@@ -57,12 +57,14 @@ function take(game, reason, opts) {
 // Right before a launch (and at session start): quick, never blocks long.
 // Skipped when a backup was taken in the last 2 minutes (a launch from KoZo
 // already took one, then the session start would walk the files again).
+// `confirmedOnly` (session start): the game is already running, so back up what
+// is known and leave finding new save folders for after it closes.
 const lastBefore = new Map()
-function beforePlay(game) {
+function beforePlay(game, { confirmedOnly = false } = {}) {
   if (!isEnabled() || !game) return null
   if (Date.now() - (lastBefore.get(game.id) || 0) < 120000) return null
   lastBefore.set(game.id, Date.now())
-  return take(game, 'before-play', { maxMs: 4000, fast: true })
+  return take(game, 'before-play', { maxMs: 4000, fast: true, confirmedOnly })
 }
 
 // After a session: learn where the game saved (folders it wrote to while it
@@ -79,6 +81,7 @@ function backupGameAfterSession(game, session = null) {
     } catch (e) { logger.warn('autoSaveBackup: detection failed', { message: e.message }) }
     take(game, 'after-play')
     try { require('./googleDrive').syncSoon() } catch {}
+    try { require('./backupCopy').syncSoon() } catch {}
     try {
       const games = require('../db/database').getDb().prepare('SELECT id, name FROM games WHERE save_paths IS NOT NULL').all()
       require('./saveVault').enforceCap(games)

@@ -1,0 +1,7 @@
+/* The shared styles the overlay page needs. Pulled in with @import so this stays
+   its own file in the build: importing them directly from overlay-main.jsx could
+   make the bundler split them into a chunk both pages share, which would change
+   the main window's CSS order. */
+@import './variables.css';
+@import './global.css';
+@import './motion.css';

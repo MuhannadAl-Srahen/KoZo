@@ -10,11 +10,22 @@ import s from './MediaGallery.module.css'
 // the first item is shown first. Trailers play with hls.js (Steam's new
 // trailers are HLS streams), loaded only when a trailer is shown.
 
+// Trailers start by themselves, so they start muted, like the Steam store.
+// Turning the sound on once is remembered for the next one.
+const MUTE_KEY = 'kozo:trailer:muted'
+function startMuted() {
+  try { return localStorage.getItem(MUTE_KEY) !== '0' } catch { return true }
+}
+function rememberMuted(muted) {
+  try { localStorage.setItem(MUTE_KEY, muted ? '1' : '0') } catch {}
+}
+
 function VideoPlayer({ video, poster, className }) {
   const ref = useRef(null)
   useEffect(() => {
     const el = ref.current
     if (!el) return
+    el.muted = startMuted()    // React's `muted` prop doesn't reach the DOM property reliably
     let hls = null, dead = false
     if (video.hls) {
       import('hls.js').then(({ default: Hls }) => {
@@ -28,7 +39,33 @@ function VideoPlayer({ video, poster, className }) {
     } else el.src = video.mp4 || video.webm || ''
     return () => { dead = true; hls?.destroy() }
   }, [video.hls, video.mp4])
-  return <video ref={ref} className={className} poster={poster} controls autoPlay playsInline onClick={(e) => e.stopPropagation()} />
+  // Nobody is watching while KoZo is hidden or behind a game (html[data-inactive]),
+  // and decoding video is real work. It carries on when KoZo is back in front.
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const root = document.documentElement
+    let pausedByUs = false
+    const sync = () => {
+      if (root.hasAttribute('data-inactive')) {
+        if (!el.paused) { el.pause(); pausedByUs = true }
+      } else if (pausedByUs) {
+        pausedByUs = false
+        el.play().catch(() => {})
+      }
+    }
+    const mo = new MutationObserver(sync)
+    mo.observe(root, { attributes: true, attributeFilter: ['data-inactive'] })
+    // A trailer starts by itself once it has loaded, after the check above.
+    el.addEventListener('play', sync)
+    sync()
+    return () => { mo.disconnect(); el.removeEventListener('play', sync) }
+  }, [])
+  return (
+    <video ref={ref} className={className} poster={poster} controls autoPlay playsInline
+      onVolumeChange={(e) => rememberMuted(e.currentTarget.muted)}
+      onClick={(e) => e.stopPropagation()} />
+  )
 }
 
 // Shows the (already cached) thumbnail the instant the picture changes, then

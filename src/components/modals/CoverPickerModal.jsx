@@ -22,7 +22,7 @@ export default function CoverPickerModal({ game, onClose, onApplied }) {
     if (!res?.ok) {
       setError(/no_key/.test(res?.error || '')
         ? 'Add your free SteamGridDB key in Settings, Steam, Covers for non-Steam games.'
-        : /invalid_key/.test(res?.error || '') ? 'SteamGridDB rejected the saved key. Check it in Settings.' : (res?.error || 'Search failed.'))
+        : /invalid_key/.test(res?.error || '') ? 'SteamGridDB rejected the saved key. A key has 32 characters: paste the whole key in Settings.' : (res?.error || 'Search failed.'))
       setMatches([])
       return
     }

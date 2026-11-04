@@ -21,7 +21,7 @@ import HoneycombLogo from '../components/HoneycombLogo'
 import ScanResultModal from '../components/modals/ScanResultModal'
 import SaveManagerModal from '../components/modals/SaveManagerModal'
 import BackupsTab from '../components/BackupsTab'
-import DriveSetupModal from '../components/DriveSetupModal'
+import DriveSetupModal, { DriveBlockedHint } from '../components/DriveSetupModal'
 import s from './Settings.module.css'
 
 // ── Shared bits ──────────────────────────────────────────────────────────────
@@ -267,11 +267,16 @@ function GeneralTab() {
 
 // Idle / AFK: stop counting playtime after this long with no input.
 let idleCache = null
+let awayCache = null
 function IdleSection() {
   const [idlePause, setIdlePause] = useState(idleCache ?? '5')      // minutes, 0 = off
+  const [awayPause, setAwayPause] = useState(awayCache ?? '60')     // seconds, 0 = off
   useEffect(() => {
     window.kozo?.api?.settings?.get?.('idle_pause_min').then(r => {
       if (r?.ok) { idleCache = r.data || '5'; setIdlePause(idleCache) }
+    })
+    window.kozo?.api?.settings?.get?.('away_pause_sec').then(r => {
+      if (r?.ok) { awayCache = r.data ?? '60'; setAwayPause(awayCache) }
     })
   }, [])
   // Saves the moment it changes.
@@ -279,6 +284,11 @@ function IdleSection() {
     setIdlePause(v)
     idleCache = v
     window.kozo?.api?.settings?.set('idle_pause_min', String(parseInt(v) || 0))
+  }
+  function pickAway(v) {
+    setAwayPause(v)
+    awayCache = v
+    window.kozo?.api?.settings?.set('away_pause_sec', String(parseInt(v) || 0))
   }
   return (
       <section className={s.section}>
@@ -302,6 +312,27 @@ function IdleSection() {
           ))}
         </div>
         <p className={s.sectionDescQuiet}>Sessions shorter than a minute aren't kept.</p>
+
+        <div className={s.sectionHeader} style={{ marginTop: 'var(--sp-16)' }}>
+          <IconClock size={15} stroke={1.6} />
+          <span>When you switch to another app</span>
+        </div>
+        <p className={s.sectionDesc}>
+          Stop counting once the game has been behind another app this long. That whole time comes
+          off your playtime, and shorter switches still count. A game left running on a second
+          monitor while you use the other one counts as away, so choose Off if you play that way.
+        </p>
+        <div className={s.sensitivityRow} role="group" aria-label="Stop counting after switching away">
+          {[['0', 'Off'], ['15', '15s'], ['60', '1m'], ['300', '5m'], ['900', '15m']].map(([v, label]) => (
+            <button key={v}
+              type="button"
+              aria-pressed={awayPause === v}
+              className={`${s.sensitivityBtn} ${awayPause === v ? s.sensitivityActive : ''}`}
+              onClick={() => pickAway(v)}>
+              {label}
+            </button>
+          ))}
+        </div>
       </section>
   )
 }
@@ -311,7 +342,6 @@ const KEYBOARD_GROUPS = [
   { title: 'Anywhere in Windows', rows: [
     ['Ctrl + Shift + K', 'Open KoZo, even when it is closed to the tray'],
     ['Alt + K', 'While playing: show your session time and achievements over the game'],
-    ['Alt + J', 'While playing: show the achievements you still have left over the game'],
   ] },
   { title: 'Inside KoZo', rows: [
     ['Ctrl + mouse wheel', 'Over a card grid: card size. Anywhere else: the size of the whole app'],
@@ -770,10 +800,16 @@ function SteamTab() {
     const off = window.kozo?.events?.onDriveStatus?.(setDrive)
     return () => { try { off?.() } catch {} }
   }, [])
+  // A second click restarts the sign-in (Google's "Access blocked" page never
+  // comes back), so only the newest attempt may change the UI.
+  const driveTry = useRef(0)
   async function connectDrive() {
+    const mine = ++driveTry.current
     setDriveBusy(true)
-    await window.kozo?.api?.drive?.connect?.()
+    const r = await window.kozo?.api?.drive?.connect?.()
+    if (mine !== driveTry.current) return
     setDriveBusy(false)
+    if (r?.data?.error) setDetectMsg({ type: 'error', text: 'Google did not finish signing in. Try again.' })
     window.kozo?.api?.drive?.status?.().then(r => { if (r?.ok) setDrive(r.data) })
   }
   const keyInput = (id, label, value, onChange, placeholder, extra = null) => (
@@ -803,7 +839,7 @@ function SteamTab() {
             icon={profile?.avatar ? <img src={profile.avatar} alt="" /> : <IconBrandSteam size={20} />}
             name="Steam"
             tone={steamUserId ? 'ok' : 'muted'}
-            status={steamUserId ? <>Connected as <b>{steamPersona || profile?.persona_name || steamUserId}</b></> : 'Not connected. KoZo reads the account the Steam app is signed in to.'}>
+            status={steamUserId ? <>Connected as <b>{steamPersona || profile?.persona_name || steamUserId}</b></> : 'Not connected. Sign in with your browser, the Steam app is not needed.'}>
             <button type="button" className={s.testBtn} onClick={detectFromPc} title="Read the account from the Steam app on this PC">Detect</button>
             <button type="button" className={s.testBtn} disabled={signingIn} onClick={signInWithSteam}>
               {signingIn ? <><IconLoader2 size={13} className="spin" /> Waiting…</> : (steamUserId ? 'Change account' : 'Sign in')}
@@ -819,7 +855,7 @@ function SteamTab() {
           </ConnRow>
           <ConnRow icon={<IconPhoto size={20} />} name="Covers for non-Steam games"
             tone={sgdb.working ? 'ok' : 'warn'}
-            status={sgdb.saved ? 'From SteamGridDB with your key' : sgdb.builtIn ? 'From SteamGridDB, built in' : 'Needs a SteamGridDB key (Advanced, below)'}>
+            status={sgdb.savedBad ? 'SteamGridDB rejected your key. Paste the whole key (Advanced, below)' : sgdb.saved ? 'From SteamGridDB with your key' : sgdb.builtIn ? 'From SteamGridDB, built in' : 'Needs a SteamGridDB key (Advanced, below)'}>
             <button type="button" className={s.testBtn} disabled={bannerRefreshing} onClick={doRefreshBanners} title="Download every cover again at 2x quality">
               {bannerRefreshing ? <><IconLoader2 size={13} className="spin" /> Refreshing…</> : <><IconRefresh size={13} /> Refresh covers</>}
             </button>
@@ -832,7 +868,7 @@ function SteamTab() {
               status={drive.connected ? <>Backups copied to <b>{drive.email || 'your Drive'}</b>{drive.lastSync ? `, ${timeAgo(drive.lastSync)}` : ''}</>
                 : 'Keeps your saves and library safe off this PC'}>
               {!drive.connected && (
-                <button type="button" className={s.testBtn} onClick={connectDrive} disabled={driveBusy}>
+                <button type="button" className={s.testBtn} onClick={connectDrive} title={driveBusy ? 'Start the sign-in again' : undefined}>
                   {driveBusy ? <><IconLoader2 size={13} className="spin" /> Waiting for Google…</> : 'Sign in with Google'}
                 </button>
               )}
@@ -840,6 +876,7 @@ function SteamTab() {
             </ConnRow>
           )}
         </div>
+        {driveBusy && <DriveBlockedHint />}
         <Message msg={detectMsg} />
         <Message msg={bannerMsg} />
         {privacyError && (
@@ -943,11 +980,19 @@ function useSgdb() {
   const [saved, setSaved] = useState('')
   const [state, setState] = useState('idle')   // idle | saving | ok | error
   const [msg, setMsg]     = useState('')
+  const [savedBad, setSavedBad] = useState(false)   // SteamGridDB refuses the saved key
   const loadedRef = useRef(false)
   useEffect(() => {
     window.kozo?.api?.dialog?.builtInKeys?.().then(r => { if (r?.ok) setBuiltIn(!!r.data?.steamgriddb) })
     window.kozo?.api?.settings?.get?.('steamgriddb_key').then(res => {
-      if (res?.ok && res.data) { setKey(res.data); setSaved(res.data) }
+      if (res?.ok && res.data) {
+        setKey(res.data); setSaved(res.data)
+        // A key saved earlier may never have been really checked. A network
+        // problem says nothing about the key, so only a real refusal counts.
+        window.kozo?.api?.sgdb?.test?.(res.data).then(t => {
+          if (t?.ok && t.data?.rejected) { setSavedBad(true); setState('error'); setMsg(t.data.message) }
+        })
+      }
       loadedRef.current = true
     })
   }, [])
@@ -961,11 +1006,11 @@ function useSgdb() {
     const res = await window.kozo?.api?.sgdb?.setKey?.(key).catch(e => ({ ok: false, error: e?.message }))
     const d = res?.ok ? res.data : null
     if (d?.valid) {
-      setSaved(key.trim()); setState('ok')
+      setSaved(key.trim()); setSavedBad(false); setState('ok')
       setMsg(key.trim() ? 'Saved. Covers for your non-Steam games are being fetched.' : 'Key removed.')
     } else { setState('error'); setMsg(d?.message || res?.error || 'Could not check the key.') }
   }
-  return { builtIn, key, setKey, saved, state, msg, save, working: builtIn || !!saved }
+  return { builtIn, key, setKey, saved, savedBad, state, msg, save, working: !savedBad && (builtIn || !!saved) }
 }
 
 function ConnRow({ icon, name, status, tone = 'muted', children }) {
@@ -1413,6 +1458,23 @@ function LookCustomize() {
       </section>
 
       <section className={s.section}>
+        <div className={s.sectionHeader}><IconLayoutCards size={15} stroke={1.6} /><span>Game List window</span></div>
+        <p className={s.sectionDesc}>Where a game's status and play plan go in the window that opens from the Game List.</p>
+        <div className={s.cardStyles} role="radiogroup" aria-label="Game List window">
+          {[
+            { value: 'tab', label: 'Edit tab', desc: 'The Overview looks like Upcoming. Everything you change is in the Edit tab' },
+            { value: 'overview', label: 'On the Overview', desc: 'Status and play plan beside the trailer, one click less' },
+          ].map(c => (
+            <button key={c.value} type="button" role="radio" aria-checked={prefs.gameListEdit === c.value}
+              className={`${s.cardStyleTile} ${prefs.gameListEdit === c.value ? s.cardStyleOn : ''}`} onClick={() => setPrefs({ gameListEdit: c.value })}>
+              <span className={s.cardStyleText}><strong>{c.label}</strong><small>{c.desc}</small></span>
+              {prefs.gameListEdit === c.value && <IconCheck size={14} stroke={2.6} className={s.cardStyleCheck} />}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className={s.section}>
         <div className={s.sectionHeader}><IconLayoutCards size={15} stroke={1.6} /><span>Game cards</span></div>
         <p className={s.sectionDesc}>How cards look in the Library and the Game List.</p>
         <div className={s.cardStudio}>
@@ -1694,7 +1756,6 @@ const FEATURE_GROUPS = [
     items: [
       { Icon: IconChartBar,  name: 'Statistics', go: '/activity?tab=overview',    desc: 'Playtime trends with an hourly 24h view, daily/monthly charts, and click-a-day (or hour) to focus it.' },
       { Icon: IconBell,      name: 'In-game status (Alt+K)', go: 'tab:shortcuts', desc: 'Press Alt+K while playing to flash your live session time and achievement progress over the game.' },
-      { Icon: IconTrophy,    name: 'Achievement list (Alt+J)', go: 'tab:shortcuts', desc: 'Press Alt+J while playing to flash your progress and the rarest achievements you still have left, right over the game.' },
       { Icon: IconRocket,    name: 'Tray & startup', go: 'tab:general',desc: 'Runs quietly in the system tray and can launch with Windows.' },
       { Icon: IconRocket,    name: 'Open KoZo from anywhere', go: 'tab:shortcuts', desc: 'Press Ctrl+Shift+K, or hold the Xbox button on a controller for a second (pick another combo in Shortcuts), to bring KoZo up (in Big Picture) even when it is closed to the tray.' },
       { Icon: IconDeviceTv,  name: 'Big Picture', go: '/big', desc: 'Full screen for the TV: big posters, your recent games and Up next, made for the controller.' },

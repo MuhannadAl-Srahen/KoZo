@@ -12,6 +12,7 @@ import InfoModal from '../components/ui/InfoModal'
 import PickForMeModal from '../components/modals/PickForMeModal'
 import RateGameModal from '../components/modals/RateGameModal'
 import OnScreenKeyboard from '../components/OnScreenKeyboard'
+import AchImg from '../components/ui/AchImg'
 import { ratingColor } from '../components/ui/RatingPicker'
 import { setZoomLock } from '../context/AppearanceContext'
 import s from './BigPicture.module.css'
@@ -165,7 +166,7 @@ function GameScreen({ g, live, liveMin, onPlay, onRate, onMenu }) {
             <div className={s.achList}>
               {next.map(a => (
                 <div key={a.id} className={s.ach} data-gpnav="">
-                  {a.icon_url || a.icon_locked_url ? <img src={a.icon_url || a.icon_locked_url} alt="" className={s.achIconLocked} /> : <span className={s.achIconBlank} />}
+                  <AchImg src={a.icon_url || a.icon_locked_url} className={s.achIconLocked} fallback={<span className={s.achIconBlank} />} />
                   <span className={s.achText}>
                     <span className={s.achName}>{a.display_name}</span>
                     <span className={s.achSub}>{a.global_unlock_percent != null ? `${a.global_unlock_percent.toFixed(1)}% of players have it` : a.description || ''}</span>
@@ -177,7 +178,7 @@ function GameScreen({ g, live, liveMin, onPlay, onRate, onMenu }) {
             <div className={s.achList}>
               {recent.map(a => (
                 <div key={a.id} className={s.ach} data-gpnav="">
-                  {a.icon_url ? <img src={a.icon_url} alt="" /> : <span className={s.achIconBlank} />}
+                  <AchImg src={a.icon_url} fallback={<span className={s.achIconBlank} />} />
                   <span className={s.achText}>
                     <span className={s.achName}>{a.display_name}</span>
                     <span className={s.achSub}>{timeAgo(a.unlocked_at)}</span>
@@ -335,6 +336,7 @@ export default function BigPicture() {
       window.kozo?.events?.onSessionStarted?.((x) => running(x?.game_id)),
       window.kozo?.events?.onSessionDetected?.((x) => running(x?.gameId)),
       window.kozo?.events?.onSessionUndetected?.(refresh),
+      window.kozo?.events?.onSessionDiscarded?.(refresh),
       window.kozo?.events?.onSessionEnded?.(({ session } = {}) => {
         refresh()
         load()

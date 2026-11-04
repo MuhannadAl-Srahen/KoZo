@@ -1,4 +1,5 @@
 const { getDb } = require('../database')
+const { achIconUrl } = require('../achIcons')
 
 function listAchievementsForGame(gameId) {
   return getDb().prepare(`
@@ -83,7 +84,7 @@ function bulkUpsertAchievements(gameId, achievements) {
   `)
   const run = getDb().transaction(() => {
     for (const a of achievements) {
-      stmt.run({ game_id: gameId, ...a })
+      stmt.run({ game_id: gameId, ...a, icon_url: achIconUrl(a.icon_url), icon_locked_url: achIconUrl(a.icon_locked_url) })
     }
   })
   run()

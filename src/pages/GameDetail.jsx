@@ -19,6 +19,7 @@ import EmptyState from '../components/ui/EmptyState'
 import { HeroSkeleton, PanelSkeleton } from '../components/ui/Skeleton'
 import GeneratedCover from '../components/GeneratedCover'
 import SteamGameModal, { StoreSections } from '../components/SteamGameModal'
+import AchImg from '../components/ui/AchImg'
 import { GamesLikeGrid } from './GamesLike'
 import { useAppearance } from '../context/AppearanceContext'
 import { useSteamArt } from '../lib/steamArt'
@@ -100,10 +101,7 @@ function AchCard({ ach, onClick, onQuickToggle }) {
         className={`${s.achIcon} ${unlocked ? s.achIconUnlocked : s.achIconLocked}`}
         style={unlocked && achRarity ? { '--rar': achRarity } : undefined}
       >
-        {ach.icon_url
-          ? <img src={ach.icon_url} alt="" loading="lazy" decoding="async" />
-          : <IconTrophy size={20} stroke={1.4} />
-        }
+        <AchImg src={ach.icon_url} loading="lazy" decoding="async" fallback={<IconTrophy size={20} stroke={1.4} />} />
       </div>
 
       <div className={s.achBody}>
@@ -266,6 +264,7 @@ export default function GameDetail() {
     const offs = [
       window.kozo.events.onSessionStarted(() => load()),
       window.kozo.events.onSessionEnded(()   => load()),
+      window.kozo.events.onSessionDiscarded?.(() => load()),
       // Reload when an achievement syncs in (live, during a session) so the page
       // catches new unlocks without a manual refresh.
       window.kozo.events.onGameUpdated(() => load()),
@@ -999,7 +998,7 @@ export default function GameDetail() {
                           <div className={s.miniList}>
                             {recentUnlocks.map(a => (
                               <button key={a.id} type="button" className={s.miniAch} onClick={() => setSelectedAch(a)}>
-                                <span className={s.miniIcon}>{a.icon_url ? <img src={a.icon_url} alt="" loading="lazy" /> : <IconTrophy size={16} />}</span>
+                                <span className={s.miniIcon}><AchImg src={a.icon_url} loading="lazy" fallback={<IconTrophy size={16} />} /></span>
                                 <span className={s.miniText}>
                                   <span className={s.miniName}>{a.display_name}</span>
                                   <span className={s.miniSub}>{a.unlocked_at ? timeAgo(a.unlocked_at) : 'Unlocked'}</span>
@@ -1017,7 +1016,7 @@ export default function GameDetail() {
                       <div className={s.miniList}>
                         {nextUp.map(a => (
                           <button key={a.id} type="button" className={s.miniAch} onClick={() => setSelectedAch(a)}>
-                            <span className={`${s.miniIcon} ${s.miniLocked}`}>{a.icon_url ? <img src={a.icon_url} alt="" loading="lazy" /> : <IconLock size={16} />}</span>
+                            <span className={`${s.miniIcon} ${s.miniLocked}`}><AchImg src={a.icon_url} loading="lazy" fallback={<IconLock size={16} />} /></span>
                             <span className={s.miniText}>
                               <span className={s.miniName}>{a.display_name}</span>
                               <span className={s.miniSub}>{a.description || 'Hidden achievement'}</span>

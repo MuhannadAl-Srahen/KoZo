@@ -1,116 +1,18 @@
 'use strict'
 
-// Gamepad activity probe (Windows XInput).
-//
-// Why: powerMonitor.getSystemIdleTime() only reflects keyboard/mouse, so a
-// controller-only player would be falsely flagged AFK. There's no Node API for
-// XInput, and the renderer Gamepad API can't poll while the window is hidden
-// behind a fullscreen game. So we run ONE persistent PowerShell process that
-// P/Invokes XInputGetState in a tight loop and prints a line whenever a
-// connected controller is actively being used (button held, trigger pulled, or
-// a stick pushed past a deadzone — raw stick drift is filtered out). Each line
-// refreshes `lastInputAt`; `msSinceInput()` is then the controller's idle time.
-//
-// The C# is compiled once at process start, then the loop is cheap. The probe
-// is also started LAZILY (see syncControllerProbe in processWatcher): it only
-// spins up once the keyboard/mouse have already gone quiet for a while, then
-// stays until the session ends (restarting it after every pause cost a C#
-// compile each time). During steady keyboard-and-mouse play it never starts.
+// When a controller was last used, so controller play isn't counted as AFK:
+// powerMonitor.getSystemIdleTime() only reflects keyboard and mouse. There's no
+// Node API for XInput and the renderer's Gamepad API can't poll while the window
+// sits behind a fullscreen game, so desktopProbe.js does the reading and reports
+// a line (at most every 2 s) while a controller is in use: a button held, a
+// trigger pulled, or a stick past a deadzone, so stick drift doesn't count.
 
-const { spawn } = require('child_process')
-const fs   = require('fs')
-const os   = require('os')
-const path = require('path')
-const logger = require('../logger')
-
-let proc        = null
 let lastInputAt = 0
-let scriptPath  = null
-let failedAt    = 0   // last spawn error: don't retry every tick
-const RETRY_AFTER_MS = 5 * 60 * 1000
 
-const PS_SCRIPT = `
-param([int]$ParentPid = 0)
-$ErrorActionPreference = 'SilentlyContinue'
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public static class XIProbe {
-  [StructLayout(LayoutKind.Sequential)]
-  public struct GP { public ushort wButtons; public byte bLT; public byte bRT; public short LX; public short LY; public short RX; public short RY; }
-  [StructLayout(LayoutKind.Sequential)]
-  public struct ST { public uint pkt; public GP pad; }
-  [DllImport("xinput1_4.dll")] static extern int XInputGetState(int i, ref ST s);
-  public static bool ActiveNow() {
-    for (int i = 0; i < 4; i++) {
-      ST s = new ST();
-      int r;
-      try { r = XInputGetState(i, ref s); } catch { return false; }
-      if (r == 0) {
-        GP g = s.pad;
-        if (g.wButtons != 0) return true;
-        if (g.bLT > 30 || g.bRT > 30) return true;
-        if (Math.Abs((int)g.LX) > 9000 || Math.Abs((int)g.LY) > 9000) return true;
-        if (Math.Abs((int)g.RX) > 9000 || Math.Abs((int)g.RY) > 9000) return true;
-      }
-    }
-    return false;
-  }
-}
-"@
-while ($true) {
-  if ($ParentPid -gt 0 -and -not (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue)) { break }
-  if ([XIProbe]::ActiveNow()) { [Console]::Out.WriteLine("C"); [Console]::Out.Flush() }
-  Start-Sleep -Milliseconds 2000
-}
-`.trim()
+function noteInput() { lastInputAt = Date.now() }
 
-/**
- * Start the probe. `idleMs` seeds how long the controller is ASSUMED to have
- * been idle already — it must be passed when starting lazily mid-session.
- * Without it the probe would report "input just now" the instant it starts, so
- * a user who genuinely walked away would never be flagged AFK. Seeding with the
- * keyboard/mouse idle time makes the two sources agree until the probe has real
- * evidence; the first actual gamepad input (within one 2s poll) overrides it.
- */
-function start({ idleMs = 0 } = {}) {
-  if (proc) return
-  if (process.platform !== 'win32') return   // XInput is Windows-only
-  if (failedAt && Date.now() - failedAt < RETRY_AFTER_MS) return
-  try {
-    if (!scriptPath) {
-      scriptPath = path.join(os.tmpdir(), 'kozo-controller-probe.ps1')
-      fs.writeFileSync(scriptPath, PS_SCRIPT, 'utf8')
-    }
-    const child = spawn('powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, String(process.pid)],
-      { windowsHide: true })
-    proc = child
-    lastInputAt = Date.now() - Math.max(0, idleMs)
-    child.stdout.on('data', () => { lastInputAt = Date.now() })
-    child.stderr.on('data', () => {})
-    // Only clear the reference if it is still THIS child: an old probe exiting
-    // late must not orphan a newer one.
-    child.on('exit', () => { if (proc === child) proc = null })
-    child.on('error', (e) => {
-      logger.warn('controllerInput spawn error: ' + e.message)
-      failedAt = Date.now()
-      if (proc === child) proc = null
-    })
-    logger.info('controllerInput: gamepad activity probe started')
-  } catch (e) {
-    logger.warn('controllerInput.start: ' + e.message)
-    proc = null
-  }
-}
+// Milliseconds since the controller was last used. Infinity = not seen yet, so
+// callers fall back to the keyboard and mouse idle time.
+function msSinceInput() { return lastInputAt ? Date.now() - lastInputAt : Infinity }
 
-function stop() {
-  if (proc) { try { proc.kill() } catch {} proc = null }
-}
-
-// Milliseconds since the controller last reported activity. Infinity when the
-// probe isn't running (so callers fall back to the keyboard/mouse idle time).
-function msSinceInput() { return proc ? (Date.now() - lastInputAt) : Infinity }
-function isRunning() { return !!proc }
-
-module.exports = { start, stop, msSinceInput, isRunning }
+module.exports = { noteInput, msSinceInput }

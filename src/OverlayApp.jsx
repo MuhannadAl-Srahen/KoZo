@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { IconTrophy, IconPlayerPlay, IconX, IconClock, IconDeviceGamepad2, IconSparkles, IconArrowBigUpLines, IconPlus, IconCheck, IconCalendarEvent } from '@tabler/icons-react'
+import { IconTrophy, IconPlayerPlay, IconX, IconClock, IconDeviceGamepad2, IconSparkles, IconArrowBigUpLines, IconPlus, IconCalendarEvent } from '@tabler/icons-react'
 import { applyAccent } from './context/AccentColorContext'
 import { fileUrl } from './lib/utils'
-import { playAchievement, playLevelUp, playSessionStart } from './lib/sounds'
+import { playAchievement, playLevelUp, playSessionStart, holdAudio, releaseAudio } from './lib/sounds'
 import s from './OverlayApp.module.css'
 
 // Cover-art thumb for session toasts — local cached banner first, CDN fallback,
@@ -70,14 +70,6 @@ function useAutoClose(onDismiss, ms) {
     setTimeout(onDismiss, 300)
   }
 
-  // Push the auto-dismiss back — used by the achievement list, which stays up
-  // while you're actively scrolling it with the hotkeys.
-  const bump = () => {
-    if (goneRef.current) return
-    clearTimeout(timerRef.current)
-    timerRef.current = setTimeout(close, ms)
-  }
-
   useEffect(() => {
     timerRef.current = setTimeout(close, ms)
     return () => {
@@ -92,7 +84,7 @@ function useAutoClose(onDismiss, ms) {
     }
   }, [])
 
-  return { leaving, close, bump, hoverId: idRef.current }
+  return { leaving, close, hoverId: idRef.current }
 }
 
 // Props shared by every toast so hovering captures the mouse and the card is
@@ -193,165 +185,6 @@ function StatusToast({ toast, onDismiss }) {
   )
 }
 
-// ── Achievement list toast (Alt+J, read-only) ─────────────────────────────────
-// "Where am I, and what's left" — NOT a dump of the whole list. Nobody reads
-// fifty rows in the nine seconds this is up, and mixing unlocked ones in made
-// it look like an arbitrary sample of completed achievements. So: progress bar,
-// then the LOCKED ones rarest-first (the ones actually worth chasing), then a
-// short strip of what you most recently earned.
-// Deliberately no way to mark anything from here — this stays read-only.
-
-function rarityLabel(pct) {
-  if (pct == null) return null
-  if (pct < 5)  return 'ultra rare'
-  if (pct < 15) return 'rare'
-  if (pct < 40) return 'uncommon'
-  return null            // common — not worth the ink
-}
-
-function AchRow({ a, done, showHint }) {
-  const rare = rarityLabel(a.rarity)
-  return (
-    <div className={`${s.achListRow} ${done ? s.achListRowDone : ''}`}>
-      {a.icon_url
-        ? <img className={s.achListIcon} src={a.icon_url} alt="" onError={e => { e.target.style.visibility = 'hidden' }} />
-        : <IconTrophy size={14} stroke={1.5} className={s.achListIconFallback} />}
-      <span className={s.achListText}>
-        <span className={s.achListName}>{a.name}</span>
-        {/* The requirement, straight from Steam's own description — the whole
-            point of glancing at this mid-game is "what do I actually have to do
-            for this one", and alt-tabbing to find out defeats the purpose.
-            Locked rows only; an unlocked one needs no instructions. */}
-        {showHint && !done && (
-          <span className={s.achListHint}>
-            {a.description || 'Hidden until unlocked'}
-          </span>
-        )}
-      </span>
-      {done
-        ? <IconCheck size={13} stroke={2.4} className={s.achListCheck} />
-        : a.rarity != null && (
-            <span className={`${s.achListRarity} ${rare ? s.achListRarityHot : ''}`}>
-              {a.rarity < 10 ? a.rarity.toFixed(1) : Math.round(a.rarity)}%
-            </span>
-          )}
-    </div>
-  )
-}
-
-// Stays up for a whole minute rather than 9s, because it's now something you
-// read and scroll rather than glance at. Not "forever" though — if it's left
-// open it has to clear itself off the game on its own.
-const ACH_LIST_MS = 60_000
-
-function AchListToast({ toast, onDismiss }) {
-  const { leaving, close, bump, hoverId } = useAutoClose(onDismiss, ACH_LIST_MS)
-  const { gameName, unlocked, total, percent, remaining = [], recent = [], idle } = toast
-  const rowsRef = useRef(null)
-  const [atEnd, setAtEnd] = useState(false)
-  const [scrollable, setScrollable] = useState(false)
-
-  // Alt+Down / Alt+Up arrive from the main process as control messages, because
-  // this window can't receive key events itself — it's click-through and never
-  // focused, which is the whole reason the list couldn't be scrolled in-game.
-  useEffect(() => {
-    const off = window.kozo?.events?.onAchListControl?.(({ action, delta }) => {
-      if (action === 'close') { close(); return }
-      if (action !== 'scroll') return
-      const el = rowsRef.current
-      if (!el) return
-      el.scrollBy({ top: delta, behavior: 'smooth' })
-      bump()                       // reading it counts as still wanting it up
-    })
-    return () => off?.()
-  }, [])
-
-  const onScroll = () => {
-    const el = rowsRef.current
-    if (!el) return
-    setAtEnd(el.scrollTop + el.clientHeight >= el.scrollHeight - 4)
-  }
-  useEffect(() => {
-    const el = rowsRef.current
-    if (!el) return
-    setScrollable(el.scrollHeight > el.clientHeight + 4)
-    onScroll()
-  }, [remaining.length])
-  return (
-    <div className={`${s.toast} ${s.achListToast} ${leaving ? s.toastOut : s.toastIn}`}
-      {...toastInteractions(close, leaving, hoverId)}>
-      <CloseButton close={close} />
-      <div className={s.toastHeader}>
-        <IconTrophy size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
-        <span className={s.toastHeaderText}>{idle ? 'KoZo' : `Achievements: ${gameName}`}</span>
-      </div>
-      {idle ? (
-        <div className={s.toastBody}>
-          <div className={s.toastIcon}>
-            <IconTrophy size={22} stroke={1.5} style={{ color: 'var(--a)' }} />
-          </div>
-          <div className={s.toastInfo}>
-            <div className={s.toastDesc}>No game is being tracked right now</div>
-          </div>
-        </div>
-      ) : !total ? (
-        <div className={s.toastBody}>
-          <div className={s.toastInfo}>
-            <div className={s.toastDesc}>No achievement list for this game yet</div>
-          </div>
-        </div>
-      ) : (
-        <>
-          <div className={s.achListProgress}>
-            <div className={s.achListProgressTop}>
-              <span className={s.achListCount}>{unlocked}<span className={s.achListCountTotal}>/{total}</span></span>
-              <span className={s.achListPct}>{percent}%</span>
-            </div>
-            <div className={s.achListBar}><div className={s.achListFill} style={{ width: `${percent}%` }} /></div>
-          </div>
-
-          {remaining.length > 0 ? (
-            <>
-              <div className={s.achListLabel}>
-                Still locked, rarest first
-                {scrollable && <span className={s.achListCounter}>{remaining.length}</span>}
-              </div>
-              <div className={s.achListRows} ref={rowsRef} onScroll={onScroll}>
-                {remaining.map((a, i) => <AchRow key={`r${i}`} a={a} done={false} showHint />)}
-              </div>
-              {scrollable && !atEnd && <div className={s.achListFade} aria-hidden="true" />}
-            </>
-          ) : (
-            <div className={s.achListAllDone}>
-              <IconCheck size={14} stroke={2.4} /> Every achievement unlocked
-            </div>
-          )}
-
-          {recent.length > 0 && (
-            <>
-              <div className={s.achListLabel}>Recently unlocked</div>
-              <div className={s.achListRecent}>
-                {recent.map((a, i) => <AchRow key={`d${i}`} a={a} done />)}
-              </div>
-            </>
-          )}
-
-          {/* The controls have to be on screen: they're global hotkeys with no
-              other affordance, and the mouse cannot reach this window while a
-              game is focused. */}
-          <div className={s.achListKeys}>
-            {scrollable && <><kbd className={s.key}>Alt</kbd>+<kbd className={s.key}>↓</kbd>
-              <kbd className={s.key}>Alt</kbd>+<kbd className={s.key}>↑</kbd>
-              <span className={s.achListKeysLabel}>scroll</span></>}
-            <kbd className={s.key}>Alt</kbd>+<kbd className={s.key}>J</kbd>
-            <span className={s.achListKeysLabel}>close</span>
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
 // ── Level-up toast ────────────────────────────────────────────────────────────
 
 function LevelUpToast({ toast, onDismiss }) {
@@ -421,17 +254,6 @@ function SessionEndToast({ toast, onDismiss }) {
 
 function OverlayToast({ toast, onDismiss }) {
   const { leaving, close, hoverId } = useAutoClose(onDismiss, DISPLAY_MS)
-  const [progress, setProgress] = useState(100)
-
-  useEffect(() => {
-    const start = Date.now()
-    const tick = setInterval(() => {
-      const pct = Math.max(0, 100 - ((Date.now() - start) / DISPLAY_MS) * 100)
-      setProgress(pct)
-      if (pct <= 0) clearInterval(tick)
-    }, 50)
-    return () => clearInterval(tick)
-  }, [])
 
   const { ach, gameName, summary } = toast
   const displayAch = summary ? summary.first : ach
@@ -486,7 +308,7 @@ function OverlayToast({ toast, onDismiss }) {
 
       {/* Progress timer bar */}
       <div className={s.progressTrack}>
-        <div className={s.progressFill} style={{ width: `${progress}%` }} />
+        <div className={s.progressFill} style={{ animationDuration: `${DISPLAY_MS}ms` }} />
       </div>
     </div>
   )
@@ -606,19 +428,11 @@ function ReleaseToast({ toast, onDismiss }) {
 
 // ── Overlay app ───────────────────────────────────────────────────────────────
 
-// The queue is capped so a burst of unlocks can't paper the screen — but the
-// Alt+J list is exempt from that cap. Main keeps Alt+Down/Alt+Up registered
-// globally for as long as the list is on screen and only releases them when the
-// toast reports itself closed (dismiss below), so evicting it here would leave
-// two very common combos hijacked system-wide and make the next Alt+J look dead.
+// The queue is capped so a burst of unlocks can't paper the screen.
 const MAX_TOASTS = 4
 
 function capToasts(list) {
-  const pinned = list.filter(t => t.type === 'achList').length
-  if (!pinned) return list.slice(-MAX_TOASTS)
-  const room = Math.max(0, MAX_TOASTS - pinned)
-  const kept = new Set(room ? list.filter(t => t.type !== 'achList').slice(-room) : [])
-  return list.filter(t => t.type === 'achList' || kept.has(t))
+  return list.slice(-MAX_TOASTS)
 }
 
 export default function OverlayApp() {
@@ -649,6 +463,14 @@ export default function OverlayApp() {
     // followed a crash/reload that happened while a toast was hovered.
     setInteractive(false)
 
+    // Audio opens as a game is found, while it is still loading, instead of with
+    // the first chime in the middle of play, and closes when the game does.
+    on(window.kozo?.events?.onSessionDetected, holdAudio)
+    on(window.kozo?.events?.onSessionStarted, holdAudio)
+    on(window.kozo?.events?.onSessionEnded, releaseAudio)
+    on(window.kozo?.events?.onSessionDiscarded, releaseAudio)
+    on(window.kozo?.events?.onSessionUndetected, releaseAudio)
+
     // Spread the FULL payload — main sends artPath/artUrl for the cover thumb.
     on(window.kozo?.events?.onSessionOverlay, (data) => {
       playSessionStart()
@@ -662,13 +484,6 @@ export default function OverlayApp() {
         ? cards.map(c => ({ id: ++nextId.current, type: 'status', ...c }))
         : [{ id: ++nextId.current, type: 'status', idle: true, gameName: 'KoZo' }]
       setToasts(q => capToasts([...q.filter(t => t.type !== 'status'), ...list]))
-    })
-
-    // Global-hotkey achievement list (Alt+J), read-only. Replaces any existing
-    // list toast so repeated presses refresh in place instead of stacking.
-    on(window.kozo?.events?.onAchListOverlay, (data) => {
-      const toast = { id: ++nextId.current, type: 'achList', ...data }
-      setToasts(q => capToasts([...q.filter(t => t.type !== 'achList'), toast]))
     })
 
     on(window.kozo?.events?.onAchievementOverlay, ({ achievements, gameName, artPath, artUrl }) => {
@@ -730,14 +545,6 @@ export default function OverlayApp() {
   function dismiss(id) {
     setToasts(q => {
       const next = q.filter(t => t.id !== id)
-      // Tell main the achievement list is gone, whatever closed it (Alt+J, the
-      // safety timeout, a click, the X), so its Alt+Down/Alt+Up hotkeys are
-      // released. This lives here rather than in an unmount cleanup on purpose:
-      // StrictMode double-mounts every component in dev, and an unmount handler
-      // would report "closed" while the list was still very much open.
-      if (q.some(t => t.id === id && t.type === 'achList')) {
-        window.kozo?.api?.overlay?.achListClosed?.()
-      }
       // Hide the overlay window when all toasts are gone
       if (next.length === 0) window.kozo?.api?.overlay?.hide?.()
       return next
@@ -751,8 +558,6 @@ export default function OverlayApp() {
           ? <SessionToast    key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
           : t.type === 'status'
           ? <StatusToast     key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
-          : t.type === 'achList'
-          ? <AchListToast    key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
           : t.type === 'levelup'
           ? <LevelUpToast    key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
           : t.type === 'sessionEnd'

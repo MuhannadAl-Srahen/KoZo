@@ -348,6 +348,7 @@ export default function Library() {
     const offs = [
       window.kozo.events.onSessionStarted(() => { loadGames({ silent: true }); loadActiveSessions() }),
       window.kozo.events.onSessionEnded(()   => { loadGames({ silent: true }); loadActiveSessions(); loadWeekPlaytime() }),
+      window.kozo.events.onSessionDiscarded?.(() => { loadGames({ silent: true }); loadActiveSessions() }),
       window.kozo.events.onGameUpdated(() => loadGames({ silent: true })),
       // Optimistic LIVE badge — light up the cover ~one poll after launch.
       window.kozo.events.onSessionDetected?.(()   => loadActiveSessions()),

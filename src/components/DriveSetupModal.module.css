@@ -19,3 +19,6 @@
   background: var(--surface-1); border: 1px solid var(--border); color: var(--text-primary); font-family: var(--font-mono); font-size: var(--fs-sm);
 }
 .input:focus { outline: none; border-color: var(--a); }
+.hint { margin: 10px 0 0; font-size: var(--fs-xs); color: var(--text-secondary); line-height: 1.5; }
+.hintLink { padding: 0; background: none; border: 0; color: var(--a); font: inherit; font-weight: 600; cursor: pointer; }
+.hintLink:hover { text-decoration: underline; }

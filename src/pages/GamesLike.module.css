@@ -30,6 +30,7 @@
 }
 .hit:hover, .hit:focus-visible { background: color-mix(in srgb, var(--a) 14%, transparent); }
 .hit img { width: 92px; height: 43px; object-fit: cover; border-radius: 4px; flex-shrink: 0; }
+.hitBlank { position: relative; width: 92px; height: 43px; border-radius: 4px; overflow: hidden; flex-shrink: 0; }
 .hit span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hitMuted { padding: 10px; color: var(--text-muted); font-size: var(--fs-sm); }
 

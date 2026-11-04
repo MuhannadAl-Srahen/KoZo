@@ -35,9 +35,19 @@ jobs:
       - name: Test
         run: |
           node scripts/test-parsers.js
+          node scripts/test-backup-copy.js
           bunx electron-builder install-app-deps
           bunx vite build
           bunx electron scripts/smoke-test.js
+
+      # KoZo's Google client for Drive sign-in, kept out of the public code. With
+      # no secrets set, the build simply has no Google row (docs/google-drive.md).
+      - name: Add the Google client
+        env:
+          KOZO_GOOGLE_CLIENT_ID: ${{ secrets.KOZO_GOOGLE_CLIENT_ID }}
+          KOZO_GOOGLE_CLIENT_SECRET: ${{ secrets.KOZO_GOOGLE_CLIENT_SECRET }}
+        run: |
+          node -e "const {KOZO_GOOGLE_CLIENT_ID:id,KOZO_GOOGLE_CLIENT_SECRET:secret}=process.env; if(id&&secret){require('fs').writeFileSync('electron/defaults.local.js','module.exports='+JSON.stringify({GOOGLE_CLIENT_ID:id,GOOGLE_CLIENT_SECRET:secret})+'\n');console.log('Google client added')}else{console.log('No Google client secrets: Drive sign-in stays off in this build')}"
 
       - name: Build and publish release
         env:

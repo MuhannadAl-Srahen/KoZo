@@ -20,6 +20,7 @@ const DEFAULT_SETTINGS = [
   ['steam_api_key', ''],
   ['steam_user_id', ''],
   ['idle_pause_min', '5'],
+  ['away_pause_sec', '60'],
 ]
 
 function getDb() {
@@ -154,6 +155,24 @@ function runMigrations() {
           const del = db.prepare('DELETE FROM sessions WHERE id = ?')
           for (const r of short) { sub.run(r.d, r.game_id); del.run(r.id) }
           db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('cleaned_short_sessions_v1', '1')").run()
+        })()
+      }
+    } catch (_) {}
+
+    // One-time: achievement icons stored on Steam's old image servers, where
+    // newer ones answer 404 (achIcons.js). New rows are fixed as they're written.
+    try {
+      const done = db.prepare("SELECT value FROM settings WHERE key = 'ach_icon_host_v1'").get()
+      if (!done) {
+        const { achIconUrl } = require('./achIcons')
+        db.transaction(() => {
+          const rows = db.prepare('SELECT id, icon_url, icon_locked_url FROM achievements WHERE icon_url IS NOT NULL OR icon_locked_url IS NOT NULL').all()
+          const set = db.prepare('UPDATE achievements SET icon_url = ?, icon_locked_url = ? WHERE id = ?')
+          for (const r of rows) {
+            const icon = achIconUrl(r.icon_url), locked = achIconUrl(r.icon_locked_url)
+            if (icon !== r.icon_url || locked !== r.icon_locked_url) set.run(icon, locked, r.id)
+          }
+          db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('ach_icon_host_v1', '1')").run()
         })()
       }
     } catch (_) {}

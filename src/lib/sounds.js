@@ -3,13 +3,40 @@
 // sound is decoration, a broken AudioContext must not break a toast.
 
 let _ctx = null
+let _held = false
+let _closeTimer = null
+
+// Measured over a game: frames drop for a few seconds some 15 s after audio
+// starts, and restarting a suspended context for each chime cost even more. So
+// audio stays open for a whole game (holdAudio), started while it loads. It is
+// closed between games: an open audio stream can keep Windows from sleeping.
+function closeSoon() {
+  clearTimeout(_closeTimer)
+  _closeTimer = setTimeout(() => {
+    if (_held || !_ctx) return
+    _ctx.close().catch(() => {})
+    _ctx = null
+  }, 8000)
+}
 
 function ctx() {
   const AC = window.AudioContext || window.webkitAudioContext
   if (!AC) return null
   if (!_ctx) _ctx = new AC()
   if (_ctx.state === 'suspended') _ctx.resume().catch(() => {})
+  if (!_held) closeSoon()   // a chime with no game running (a level-up after one)
   return _ctx
+}
+
+export function holdAudio() {
+  _held = true
+  clearTimeout(_closeTimer)
+  try { ctx() } catch { /* sound is decoration */ }
+}
+
+export function releaseAudio() {
+  _held = false
+  closeSoon()
 }
 
 // One enveloped note: quick attack, exponential decay. A quiet triangle layer

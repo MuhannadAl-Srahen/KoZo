@@ -763,7 +763,7 @@ export default function GameList() {
             loadItems(page, { silent: true })
           }}
           onToggleFavorite={toggleFav}
-          onEdit={setEditItem}
+          onEdit={(it) => setEditItem({ ...it, _openTab: 'edit' })}
           onDelete={async (item) => {
             await window.kozo?.api?.gameList?.delete(item.id)
             await afterDelete()

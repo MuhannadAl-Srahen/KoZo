@@ -1,17 +1,27 @@
 import React, { useState, useEffect } from 'react'
-import { IconEdit, IconTrash, IconStar, IconBrandSteam, IconCheck } from '@tabler/icons-react'
+import { IconEdit, IconTrash, IconStar, IconPencil } from '@tabler/icons-react'
 import Modal, { modalStyles as ms } from '../ui/Modal'
+import SteamGameModal from '../SteamGameModal'
 import { LIST_STATUSES, LIST_STATUS_ORDER } from '../../lib/cardModel'
 import MonthPicker from '../ui/MonthPicker'
-import MediaGallery from '../ui/MediaGallery'
 import RatingPicker from '../ui/RatingPicker'
 import { useSteamArt } from '../../lib/steamArt'
+import { useAppearance } from '../../context/AppearanceContext'
 import { formatMonthKey } from '../../lib/utils'
+import sg from '../SteamGameModal.module.css'
 import s from './AddGameModal.module.css'
 
 const STATUS_OPTIONS = LIST_STATUS_ORDER.map(value => ({ value, label: LIST_STATUSES[value].label }))
 
+// A Game List game's window. A game on Steam gets the same store window as
+// Upcoming (SteamGameModal), at its full size from the first frame, plus what's
+// yours to change. Where that goes is Settings > Appearance > Game List window
+// (prefs.gameListEdit): all in an Edit tab, or status and play plan on the
+// Overview. A game with no Steam page has no store info, so it keeps the small form.
 export default function EditGameListModal({ item, onClose, onSaved, onDeleted }) {
+  const { prefs } = useAppearance()
+  const onOverview = prefs.gameListEdit === 'overview'
+  const [tab, setTab]               = useState(item._openTab || 'overview')
   const [name, setName]             = useState(item.name)
   const [status, setStatus]         = useState(item.status)
   const [rating, setRating]         = useState(item.rating != null ? String(item.rating) : '')
@@ -21,23 +31,7 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
   const [errors, setErrors]         = useState({})
   const [plannedMonth, setPlannedMonth] = useState(item.planned_month || null)   // play plan 'YYYY-MM'
   const [pickingMonth, setPickingMonth] = useState(false)
-  // Game media for the header gallery: trailers first, then Steam art (the
-  // same art the cards use, lib/steamArt) and the store screenshots.
   const art = useSteamArt(item.steam_app_id)
-  const [details, setDetails] = useState(null)
-  useEffect(() => {
-    const appId = item.steam_app_id
-    if (!appId) return
-    let alive = true
-    window.kozo?.api?.steam?.storeDetails?.(appId).then(r => { if (alive && r?.ok) setDetails(r.data) })
-    return () => { alive = false }
-  }, [item.steam_app_id])
-  const lead = art?.hero || art?.capsule || art?.header
-  const media = [
-    ...(details?.videos || []).map(v => ({ thumb: v.thumb, video: v })),
-    ...(lead ? [{ thumb: art.capsule || art.header || lead, full: lead }] : []),
-    ...(details?.media || []),
-  ]
   const [confirmingClose, setConfirmingClose] = useState(false)
 
   // Custom-list membership (Spotify-playlist style, many-to-many).
@@ -60,14 +54,6 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
     })()
   }, [item.id])
 
-  function toggleList(listId) {
-    setMemberIds(prev => {
-      const next = new Set(prev)
-      next.has(listId) ? next.delete(listId) : next.add(listId)
-      return next
-    })
-  }
-
   const dirty =
     name !== item.name ||
     status !== item.status ||
@@ -76,7 +62,7 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
     memberIds.size !== initialMemberIds.size ||
     [...memberIds].some(id => !initialMemberIds.has(id))
 
-  // Backdrop / Escape / X — confirm before dropping unsaved edits.
+  // Backdrop / Escape / X: confirm before dropping unsaved edits.
   function requestClose() {
     if (dirty) setConfirmingClose(true)
     else onClose()
@@ -85,14 +71,14 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
   async function handleSave() {
     const newErrors = {}
     if (!name.trim()) newErrors.name = 'Game name is required'
-    if (Object.keys(newErrors).length) { setErrors(newErrors); return }
+    if (Object.keys(newErrors).length) { setErrors(newErrors); setTab('edit'); return }
 
     setSaving(true)
     const res = await window.kozo?.api?.gameList?.update(item.id, {
       name: name.trim(),
       // Only send status when the user actually changed it. gameList:update runs
       // statusSync on ANY truthy status, and re-asserting an unchanged
-      // want_to_play/upcoming clears the linked library game's Finished flag —
+      // want_to_play/upcoming clears the linked library game's Finished flag,
       // so a rename or a list toggle would silently cost the milestone.
       ...(status !== item.status ? { status } : {}),
       rating: status === 'finished' && rating !== '' ? Number(rating) : null,
@@ -103,7 +89,7 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
       setErrors({ save: res?.error || 'Failed to save' })
       return
     }
-    // Apply list-membership diff — only once the row itself saved.
+    // Apply list-membership diff, only once the row itself saved.
     for (const l of lists) {
       const now = memberIds.has(l.id)
       const was = initialMemberIds.has(l.id)
@@ -122,137 +108,172 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
     onDeleted?.()
   }
 
-  function openOnSteam() {
-    if (item.steam_app_id) {
-      window.kozo?.api?.shell?.openExternal(`https://store.steampowered.com/app/${item.steam_app_id}`)
-    }
-  }
+  const nameField = (
+    <div className={s.field}>
+      <label className={`${s.label} ${s.labelRequired}`}>Game name</label>
+      <input
+        className={`${s.input} ${errors.name ? s.inputError : ''}`}
+        value={name}
+        onChange={e => { setName(e.target.value); setErrors(p => ({ ...p, name: '' })) }}
+      />
+      {errors.name && <div className={s.errorText}>{errors.name}</div>}
+    </div>
+  )
 
-  return (
-    <Modal
-      title="Edit Game"
-      icon={<IconEdit size={17} stroke={1.6} />}
-      onClose={onClose}
-      onRequestClose={requestClose}
-      width={media.length ? 760 : 560}
-      footer={
-        <div style={{ display: 'flex', gap: 8, width: '100%', alignItems: 'center' }}>
+  const statusField = (
+    <div className={s.field}>
+      <label className={s.label}>Status</label>
+      <div className={s.pills}>
+        {STATUS_OPTIONS.map(o => (
           <button
-            className={confirmDelete ? ms.btnDanger : ms.btnGhost}
-            onClick={handleDelete}
-            disabled={deleting}
-            style={{ marginRight: 'auto' }}
+            key={o.value}
+            className={`${s.pill} ${status === o.value ? s.pillActive : ''}`}
+            onClick={() => setStatus(o.value)}
           >
-            <IconTrash size={14} stroke={1.6} />
-            {confirmDelete ? (deleting ? 'Removing…' : 'Confirm remove') : 'Remove'}
+            {o.label}
           </button>
-          {confirmDelete && (
-            <button className={ms.btnCancel} onClick={() => setConfirmDelete(false)}>Cancel</button>
-          )}
-          {!confirmDelete && (
-            <>
-              {item.steam_app_id && (
-                <button
-                  className={ms.btnCancel}
-                  onClick={openOnSteam}
-                  title="View this game on the Steam Store"
-                >
-                  <IconBrandSteam size={14} stroke={1.6} />
-                  View on Steam
-                </button>
-              )}
-              <button className={ms.btnCancel} onClick={requestClose}>Cancel</button>
-              <button className={ms.btnPrimary} onClick={handleSave} disabled={saving}>
-                {saving ? 'Saving…' : 'Save'}
-              </button>
-            </>
-          )}
-        </div>
-      }
-    >
-      {media.length > 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <MediaGallery items={media} />
-        </div>
-      )}
-
-      <div className={s.field}>
-        <label className={`${s.label} ${s.labelRequired}`}>Game name</label>
-        <input
-          className={`${s.input} ${errors.name ? s.inputError : ''}`}
-          value={name}
-          onChange={e => { setName(e.target.value); setErrors(p => ({ ...p, name: '' })) }}
-        />
-        {errors.name && <div className={s.errorText}>{errors.name}</div>}
+        ))}
       </div>
+    </div>
+  )
 
-      <div className={s.field}>
-        <label className={s.label}>Status</label>
-        <div className={s.pills}>
-          {STATUS_OPTIONS.map(o => (
-            <button
-              key={o.value}
-              className={`${s.pill} ${status === o.value ? s.pillActive : ''}`}
-              onClick={() => setStatus(o.value)}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className={s.field}>
-        <label className={s.label}>Play plan</label>
-        <div className={s.pills}>
-          <button className={`${s.pill} ${plannedMonth ? s.pillActive : ''}`} onClick={() => setPickingMonth(v => !v)}>
-            {plannedMonth ? formatMonthKey(plannedMonth, 'long') : 'Not planned'}
-          </button>
-          {plannedMonth && (
-            <button className={s.pill} onClick={() => { setPlannedMonth(null); setPickingMonth(false) }}>Clear</button>
-          )}
-        </div>
-        {pickingMonth && (
-          <div style={{ marginTop: 8 }}>
-            <MonthPicker value={plannedMonth} onChange={(k) => { setPlannedMonth(k); setPickingMonth(false) }} />
-          </div>
+  const planField = (
+    <div className={s.field}>
+      <label className={s.label}>Play plan</label>
+      <div className={s.pills}>
+        <button className={`${s.pill} ${plannedMonth ? s.pillActive : ''}`} onClick={() => setPickingMonth(v => !v)}>
+          {plannedMonth ? formatMonthKey(plannedMonth, 'long') : 'Not planned'}
+        </button>
+        {plannedMonth && (
+          <button className={s.pill} onClick={() => { setPlannedMonth(null); setPickingMonth(false) }}>Clear</button>
         )}
       </div>
-
-      {/* The same 1 to 10 picker as Finished games. An older decimal score
-          (8.5) shows rounded and is only replaced when a new one is picked. */}
-      {status === 'finished' && (
-        <div className={s.field}>
-          <label className={s.label}>
-            <IconStar size={12} stroke={1.6} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />
-            Your rating
-            {rating !== '' && (
-              <button type="button" className={s.labelAction} onClick={() => setRating('')}>Clear</button>
-            )}
-          </label>
-          <RatingPicker
-            value={rating !== '' ? Math.min(10, Math.max(1, Math.round(Number(rating)))) : null}
-            onChange={(n) => setRating(String(n))}
-          />
+      {pickingMonth && (
+        <div style={{ marginTop: 8 }}>
+          <MonthPicker value={plannedMonth} onChange={(k) => { setPlannedMonth(k); setPickingMonth(false) }} />
         </div>
       )}
+    </div>
+  )
 
-      {errors.save && <div className={s.errorText} style={{ marginTop: 6 }}>{errors.save}</div>}
+  // The same 1 to 10 picker as Finished games. An older decimal score (8.5)
+  // shows rounded and is only replaced when a new one is picked.
+  const ratingField = status === 'finished' && (
+    <div className={s.field}>
+      <label className={s.label}>
+        <IconStar size={12} stroke={1.6} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />
+        Your rating
+        {rating !== '' && (
+          <button type="button" className={s.labelAction} onClick={() => setRating('')}>Clear</button>
+        )}
+      </label>
+      <RatingPicker
+        value={rating !== '' ? Math.min(10, Math.max(1, Math.round(Number(rating)))) : null}
+        onChange={(n) => setRating(String(n))}
+      />
+    </div>
+  )
 
-      {confirmingClose && (
-        <div className={s.confirmOverlay} onMouseDown={e => e.stopPropagation()}>
-          <div className={s.confirmBox}>
-            <div className={s.confirmTitle}>Discard unsaved changes?</div>
-            <div className={s.confirmBtns}>
-              <button className={ms.btnPrimary} onClick={() => setConfirmingClose(false)}>
-                Keep editing
-              </button>
-              <button className={ms.btnDanger} onClick={onClose}>
-                Discard
-              </button>
-            </div>
+  const saveError = errors.save && <div className={s.errorText} style={{ marginTop: 6 }}>{errors.save}</div>
+
+  const confirmClose = confirmingClose && (
+    <div className={s.confirmOverlay} onMouseDown={e => e.stopPropagation()}>
+      <div className={s.confirmBox}>
+        <div className={s.confirmTitle}>Discard unsaved changes?</div>
+        <div className={s.confirmBtns}>
+          <button className={ms.btnPrimary} onClick={() => setConfirmingClose(false)}>
+            Keep editing
+          </button>
+          <button className={ms.btnDanger} onClick={onClose}>
+            Discard
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+
+  const removeButtons = (
+    <>
+      <button className={confirmDelete ? ms.btnDanger : ms.btnGhost} onClick={handleDelete} disabled={deleting}>
+        <IconTrash size={14} stroke={1.6} />
+        {confirmDelete ? (deleting ? 'Removing...' : 'Confirm remove') : 'Remove'}
+      </button>
+      {confirmDelete && <button className={ms.btnCancel} onClick={() => setConfirmDelete(false)}>Cancel</button>}
+    </>
+  )
+
+  const saveButtons = (
+    <>
+      <button className={ms.btnCancel} onClick={requestClose}>Cancel</button>
+      <button className={ms.btnPrimary} onClick={handleSave} disabled={saving}>
+        {saving ? 'Saving...' : 'Save'}
+      </button>
+    </>
+  )
+
+  // No Steam page: the plain form.
+  if (!item.steam_app_id) {
+    return (
+      <Modal
+        title="Edit Game"
+        icon={<IconEdit size={17} stroke={1.6} />}
+        onClose={onClose}
+        onRequestClose={requestClose}
+        width={560}
+        footer={
+          <div style={{ display: 'flex', gap: 8, width: '100%', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 8, marginRight: 'auto' }}>{removeButtons}</div>
+            {!confirmDelete && saveButtons}
           </div>
-        </div>
-      )}
-    </Modal>
+        }
+      >
+        {nameField}
+        {statusField}
+        {planField}
+        {ratingField}
+        {saveError}
+        {confirmClose}
+      </Modal>
+    )
+  }
+
+  const onEditTab = tab === 'edit'
+  return (
+    <SteamGameModal
+      appId={item.steam_app_id}
+      name={name.trim() || item.name}
+      art={art}
+      onClose={onClose}
+      onRequestClose={requestClose}
+      tab={tab}
+      onTab={setTab}
+      chips={!onOverview && <div className={sg.reviewChip}>{LIST_STATUSES[status]?.label || status}</div>}
+      overviewTop={onOverview && <div>{statusField}{planField}{ratingField}{saveError}</div>}
+      extraTab={{
+        key: 'edit',
+        label: 'Edit',
+        node: (
+          <div style={{ maxWidth: 620 }}>
+            {nameField}
+            {!onOverview && statusField}
+            {!onOverview && planField}
+            {!onOverview && ratingField}
+            {saveError}
+          </div>
+        ),
+      }}
+      footerLeft={onEditTab ? removeButtons : null}
+      actions={
+        confirmDelete ? null
+          : onEditTab || dirty ? saveButtons
+            : !onOverview ? (
+              <button className={ms.btnCancel} onClick={() => setTab('edit')}>
+                <IconPencil size={14} stroke={1.6} /> Edit
+              </button>
+            ) : null
+      }
+    >
+      {confirmClose}
+    </SteamGameModal>
   )
 }

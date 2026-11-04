@@ -25,6 +25,10 @@ if (!fs.existsSync(path.join(root, 'renderer-dist', 'index.html'))) {
 // Before main.js loads: its own DB, logs and single-instance lock.
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kozo-smoke-'))
 app.setPath('userData', tmp)
+// Its own Documents too: backupHome.ensure() runs 45s in and, on this fresh
+// profile, would otherwise adopt the real KoZo Backup folder, overwrite the
+// real library file and move old backups into this throwaway folder.
+app.setPath('documents', path.join(tmp, 'Documents'))
 process.env.KOZO_SMOKE = '1'
 process.env.KOZO_RENDERER = 'dist'
 
@@ -153,6 +157,127 @@ app.whenReady().then(async () => {
   })()`)
   check('Settings: every tab renders', tabs.length > 3 && tabs.every(Boolean), JSON.stringify(tabs))
 
+  // Backups: a copy in a folder of your own (a path skips the folder dialog).
+  const copyTo = fs.mkdtempSync(path.join(os.homedir(), '.kozo-smoke-copy-'))
+  const copyRes = await ev(`(async () => {
+    const api = window.kozo.api
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const text = () => document.querySelector('.app-main').innerText
+    location.hash = '#/settings?tab=data'; await wait(1800)
+    const summary = text()
+    const click = (label) => [...document.querySelectorAll('.app-main button')].find(x => x.innerText.trim() === label)?.click()
+    click('Set up'); await wait(400)
+    const before = document.body.innerText
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await wait(300)
+    click('Get everything back'); await wait(400)
+    const getBack = document.body.innerText
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await wait(300)
+    const set = await api.backup.copySet(${JSON.stringify(copyTo)})
+    await api.backup.copyNow()
+    const status = (await api.backup.copyStatus()).data
+    await wait(500)
+    return { summary, before, getBack, set, status, during: text() }
+  })()`)
+  check('Backups: page is short (the choices are in pop-ups)', /Off this PC/.test(copyRes.summary) && !/Choose a folder|A \.kozo file/.test(copyRes.summary), copyRes.summary.slice(0, 300))
+  check('Backups: Set up offers a cloud folder', /Keep a copy off this PC/.test(copyRes.before) && /Choose a folder/.test(copyRes.before), copyRes.before.slice(-300))
+  check('Backups: Get everything back lists the sources', /A folder/.test(copyRes.getBack) && /A \.kozo file/.test(copyRes.getBack), copyRes.getBack.slice(-300))
+  check('Backups: never offers OneDrive', !/OneDrive/i.test(copyRes.before))
+  check('Backups: copy folder is set', copyRes.set?.ok && copyRes.status?.configured && copyRes.status?.reachable && !copyRes.status?.error, JSON.stringify(copyRes.status))
+  check('Backups: page shows the copy', /Copy now/.test(copyRes.during) && /Stop copying/.test(await ev(`document.documentElement.textContent`)), copyRes.during.slice(0, 300))
+  const copyOff = await ev(`(async () => {
+    await window.kozo.api.backup.copyOff()
+    await new Promise(r => setTimeout(r, 400))
+    return document.querySelector('.app-main').innerText
+  })()`)
+  check('Backups: stop copying goes back to Set up', /Off this PC/.test(copyOff) && /Set up/.test(copyOff), copyOff.slice(0, 300))
+
+  // Restoring from that folder: the library and saves come back, the folder stays
+  // where it is and becomes the copy, and KoZo's own backup home doesn't move.
+  const settingsQ = require(path.join(root, 'electron', 'db', 'queries', 'settings.js'))
+  const backupHome = require(path.join(root, 'electron', 'services', 'backupHome.js'))
+  const copyHome = path.join(copyTo, 'KoZo Backup')
+  const blob = path.join('Saves', 'Smoke Restored', 'vault', 'blobs', 'abc.gz')
+  fs.mkdirSync(path.join(copyHome, path.dirname(blob)), { recursive: true })
+  fs.writeFileSync(path.join(copyHome, blob), 'saved game')
+  fs.mkdirSync(path.join(copyHome, 'Data'), { recursive: true })
+  const payload = require(path.join(root, 'electron', 'services', 'autoBackup.js')).buildPayload()
+  fs.writeFileSync(path.join(copyHome, 'Data', 'kozo-autobackup.json'), JSON.stringify(payload))
+  const baseBefore = backupHome.base()
+  const restored = await ev(`window.kozo.api.backup.restoreFolder(${JSON.stringify(copyTo)}, { copy: true })`)
+  check('Restore: reads the backup from the folder', restored?.ok && restored.data?.data?.games === payload.games.length, JSON.stringify(restored).slice(0, 200))
+  check('Restore: backup home did not move', backupHome.base() === baseBefore, `${baseBefore} -> ${backupHome.base()}`)
+  check('Restore: the folder becomes the copy', settingsQ.getSetting('backup_copy_dir') === copyHome, settingsQ.getSetting('backup_copy_dir'))
+  check('Restore: saves came down to this PC', fs.existsSync(path.join(require(path.join(root, 'electron', 'services', 'saveBackup.js')).rootPath(), 'Smoke Restored', 'vault', 'blobs', 'abc.gz')))
+  check('Restore: the folder keeps its files', fs.existsSync(path.join(copyHome, blob)))
+  const noBackup = fs.mkdtempSync(path.join(os.homedir(), '.kozo-smoke-empty-'))
+  const refused = await ev(`window.kozo.api.backup.restoreFolder(${JSON.stringify(noBackup)}, { copy: true })`)
+  check('Restore: a folder with no backup is refused', refused?.ok === false && /No KoZo backup/.test(refused.error || ''), JSON.stringify(refused))
+  await ev(`window.kozo.api.backup.copyOff()`)
+  try { fs.rmSync(copyTo, { recursive: true, force: true }); fs.rmSync(noBackup, { recursive: true, force: true }) } catch {}
+
+  // The Game List window: full width with the store tabs from the first frame for
+  // a Steam game, the small form without one. Neither needs Steam to answer.
+  {
+    const api = `window.kozo.api.gameList`
+    await ev(`(async () => {
+      await ${api}.add({ name: 'Smoke Window Steam', steam_app_id: 814380, status: 'want_to_play', rating: null, game_id: null })
+      await ${api}.add({ name: 'Smoke Window Plain', steam_app_id: null, status: 'want_to_play', rating: null, game_id: null })
+      return true
+    })()`)
+    await ev(`location.hash = '#/plan'; true`); await sleep(300)
+    await ev(`location.hash = '#/game-list'; true`)
+    const open = (name) => ev(`(async () => {
+      let wrap = null
+      for (let i = 0; i < 100 && !wrap; i++) {
+        wrap = [...document.querySelectorAll('.app-main [data-gpnav]')].find(c => c.innerText.includes(${JSON.stringify(name)}))
+        if (!wrap) await new Promise(r => setTimeout(r, 100))
+      }
+      wrap?.firstElementChild?.click()
+      let d = null
+      for (let i = 0; i < 60 && !d; i++) {
+        await new Promise(r => setTimeout(r, 50))
+        d = document.querySelector('[role=dialog]')
+      }
+      const out = { width: Math.round(d?.getBoundingClientRect().width || 0), tabs: [...(d?.querySelectorAll('[role=tab]') || [])].map(t => t.innerText.trim()), text: d?.innerText || '' }
+      d?.querySelector('button[aria-label="Close dialog"]')?.click()
+      await new Promise(r => setTimeout(r, 300))
+      return out
+    })()`)
+    const steam = await open('Smoke Window Steam')
+    check('Game List window: full width at once', steam.width === 1120, String(steam.width))
+    check('Game List window: store tabs and Edit', ['Overview', 'About', 'Details', 'System requirements', 'Edit'].every(t => steam.tabs.includes(t)), steam.tabs.join(', '))
+    const plain = await open('Smoke Window Plain')
+    check('Game List window: no Steam page keeps the small form', plain.width === 560 && plain.tabs.length === 0 && /Status/i.test(plain.text), String(plain.width))
+    await ev(`location.hash = '#/settings?tab=appearance'; true`); await sleep(1800)
+    check('Settings: Game List window switch', await ev(`[...document.querySelectorAll('button[role=radio]')].some(b => b.innerText.includes('On the Overview'))`))
+    await ev(`location.hash = '#/settings?tab=tracking'; true`); await sleep(1800)
+    check('Settings: stop counting after switching away, 1 minute by default', await ev(`document.querySelector('[aria-label="Stop counting after switching away"] [aria-pressed=true]')?.innerText === '1m'`))
+    // Leave the list as it was: Pick for me below chooses from it.
+    await ev(`(async () => {
+      const rows = (await ${api}.list({ limit: 50 })).data?.items || []
+      for (const r of rows) if (/^Smoke Window /.test(r.name)) await ${api}.delete(r.id)
+      return true
+    })()`)
+  }
+
+  // Upcoming, Picked for you: a day with releases shows games, not just a count.
+  const upcoming = await ev(`(async () => {
+    localStorage.setItem('kozo:calendar:view', 'steam')
+    localStorage.setItem('kozo:calendar:pick', 'picked')
+    location.hash = '#/upcoming'
+    for (let i = 0; i < 80; i++) {
+      await new Promise(r => setTimeout(r, 100))
+      if (document.querySelector('.app-main [class*=steamCapFrame]')) break
+    }
+    const days = [...document.querySelectorAll('.app-main [class*=steamDay_]')].filter(d => d.querySelector('[class*=steamDayHead]'))
+    return { days: days.length, empty: days.filter(d => !d.querySelector('[class*=steamCapFrame]')).length, text: document.querySelector('.app-main').innerText }
+  })()`)
+  // Offline there are no games at all, which isn't what this checks.
+  if (upcoming.days) {
+    check('Upcoming: every day shows games', upcoming.empty === 0, `${upcoming.empty} of ${upcoming.days} days are empty`)
+    check('Upcoming: no "No picks" days', !/No picks/.test(upcoming.text))
+  }
+
   // Narrow window
   win.setContentSize(1000, 720); await sleep(400)
   for (const [hash, label] of [['#/', 'Library'], ['#/plan', 'Play Plan'], ['#/finished', 'Finished'], ['#/profile', 'Profile']]) {
@@ -227,6 +352,36 @@ app.whenReady().then(async () => {
     check('Big Picture: Escape leaves', await ev(`!document.querySelector('[data-bigpicture-root]')`))
     check('Big Picture: back to a window', !win.isFullScreen())
     check('Big Picture: no errors', errorsSince(before).length === 0, errorsSince(before).join(' | '))
+
+    // ── Overlay: its own small page, up before the toast, and toasts still show ──
+    const ow = require(path.join(root, 'electron', 'overlayWindow.js'))
+    ow.warm({ show: true })
+    const owin = ow.getWindow()
+    const overlayErrors = []
+    owin.webContents.on('console-message', (e) => { if (e.level === 'error') overlayErrors.push(String(e.message).slice(0, 200)) })
+    for (let i = 0; i < 80 && (owin.webContents.isLoading() || !owin.isVisible()); i++) await sleep(100)
+    check('overlay: loads its own page', /overlay\.html/.test(owin.webContents.getURL()), owin.webContents.getURL())
+    check('overlay: on screen before any toast', owin.isVisible())
+    ow.sendAchievements({ gameId: 0, gameName: 'Smoke Alpha', achievements: [{ display_name: 'Smoke unlock', description: 'A test', icon_url: null, xp: 25 }] })
+    ow.sendSessionStarted({ gameId: 0, gameName: 'Smoke Beta', artPath: null, artUrl: null })
+    await sleep(700)
+    const shown = await owin.webContents.executeJavaScript('document.body.innerText', true)
+    check('overlay: achievement toast shows', /Smoke unlock/.test(shown) && /\+25 XP/.test(shown), shown.slice(0, 120))
+    check('overlay: session toast shows', /Smoke Beta/.test(shown), shown.slice(0, 120))
+    const look = await owin.webContents.executeJavaScript(`(() => {
+      const css = (el) => el ? getComputedStyle(el) : null
+      const bar = [...document.querySelectorAll('div')].find(d => /progressFill/.test(d.className))
+      const t = [...document.querySelectorAll('div')].find(d => /_toast_|toast/.test(d.className) && getComputedStyle(d).borderRadius === '8px')
+      return { font: css(t)?.fontFamily || '', name: css([...document.querySelectorAll('div')].find(d => /toastName/.test(d.className)))?.fontFamily || '',
+               a: getComputedStyle(document.documentElement).getPropertyValue('--a').trim(), barAnim: css(bar)?.animationName || 'none',
+               body: getComputedStyle(document.body).backgroundColor }
+    })()`, true)
+    check('overlay: keeps its font', /DM Sans/.test(look.name), look.name)
+    check('overlay: has the design tokens', look.a.length > 0, JSON.stringify(look))
+    check('overlay: stays see-through', /rgba\(0, 0, 0, 0\)|transparent/.test(look.body), look.body)
+    check('overlay: timer bar animates', look.barAnim !== 'none', look.barAnim)
+    check('overlay: no errors', overlayErrors.length === 0, overlayErrors.join(' | '))
+
   }
 
   check('no renderer errors overall', errors.length === 0, errors.join(' | '))
