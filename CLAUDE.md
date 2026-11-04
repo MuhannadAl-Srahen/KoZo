@@ -169,4 +169,5 @@ src/                 renderer (React)
 - Settings > Backups stays short on purpose: one status card, two closed folds, and the choices in pop-ups (Set up, Get everything back). Add new options there, not to the page.
 - A session under 60s ends with `session:discarded`, not `session:ended`: anything showing a live session must listen to both, or its timer runs forever.
 - The Google client reaches release builds through GitHub secrets (`electron/defaults.local.js`, gitignored, written by `release.yml`), because the repo is public. See `docs/google-drive.md`, including what brand verification needs.
+- The smoke test also runs on GitHub's machine before every release, with a small screen and no user at it. Don't check exact on-screen sizes: windows shrink to fit the screen and open with a scale animation (use `offsetWidth`, and compare to the room there is). A failure there stops the release, so nothing is published.
 - `scripts/smoke-test.js` points `documents` at its throwaway folder, and `chooseBase` honours `KOZO_SMOKE`. Without both, a local run adopts the real KoZo Backup folder.

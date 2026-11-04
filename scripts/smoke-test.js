@@ -238,16 +238,21 @@ app.whenReady().then(async () => {
         await new Promise(r => setTimeout(r, 50))
         d = document.querySelector('[role=dialog]')
       }
-      const out = { width: Math.round(d?.getBoundingClientRect().width || 0), tabs: [...(d?.querySelectorAll('[role=tab]') || [])].map(t => t.innerText.trim()), text: d?.innerText || '' }
+      // Layout width, not the on-screen box: the window opens with a small scale
+      // animation. It also has to fit the screen, and the release machine's is small.
+      const o = d?.parentElement
+      const cs = o && getComputedStyle(o)
+      const room = o ? Math.floor(o.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)) : 0
+      const out = { width: d?.offsetWidth || 0, room, tabs: [...(d?.querySelectorAll('[role=tab]') || [])].map(t => t.innerText.trim()), text: d?.innerText || '' }
       d?.querySelector('button[aria-label="Close dialog"]')?.click()
       await new Promise(r => setTimeout(r, 300))
       return out
     })()`)
     const steam = await open('Smoke Window Steam')
-    check('Game List window: full width at once', steam.width === 1120, String(steam.width))
+    check('Game List window: full width at once', steam.width === Math.min(1120, steam.room), `${steam.width} of ${steam.room}`)
     check('Game List window: store tabs and Edit', ['Overview', 'About', 'Details', 'System requirements', 'Edit'].every(t => steam.tabs.includes(t)), steam.tabs.join(', '))
     const plain = await open('Smoke Window Plain')
-    check('Game List window: no Steam page keeps the small form', plain.width === 560 && plain.tabs.length === 0 && /Status/i.test(plain.text), String(plain.width))
+    check('Game List window: no Steam page keeps the small form', plain.width === Math.min(560, plain.room) && plain.tabs.length === 0 && /Status/i.test(plain.text), `${plain.width} of ${plain.room}`)
     await ev(`location.hash = '#/settings?tab=appearance'; true`); await sleep(1800)
     check('Settings: Game List window switch', await ev(`[...document.querySelectorAll('button[role=radio]')].some(b => b.innerText.includes('On the Overview'))`))
     await ev(`location.hash = '#/settings?tab=tracking'; true`); await sleep(1800)
@@ -321,8 +326,12 @@ app.whenReady().then(async () => {
   await tap(13)
   check('controller: ring moves on the new page', await ev(`!!document.querySelector('[data-gpfocus]')`))
   await go('#/', 1500)
-  await tap(13); await tap(13)
-  const focusedCard = await ev(`!!document.querySelector('.app-main [data-gpnav][data-gpfocus]')`)
+  // Down until a card: how many rows the toolbar takes depends on the window's width.
+  let focusedCard = false
+  for (let i = 0; i < 5 && !focusedCard; i++) {
+    await tap(13)
+    focusedCard = await ev(`!!document.querySelector('.app-main [data-gpnav][data-gpfocus]')`)
+  }
   check('controller: down lands on a Library card', focusedCard, await ev(`(document.querySelector('[data-gpfocus]')?.outerHTML || 'nothing focused').slice(0, 160) + ' focus=' + document.hasFocus()`))
   await tap(2)    // X
   check('controller: X opens the card menu', await ev(`!!document.querySelector('[role=menu]')`))
