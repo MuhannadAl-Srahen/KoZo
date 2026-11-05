@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>KoZo privacy</title>
+<meta name="description" content="What KoZo keeps, what leaves your PC, and how it uses Google Drive.">
+<meta name="theme-color" content="#08090a">
+<link rel="canonical" href="https://kozoapp.cloud/privacy.html">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<script>
+  try {
+    var saved = JSON.parse(localStorage.getItem('kozo-site') || '{}')
+    if (saved.accent) document.documentElement.style.setProperty('--a', saved.accent)
+  } catch (e) {}
+</script>
+<link rel="stylesheet" href="css/site.css">
+</head>
+<body>
+<main class="doc">
+  <a class="doc-brand" href="index.html"><img src="assets/favicon.svg" alt="" width="30" height="26"><span>KoZo</span></a>
+  <h1>Privacy</h1>
+  <p class="doc-date">Last updated November 5, 2026</p>
+  <p>KoZo is a desktop app that keeps your game history on your own PC. It has no account and no server of its own, and it sends nothing about you to its maker. This page says exactly what stays and what leaves.</p>
+
+  <h2>What stays on your PC</h2>
+  <p>Your library, sessions, achievements, ratings, settings and save backups are stored on your computer, in <b>%APPDATA%\KoZo</b> and in the backup folder you choose. You can delete them at any time by removing those folders.</p>
+
+  <h2>What KoZo asks other services for</h2>
+  <p>To show art, game details and prices, the app asks these services directly from your PC. They see your IP address, as any website does, and the request itself.</p>
+  <ul>
+    <li><b>Steam:</b> store details, cover art, news and achievement lists. If you connect your Steam account, your Steam ID and your own API key are used to read your unlocks. They stay on your PC.</li>
+    <li><b>SteamGridDB:</b> game names, to find covers for games that aren't on Steam.</li>
+    <li><b>CheapShark:</b> Steam game ids, to find the lowest price and prices at other stores.</li>
+    <li><b>api.steamcmd.net:</b> a game's Steam id, to tell you if your copy is behind the newest build.</li>
+    <li><b>GitHub:</b> to check for a new version of KoZo, and to download the public list of where games keep their saves.</li>
+    <li><b>Discord:</b> only if you turn on Rich Presence. The app talks to Discord on your PC, and Discord shows the game you're playing to your friends.</li>
+  </ul>
+
+  <h2>Google Drive</h2>
+  <p>Signing in with Google is optional, and KoZo works fully without it. If you sign in:</p>
+  <ul>
+    <li>KoZo asks for the <b>drive.file</b> permission only. It can only see and change files it created itself, in a folder called "KoZo Backup" in your own Drive. It can't read anything else in your Drive.</li>
+    <li>It stores your library backup and your game save backups there, and reads them back when you ask it to restore them or bring them to another PC.</li>
+    <li>The sign-in token is encrypted by Windows and stays on your PC.</li>
+    <li>Your Google data goes only between your PC and your Drive. It is never sent to the maker of KoZo or to anyone else, never sold, and never used for ads.</li>
+    <li>You can remove access at any time from <a href="https://myaccount.google.com/permissions">your Google account</a>, or by signing out in KoZo. The files stay in your Drive until you delete them.</li>
+  </ul>
+  <p>KoZo's use of information received from Google APIs follows the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including its Limited Use requirements.</p>
+
+  <h2>Other cloud folders</h2>
+  <p>If you choose a folder from Google Drive for Desktop, Dropbox, MEGA or iCloud, KoZo only writes files to that folder on your PC. That service's own app does the syncing, under your agreement with it.</p>
+
+  <h2>This website</h2>
+  <p>This site has no cookies, no analytics and no trackers. The color you pick and the achievements you earn here are saved in your own browser and never leave it. To show the newest version, your browser asks GitHub for the latest release. The site is hosted on GitHub Pages, and GitHub may keep the usual server logs.</p>
+
+  <h2>Questions</h2>
+  <p>Ask on <a href="https://github.com/MuhannadAl-Srahen/KoZo/issues">GitHub</a>. All of KoZo's code is public, so you can check any of this yourself. If this page changes, the date at the top changes with it.</p>
+  <p class="doc-links"><a href="index.html">Back to KoZo</a><a href="terms.html">Terms</a></p>
+</main>
+</body>
+</html>
