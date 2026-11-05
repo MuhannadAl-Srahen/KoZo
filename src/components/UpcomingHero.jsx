@@ -182,7 +182,7 @@ export default function UpcomingHero({ games, isTracked, onOpen, renderTrack }) 
         <section className={s.week}>
           <div className={s.weekHead}>
             <span className={s.weekTitle}>This week</span>
-            <span className={s.weekSub}>Landing in the next 7 days, best match first</span>
+            <span className={s.weekSub}>Landing in the next 7 days, {week.some(g => g.match > 0) ? 'best match first' : 'most popular first'}</span>
           </div>
           <div className={s.weekRow}>
             {week.map(g => (

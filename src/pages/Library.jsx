@@ -12,6 +12,7 @@ import EditGameModal from '../components/modals/EditGameModal'
 import InfoModal from '../components/ui/InfoModal'
 import ScanResultModal from '../components/modals/ScanResultModal'
 import SearchableSelect from '../components/ui/SearchableSelect'
+import CardSizeSlider from '../components/ui/CardSizeSlider'
 import CardContextMenu from '../components/ui/CardContextMenu'
 import EmptyState from '../components/ui/EmptyState'
 import ReleasedPanel from '../components/ReleasedPanel'
@@ -99,11 +100,8 @@ export default function Library() {
   const [scanning, setScanning]     = useState(false)
   const [scanProgress, setScanProgress] = useState(null)   // { stage, done, total }
   const [scanModal, setScanModal]   = useState(null)  // null | scan results[]
-  // Import from launchers (Epic, GOG, Xbox): the review list, the background
-  // "N new games found" count, and the busy flag of the toolbar button.
-  const [launcherModal, setLauncherModal] = useState(null)
+  // Launcher games (Epic, GOG, Xbox) found in the background: "N new games found".
   const [launcherNew, setLauncherNew] = useState(0)
-  const [launcherBusy, setLauncherBusy] = useState(false)
 
   const [search, setSearch]         = useState('')
   const [sortBy, setSortBy]         = useState(() => {
@@ -179,11 +177,6 @@ export default function Library() {
       navigate('/', { replace: true })
       runScan()
     }
-    // ?launchers=1: Settings → Features → Import from launchers
-    if (params.get('launchers') === '1') {
-      navigate('/', { replace: true })
-      runLauncherScan()
-    }
   }, [location.search])
 
   // New launcher games found in the background (main process, on launch).
@@ -193,19 +186,11 @@ export default function Library() {
     return () => off?.()
   }, [])
 
-  async function runLauncherScan() {
-    if (launcherBusy || !window.kozo?.api?.launchers) return
-    setLauncherBusy(true)
-    const res = await window.kozo.api.launchers.scan()
-    setLauncherBusy(false)
-    setLauncherModal(res?.ok ? res.data || [] : [])
-  }
-  // Closing the review counts as seen: the strip doesn't come back for them.
-  function closeLauncherModal() {
-    const keys = (launcherModal || []).map(g => g.key).filter(Boolean)
-    if (keys.length) window.kozo?.api?.launchers?.dismiss?.(keys)
-    setLauncherNew(0)
-    setLauncherModal(null)
+  // Closing the scan window counts as seen: the strip doesn't come back for those launcher games.
+  function closeScanModal() {
+    const keys = (scanModal || []).map(g => g.key).filter(Boolean)
+    if (keys.length) { window.kozo?.api?.launchers?.dismiss?.(keys); setLauncherNew(0) }
+    setScanModal(null)
   }
 
   // ── Selection mode ──────────────────────────────────────────────────────────
@@ -449,7 +434,7 @@ export default function Library() {
 
       {/* ── Toolbar (changes based on selection mode) ── */}
       {!selectionMode ? (
-        <div className={s.toolbar}>
+        <div className={`${s.toolbar} ${s.oneRow}`}>
           <h1 className={s.pageTitle}>My Library</h1>
 
           {/* Search */}
@@ -457,7 +442,7 @@ export default function Library() {
             <IconSearch size={13} stroke={1.6} className={s.searchIcon} />
             <input
               className={s.searchInput}
-              placeholder="Search games…"
+              placeholder="Search…" aria-label="Search games"
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
@@ -469,6 +454,7 @@ export default function Library() {
           </div>
 
           {/* Sort */}
+          <div className={s.selectSlot} style={{ '--slot': '148px' }}>
           <SearchableSelect
             value={sortBy}
             onChange={v => {
@@ -480,10 +466,12 @@ export default function Library() {
             placeholder="Sort by"
             searchable={false}
             clearable={false}
-            width={148}
+            width="100%"
           />
+          </div>
 
           {/* Status filter — filter out dropped/on-hold etc. without hiding */}
+          <div className={s.selectSlot} style={{ '--slot': '140px' }}>
           <SearchableSelect
             value={statusFilter}
             onChange={v => {
@@ -494,42 +482,31 @@ export default function Library() {
             options={Object.entries(STATUS_META).map(([value, st]) => ({ value, label: st.label }))}
             placeholder="All statuses"
             searchable={false}
-            width={140}
+            width="100%"
           />
+          </div>
 
           <button
             className={s.btnSecondary}
             data-tour="scan-pc"
-            title="Scan your PC for installed games to add (folders configured in Settings → Scan PC)"
+            title="Scan PC: find installed games to add, also from Epic, GOG and Xbox (folders are in Settings, Tracking)"
+            aria-label="Scan PC"
             disabled={scanning}
             aria-busy={scanning || undefined}
             onClick={runScan}
           >
             {scanning
-              ? <IconLoader2 size={15} stroke={1.6} style={{ animation: 'spin 1s linear infinite' }} />
+              ? <IconLoader2 size={15} stroke={1.6} className="spin" />
               : <IconScan size={15} stroke={1.6} />}
-            {!scanning ? 'Scan PC'
+            {!scanning ? <span className={s.btnLabel}>Scan PC</span>
               : scanProgress?.stage === 'matching' ? `Matching ${scanProgress.done}/${scanProgress.total}`
               : 'Scanning…'}
           </button>
 
-          <button
-            className={s.btnSecondary}
-            title="Add the games installed through Epic, GOG and Xbox"
-            disabled={launcherBusy}
-            aria-busy={launcherBusy || undefined}
-            onClick={runLauncherScan}
-          >
-            {launcherBusy
-              ? <IconLoader2 size={15} stroke={1.6} style={{ animation: 'spin 1s linear infinite' }} />
-              : <IconDownload size={15} stroke={1.6} />}
-            {launcherBusy ? 'Looking…' : 'Launchers'}
-          </button>
-
           {games.length > 0 && (
-            <button className={s.btnSecondary} onClick={enterSelection}>
+            <button className={s.btnSecondary} onClick={enterSelection} title="Select games" aria-label="Select games">
               <IconCheckbox size={15} stroke={1.6} />
-              Select
+              <span className={s.btnLabel}>Select</span>
             </button>
           )}
 
@@ -545,6 +522,8 @@ export default function Library() {
               </button>
             ))}
           </div>
+
+          <CardSizeSlider pageKey="library" view={view} opts={{ min: 140, max: 380 }} />
 
           <button className={s.btnPrimary} data-tour="add-game" onClick={() => setAddModal(true)}>
             <IconPlus size={15} stroke={2} />
@@ -619,7 +598,7 @@ export default function Library() {
             <span>
               {launcherNew} game{launcherNew === 1 ? '' : 's'} found in your Epic, GOG and Xbox launchers.
             </span>
-            <button type="button" className={s.launcherReview} onClick={runLauncherScan}>Review</button>
+            <button type="button" className={s.launcherReview} onClick={runScan}>Review</button>
             <button type="button" className={s.launcherClose} aria-label="Dismiss"
               onClick={async () => {
                 const r = await window.kozo?.api?.launchers?.pending?.()
@@ -708,26 +687,11 @@ export default function Library() {
         />
       )}
 
-      {launcherModal && (
-        launcherModal.length ? (
-          <ScanResultModal
-            title="Games from your launchers"
-            results={launcherModal}
-            onClose={closeLauncherModal}
-            onAdd={() => { closeLauncherModal(); loadGames() }}
-          />
-        ) : (
-          <InfoModal title="No launcher games found"
-            message="KoZo didn't find games installed through Epic Games, GOG or Xbox on this PC. Games from folders can still be found with Scan PC."
-            onClose={() => setLauncherModal(null)} />
-        )
-      )}
-
       {scanModal && (
         <ScanResultModal
           results={scanModal}
-          onClose={() => setScanModal(null)}
-          onAdd={() => { setScanModal(null); loadGames() }}
+          onClose={closeScanModal}
+          onAdd={() => { closeScanModal(); loadGames() }}
         />
       )}
 

@@ -1,0 +1,36 @@
+# Publishes site/ to GitHub Pages when it changes on main. The app's release workflow is separate.
+# Needs Settings > Pages > Source: GitHub Actions. The domain (kozoapp.cloud) is set in that same page:
+# a workflow like this one ignores any CNAME file, so don't add one.
+name: Publish site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - '.github/workflows/site.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4

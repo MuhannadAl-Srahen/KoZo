@@ -55,6 +55,8 @@
 }
 .preset:hover { transform: scale(1.1); }
 .hexRow { display: flex; align-items: center; gap: 8px; }
+.result { display: flex; align-items: center; gap: 8px; font-size: var(--fs-xs); color: var(--text-secondary); }
+.result b { font-family: var(--font-mono); font-weight: 600; color: var(--text-primary); }
 .hex {
   flex: 1; min-width: 0; height: 32px; padding: 0 10px; border-radius: var(--r-input);
   background: var(--surface-1); border: 1px solid var(--border); color: var(--text-primary);

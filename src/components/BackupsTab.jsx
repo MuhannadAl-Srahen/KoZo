@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react'
 import {
-  IconShieldCheck, IconAlertTriangle, IconDeviceDesktop, IconBrandGoogleDrive, IconRefresh, IconLoader2,
+  IconShield, IconShieldCheck, IconAlertTriangle, IconDeviceDesktop, IconBrandGoogleDrive, IconRefresh, IconLoader2,
   IconExternalLink, IconChevronRight, IconChevronDown, IconHistory, IconDownload, IconFolder,
   IconArchive, IconCheck, IconCloudOff, IconFileZip, IconBrandGoogle, IconBrandDropbox, IconBrandApple, IconCloud, IconCloudUp,
 } from '@tabler/icons-react'
 import Modal, { modalStyles as ms } from './ui/Modal'
 import { DriveBlockedHint } from './DriveSetupModal'
+import DriveOffer from './DriveOffer'
 import { fileUrl, timeAgo } from '../lib/utils'
 import b from './BackupsTab.module.css'
 
@@ -96,6 +97,17 @@ export default function BackupsTab({ onManageSaves }) {
     if (r?.data) { setMsg({ type: 'ok', text: `KoZo now keeps a copy of your backups in ${r.data}.` }); setOffPcOpen(false) }
     loadCopy()
   }
+  // Google Drive asks what to add, one question at a time (DriveOffer).
+  const [driveOffer, setDriveOffer] = useState(null)
+  async function offerFromDrive() {
+    setBusy('restoreDrive'); setMsg(null)
+    const r = await api()?.drive?.offer?.()
+    setBusy('')
+    setGetBackOpen(false)
+    if (r?.ok === false) setMsg({ type: 'error', text: r.error || 'Google Drive did not answer.' })
+    else if (r?.data?.anything) setDriveOffer(r.data)
+    else setMsg({ type: 'ok', text: 'Nothing new on Google Drive. Everything there is already on this PC.' })
+  }
   // From the Get everything back window: it closes when the restore has finished.
   async function getBack(fn) {
     await fn()
@@ -162,14 +174,15 @@ export default function BackupsTab({ onManageSaves }) {
   if (!auto) { title = 'Automatic backups are off'; sub = 'Turn them on so KoZo keeps your saves safe.'; warn = true }
   else if (lowSpace) { title = 'The backup drive is almost full'; sub = 'New backups wait until there is 2 GB free. Free some space or move the backups.'; warn = true }
   else if (!withSaves.length) { title = 'Ready'; sub = 'KoZo backs up a game\'s saves the first time you play it.' }
-  else { title = `${withSaves.length} game${withSaves.length === 1 ? '' : 's'} protected`; sub = `Backed up before and after every session${lastAt ? `, last ${timeAgo(lastAt)}` : ''}.` }
+  else if (!backedUp.length) { title = `${waiting.length} game${waiting.length === 1 ? '' : 's'} waiting for a first backup`; sub = 'KoZo knows where the saves are, and backs them up the next time you play.' }
+  else { title = `${backedUp.length} game${backedUp.length === 1 ? '' : 's'} protected`; sub = `Backed up before and after every session${lastAt ? `, last ${timeAgo(lastAt)}` : ''}.${waiting.length ? ` ${waiting.length} more waiting for a first backup.` : ''}` }
 
   return (
     <div className={b.page}>
       {/* Is everything safe, and where is it? */}
       <section className={`${b.card} ${b.status} ${warn ? b.statusWarn : ''}`}>
         <div className={b.statusTop}>
-          <span className={b.shield}>{warn ? <IconAlertTriangle size={26} /> : <IconShieldCheck size={26} />}</span>
+          <span className={b.shield}>{warn ? <IconAlertTriangle size={26} /> : backedUp.length ? <IconShieldCheck size={26} /> : <IconShield size={26} />}</span>
           <div className={b.statusText}>
             <h3>{title}</h3>
             <p>{sub}</p>
@@ -365,10 +378,9 @@ export default function BackupsTab({ onManageSaves }) {
               </button>
             ))}
             {drive?.connected && (
-              <button type="button" className={b.action} disabled={!!busy}
-                onClick={() => getBack(() => run('restoreDrive', () => api().drive.restore(), (d) => `Brought back ${d?.data?.games ?? 0} games and their save backups from Google Drive.`))}>
+              <button type="button" className={b.action} disabled={!!busy} onClick={offerFromDrive} data-offer-drive>
                 <IconBrandGoogleDrive size={18} />
-                <span><strong>{busy === 'restoreDrive' ? 'Downloading…' : 'Google Drive'}</strong><small>Your library, playtime and every save backup</small></span>
+                <span><strong>{busy === 'restoreDrive' ? 'Looking…' : 'Google Drive'}</strong><small>Asks what to add: Game List, Library, game saves</small></span>
               </button>
             )}
             <button type="button" className={b.action} disabled={!!busy} onClick={() => getBack(restoreFromFolder)}>
@@ -388,6 +400,7 @@ export default function BackupsTab({ onManageSaves }) {
       )}
 
       {restoreAll && <RestoreAllModal onClose={() => { setRestoreAll(false); loadOverview() }} />}
+      {driveOffer && <DriveOffer offer={driveOffer} onClose={() => { setDriveOffer(null); loadOverview(); loadStorage() }} />}
     </div>
   )
 }

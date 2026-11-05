@@ -3,20 +3,23 @@ import {
   IconPlus, IconLayoutGrid, IconList, IconLayoutColumns,
   IconDeviceGamepad2, IconPencil, IconSearch,
   IconCheckbox, IconSquare, IconTrash, IconX, IconCheck, IconStar, IconLoader2,
-  IconBooks, IconCalendarEvent, IconDice5,
+  IconBooks, IconCalendarEvent, IconDice5, IconBrandSteam,
 } from '@tabler/icons-react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { getBannerBg, parseGenres, formatMonthKey, fileUrl } from '../lib/utils'
 import { LIST_STATUSES, LIST_STATUS_ORDER } from '../lib/cardModel'
 import AddGameToListModal from '../components/modals/AddGameToListModal'
 import EditGameListModal from '../components/modals/EditGameListModal'
 import PlanMonthModal from '../components/modals/PlanMonthModal'
 import SearchableSelect from '../components/ui/SearchableSelect'
+import CardSizeSlider from '../components/ui/CardSizeSlider'
 import CardContextMenu from '../components/ui/CardContextMenu'
 import EmptyState from '../components/ui/EmptyState'
 import GeneratedCover from '../components/GeneratedCover'
 import useCardZoom from '../lib/useCardZoom'
 import InfoModal from '../components/ui/InfoModal'
 import PickForMeModal from '../components/modals/PickForMeModal'
+import WishlistImportModal from '../components/modals/WishlistImportModal'
 import { CardSkeletonGrid } from '../components/ui/Skeleton'
 import s from './GameList.module.css'
 
@@ -237,6 +240,16 @@ export default function GameList() {
 
   const [showAdd, setShowAdd]   = useState(false)
   const [picking, setPicking]   = useState(false)   // Pick for me
+  const [wishlist, setWishlist] = useState(false)   // Steam wishlist import
+  const location = useLocation()
+  const navigate = useNavigate()
+  // ?wishlist=1: Settings > Features > Steam wishlist
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get('wishlist') === '1') {
+      setWishlist(true)
+      navigate('/game-list', { replace: true })
+    }
+  }, [location.search])
   const [editItem, setEditItem] = useState(null)
   const [ctxMenu, setCtxMenu]   = useState(null)     // null | { x, y, item }
   const [dragOverId, setDragOverId] = useState(null) // drop-target highlight
@@ -468,14 +481,15 @@ export default function GameList() {
     <div className={s.page}>
       {/* Toolbar — two modes */}
       {!selectionMode ? (
-        <div className={s.toolbar}>
+        <div className={`${s.toolbar} ${s.oneRow}`}>
           <h1 className={s.pageTitle}>
             Game List
             {switching && (
               <IconLoader2
                 size={14}
                 stroke={1.8}
-                style={{ marginLeft: 6, color: 'var(--text-muted)', animation: 'spin 1s linear infinite' }}
+                className="spin"
+                style={{ marginLeft: 6, color: 'var(--text-muted)' }}
               />
             )}
           </h1>
@@ -485,7 +499,7 @@ export default function GameList() {
             <IconSearch size={13} stroke={1.6} className={s.searchIcon} />
             <input
               className={s.searchInput}
-              placeholder="Search games…"
+              placeholder="Search…" aria-label="Search games"
               value={searchText}
               onChange={e => setSearchText(e.target.value)}
             />
@@ -502,16 +516,16 @@ export default function GameList() {
                 value={genreFilter}
                 onChange={handleGenreChange}
                 placeholder="All genres"
-                width={140}
+                width="100%"
                 options={genreOptions.map(g => ({ value: g, label: g }))}
               />
             )}
           </div>
 
           {items.length > 0 && (
-            <button className={s.btnSecondary} onClick={enterSelection}>
+            <button className={s.btnSecondary} onClick={enterSelection} title="Select games" aria-label="Select games">
               <IconCheckbox size={14} stroke={1.6} />
-              Select
+              <span className={s.btnLabel}>Select</span>
             </button>
           )}
 
@@ -528,10 +542,17 @@ export default function GameList() {
             ))}
           </div>
 
-          <button className={s.btnSecondary} onClick={() => setPicking(true)} title="Let KoZo choose your next game from Want to play, weighted by your favourite genres">
+          <button className={s.btnSecondary} onClick={() => setPicking(true)} aria-label="Pick for me" title="Pick for me: KoZo chooses your next game from Want to play, weighted by your favorite genres">
             <IconDice5 size={14} stroke={1.7} />
-            Pick for me
+            <span className={s.btnLabel}>Pick for me</span>
           </button>
+
+          <button className={s.btnSecondary} onClick={() => setWishlist(true)} aria-label="Steam wishlist" title="Steam wishlist: bring in the games on it">
+            <IconBrandSteam size={14} stroke={1.7} />
+            <span className={s.btnLabel}>Steam wishlist</span>
+          </button>
+
+          <CardSizeSlider pageKey="gamelist" view={view} defaults={{ big: 220 }} opts={{ min: 140, max: 380 }} />
 
           <button className={s.btnPrimary} onClick={() => setShowAdd(true)}>
             <IconPlus size={15} stroke={2} />
@@ -715,6 +736,7 @@ export default function GameList() {
       </div>
 
       {picking && <PickForMeModal onClose={() => setPicking(false)} onChanged={() => loadItems(page, { silent: true })} />}
+      {wishlist && <WishlistImportModal onClose={() => setWishlist(false)} onImported={() => { setWishlist(false); afterSave() }} />}
 
       {showAdd && (
         <AddGameToListModal

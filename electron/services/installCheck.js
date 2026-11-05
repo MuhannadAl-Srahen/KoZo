@@ -20,7 +20,9 @@
 //     Steam-only entries are legitimately launchable via steam://).
 //
 // PERF: async fs.access, one per game, and gated on no session running (see
-// main.js) — it must never walk the disk while a game is playing.
+// main.js) — it must never walk the disk while a game is playing. It runs at start, when the
+// window comes back and every few minutes (quick): a game removed while KoZo is open shows as
+// removed. Quick only hunts for a new location the moment a game goes missing, not every time.
 
 const fs = require('fs')
 const path = require('path')
@@ -32,6 +34,26 @@ async function exists(p) {
 
 function existsSync(p) {
   try { return fs.existsSync(p) } catch { return false }
+}
+
+// A folder isn't a game: an uninstaller leaves saves and settings behind. This looks for a file
+// that can start it. A game Steam or a launcher starts may keep its exe further in, so what
+// proved it once is remembered, and the search only runs when that file is gone. A folder that
+// can't be read (Xbox's WindowsApps) says nothing, so it counts as there.
+const provedBy = new Map()   // game id -> file
+async function hasGameFile(g) {
+  if (g.launch_uri) return true
+  const known = provedBy.get(g.id)
+  if (known && await exists(known)) return true
+  provedBy.delete(g.id)
+  try { await fs.promises.readdir(g.install_path) } catch (e) { return e.code !== 'ENOENT' }
+  for (const f of [g.launch_file, g.exe_name && path.join(g.install_path, g.exe_name)]) {
+    if (f && await exists(f)) { provedBy.set(g.id, f); return true }
+  }
+  const [found] = require('./pcScanner').collectExes(g.install_path, 4)
+  if (!found) return false
+  provedBy.set(g.id, path.join(found.dir, found.name))
+  return true
 }
 
 // Is the whole volume this path lives on unavailable? Distinguishes "the game
@@ -200,7 +222,7 @@ function driveLetters() {
  * Check every library game's install folder. Returns
  * { checked, nowMissing, nowFound, missing: [{id, name, install_path}] }.
  */
-async function reconcile() {
+async function reconcile({ quick = false } = {}) {
   const { getDb } = require('../db/database')
   let db
   try { db = getDb() } catch { return { checked: 0, nowMissing: 0, nowFound: 0, missing: [] } }
@@ -208,7 +230,7 @@ async function reconcile() {
   let games = []
   try {
     games = db.prepare(
-      "SELECT id, name, install_path, exe_name, is_installed FROM games WHERE install_path IS NOT NULL AND install_path != ''"
+      "SELECT id, name, install_path, exe_name, launch_file, launch_uri, is_installed FROM games WHERE install_path IS NOT NULL AND install_path != ''"
     ).all()
   } catch { return { checked: 0, nowMissing: 0, nowFound: 0, missing: [] } }
 
@@ -219,12 +241,13 @@ async function reconcile() {
   const moved = []
 
   for (const g of games) {
-    let there = await exists(g.install_path)
+    const folderThere = await exists(g.install_path)
+    let there = folderThere && await hasGameFile(g)
 
     // Gone from where we last saw it — before writing it off, look for where
     // it moved to. Without this a game you relocate stays dimmed forever, since
     // the only path we ever check is the dead one.
-    if (!there) {
+    if (!folderThere && (!quick || g.is_installed === 1)) {
       let dest = null
       // Only hunt for a new location when the game is genuinely gone — not when
       // its whole VOLUME is simply absent. An unplugged external drive or an
@@ -282,4 +305,4 @@ async function reconcile() {
   return { checked: games.length, nowMissing, nowFound, missing, moved }
 }
 
-module.exports = { reconcile, findNewLocation }
+module.exports = { reconcile, findNewLocation, hasGameFile }

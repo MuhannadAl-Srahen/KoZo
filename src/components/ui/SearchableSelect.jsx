@@ -97,7 +97,7 @@ export default function SearchableSelect({
           style={{
             position: 'fixed',
             left: pos.left,
-            width: pos.width,
+            width: Math.max(pos.width, 150),
             top: pos.top,
             bottom: pos.bottom,
           }}

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react'
-import { IconEdit, IconTrash, IconStar, IconPencil } from '@tabler/icons-react'
+import { IconEdit, IconTrash, IconStar } from '@tabler/icons-react'
 import Modal, { modalStyles as ms } from '../ui/Modal'
 import SteamGameModal from '../SteamGameModal'
+import GamePrices from '../GamePrices'
 import { LIST_STATUSES, LIST_STATUS_ORDER } from '../../lib/cardModel'
 import MonthPicker from '../ui/MonthPicker'
 import RatingPicker from '../ui/RatingPicker'
@@ -249,29 +250,24 @@ export default function EditGameListModal({ item, onClose, onSaved, onDeleted })
       onTab={setTab}
       chips={!onOverview && <div className={sg.reviewChip}>{LIST_STATUSES[status]?.label || status}</div>}
       overviewTop={onOverview && <div>{statusField}{planField}{ratingField}{saveError}</div>}
-      extraTab={{
-        key: 'edit',
-        label: 'Edit',
-        node: (
-          <div style={{ maxWidth: 620 }}>
-            {nameField}
-            {!onOverview && statusField}
-            {!onOverview && planField}
-            {!onOverview && ratingField}
-            {saveError}
-          </div>
-        ),
-      }}
+      extraTab={[
+        { key: 'prices', label: 'Prices', node: <GamePrices appId={item.steam_app_id} name={item.name} banner={item.banner_url} /> },
+        {
+          key: 'edit',
+          label: 'Edit',
+          node: (
+            <div style={{ maxWidth: 620 }}>
+              {nameField}
+              {!onOverview && statusField}
+              {!onOverview && planField}
+              {!onOverview && ratingField}
+              {saveError}
+            </div>
+          ),
+        },
+      ]}
       footerLeft={onEditTab ? removeButtons : null}
-      actions={
-        confirmDelete ? null
-          : onEditTab || dirty ? saveButtons
-            : !onOverview ? (
-              <button className={ms.btnCancel} onClick={() => setTab('edit')}>
-                <IconPencil size={14} stroke={1.6} /> Edit
-              </button>
-            ) : null
-      }
+      actions={confirmDelete ? null : onEditTab || dirty ? saveButtons : null}
     >
       {confirmClose}
     </SteamGameModal>

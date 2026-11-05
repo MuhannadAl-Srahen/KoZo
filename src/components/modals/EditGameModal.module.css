@@ -1,0 +1,123 @@
+/* Fields come from AddGameModal.module.css; this is the layout that's only here. */
+.top {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: var(--sp-16);
+  align-items: start;
+}
+
+.coverCol {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  min-width: 0;
+}
+
+.cover {
+  position: relative;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.coverEmpty { color: var(--text-muted); }
+
+.coverRemove {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  cursor: pointer;
+}
+.coverRemove:hover { background: var(--error); }
+.coverRemove:focus-visible { outline: 2px solid var(--ab); outline-offset: 1px; }
+
+.coverBtns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-4);
+}
+.coverBtn {
+  composes: btn btnSecondary btnSm from '../../styles/controls.module.css';
+}
+.coverBtn.coverBtn {
+  min-width: 0;
+  padding: 5px 2px;
+  gap: 3px;
+  background: var(--surface-3);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  justify-content: center;
+}
+
+.fields { min-width: 0; }
+
+/* The closed row says what's set, so there's no need to open it to check. */
+.more {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  width: 100%;
+  min-width: 0;
+  margin-top: var(--sp-12);
+  padding: var(--sp-10) 0 var(--sp-4);
+  background: none;
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  text-align: left;
+}
+.more:hover { color: var(--text-primary); }
+.more:focus-visible { outline: 2px solid var(--ab); outline-offset: 2px; border-radius: var(--r-sm); }
+.moreLabel { font-weight: 600; flex-shrink: 0; }
+.moreSummary {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+
+.options { padding-top: var(--sp-4); }
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-16);
+  min-height: 38px;
+  padding: var(--sp-6) 0;
+}
+.row + .row { border-top: 1px solid var(--border-subtle); }
+.rowText { min-width: 0; }
+.rowLabel { font-size: var(--fs-sm); color: var(--text-primary); }
+.rowHint { margin-top: 1px; font-size: var(--fs-xs); color: var(--text-muted); }
+
+.appId.appId { width: 140px; flex-shrink: 0; }
+
+@media (max-width: 680px) {
+  .top { grid-template-columns: 96px minmax(0, 1fr); gap: var(--sp-12); }
+}

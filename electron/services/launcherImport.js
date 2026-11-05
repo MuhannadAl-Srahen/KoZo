@@ -212,4 +212,18 @@ async function readAll() {
 // A stable key per found game, for "already reviewed" bookkeeping.
 function keyOf(g) { return `${g.detected_type}:${(g.store_id || g.install_path || g.name).toLowerCase()}` }
 
-module.exports = { readAll, keyOf, parseEpicManifest, parseGogRegistry, parseGogInfo, parseXboxPackage }
+// Pure: one list from a folder scan and the launchers' own records. A game in both is the
+// launcher's, because that knows how to start it. Folder entries keep their place.
+function mergeLauncherGames(results, found) {
+  const norm = (p) => String(p || '').replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase()
+  const out = [...results]
+  for (const g of found) {
+    const entry = { ...g, isInstalled: true }
+    const at = g.install_path ? out.findIndex(r => norm(r.install_path) === norm(g.install_path)) : -1
+    if (at >= 0) out[at] = entry
+    else out.push(entry)
+  }
+  return out
+}
+
+module.exports = { readAll, keyOf, mergeLauncherGames, parseEpicManifest, parseGogRegistry, parseGogInfo, parseXboxPackage }

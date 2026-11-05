@@ -92,4 +92,15 @@ function check({ reason = 'unknown', gameName = null, artPath = null, artUrl = n
   return { gained, totalXp: xp.totalXp, level: xp.level, tier: xp.tier, leveledUp, toNextLevel: xp.toNextLevel, nextTier: xp.nextTier }
 }
 
-module.exports = { check }
+// XP changed without anything being earned now (another PC's library came in): move the
+// baseline silently, or the next session would report all of it, with a level-up toast.
+function rebase() {
+  try {
+    const xp = require('./xp').computeXp()
+    writeLast(xp.totalXp, xp.level)
+  } catch (e) {
+    logger.warn('xpTracker: rebase failed', { message: e.message })
+  }
+}
+
+module.exports = { check, rebase }

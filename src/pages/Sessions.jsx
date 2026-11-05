@@ -8,13 +8,15 @@ import SearchableSelect from '../components/ui/SearchableSelect'
 import EmptyState from '../components/ui/EmptyState'
 import ContextMenu from '../components/ui/ContextMenu'
 import { RowSkeleton } from '../components/ui/Skeleton'
+import DatePicker from '../components/ui/DatePicker'
 import s from './Sessions.module.css'
 
 const PAGE_SIZE = 60
 
-function sessionTimeRange(startedAt, durationSeconds) {
+// The real end: paused time means start + played isn't when a session ended.
+function sessionTimeRange(startedAt, endedAt, durationSeconds) {
   const start = new Date(startedAt)
-  const end   = new Date(start.getTime() + (durationSeconds || 0) * 1000)
+  const end   = endedAt ? new Date(endedAt) : new Date(start.getTime() + (durationSeconds || 0) * 1000)
   const fmt   = d => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   return `${fmt(start)} to ${fmt(end)}`
 }
@@ -151,29 +153,11 @@ export default function Sessions() {
               options={games.map(g => ({ value: String(g.id), label: g.name }))}
             />
           </div>
-          <div className={`${s.dateWrap} hasRing`}>
-            <input
-              type="date"
-              className={s.dateInput}
-              aria-label="Sessions from date"
-              title="Sessions from date"
-              value={fromDate}
-              onChange={e => handleFromDate(e.target.value)}
-            />
-          </div>
+          <DatePicker value={fromDate} onChange={handleFromDate} label="Sessions from date" placeholder="From" max={toDate} />
           {/* Decorative: each field names its own end of the range, so the
               separator carries no meaning of its own and is hidden from AT. */}
           <span className={s.dateSep} aria-hidden="true">to</span>
-          <div className={`${s.dateWrap} hasRing`}>
-            <input
-              type="date"
-              className={s.dateInput}
-              aria-label="Sessions to date"
-              title="Sessions to date"
-              value={toDate}
-              onChange={e => handleToDate(e.target.value)}
-            />
-          </div>
+          <DatePicker value={toDate} onChange={handleToDate} label="Sessions to date" placeholder="To" min={fromDate} />
         </div>
       </div>
 
@@ -235,7 +219,7 @@ export default function Sessions() {
                       {/* Game + time range */}
                       <div className={s.sessionInfo}>
                         <div className={s.sessionGame} title={session.game_name}>{session.game_name}</div>
-                        <div className={s.sessionTime}>{sessionTimeRange(session.started_at, session.duration_seconds)}</div>
+                        <div className={s.sessionTime}>{sessionTimeRange(session.started_at, session.ended_at, session.duration_seconds)}</div>
                       </div>
 
                       {/* Duration */}

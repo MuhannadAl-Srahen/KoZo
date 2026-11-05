@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 19,
+  rev: 24,
   // Settings → Appearance → UI scale.
   ui: {
     setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
@@ -14,11 +14,15 @@ contextBridge.exposeInMainWorld('kozo', {
     games: {
       list: () => ipcRenderer.invoke('games:list'),
       get: (id) => ipcRenderer.invoke('games:get', id),
+      version: (id) => ipcRenderer.invoke('games:version', id),
       add: (data) => ipcRenderer.invoke('games:add', data),
       planMonth: (gameIds, month) => ipcRenderer.invoke('games:planMonth', gameIds, month),
       finished: () => ipcRenderer.invoke('games:finished'),
       update: (id, data) => ipcRenderer.invoke('games:update', id, data),
       delete: (id) => ipcRenderer.invoke('games:delete', id),
+      launchMiss: () => ipcRenderer.invoke('games:launchMiss'),
+      dismissLaunchMiss: (id) => ipcRenderer.invoke('games:dismissLaunchMiss', id),
+      setWatchedExe: (id, proc) => ipcRenderer.invoke('games:setWatchedExe', id, proc),
       reorder: (orderedIds) => ipcRenderer.invoke('games:reorder', orderedIds),
       archive: (ids) => ipcRenderer.invoke('games:archive', ids),
       unarchive: (ids) => ipcRenderer.invoke('games:unarchive', ids),
@@ -57,6 +61,8 @@ contextBridge.exposeInMainWorld('kozo', {
       planSummary: () => ipcRenderer.invoke('gameList:planSummary'),
       statusCounts: () => ipcRenderer.invoke('gameList:statusCounts'),
       planMonth: (ids, month) => ipcRenderer.invoke('gameList:planMonth', ids, month),
+      wishlistPreview: () => ipcRenderer.invoke('gameList:wishlistPreview'),
+      wishlistImport: (appids) => ipcRenderer.invoke('gameList:wishlistImport', appids),
     },
     customLists: {
       list: () => ipcRenderer.invoke('customLists:list'),
@@ -92,6 +98,7 @@ contextBridge.exposeInMainWorld('kozo', {
       tasteProfile: () => ipcRenderer.invoke('steam:tasteProfile'),
       picks: () => ipcRenderer.invoke('steam:picks'),
       reviews: (appId) => ipcRenderer.invoke('steam:reviews', appId),
+      news: (appId) => ipcRenderer.invoke('steam:news', appId),
       lastSyncError: (gameId) => ipcRenderer.invoke('steam:lastSyncError', gameId),
       recheckPrivacy: () => ipcRenderer.invoke('steam:recheckPrivacy'),
       getProfile: (overrides) => ipcRenderer.invoke('steam:getProfile', overrides),
@@ -145,6 +152,9 @@ contextBridge.exposeInMainWorld('kozo', {
       hourActivity: (hour, includeHidden) => ipcRenderer.invoke('stats:hourActivity', hour, includeHidden),
       xp: () => ipcRenderer.invoke('stats:xp'),
       xpHistory: (limit) => ipcRenderer.invoke('stats:xpHistory', limit),
+      years: () => ipcRenderer.invoke('stats:years'),
+      year: (year) => ipcRenderer.invoke('stats:year', year),
+      captureCard: (rect, action, year) => ipcRenderer.invoke('stats:captureCard', rect, action, year),
     },
     watcher: {
       pause:  () => ipcRenderer.invoke('watcher:pause'),
@@ -169,12 +179,18 @@ contextBridge.exposeInMainWorld('kozo', {
       sync: () => ipcRenderer.invoke('drive:sync'),
       setBudget: (gb) => ipcRenderer.invoke('drive:setBudget', gb),
       setClient: (c) => ipcRenderer.invoke('drive:setClient', c),
-      restore: () => ipcRenderer.invoke('drive:restore'),
+      offer: () => ipcRenderer.invoke('drive:offer'),
+      applyOffer: (a) => ipcRenderer.invoke('drive:applyOffer', a),
+      news: () => ipcRenderer.invoke('drive:news'),
+      newsSeen: () => ipcRenderer.invoke('drive:newsSeen'),
+      checkNews: () => ipcRenderer.invoke('drive:checkNews'),
     },
     deals: {
       list: (opts) => ipcRenderer.invoke('deals:list', opts),
       markSeen: () => ipcRenderer.invoke('deals:markSeen'),
       unseen: () => ipcRenderer.invoke('deals:unseen'),
+      gamePrices: (appid) => ipcRenderer.invoke('deals:gamePrices', appid),
+      setTarget: (appid, cents, meta) => ipcRenderer.invoke('deals:setTarget', appid, cents, meta),
     },
     pack: {
       exportAll: () => ipcRenderer.invoke('pack:export'),
@@ -199,10 +215,12 @@ contextBridge.exposeInMainWorld('kozo', {
     overlay: {
       hide: () => ipcRenderer.invoke('overlay:hide'),
       test: () => ipcRenderer.invoke('overlay:test'),
+      testBreak: () => ipcRenderer.invoke('overlay:testBreak'),
       ready: () => ipcRenderer.invoke('overlay:ready'),
       setInteractive: (v) => ipcRenderer.invoke('overlay:setInteractive', v),
       applyAccent: (hex) => ipcRenderer.invoke('overlay:applyAccent', hex),
       addUnknownGame: (data) => ipcRenderer.invoke('overlay:addUnknownGame', data),
+      openLaunchMiss: () => ipcRenderer.invoke('overlay:openLaunchMiss'),
     },
     sgdb: {
       test: (key) => ipcRenderer.invoke('sgdb:test', key),
@@ -244,7 +262,6 @@ contextBridge.exposeInMainWorld('kozo', {
       apply: () => ipcRenderer.invoke('discord:apply'),
     },
     launchers: {
-      scan: () => ipcRenderer.invoke('launchers:scan'),
       pending: () => ipcRenderer.invoke('launchers:pending'),
       dismiss: (keys) => ipcRenderer.invoke('launchers:dismiss', keys),
     },
@@ -283,13 +300,19 @@ contextBridge.exposeInMainWorld('kozo', {
       onSessionOverlay: sub('session:overlay', pass),
       onStatusOverlay: sub('status:overlay', pass),
       onUnknownGameOverlay: sub('unknownGame:overlay', pass),
+      onLaunchMissOverlay: sub('launchMiss:overlay', pass),
       onReleaseOverlay: sub('release:overlay', pass),
+      onPriceOverlay: sub('price:overlay', pass),
+      onBreakOverlay: sub('break:overlay', pass),
       onXpOverlay: sub('xp:overlay', pass),
       onSessionEndOverlay: sub('sessionEnd:overlay', pass),
       onXpLevelUp: sub('xp:levelup', pass),
       onAppUpdate: sub('app:update', pass),
       onReleasesChanged: sub('releases:changed', pass),
       onDriveStatus: sub('drive:status', pass),
+      onDriveOffer: sub('drive:offer', pass),
+      onDriveNews: sub('drive:news', pass),
+      onDriveRestoreProgress: sub('drive:restoreProgress', pass),
       onBackupCopyStatus: sub('backup:copyStatus', pass),
       onPackProgress: sub('pack:progress', pass),
       onDealsChanged: sub('deals:changed', pass),
@@ -297,6 +320,7 @@ contextBridge.exposeInMainWorld('kozo', {
       onTrayRefresh: sub('tray:refresh', pass),
       onAccentChanged: sub('accent:changed', pass),
       onUnknownProcessAdd: sub('unknown-process:add', pass),
+      onLaunchMiss: sub('launch:miss', pass),
       removeAll: (channel) => {
         ipcRenderer.removeAllListeners(channel)
       },

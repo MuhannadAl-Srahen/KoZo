@@ -390,6 +390,13 @@
 }
 
 /* Durations are the point of this panel — they read as HUD values. */
+.rankDate {
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 .rankVal {
   font-size: var(--fs-sm);
   font-weight: 500;

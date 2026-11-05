@@ -12,7 +12,7 @@ import s from './SteamGameModal.module.css'
 // Tabs: Overview (trailers + screenshots, key facts, reviews, description),
 // About (the store's full description), Details (every fact) and System
 // requirements. `actions` renders in the footer next to "Steam page".
-// The Game List adds its own: `extraTab` { key, label, node }, `overviewTop`
+// The Game List adds its own: `extraTab` { key, label, node } (or a list), `overviewTop`
 // (above the facts), `chips`, `footerLeft`, and a parent-held `tab` / `onTab`.
 
 // Steam's descriptions are HTML: keep text, lists, headings and images only.
@@ -181,7 +181,8 @@ export default function SteamGameModal({
   const storeTabs = details === undefined ? TABS
     : TABS.filter(t => t.key === 'overview' || details?.[t.key === 'about' ? 'about' : t.key === 'reqs' ? 'requirements' : 'name'])
       .filter(t => t.key !== 'reqs' || details?.requirements?.minimum || details?.requirements?.recommended)
-  const tabs = extraTab ? [...storeTabs, extraTab] : storeTabs
+  const extraTabs = extraTab ? [].concat(extraTab) : []
+  const tabs = [...storeTabs, ...extraTabs]
 
   const facts = details ? [
     { Icon: IconCalendar, label: 'Release', value: release || details.release_date || 'To be announced' },
@@ -305,7 +306,7 @@ export default function SteamGameModal({
         </div>
       )}
 
-      {extraTab && tab === extraTab.key && extraTab.node}
+      {extraTabs.map(t => tab === t.key && <React.Fragment key={t.key}>{t.node}</React.Fragment>)}
       {children}
     </Modal>
   )

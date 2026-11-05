@@ -202,18 +202,20 @@
   background: color-mix(in srgb, var(--surface-3) 80%, transparent); color: var(--text-secondary);
   border: 1px solid var(--border);
 }
+.versionChip {
+  padding: 3px 10px; border-radius: var(--r-pill); font-size: var(--fs-xs); font-weight: 600; white-space: nowrap;
+  font-variant-numeric: tabular-nums; cursor: default;
+  background: color-mix(in srgb, var(--surface-3) 80%, transparent); color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+.versionState { font-weight: 700; }
+.versionBehind { background: var(--warning-bg); color: var(--warning); border-color: var(--warning-border-strong); }
+.versionMaybe { color: var(--warning); border-color: var(--warning-border); }
 .crackBadge {
   padding: 3px 10px; border-radius: var(--r-pill); font-size: var(--fs-2xs); font-weight: 700; letter-spacing: 0.08em;
   background: var(--warning-bg); color: var(--warning); border: 1px solid var(--warning-border-strong);
 }
 .crackBadgeSource { font-weight: 400; letter-spacing: 0; opacity: 0.8; }
-.statusChip {
-  display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: var(--r-pill);
-  font-size: var(--fs-xs); font-weight: 700; color: var(--st, var(--a));
-  background: color-mix(in srgb, var(--st, var(--a)) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--st, var(--a)) 40%, transparent);
-}
-
 /* ── Actions: Play, status, ⋮ ────────────────────────────────────────── */
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-8); }
 .playBig {
@@ -238,6 +240,7 @@
 }
 
 .statusBtn { composes: btn btnPill from '../styles/controls.module.css'; }
+.statusKey { color: var(--text-secondary); font-weight: 500; }
 .menuTrigger { composes: btn btnIcon from '../styles/controls.module.css'; }
 .actions .statusBtn, .actions .menuTrigger {
   height: 44px; background: var(--surface-2); border-color: var(--border); color: var(--text-primary);
@@ -392,6 +395,13 @@
   transition: height var(--dur-slower) var(--ease);
 }
 .monthZero .monthFill { background: var(--surface-3); }
+/* The whole column is the target: a short bar is too small to aim at. */
+button.monthBar { padding: 0; border: 0; border-radius: 3px; background: none; cursor: pointer; }
+button.monthBar:hover { background: color-mix(in srgb, var(--a) 12%, transparent); }
+button.monthBar:hover .monthFill { background: var(--a); }
+button.monthPicked { background: color-mix(in srgb, var(--a) 12%, transparent); }
+.monthPicked .monthFill { background: var(--a); box-shadow: 0 0 10px -2px var(--a); }
+.monthChartPicked button.monthBar:not(.monthPicked):not(:hover) .monthFill { opacity: 0.45; }
 .monthToday .monthFill { background: var(--a); box-shadow: 0 0 10px -2px var(--a); }
 .monthAxis { display: flex; justify-content: space-between; margin-top: 6px; font-size: var(--fs-2xs); color: var(--text-muted); }
 .monthTotal { font-size: var(--fs-xs); color: var(--text-muted); text-transform: none; letter-spacing: 0; font-weight: 600; }
@@ -661,6 +671,34 @@
   padding: var(--sp-10) var(--sp-12);
   content-visibility: auto;
   contain-intrinsic-size: auto 44px;
+  width: 100%;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sessionRow:hover {
+  background: var(--surface-3);
+  border-color: color-mix(in srgb, var(--a) 40%, var(--border));
+}
+
+.exeNote {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-6) var(--sp-8); margin: var(--sp-8) 0 0; padding: var(--sp-6) var(--sp-10);
+  border: 1px solid color-mix(in srgb, var(--status-onhold) 40%, var(--border)); border-radius: var(--r-card);
+  background: var(--surface-2); font-size: var(--fs-sm); color: var(--text-secondary);
+}
+.exeNote span { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }
+.exeNote b { color: var(--text-primary); font-weight: 600; }
+.exeNoteIcon { flex-shrink: 0; color: var(--status-onhold); }
+.exeNoteBtn {
+  flex-shrink: 0; height: 26px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-pill);
+  background: var(--surface-3); color: var(--text-primary); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer;
+}
+.exeNoteBtn:hover { border-color: color-mix(in srgb, var(--a) 50%, var(--border)); color: var(--a); }
+
+.sessionRowOpen {
+  border-color: color-mix(in srgb, var(--a) 40%, var(--border));
 }
 
 .sessionDate {
@@ -689,6 +727,7 @@
 }
 
 .sessionDurFill {
+  display: block;
   height: 100%;
   /* Fades in from the left, brightest at the leading edge — same charge-meter
      read as the hero progress bar. */

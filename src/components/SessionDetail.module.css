@@ -1,0 +1,22 @@
+.detail {
+  display: flex; flex-direction: column; gap: var(--sp-6); min-width: 0; padding: var(--sp-10) var(--sp-12) var(--sp-8);
+  border-radius: var(--r-card); border: 1px solid var(--border); background: var(--surface-2);
+}
+.line { margin: 0; font-size: var(--fs-sm); color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.none { margin: 0; font-size: var(--fs-sm); color: var(--text-muted); }
+.list { display: flex; flex-direction: column; gap: 2px; margin: 0 calc(-1 * var(--sp-6)); }
+.ach {
+  display: flex; align-items: center; gap: var(--sp-10); width: 100%; min-width: 0; padding: 6px;
+  border: 0; border-radius: var(--r-md, 8px); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.ach:hover { background: var(--surface-3); }
+.achIcon {
+  width: 38px; height: 38px; border-radius: 8px; overflow: hidden; flex-shrink: 0; display: grid; place-items: center;
+  background: var(--surface-3); color: var(--text-muted);
+}
+.achIcon img { width: 100%; height: 100%; object-fit: cover; }
+.achText { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.achName { font-size: var(--fs-sm); font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.achDesc { font-size: var(--fs-xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.achPct { flex-shrink: 0; font-size: var(--fs-xs); font-weight: 700; color: var(--rar, var(--a)); font-variant-numeric: tabular-nums; }
+.achTime { flex-shrink: 0; font-size: var(--fs-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }

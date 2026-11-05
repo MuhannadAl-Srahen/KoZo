@@ -7,6 +7,8 @@ import s from './ColorPicker.module.css'
 // lose): a swatch button that opens a popover with a saturation/brightness
 // square, a hue bar, preset swatches, a hex field and an eyedropper.
 // Drags with the pointer; arrow keys nudge. onChange fires as you drag.
+// resultOf: when a pick isn't used as it is (the background is made dark), it turns a pick
+// into the color really shown, and the box tells the truth.
 
 function hexToHsv(hex) {
   if (!/^#[0-9a-f]{6}$/i.test(hex || '')) return { h: 260, s: 0.45, v: 0.98 }
@@ -29,7 +31,7 @@ function hsvToHex({ h, s: sat, v }) {
 }
 const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x))
 
-export default function ColorPicker({ value, onChange, presets = [], label = 'Color', allowClear = false, clearLabel = 'None' }) {
+export default function ColorPicker({ value, onChange, presets = [], label = 'Color', allowClear = false, clearLabel = 'None', resultOf = null }) {
   const [open, setOpen] = useState(false)
   const [hsv, setHsv] = useState(() => hexToHsv(value))
   const [hex, setHex] = useState(value || '')
@@ -77,6 +79,9 @@ export default function ColorPicker({ value, onChange, presets = [], label = 'Co
   }
   const area = useRef(null)
   const hue = useRef(null)
+  const shown = value && resultOf ? resultOf(value) : value
+  // White, gray or black has no hue to change, so moving the bar did nothing: give it color.
+  const withHue = (h) => ({ h, s: hsv.s < 0.02 ? 1 : hsv.s, v: hsv.v < 0.02 ? 1 : hsv.v })
 
   async function eyedrop() {
     try {
@@ -88,8 +93,8 @@ export default function ColorPicker({ value, onChange, presets = [], label = 'Co
   return (
     <>
       <button ref={btn} type="button" className={s.trigger} onClick={() => setOpen(o => !o)} aria-haspopup="dialog" aria-expanded={open} aria-label={label}>
-        <span className={`${s.chip} ${value ? '' : s.chipEmpty}`} style={value ? { background: value } : undefined} />
-        <span className={s.triggerText}>{value ? value.toUpperCase() : clearLabel}</span>
+        <span className={`${s.chip} ${value ? '' : s.chipEmpty}`} style={shown ? { background: shown } : undefined} />
+        <span className={s.triggerText}>{shown ? shown.toUpperCase() : clearLabel}</span>
       </button>
       {open && createPortal(
         <div ref={pop} className={s.pop} style={{ top: pos.top, left: pos.left }} role="dialog" aria-label={label}>
@@ -108,10 +113,10 @@ export default function ColorPicker({ value, onChange, presets = [], label = 'Co
               <button type="button" className={s.iconBtn} onClick={eyedrop} title="Pick a color from the screen"><IconColorPicker size={16} /></button>
             )}
             <div ref={hue} className={s.hue} tabIndex={0} aria-label="Hue"
-              onPointerDown={drag(hue, (x) => commit({ ...hsv, h: x * 360 }))}
+              onPointerDown={drag(hue, (x) => commit(withHue(x * 360)))}
               onKeyDown={(e) => {
                 const m = { ArrowLeft: -4, ArrowRight: 4 }[e.key]
-                if (m) { e.preventDefault(); commit({ ...hsv, h: (hsv.h + m * (e.shiftKey ? 5 : 1) + 360) % 360 }) }
+                if (m) { e.preventDefault(); commit(withHue((hsv.h + m * (e.shiftKey ? 5 : 1) + 360) % 360)) }
               }}>
               <span className={s.hueThumb} style={{ left: `${(hsv.h / 360) * 100}%`, background: `hsl(${hsv.h} 100% 50%)` }} />
             </div>
@@ -140,6 +145,12 @@ export default function ColorPicker({ value, onChange, presets = [], label = 'Co
               }} />
             {allowClear && <button type="button" className={s.clear} onClick={() => { onChange(null); setOpen(false) }}>{clearLabel}</button>}
           </div>
+          {resultOf && shown && (
+            <div className={s.result} data-color-result="">
+              <span className={s.chip} style={{ background: shown }} />
+              <span>KoZo shows <b>{shown.toUpperCase()}</b></span>
+            </div>
+          )}
         </div>,
         document.body
       )}

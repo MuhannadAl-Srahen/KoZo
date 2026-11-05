@@ -1,0 +1,9 @@
+.body { display: flex; flex-direction: column; gap: var(--sp-6); min-width: 0; }
+.count { margin: 0; font-size: var(--fs-xs); font-weight: 600; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.title { margin: 0; font-size: var(--fs-lg); font-weight: 700; color: var(--text-primary); overflow-wrap: anywhere; }
+.text { margin: 0; font-size: var(--fs-sm); line-height: 1.5; color: var(--text-secondary); }
+.note { margin: var(--sp-4) 0 0; font-size: var(--fs-xs); color: var(--text-muted); }
+.warn { margin: var(--sp-4) 0 0; font-size: var(--fs-sm); color: var(--status-dropped, #e5484d); }
+.done { display: flex; flex-direction: column; gap: var(--sp-8); margin: 0; padding: 0; list-style: none; }
+.done li { display: flex; align-items: flex-start; gap: var(--sp-6); font-size: var(--fs-sm); line-height: 1.5; color: var(--text-primary); }
+.done svg { flex-shrink: 0; margin-top: 3px; color: var(--a); }

@@ -3,7 +3,7 @@ import {
   IconTrophy, IconClock, IconHistory, IconDeviceGamepad2, IconFlame, IconLoader2, IconX,
   IconChartBar, IconEye, IconEyeOff,
 } from '@tabler/icons-react'
-import { formatPlaytime, localDayKey } from '../lib/utils'
+import { formatDate, formatPlaytime, localDayKey } from '../lib/utils'
 import EmptyState from '../components/ui/EmptyState'
 import { Skeleton, PanelSkeleton } from '../components/ui/Skeleton'
 import s from './Statistics.module.css'
@@ -546,6 +546,7 @@ export default function Statistics() {
                     : longest.map(sess => (
                         <div key={sess.id} className={s.rankRow}>
                           <span className={s.rankName} title={sess.game_name}>{sess.game_name}</span>
+                          {sess.started_at && <span className={s.rankDate}>{formatDate(sess.started_at)}</span>}
                           <span className={s.rankVal}>{formatPlaytime(sess.duration_seconds)}</span>
                         </div>
                       ))

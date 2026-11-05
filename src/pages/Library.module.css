@@ -51,6 +51,20 @@
   composes: toolbar from '../styles/page.module.css';
   flex-wrap: wrap;
   gap: var(--sp-8);
+  container-type: inline-size;
+}
+
+/* The primary button never drops to a line of its own: first the buttons fold to icons
+   (they keep a tooltip), then the title goes. The search and dropdowns give way as well. */
+.oneRow { flex-wrap: nowrap; }
+.oneRow > .btnSecondary, .oneRow > .btnPrimary, .oneRow > .viewToggle, .oneRow > .pageTitle { flex-shrink: 0; white-space: nowrap; }
+.selectSlot { flex: 0 1 var(--slot); min-width: 104px; }
+@container (max-width: 1160px) {
+  .btnLabel { display: none; }
+  .btnSecondary:has(> .btnLabel) { padding-left: 9px; padding-right: 9px; }
+}
+@container (max-width: 860px) {
+  .oneRow > .pageTitle { display: none; }
 }
 
 .pageTitle {
@@ -67,8 +81,8 @@
   border: 1px solid var(--border);
   border-radius: var(--r-input);
   padding: 0 8px;
-  flex: 1;
-  min-width: 120px;
+  flex: 1 1 150px;
+  min-width: 96px;
   max-width: 220px;
   transition: border-color 0.12s;
 }

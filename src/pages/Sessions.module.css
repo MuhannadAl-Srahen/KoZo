@@ -41,17 +41,6 @@
   flex-shrink: 0;
 }
 
-.dateWrap { composes: inputWrap from '../styles/controls.module.css'; }
-
-/* line-height (not padding) sets the height here so nothing collides with the
-   composed .inputBare geometry, and the date fields end up the same height as
-   the game selector beside them. */
-.dateInput {
-  composes: inputBare from '../styles/controls.module.css';
-  line-height: var(--lh-tight);
-  color-scheme: dark;
-}
-
 .dateSep {
   color: var(--text-muted);
   font-size: var(--fs-sm);

@@ -7,7 +7,7 @@ import b from './BackupsTab.module.css'
 // First run with an empty library: "Welcome back". Offers the KoZo Backup
 // folder found on this PC's drives (backupHome.findExisting) and Google Drive,
 // so a new Windows gets the library and every save back in one click.
-export default function RestoreOffer({ found, drive, onClose }) {
+export default function RestoreOffer({ found, drive, onOffer, onClose }) {
   const [busy, setBusy] = useState('')
   const [done, setDone] = useState(null)
   const [error, setError] = useState(null)
@@ -31,16 +31,16 @@ export default function RestoreOffer({ found, drive, onClose }) {
     if (r?.ok && r.data) setDone(r.data.data?.games ?? 0)
     else if (r?.ok === false) setError(r.error || 'That file could not be opened')
   }
+  // What to bring in is asked in the next window (DriveOffer), the same as after any sign-in.
   async function fromDrive() {
     setBusy('drive'); setError(null)
-    if (!drive?.connected) {
-      const c = await window.kozo?.api?.drive?.connect?.()
-      if (!c?.ok || c.data?.error) { setBusy(''); setError('Google Drive was not connected.'); return }
-    }
-    const r = await window.kozo?.api?.drive?.restore?.()
+    const api = window.kozo?.api?.drive
+    const r = drive?.connected ? await api?.offer?.() : await api?.connect?.()
     setBusy('')
-    if (r?.ok) setDone(r.data?.data?.games ?? 0)
-    else setError(r?.error || 'Restore failed')
+    if (!r?.ok || r.data?.error) { setError('Google Drive was not connected.'); return }
+    const offer = drive?.connected ? r.data : r.data?.offer
+    if (offer?.anything) onOffer(offer)
+    else setError('This Google account has no KoZo backup to bring in.')
   }
 
   return (
@@ -63,7 +63,7 @@ export default function RestoreOffer({ found, drive, onClose }) {
             {drive?.configured && (
               <button type="button" className={b.action} disabled={!!busy} onClick={fromDrive}>
                 {busy === 'drive' ? <IconLoader2 size={18} className="spin" /> : <IconBrandGoogleDrive size={18} />}
-                <span><strong>From Google Drive</strong><small>Sign in and download your backup</small></span>
+                <span><strong>From Google Drive</strong><small>Sign in, then choose what to add</small></span>
               </button>
             )}
             <button type="button" className={b.action} disabled={!!busy} onClick={pickFolder}>

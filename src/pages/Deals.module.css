@@ -62,6 +62,7 @@
   padding: 4px 8px; border-radius: 10px; background: color-mix(in srgb, #0b0b12 72%, transparent);
   font-size: var(--fs-lg); font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums;
 }
+.scoreNum i { margin-left: 1px; font-size: 9px; font-style: normal; font-weight: 700; opacity: 0.7; }
 .score small { font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; margin-top: 3px; opacity: 0.9; }
 .score_great { color: var(--success); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--success) 55%, transparent); }
 .score_good { color: var(--a); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a) 50%, transparent); }
@@ -85,7 +86,30 @@
 .badgeNear { background: color-mix(in srgb, var(--a) 14%, transparent); color: var(--a); }
 .badgeAbove { background: var(--surface-3); color: var(--text-muted); }
 .badgeStore { background: color-mix(in srgb, var(--warning) 14%, transparent); color: var(--warning); }
+.lowLine { display: flex; align-items: center; gap: 4px; font-size: var(--fs-xs); color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.lowLine svg { color: var(--success); flex-shrink: 0; }
 .why { font-size: var(--fs-xs); color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Price alerts: short rows, so a few alerts don't push the deals down the page. */
+.alerts { display: grid; gap: var(--sp-8); grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+.alertRow {
+  display: flex; align-items: center; gap: var(--sp-10); min-width: 0; padding: 8px 12px 8px 8px;
+  border-radius: var(--r-card); border: 1px solid var(--border); background: var(--surface-1);
+  color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.alertRow:hover { border-color: color-mix(in srgb, var(--a) 45%, var(--border)); }
+.alertReached { border-color: color-mix(in srgb, var(--success) 45%, var(--border)); }
+.alertArt { position: relative; flex-shrink: 0; width: 92px; aspect-ratio: 460 / 215; border-radius: 6px; overflow: hidden; background: var(--surface-3); }
+.alertArt img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.alertBody { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+.alertName { font-size: var(--fs-sm); font-weight: 700; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.alertLine, .alertLow { font-size: var(--fs-xs); color: var(--text-secondary); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.alertLow { color: var(--text-muted); }
+/* The badge sits with the name, which can shorten: the prices below it never do. */
+.alertTop { display: flex; align-items: center; gap: var(--sp-6); min-width: 0; }
+.alertTop .alertName { flex: 0 1 auto; min-width: 0; }
+.alertLine, .alertLow { white-space: normal; overflow: visible; }
+.alertRow .badge { flex-shrink: 0; white-space: nowrap; }
 
 .more {
   align-self: center; display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 18px;

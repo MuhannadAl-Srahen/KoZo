@@ -45,24 +45,78 @@ account and check the screen. You can switch it back to Testing.
 ### What the website adds
 
 Showing KoZo's name and logo on the sign-in screen needs **brand verification**, which
-needs a website:
+needs a public site on a domain you own. That's `site/`, at <https://kozoapp.cloud>:
 
-- A public **homepage** that describes what KoZo does. It can't be only a login
-  page, and it must link to the privacy policy.
-- A **privacy policy** on the same domain, saying how KoZo uses Google data: it
-  asks only for `drive.file` (files it created itself), uses them only for the
-  user's own backups, and has no server of its own.
-- A **domain you own**, verified in Google Search Console and listed under
-  Authorized domains. Google's docs don't say whether a `github.io` address counts,
-  so try a free one first; a custom domain is the fallback.
+| Branding field | Value |
+|---|---|
+| Application home page | `https://kozoapp.cloud/` |
+| Application privacy policy link | `https://kozoapp.cloud/privacy.html` |
+| Application terms of service link | `https://kozoapp.cloud/terms.html` (optional for Google) |
+| Authorized domains | `kozoapp.cloud` |
+
+Google's rules, which the site meets: the homepage describes what KoZo does, isn't only
+a login page, and links the same privacy address as the consent screen. The privacy
+policy is on the same domain and says how KoZo uses Google data. The domain must be
+verified in Google Search Console by an owner or editor of the Google project.
 
 Remove any logo from Branding until you're ready to submit, because a logo requires
 verification. Then:
 
-1. **Branding**: add the homepage, privacy policy and authorized domain.
-2. **Verification Center**: submit for review.
+1. Connect the domain and publish the site (below), and check the three links open.
+2. **Google Search Console**: add `kozoapp.cloud` as a Domain property and add the TXT
+   record it gives you in Hostinger.
+3. **Branding**: enter the table above.
+4. **Verification Center**: submit for review. An automated review usually takes
+   minutes, a manual one 2 to 3 business days. Branding can't be edited during it, and
+   after it passes you have 7 days to publish the branding.
 
 This is the lighter check. The stricter review is only for sensitive scopes.
+
+### Connecting kozoapp.cloud to GitHub Pages
+
+The order matters: GitHub says to add the domain in its settings before pointing DNS at it.
+
+1. GitHub > your profile > Settings > Pages > **Add a domain**: `kozoapp.cloud`. Add the
+   TXT record it gives you in Hostinger, then press Verify. This stops anyone else from
+   using the domain on GitHub.
+2. The repo > Settings > Pages > Build and deployment > Source: **GitHub Actions**.
+3. Publish: `.github/workflows/site.yml` runs when `site/` changes on `main`.
+4. The same page > Custom domain: `kozoapp.cloud` > Save. A CNAME file does nothing with
+   a workflow like this one.
+5. Hostinger > Domains > kozoapp.cloud > DNS / Nameservers > DNS records. Remove any
+   existing `A` record at `@` and `CNAME` at `www`, then add:
+
+   | Type | Name | Points to |
+   |---|---|---|
+   | A | @ | 185.199.108.153 |
+   | A | @ | 185.199.109.153 |
+   | A | @ | 185.199.110.153 |
+   | A | @ | 185.199.111.153 |
+   | AAAA | @ | 2606:50c0:8000::153 |
+   | AAAA | @ | 2606:50c0:8001::153 |
+   | AAAA | @ | 2606:50c0:8002::153 |
+   | AAAA | @ | 2606:50c0:8003::153 |
+   | CNAME | www | muhannadal-srahen.github.io |
+
+   Never add a wildcard (`*`) record: GitHub warns it allows a takeover even on a
+   verified domain. Changes can take up to 24 hours.
+6. Back on GitHub's Pages page, tick **Enforce HTTPS** when it becomes available (up to
+   24 hours).
+
+## Two PCs on one Google account
+
+Each KoZo install keeps its own library file on Drive, so two PCs never overwrite each
+other. Signing in on a PC when the account already holds another PC's backup asks three
+questions, one after another: add the Game List, add the Library, add the game saves.
+Nothing comes down until the answer is yes, and games already here aren't added twice.
+
+Later, when the other PC has something new, a bar at the top of KoZo says so, and its
+button opens the same three questions. KoZo looks once an hour when no game is running.
+
+Both PCs must use the same Google client. `drive.file` only shows files made by that
+same client, so a PC using a client pasted under **Use your own Google client** can't
+see what a release build uploaded with the built-in one, and the other way round. It
+just looks like an empty account.
 
 ## 4. Build it into releases
 

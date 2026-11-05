@@ -1,12 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
   IconDiscount2, IconRefresh, IconThumbUp, IconTrendingDown, IconClock, IconBuildingStore, IconPlus, IconCheck,
-  IconSparkles, IconListCheck, IconBrandSteam, IconChevronDown,
+  IconSparkles, IconListCheck, IconBrandSteam, IconChevronDown, IconBell,
 } from '@tabler/icons-react'
 import SteamGameModal from '../components/SteamGameModal'
+import GamePrices, { lowestLine } from '../components/GamePrices'
+import GeneratedCover from '../components/GeneratedCover'
 import EmptyState from '../components/ui/EmptyState'
 import { Skeleton } from '../components/ui/Skeleton'
 import useCardZoom from '../lib/useCardZoom'
+import CardSizeSlider from '../components/ui/CardSizeSlider'
 import { timeAgo } from '../lib/utils'
 import s from './Deals.module.css'
 
@@ -14,6 +17,7 @@ import s from './Deals.module.css'
 // Game List games on sale come first; every deal has a deal score (discount,
 // reviews and how close it is to what you play), and CheapShark's price
 // history says when a price is the lowest ever (or only looks like a sale).
+// A game's window has a Prices tab: other stores and a price alert.
 
 const FILTERS = [
   { key: 'all',    label: 'All' },
@@ -34,6 +38,9 @@ let dealsCache = null   // module cache: a revisit paints at once
 
 function scoreTone(n) { return n >= 80 ? 'great' : n >= 65 ? 'good' : 'ok' }
 function scoreWord(n) { return n >= 80 ? 'Great deal' : n >= 65 ? 'Good deal' : 'Deal' }
+// "24% your taste" read like something bad, and a weak match says nothing worth a line.
+// 35 is where the "Close to your taste" filter starts.
+function tasteWord(n) { return n >= 35 ? 'Close to your taste' : n >= 20 ? 'Near your taste' : null }
 function endsIn(ts) {
   if (!ts) return null
   const ms = ts - Date.now()
@@ -43,15 +50,17 @@ function endsIn(ts) {
   return `Ends in ${Math.floor(h / 24)}d`
 }
 
-function DealCard({ g, i, onOpen }) {
+function DealCard({ g, i, us, alert, onOpen }) {
   const ends = endsIn(g.price?.endsAt)
+  const taste = tasteWord(g.match)
+  const low = lowestLine(g.lowest, g.lowestDate, us)
   return (
     <button type="button" className={s.card} data-gpnav onClick={() => onOpen(g)} style={{ '--i': Math.min(i, 18) }}>
       <div className={s.art}>
         {(g.header || g.capsule) && <img src={g.header || g.capsule} alt="" loading="lazy" decoding="async" />}
         <span className={s.pct}>-{g.price.pct}%</span>
-        <span className={`${s.score} ${s['score_' + scoreTone(g.score)]}`} title="Deal score: discount, reviews and how close it is to what you play">
-          {g.score}<small>{scoreWord(g.score)}</small>
+        <span className={`${s.score} ${s['score_' + scoreTone(g.score)]}`} title="Deal score out of 100: discount, reviews and how close it is to what you play">
+          <span className={s.scoreNum}>{g.score}<i>/100</i></span><small>{scoreWord(g.score)}</small>
         </span>
       </div>
       <div className={s.body}>
@@ -64,7 +73,7 @@ function DealCard({ g, i, onOpen }) {
         </div>
         <div className={s.meta}>
           {g.reviews?.count > 0 && <span className={s.reviews} title={`${g.reviews.count.toLocaleString()} reviews`}><IconThumbUp size={12} /> {g.reviews.pct}%</span>}
-          {g.match > 0 && <span className={s.matchTxt}><IconSparkles size={12} /> {g.match}% your taste</span>}
+          {taste && <span className={s.matchTxt} title={`${g.match}% like the games you play most`}><IconSparkles size={12} /> {taste}</span>}
           {ends && <span className={s.ends}><IconClock size={12} /> {ends}</span>}
         </div>
         <div className={s.badges}>
@@ -73,8 +82,35 @@ function DealCard({ g, i, onOpen }) {
           {g.low === 'above' && <span className={`${s.badge} ${s.badgeAbove}`} title="This game has been cheaper before">Was cheaper before</span>}
           {g.elsewhere && <span className={`${s.badge} ${s.badgeStore}`}><IconBuildingStore size={12} /> {g.elsewhere.save}% less at {g.elsewhere.store}</span>}
         </div>
+        {low && <div className={s.lowLine} title="The lowest price at any store CheapShark follows, in US dollars"><IconTrendingDown size={12} /> {low}</div>}
         {g.why?.length > 0 && <div className={s.why}>Because you play {g.why.join(', ')}</div>}
       </div>
+    </button>
+  )
+}
+
+function alertText(a) {
+  if (a.state === 'currency') return 'Set in another currency. Open it to set it again.'
+  if (!a.price) return 'Steam gave no price just now.'
+  return `Now ${a.price.finalText}, your alert is ${a.targetText}`
+}
+
+function AlertRow({ a, us, onOpen }) {
+  const low = lowestLine(a.lowest, a.lowestDate, us)
+  const art = a.header || a.capsule
+  return (
+    <button type="button" className={`${s.alertRow} ${a.state === 'reached' ? s.alertReached : ''}`} data-gpnav onClick={() => onOpen(a)}>
+      <span className={s.alertArt}>
+        {art ? <img src={art} alt="" loading="lazy" decoding="async" /> : <GeneratedCover name={a.name} compact />}
+      </span>
+      <span className={s.alertBody}>
+        <span className={s.alertTop}>
+          <span className={s.alertName} title={a.name}>{a.name}</span>
+          {a.state === 'reached' && <span className={`${s.badge} ${s.badgeLow}`}><IconCheck size={12} /> At your price</span>}
+        </span>
+        <span className={s.alertLine}>{alertText(a)}</span>
+        {low && <span className={s.alertLow}>{low}</span>}
+      </span>
     </button>
   )
 }
@@ -100,6 +136,7 @@ export default function Deals() {
   const [sort, setSort] = useState('score')
   const [shown, setShown] = useState(PAGE)
   const [open, setOpen] = useState(null)
+  const [openTab, setOpenTab] = useState('overview')
   const [added, setAdded] = useState(() => new Set())
   const [adding, setAdding] = useState(null)
   const zoomStyle = useCardZoom('deals', 'grid', { grid: 260 }, { min: 200, max: 440 })
@@ -143,12 +180,18 @@ export default function Deals() {
     if (res?.ok) setAdded(a => new Set(a).add(g.appid))
   }
 
+  function openWindow(g, tab = 'overview') { setOpenTab(tab); setOpen(g) }
+
   const yours = data?.yours || []
+  const us = data?.cc === 'US'
+  const alerts = data?.alerts || []
+  const reachedCount = alerts.filter(a => a.state === 'reached').length
   return (
     <div className={s.page}>
       <div className={s.toolbar}>
         <h1 className={s.pageTitle}><IconDiscount2 size={16} stroke={1.7} /> Discounts</h1>
         <div className={s.spacer} />
+        <CardSizeSlider pageKey="deals" view="grid" defaults={{ grid: 260 }} opts={{ min: 200, max: 440 }} />
         {data?.at && <span className={s.updated}>Prices for {data.cc}, checked {timeAgo(data.at)}</span>}
         <button type="button" className={s.ghostBtn} onClick={() => load(true)} disabled={refreshing}>
           <IconRefresh size={14} className={refreshing ? 'spin' : ''} /> {refreshing ? 'Checking…' : 'Check now'}
@@ -167,6 +210,18 @@ export default function Deals() {
               </div>
             )}
 
+            {alerts.length > 0 && (
+              <section className={s.section}>
+                <div className={s.sectionHead}>
+                  <IconBell size={15} /> Price alerts
+                  <span className={s.count}>{reachedCount > 0 ? `${reachedCount} at your price` : alerts.length}</span>
+                </div>
+                <div className={s.alerts}>
+                  {alerts.map(a => <AlertRow key={a.appid} a={a} us={us} onOpen={(x) => openWindow({ ...x, mine: true }, 'prices')} />)}
+                </div>
+              </section>
+            )}
+
             {/* Your Game List games on sale: the reason to open this page. */}
             <section className={s.section}>
               <div className={s.sectionHead}>
@@ -181,7 +236,7 @@ export default function Deals() {
                 </p>
               ) : (
                 <div className={s.grid} style={zoomStyle}>
-                  {yours.map((g, i) => <DealCard key={g.appid} g={g} i={i} onOpen={setOpen} />)}
+                  {yours.map((g, i) => <DealCard key={g.appid} g={g} i={i} us={us} onOpen={openWindow} />)}
                 </div>
               )}
             </section>
@@ -208,7 +263,7 @@ export default function Deals() {
               ) : (
                 <>
                   <div className={s.grid} style={zoomStyle}>
-                    {deals.slice(0, shown).map((g, i) => <DealCard key={g.appid} g={g} i={i % PAGE} onOpen={setOpen} />)}
+                    {deals.slice(0, shown).map((g, i) => <DealCard key={g.appid} g={g} i={i % PAGE} us={us} onOpen={openWindow} />)}
                   </div>
                   {deals.length > shown && (
                     <button type="button" className={s.more} onClick={() => setShown(n => n + PAGE)}>
@@ -228,6 +283,13 @@ export default function Deals() {
           name={open.name}
           art={{ header: open.header, capsule: open.capsule }}
           onClose={() => setOpen(null)}
+          tab={openTab}
+          onTab={setOpenTab}
+          extraTab={{
+            key: 'prices',
+            label: 'Prices',
+            node: <GamePrices appId={open.appid} name={open.name} banner={open.portrait} onAlertChanged={() => setAdded(a => new Set(a).add(open.appid))} />,
+          }}
           actions={<>
             {open.mine || added.has(open.appid)
               ? <span className={s.addedNote}><IconCheck size={14} /> On your Game List</span>
@@ -240,7 +302,7 @@ export default function Deals() {
               </button>
             )}
             <button type="button" className={s.buyBtn} onClick={() => window.kozo?.api?.shell?.openExternal?.(`https://store.steampowered.com/app/${open.appid}`)}>
-              <IconBrandSteam size={14} /> {open.price.finalText} on Steam
+              <IconBrandSteam size={14} /> {open.price ? `${open.price.finalText} on Steam` : 'On Steam'}
             </button>
           </>}
         />

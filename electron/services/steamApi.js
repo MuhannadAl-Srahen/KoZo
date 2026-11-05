@@ -1169,6 +1169,44 @@ async function getPlayerAchievements(appId, apiKey, steamId) {
   }
 }
 
+// Pure: the profile page's XML -> 'public', 'private' (also friends only), or null.
+function privacyFromProfileXml(body) {
+  const state = String(body || '').match(/<privacyState>\s*(?:<!\[CDATA\[)?\s*(\w+)/i)?.[1]?.toLowerCase()
+  if (!state) return null
+  return state === 'public' ? 'public' : 'private'
+}
+
+// Pure: GetOwnedGames. With Game details private Steam answers an empty response, and a
+// public account with no games still has game_count: 0.
+function privacyFromOwnedGames(data) {
+  const r = data?.response
+  if (!r || typeof r !== 'object') return null
+  return r.game_count != null ? 'public' : 'private'
+}
+
+// Is this account's data open? Asks Steam about the account itself. A game's answer can't
+// tell: "Profile is not public" also means "this game isn't on this account". Returns
+// 'public', 'private', or null when Steam gave no clear answer. An empty wishlist proves
+// nothing, because a private one looks the same.
+async function accountPrivacy(steamId, apiKey) {
+  if (!steamId) return null
+  try {
+    const page = await getAxios().get(`https://steamcommunity.com/profiles/${steamId}/`, {
+      params: { xml: 1 }, timeout: 15000, responseType: 'text', transformResponse: [x => x],
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+    })
+    if (privacyFromProfileXml(page.data) === 'private') return 'private'
+  } catch {}
+  if (apiKey) {
+    try {
+      const verdict = privacyFromOwnedGames(await getJSON('https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/', { key: apiKey, steamid: steamId }))
+      if (verdict) return verdict
+    } catch {}
+  }
+  try { if ((await getWishlist(steamId)).length > 0) return 'public' } catch {}
+  return null
+}
+
 // Returns the Steam profile (persona name, avatar, profile URL) for a Steam ID.
 // Used in Settings so the user can visually confirm they entered the right ID.
 async function getPlayerSummary(apiKey, steamId) {
@@ -1195,6 +1233,15 @@ async function getPlayerSummary(apiKey, steamId) {
 }
 
 // Returns the user's owned Steam games (requires profile to be public).
+// The user's Steam wishlist: no key needed. An empty list and a private one look
+// the same from here. Each item: { appid, added (ms), priority }
+async function getWishlist(steamId) {
+  const data = await getJSON('https://api.steampowered.com/IWishlistService/GetWishlist/v1/', { steamid: steamId })
+  return (data?.response?.items || [])
+    .map(i => ({ appid: Number(i.appid), added: i.date_added ? i.date_added * 1000 : null, priority: i.priority ?? 0 }))
+    .filter(i => i.appid > 0)
+}
+
 // Each item: { appid, name, playtime_forever, img_icon_url }
 async function getOwnedGames(apiKey, steamId) {
   if (!apiKey || !steamId) return []
@@ -1489,6 +1536,7 @@ async function getComingSoon(feed = 'soon', page = 0) {
 }
 
 module.exports = {
+  accountPrivacy, privacyFromProfileXml, privacyFromOwnedGames,
   warmUpcoming,
   shrinkCover, getTasteProfile, clearTasteProfile, getPicks, scorePicks, pickSources, getReviews,
   getBannersDir, downloadFile,
@@ -1497,5 +1545,5 @@ module.exports = {
   testApiKey, searchGames, findAppByName, parentArtAppId, refreshGameData, refreshBanners, downloadBanner,
   getStoreArt, getStoreDetails, resolveBannerUrl, resolveSteamId, runGenreBackfill, storeRemoteFallback,
   getSchemaForGame, getSchemaKeyless, getGlobalAchievementPercentages, getPlayerAchievements, getPlayerAchievementsXml,
-  getPlayerSummary, getOwnedGames,
+  getPlayerSummary, getOwnedGames, getWishlist,
 }

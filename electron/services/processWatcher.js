@@ -110,6 +110,15 @@ function getAwayPauseSec() {
   return DEFAULT_AWAY_PAUSE_SEC
 }
 
+// Settings > Tracking > Break reminder, in seconds. 0 = off.
+function getBreakReminderSec() {
+  try {
+    const min = parseInt(settingsQ.getSetting('break_reminder_min'))
+    if (Number.isFinite(min) && min > 0) return min * 60
+  } catch {}
+  return 0
+}
+
 // Games that have been the front window on this PC. A game KoZo has never matched
 // doesn't pause (see foregroundProbe.awaySeconds), and this memory has to outlive a
 // KoZo restart: restarted while you were in another app, it kept counting until
@@ -184,6 +193,11 @@ const HARD_DENY = new Set([
   'audiodg.exe','spoolsv.exe','searchindexer.exe','searchhost.exe',
   'msmpeng.exe','wuauclt.exe','msiexec.exe','regsvr32.exe','rundll32.exe',
   'system','registry','memory compression','idle',
+  // Windows starts these for a permission prompt or a crash, so they turn up right after Play.
+  'smartscreen.exe','consent.exe','werfault.exe','applicationframehost.exe',
+  'shellexperiencehost.exe','startmenuexperiencehost.exe','textinputhost.exe','lockapp.exe',
+  'securityhealthservice.exe','securityhealthsystray.exe','wmiprvse.exe','backgroundtaskhost.exe',
+  'systemsettings.exe','taskmgr.exe',
   'powershell.exe','pwsh.exe','cmd.exe','bash.exe','wsl.exe',
   'chrome.exe','msedge.exe','firefox.exe','opera.exe','brave.exe',
   'code.exe','cursor.exe','node.exe','electron.exe','claude.exe',
@@ -421,6 +435,23 @@ function heartbeatSession(game, session, gapMs, now) {
     sendToRenderer('session:idle', { gameId: game.id, idle: isIdleNow, idle_seconds: session.idle_seconds || 0 })
   }
 
+  // Break reminder: time actually played, the same sum the live timer shows.
+  const everySec = getBreakReminderSec()
+  if (everySec > 0 || session._break) {
+    const startedMs = new Date(session.started_at).getTime()
+    const activeSec = Number.isFinite(startedMs) ? Math.floor((now - startedMs) / 1000) - (session.idle_seconds || 0) : 0
+    const step = require('./breakReminder').breakDue({ activeSec, everySec, paused: isIdleNow, state: session._break || null })
+    session._break = step.state
+    if (step.due) {
+      try {
+        require('../overlayWindow').sendBreakReminder({
+          gameName: game.name, playedSec: activeSec,
+          artPath: game.banner_local_path || null, artUrl: game.banner_url || null,
+        })
+      } catch (e) { logger.warn('processWatcher: break reminder failed', { message: e.message }) }
+    }
+  }
+
   // Persist the heartbeat, but not every tick — each UPDATE fsyncs the DB, and
   // doing that every 5s while the game may be streaming assets from the same
   // disk is needless I/O on a hot path. 30s granularity only matters if KoZo
@@ -611,11 +642,14 @@ async function tick() {
       }
 
       if (buf.ticks >= 2 && now - buf.firstSeen >= sensitivityMs) {
+        // How the game was, in case this turns out to be under a minute and is thrown away.
+        const before = { last_played_at: game.last_played_at, first_played_at: game.first_played_at, completion_status: game.completion_status }
         const session = sessionsQ.resumeOrStartSession(game.id)
         const pid = procByName.get(exeLower)?.pid || null
         // A merged session carries the idle time already excluded from its first
         // leg — endSession recomputes duration from the raw timestamps.
         const enriched = { ...session, game_name: game.name, exe_name: game.exe_name, last_seen_at: now, idle_seconds: session.prev_excluded || 0, pid }
+        enriched.before = before
         activeSessions.set(game.id, enriched)
         detectionBuffer.delete(game.id)
         detectingGames.delete(game.id)
@@ -831,6 +865,7 @@ function endSession(gameId, session, forcedEndAt) {
       .prepare('UPDATE games SET total_playtime_seconds=MAX(0,total_playtime_seconds-?) WHERE id=?')
       .run(ended.duration_seconds || 0, session.game_id)
     logger.debug('Dropped short session', { id: session.id, duration: ended?.duration_seconds })
+    try { require('./statusSync').undoSessionStart(session.game_id, session.before) } catch {}
     sendToRenderer('session:discarded', { gameId: session.game_id })
     emitter.emit('change')
     // Still an end — deferred jobs must be released even for a dropped session,
@@ -1245,5 +1280,5 @@ module.exports = {
   getActiveSessions, getDetectingGames, isPaused,
   isSessionActive, onIdle, runWhenIdle,
   onChange, onUnknownProcess,
-  listRunningProcesses,
+  listRunningProcesses, getRunningProcesses, getProcessPathsBatch, HARD_DENY,
 }
