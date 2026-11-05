@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>KoZo</title>
+<meta name="description" content="KoZo tracks playtime, sessions and achievements for every game on your Windows PC, by itself. Open source, no account.">
+<meta name="theme-color" content="#08090a">
+<meta property="og:type" content="website">
+<meta property="og:title" content="KoZo: you play, it keeps score">
+<meta property="og:description" content="Playtime, sessions and achievements for every game on your PC, by itself. Open source, no account.">
+<meta property="og:url" content="https://kozoapp.cloud/">
+<meta property="og:image" content="https://kozoapp.cloud/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="canonical" href="https://kozoapp.cloud/">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="preload" href="assets/fonts/anybody.woff2" as="font" type="font/woff2" crossorigin>
+<script>
+  // The visitor's color and motion setting, before anything paints. Motion is this page's own
+  // setting, as in the app: Windows "Show animations" is often off on gaming PCs for other reasons.
+  (function () {
+    var root = document.documentElement, motion = 'on'
+    try {
+      var saved = JSON.parse(localStorage.getItem('kozo-site') || '{}')
+      if (saved.accent) root.style.setProperty('--a', saved.accent)
+      if (saved.motion === 'off') motion = 'off'
+    } catch (e) {}
+    root.dataset.motion = motion
+    window.kozoFlat = function () { root.classList.toggle('flat', motion === 'off' || innerWidth <= 880) }
+    window.kozoFlat()
+    addEventListener('resize', window.kozoFlat)
+  })()
+</script>
+<script type="application/ld+json">
+{ "@context": "https://schema.org", "@type": "SoftwareApplication", "name": "KoZo", "url": "https://kozoapp.cloud/", "operatingSystem": "Windows 10, Windows 11", "applicationCategory": "GameApplication", "description": "Tracks playtime, sessions and achievements for every game on your Windows PC.", "license": "https://opensource.org/licenses/MIT" }
+</script>
+<link rel="stylesheet" href="css/site.css">
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M7 11l5 5 5-5M12 4v12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-trophy" viewBox="0 0 24 24"><path d="M8 21h8M12 17v4M7 4h10M17 4v8a5 5 0 0 1-10 0V4M5 9a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM19 9a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M9 12h-3.6a.6.6 0 0 1-.4-1l6.5-6.6a.7.7 0 0 1 1 0L19 11a.6.6 0 0 1-.4 1H15v3H9v-3ZM9 21h6M9 18h6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0 9 9 0 0 0-18 0M12 7v5l3 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-pad" viewBox="0 0 24 24"><path d="M6 12h4M8 10v4M15 13h.01M18 11h.01M17.3 5H6.7a4 4 0 0 0-4 3.6l-.7 6.8A2.9 2.9 0 0 0 7 17.9L8.9 16h6.2l1.9 1.9a2.9 2.9 0 0 0 5-2.5l-.7-6.8a4 4 0 0 0-4-3.6Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-sound" viewBox="0 0 24 24"><path d="M15 8a5 5 0 0 1 0 8M18 5a9 9 0 0 1 0 14M6 15H4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1h2l4-4.5a.6.6 0 0 1 1 .4v15.200a.6.6 0 0 1-1 .4L6 15Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24"><path d="M6 4h10l4 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2ZM12 14a2 2 0 1 0 0 4 2 2 0 0 0 0-4ZM14 4v4H8V4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-win" viewBox="0 0 24 24"><path d="M4 5.500l7-1V11H4V5.500ZM13 4.200l7-1V11h-7V4.200ZM4 13h7v6.500l-7-1V13ZM13 13h7v7.800l-7-1V13Z" fill="currentColor"/></symbol>
+</svg>
+
+<header class="hud" id="hud">
+  <a class="hud-brand" href="#top" aria-label="KoZo, back to the top">
+    <svg class="hud-logo" id="hud-logo" viewBox="-26 -23 52 46" aria-hidden="true"></svg>
+    <span class="hud-name">KoZo</span>
+  </a>
+
+  <button class="hud-score" id="ach-toggle" type="button" aria-expanded="false" aria-controls="ach-panel">
+    <span class="hud-lvl">LVL <b id="hud-level">1</b></span>
+    <span class="hud-tier" id="hud-tier">Rookie</span>
+    <span class="hud-xp"><b id="hud-into">0</b>/<span id="hud-span">100</span> XP</span>
+    <span class="hud-count"><b id="hud-count">0</b>/7</span>
+  </button>
+
+  <div class="hud-right">
+    <button class="hud-color" id="color-toggle" type="button" aria-expanded="false" aria-controls="color-panel" aria-label="Change the color" title="Change the color">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12,2 20.66,7 20.66,17 12,22 3.34,17 3.34,7"/></svg>
+    </button>
+    <a class="hud-download" data-download href="https://github.com/MuhannadAl-Srahen/KoZo/releases/latest">
+      <svg aria-hidden="true"><use href="#i-download"/></svg>
+      <span data-download-label="Download">Download</span>
+    </a>
+  </div>
+
+  <div class="hud-bar" aria-hidden="true"><i id="hud-fill"></i></div>
+
+  <div class="panel color-panel" id="color-panel" hidden>
+    <p class="panel-title">KoZo's 12 colors</p>
+    <div class="swatches" id="swatches"></div>
+    <p class="panel-note">The app has these too, and any other color you like.</p>
+    <div class="panel-row">
+      <span>Animations</span>
+      <button class="switch" id="motion-toggle" type="button" role="switch" aria-checked="true" aria-label="Animations"><i></i></button>
+    </div>
+  </div>
+
+  <div class="panel ach-panel" id="ach-panel" hidden>
+    <p class="panel-title">Achievements on this page</p>
+    <ul class="ach-list" id="ach-list"></ul>
+    <button class="panel-reset" id="ach-reset" type="button">Start over</button>
+  </div>
+</header>
+
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+
+<aside class="session" id="session" aria-label="Your session on this page">
+  <div class="session-art"><svg viewBox="-26 -23 52 46" aria-hidden="true" id="session-logo"></svg></div>
+  <div class="session-info">
+    <p class="session-state"><i class="session-dot"></i><span id="session-state">Playing now</span></p>
+    <p class="session-name">KoZo's website</p>
+    <p class="session-time" id="session-time">0:00</p>
+  </div>
+</aside>
+
+<main id="top">
+
+  <!-- The honeycomb stays put while the hero leaves, then its center cell opens into the app. -->
+  <div class="stage" id="stage">
+    <div class="hive-wrap" id="hive-wrap" aria-hidden="true">
+      <canvas class="hive" id="hive"></canvas>
+      <div class="hero-shade" id="hero-shade"></div>
+    </div>
+    <div class="hive-tag" id="hive-tag" hidden></div>
+
+    <section class="hero" id="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">
+          <span>Game tracker for Windows</span>
+          <span class="eyebrow-score">Your score <b id="hero-score">00000</b></span>
+        </p>
+
+        <h1 class="lockup" data-fit id="lockup" aria-label="You play. KoZo keeps score.">
+          <span aria-hidden="true" data-wdth="104">You play.</span>
+          <span aria-hidden="true" data-wdth="58">KoZo keeps</span>
+          <span aria-hidden="true" data-wdth="150" class="hot">score.</span>
+        </h1>
+
+        <p class="lede">Playtime, sessions and achievements for every game on your PC, from Steam to games with no launcher at all. It starts counting when you play and stops when you don't.</p>
+
+        <div class="cta-row">
+          <a class="btn-hex" data-download href="https://github.com/MuhannadAl-Srahen/KoZo/releases/latest">
+            <svg aria-hidden="true"><use href="#i-download"/></svg>
+            <span data-download-label="Download for Windows">Download for Windows</span>
+          </a>
+          <a class="btn-text" href="#dive">See it work</a>
+        </div>
+
+        <p class="meta">
+          <span>Open source</span>
+          <span>No account</span>
+          <span>Windows 10 and 11</span>
+          <span data-dl-meta>128 MB</span>
+        </p>
+      </div>
+    </section>
+
+    <section class="dive" id="dive" aria-label="A tour of the KoZo app">
+      <div class="dive-stage" id="dive-stage">
+        <p class="dive-line" id="dive-line" aria-hidden="true">Step inside.</p>
+        <div class="dive-open hexclip" id="dive-open">
+          <figure class="beat" data-beat="0">
+            <div class="win"><div class="win-bar"><svg class="win-logo" viewBox="-26 -23 52 46" aria-hidden="true"></svg><span>KoZo</span><i></i><i></i><i></i></div>
+              <img src="assets/shots/library.webp" width="1440" height="900" alt="KoZo's Library: game covers with playtime and achievements" decoding="async"></div>
+            <figcaption>
+              <p class="beat-tag">Library</p>
+              <h3>Every game in one place.</h3>
+              <p>Covers, playtime and achievements at a glance. The one you're playing glows.</p>
+            </figcaption>
+          </figure>
+          <figure class="beat hexclip" data-beat="1">
+            <div class="win"><div class="win-bar"><svg class="win-logo" viewBox="-26 -23 52 46" aria-hidden="true"></svg><span>KoZo</span><i></i><i></i><i></i></div>
+              <img src="assets/shots/game.webp" width="1440" height="900" alt="A game's page in KoZo with its hours, unlocks and next achievements" decoding="async" loading="lazy"></div>
+            <figcaption>
+              <p class="beat-tag">Game page</p>
+              <h3>Every game has its story.</h3>
+              <p>Your hours, what you earned, what to unlock next, and what changed since you last played.</p>
+            </figcaption>
+          </figure>
+          <figure class="beat hexclip" data-beat="2">
+            <div class="win"><div class="win-bar"><svg class="win-logo" viewBox="-26 -23 52 46" aria-hidden="true"></svg><span>KoZo</span><i></i><i></i><i></i></div>
+              <img src="assets/shots/sessions.webp" width="1440" height="900" alt="A game's sessions in KoZo, with one session opened" decoding="async" loading="lazy"></div>
+            <figcaption>
+              <p class="beat-tag">Sessions</p>
+              <h3>Every session, on the record.</h3>
+              <p>Open any session to see when it ran, how long you really played, and what you unlocked in it.</p>
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Unlock something: the real toast, over a game -->
+  <section class="sec sec-unlock" id="unlock">
+    <div class="sec-head">
+      <p class="eyebrow"><span>Achievements</span></p>
+      <h2 class="title" data-fit aria-label="The second you earn it.">
+        <span aria-hidden="true" data-wdth="86">The second</span>
+        <span aria-hidden="true" data-wdth="66" class="hot">you earn it.</span>
+      </h2>
+      <p class="sec-lede">A toast over your game, with the XP it's worth. It reads Steam, and for games with no launcher, the achievement files of emulators like Goldberg and CODEX. There's no sync button. Go on, press one.</p>
+    </div>
+
+    <div class="scene" id="scene">
+      <img class="scene-art" src="assets/scene.webp" width="1920" height="620" alt="" loading="lazy" decoding="async">
+      <div class="scene-toasts" id="scene-toasts" role="status" aria-live="polite"></div>
+      <div class="scene-hint" id="scene-hint">Your game is here. Press a rarity below.</div>
+    </div>
+
+    <div class="rarity-row" id="rarity-row" role="group" aria-label="Unlock an achievement"></div>
+    <button class="sound-toggle" id="sound-toggle" type="button" aria-pressed="false">
+      <svg aria-hidden="true"><use href="#i-sound"/></svg><span id="sound-label">Sound off</span>
+    </button>
+  </section>
+
+  <!-- The session chart: click a bar, that day's sessions show under it -->
+  <section class="sec sec-sessions" id="sessions">
+    <div class="split">
+      <div class="split-copy">
+        <p class="eyebrow"><span>Tracking</span></p>
+        <h2 class="title" data-fit aria-label="It knows when you stopped playing.">
+          <span aria-hidden="true" data-wdth="62">It knows when</span>
+          <span aria-hidden="true" data-wdth="84">you stopped</span>
+          <span aria-hidden="true" data-wdth="122" class="hot">playing.</span>
+        </h2>
+        <p class="sec-lede">No timer to start. KoZo sees the game open and close, and it only counts the time you're really there. You've been watching it work: leave this tab and look at the corner.</p>
+        <dl class="facts">
+          <div><dt>60s</dt><dd>In another app for a minute? The clock stops, and that whole minute comes back off.</dd></div>
+          <div><dt>5m</dt><dd>No keyboard, mouse or controller for five minutes counts as away. You can change both.</dd></div>
+          <div><dt>&lt;1m</dt><dd>Under a minute isn't a session. A launcher flash or a crash on start leaves no trace.</dd></div>
+          <div><dt>0</dt><dd>Sessions lost when the PC sleeps or KoZo closes mid-game. It picks them up again.</dd></div>
+        </dl>
+      </div>
+
+      <div class="chart-card" id="chart-card">
+        <div class="chart-head">
+          <p class="chart-title">Last 30 days</p>
+          <p class="chart-total" id="chart-total"></p>
+        </div>
+        <div class="chart-bars" id="chart-bars" role="group" aria-label="Play per day. Choose a day to see its sessions."></div>
+        <div class="chart-axis"><span id="axis-start"></span><span>Today</span></div>
+        <div class="chart-rows" id="chart-rows"></div>
+        <p class="chart-note">Sample sessions. The last bar is your visit, live.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Every launcher -->
+  <div class="band" id="band" aria-hidden="true">
+    <div class="band-track" id="band-track">Steam <i></i> Epic <i></i> GOG <i></i> Xbox <i></i> EA <i></i> Ubisoft <i></i> No launcher at all <i></i> Steam <i></i> Epic <i></i> GOG <i></i> Xbox <i></i> EA <i></i> Ubisoft <i></i> No launcher at all <i></i></div>
+  </div>
+
+  <!-- Scan PC -->
+  <section class="sec sec-scan" id="scan">
+    <div class="split split-flip">
+      <div class="scan-win" id="scan-win">
+        <div class="scan-top">
+          <p class="scan-title" id="scan-title">Scan PC</p>
+          <p class="scan-status" id="scan-status">Ready</p>
+        </div>
+        <div class="scan-track"><i id="scan-fill"></i></div>
+        <div class="scan-grid" id="scan-grid"></div>
+        <button class="scan-again" id="scan-again" type="button">Scan again</button>
+      </div>
+
+      <div class="split-copy">
+        <p class="eyebrow"><span>Your library</span></p>
+        <h2 class="title" data-fit aria-label="Every game on this PC.">
+          <span aria-hidden="true" data-wdth="104">Every game</span>
+          <span aria-hidden="true" data-wdth="94" class="hot">on this PC.</span>
+        </h2>
+        <p class="sec-lede">One button finds them: Steam, Epic, GOG, Xbox, and games with no launcher at all, including achievements from emulators like Goldberg and CODEX.</p>
+        <ul class="ticks">
+          <li><b>It checks the file first.</b> KoZo reads what a file loads before it trusts it, so a settings tool or a map editor is never mistaken for your game.</li>
+          <li><b>No duplicates.</b> The same folder or the same game shows In Library, however it's spelled.</li>
+          <li><b>Moved it? Removed it?</b> KoZo finds a game you moved to another drive, and says so when one is gone from this PC.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- A page for every game -->
+  <section class="sec sec-page" id="page">
+    <div class="sec-head sec-head-wide">
+      <p class="eyebrow"><span>Game pages</span></p>
+      <h2 class="title" data-fit aria-label="A page for every game.">
+        <span aria-hidden="true" data-wdth="150">A page for</span>
+        <span aria-hidden="true" data-wdth="112" class="hot">every game.</span>
+      </h2>
+    </div>
+    <figure class="page-shot">
+      <img src="assets/shots/game-cinematic.webp" width="1440" height="900" alt="A game's page in KoZo with wide art, the game's name and its stats" loading="lazy" decoding="async">
+    </figure>
+    <ul class="page-points">
+      <li><h3>Since you last played</h3><p>The developer's own news, in order, waiting for you when you come back.</p></li>
+      <li><h3>Next to unlock</h3><p>The locked achievements most players have, so you know what's close.</p></li>
+      <li><h3>Is your copy behind?</h3><p>A version tag beside the name, compared with Steam's newest build.</p></li>
+      <li><h3>Two layouts</h3><p>Store or Cinematic, one click. Trailers, reviews and system requirements too.</p></li>
+    </ul>
+  </section>
+
+  <!-- What to play next: a sideways rail -->
+  <section class="rail" id="rail" aria-label="What to play next">
+    <div class="rail-stage" id="rail-stage">
+      <div class="rail-track" id="rail-track">
+        <div class="rail-intro">
+          <p class="eyebrow"><span>Discover</span></p>
+          <h2 class="title" data-fit aria-label="What to play next.">
+            <span aria-hidden="true" data-wdth="130">What to</span>
+            <span aria-hidden="true" data-wdth="76" class="hot">play next.</span>
+          </h2>
+          <p class="sec-lede">Your library knows what you like, so KoZo can tell you what's coming, what's cheap and what's worth your time.</p>
+        </div>
+        <figure class="slide"><img src="assets/shots/upcoming.webp" width="1440" height="900" alt="KoZo's Upcoming calendar" loading="lazy" decoding="async">
+          <figcaption><h3>Upcoming</h3><p>A release calendar with one button that matters: Like my games. What's coming that matches what you play, best match first, with trailers.</p></figcaption></figure>
+        <figure class="slide"><img src="assets/shots/discounts.webp" width="1440" height="900" alt="KoZo's Discounts page, ranked for the player" loading="lazy" decoding="async">
+          <figcaption><h3>Discounts</h3><p>Sales ranked for you by the discount, the reviews and your taste. The lowest price ever, other stores, and an alert when a game hits your price.</p></figcaption></figure>
+        <figure class="slide"><img src="assets/shots/like.webp" width="1440" height="900" alt="KoZo's Games like page" loading="lazy" decoding="async">
+          <figcaption><h3>Games like</h3><p>Pick any game and get its real neighbors, ranked by tags, by Steam's own suggestions and by how good the reviews are.</p></figcaption></figure>
+        <figure class="slide"><img src="assets/shots/plan-focus.webp" width="1440" height="900" alt="KoZo's Play Plan in its Focus view" loading="lazy" decoding="async">
+          <figcaption><h3>Play Plan</h3><p>Plan your backlog by month and drag games around. The one you're playing fills the screen, with what's up next beside it.</p></figcaption></figure>
+        <figure class="slide"><img src="assets/shots/finished.webp" width="1440" height="900" alt="KoZo's Finished page with rated games" loading="lazy" decoding="async">
+          <figcaption><h3>Finished</h3><p>Every game you've beaten, by year, with your rating from 1 to 10. It's a satisfying wall to look at.</p></figcaption></figure>
+        <figure class="slide"><img src="assets/shots/year.webp" width="1440" height="900" alt="KoZo's Your year page" loading="lazy" decoding="async">
+          <figcaption><h3>Your year</h3><p>Most played, hours per month, your longest session and your rarest unlock. Share it as a picture.</p></figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- Rookie to Mythic -->
+  <section class="sec sec-tiers" id="tiers">
+    <div class="sec-head">
+      <p class="eyebrow"><span>Your profile</span></p>
+      <h2 class="title" data-fit aria-label="Rookie to Mythic.">
+        <span aria-hidden="true" data-wdth="104">Rookie to</span>
+        <span aria-hidden="true" data-wdth="124" class="hot">Mythic.</span>
+      </h2>
+      <p class="sec-lede">Everything you play adds up to one career. XP is worked out from your real history, so it can't drift and can't be farmed by a menu.</p>
+    </div>
+    <ol class="tier-row" id="tier-row"></ol>
+    <div class="tier-body">
+      <dl class="xp-list">
+        <div><dt>+60</dt><dd>for every hour you play</dd></div>
+        <div><dt>+30 to 80</dt><dd>for each unlock, more the rarer it is</dd></div>
+        <div><dt>+50</dt><dd>for each day in your longest streak</dd></div>
+        <div><dt>+250</dt><dd>for every game you finish</dd></div>
+      </dl>
+      <figure class="tier-shot"><img src="assets/shots/profile.webp" width="1440" height="900" alt="A KoZo profile with level, XP and a year of play" loading="lazy" decoding="async"></figure>
+    </div>
+  </section>
+
+  <!-- Couch mode -->
+  <section class="couch" id="couch">
+    <img class="couch-art" src="assets/shots/big.webp" width="1440" height="900" alt="KoZo's Big Picture mode on a TV-style layout" loading="lazy" decoding="async">
+    <div class="couch-copy">
+      <p class="eyebrow"><span>Big Picture</span></p>
+      <h2 class="title" data-fit aria-label="Couch mode.">
+        <span aria-hidden="true" data-wdth="150">Couch</span>
+        <span aria-hidden="true" data-wdth="150" class="hot">mode.</span>
+      </h2>
+      <p class="sec-lede">Full screen and built for a controller. Hold the Xbox button anywhere and KoZo comes up, even from the tray. Browse, play, rate and check achievements without touching the keyboard.</p>
+      <p class="pad-state" id="pad-state"><svg aria-hidden="true"><use href="#i-pad"/></svg><span id="pad-text">Got a controller? Connect it and press A.</span></p>
+    </div>
+  </section>
+
+  <!-- Make it yours -->
+  <section class="sec sec-look" id="look">
+    <div class="split">
+      <div class="split-copy">
+        <p class="eyebrow"><span>Appearance</span></p>
+        <h2 class="title" data-fit aria-label="Make it yours.">
+          <span aria-hidden="true" data-wdth="96">Make it</span>
+          <span aria-hidden="true" data-wdth="104" class="hot">yours.</span>
+        </h2>
+        <p class="sec-lede">Same app, all real settings. Press one, and this page changes with it.</p>
+        <div class="look-btns" id="look-btns" role="group" aria-label="Try a look"></div>
+        <ul class="look-list">
+          <li>Themes and any background color</li>
+          <li>Twelve colors, or your own</li>
+          <li>Card styles, fonts and page width</li>
+          <li>Slim sidebar, your own tab order</li>
+          <li>A wallpaper behind everything</li>
+          <li>Share your look as a code</li>
+        </ul>
+      </div>
+      <figure class="look-shot" id="look-shot">
+        <img id="look-img" src="assets/shots/look-pink.webp" width="1440" height="900" alt="KoZo's Library in the chosen look" loading="lazy" decoding="async">
+        <figcaption id="look-cap">Hot Pink, Poster cards, slim sidebar</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- Saves -->
+  <section class="sec sec-saves" id="saves">
+    <div class="split split-flip">
+      <div class="saves-card">
+        <div class="saves-head"><svg aria-hidden="true"><use href="#i-save"/></svg><p>Restore points</p><span>Sample</span></div>
+        <ol class="saves-list" id="saves-list"></ol>
+      </div>
+      <div class="split-copy">
+        <p class="eyebrow"><span>Backups</span></p>
+        <h2 class="title" data-fit aria-label="Your saves survive anything.">
+          <span aria-hidden="true" data-wdth="88">Your saves</span>
+          <span aria-hidden="true" data-wdth="112">survive</span>
+          <span aria-hidden="true" data-wdth="70" class="hot">anything.</span>
+        </h2>
+        <p class="sec-lede">KoZo finds each game's saves by itself and backs them up before and after you play. No clicks, and nothing to set up.</p>
+        <ul class="ticks">
+          <li><b>Put any one back.</b> The save you have now is kept first, so a restore can always be undone.</li>
+          <li><b>Kept the smart way.</b> Everything for 7 days, one a day to 30, one a week to 90, and small because files are only stored once.</li>
+          <li><b>Off this PC too.</b> A copy in Google Drive for Desktop, Dropbox, MEGA, iCloud, any folder or a USB stick, or everything in one .kozo file.</li>
+          <li><b>New PC, same library.</b> Bring in a backup from another PC and it merges: games are matched by name and Steam id, and nothing is added twice.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Stays out of the way -->
+  <section class="sec sec-light" id="light">
+    <div class="light-head">
+      <p class="eyebrow"><span>Built for people who play</span></p>
+      <h2 class="title" data-fit aria-label="Stays out of your game.">
+        <span aria-hidden="true" data-wdth="76">Stays out</span>
+        <span aria-hidden="true" data-wdth="130">of your</span>
+        <span aria-hidden="true" data-wdth="150" class="hot">game.</span>
+      </h2>
+    </div>
+    <ul class="light-list">
+      <li><h3>Nothing draws behind your game</h3><p>When KoZo isn't the app in front, every animation stops. The overlay only appears for a toast.</p></li>
+      <li><h3>Nothing new starts mid-game</h3><p>One small helper, started before you play. No new processes while you're playing.</p></li>
+      <li><h3>Heavy work waits for you</h3><p>Backups, art and scans run after you close the game, one at a time, so the PC doesn't stutter.</p></li>
+      <li><h3>Your data is yours</h3><p>No account and no tracking. Your library is on your PC, and KoZo has no server to send it to.</p></li>
+      <li><h3>Open source, MIT licensed</h3><p>Every line is public. <a href="https://github.com/MuhannadAl-Srahen/KoZo">Read it on GitHub</a>.</p></li>
+    </ul>
+  </section>
+
+  <!-- The end: the level-up -->
+  <section class="finale" id="finale">
+    <div class="finale-hex" id="finale-hex" aria-hidden="true"></div>
+    <div class="finale-copy">
+      <p class="eyebrow"><span id="finale-tag">Session complete</span></p>
+      <h2 class="title" data-fit aria-label="Now try it on real games.">
+        <span aria-hidden="true" data-wdth="80">Now try it</span>
+        <span aria-hidden="true" data-wdth="104">on real</span>
+        <span aria-hidden="true" data-wdth="130" class="hot">games.</span>
+      </h2>
+      <dl class="finale-stats">
+        <div><dt id="stat-time">0:00</dt><dd>played here, away time not counted</dd></div>
+        <div><dt id="stat-ach">0/7</dt><dd>achievements</dd></div>
+        <div><dt id="stat-level">Level 1</dt><dd id="stat-tier">Rookie</dd></div>
+      </dl>
+      <p class="finale-note" id="finale-note"></p>
+      <div class="cta-row">
+        <a class="btn-hex btn-hex-xl" data-download href="https://github.com/MuhannadAl-Srahen/KoZo/releases/latest">
+          <svg aria-hidden="true"><use href="#i-download"/></svg>
+          <span data-download-label="Download for Windows">Download for Windows</span>
+        </a>
+      </div>
+      <p class="meta">
+        <span>Open source</span>
+        <span>No account</span>
+        <span>Windows 10 and 11</span>
+        <span data-dl-meta>128 MB</span>
+      </p>
+    </div>
+    <div id="end-sentinel"></div>
+  </section>
+
+  <section class="faq" id="faq">
+    <h2 class="faq-title">Questions</h2>
+    <div class="faq-list">
+      <details><summary>Which games does it work with?</summary><p>Steam, Epic, GOG, Xbox, EA and Ubisoft, and games with no launcher at all, including achievements from emulators like Goldberg and CODEX. If it runs on your PC, you can add it.</p></details>
+      <details><summary>Will it slow my games down?</summary><p>It's built not to. KoZo stops its animations behind your game, starts no new processes while you play, and leaves heavy work until you close the game.</p></details>
+      <details><summary>Why does Windows warn me when I install it?</summary><p>The installer isn't code signed yet, so Windows may show "Windows protected your PC". Choose More info, then Run anyway. All of the code is public on GitHub if you want to check it first.</p></details>
+      <details><summary>Do I need a Steam account?</summary><p>No. Connecting Steam brings in your Steam unlocks, and everything else works without it.</p></details>
+      <details><summary>Where does my data live?</summary><p>On your PC. Backups go where you choose. KoZo has no server of its own. It asks Steam, SteamGridDB and CheapShark for art, game details and prices. The <a href="privacy.html">privacy page</a> has the details.</p></details>
+      <details><summary>Does it work on Mac or Linux?</summary><p>Not at the moment. KoZo runs on Windows 10 and 11.</p></details>
+      <details><summary>Does it update itself?</summary><p>Yes. When there's a new version it tells you, and it installs when you say so.</p></details>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <a class="foot-brand" href="#top"><svg class="foot-logo" viewBox="-26 -23 52 46" aria-hidden="true"></svg><span>KoZo</span></a>
+  <nav class="foot-links" aria-label="Links">
+    <a href="https://github.com/MuhannadAl-Srahen/KoZo">GitHub</a>
+    <a href="https://github.com/MuhannadAl-Srahen/KoZo/releases">Releases</a>
+    <a href="https://github.com/MuhannadAl-Srahen/KoZo/issues">Report a problem</a>
+    <a href="privacy.html">Privacy</a>
+    <a href="terms.html">Terms</a>
+  </nav>
+  <p class="foot-note">KoZo isn't affiliated with Valve, Epic Games, GOG, Microsoft, Electronic Arts or Ubisoft. Game art belongs to its publishers and is shown to illustrate how KoZo displays a library. App screens show a sample library.</p>
+</footer>
+
+<script src="assets/covers.js" defer></script>
+<script src="js/hive.js" defer></script>
+<script src="js/game.js" defer></script>
+<script src="js/sections.js" defer></script>
+</body>
+</html>
