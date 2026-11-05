@@ -7,6 +7,19 @@
   composes: toolbar from '../styles/page.module.css';
   flex-wrap: wrap;
   gap: var(--sp-8);
+  container-type: inline-size;
+}
+
+/* Same rule as the Library: everything stays on one row, buttons fold to icons first. */
+.oneRow { flex-wrap: nowrap; }
+.oneRow > .btnSecondary, .oneRow > .btnPrimary, .oneRow > .viewToggle { flex-shrink: 0; white-space: nowrap; }
+.oneRow > .pageTitle { flex: 1 0 auto; white-space: nowrap; }
+@container (max-width: 1020px) {
+  .btnLabel { display: none; }
+  .btnSecondary:has(> .btnLabel) { padding-left: 9px; padding-right: 9px; }
+}
+@container (max-width: 740px) {
+  .oneRow > .pageTitle { display: none; }
 }
 
 .pageTitle {
@@ -28,7 +41,10 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 0 1 140px;
+  min-width: 104px;
 }
+.filters:empty { display: none; }
 
 .filterSelect {
   appearance: none;
@@ -151,8 +167,8 @@
   border: 1px solid var(--border);
   border-radius: var(--r-input);
   padding: 0 8px;
-  flex: 1;
-  min-width: 120px;
+  flex: 1 1 150px;
+  min-width: 96px;
   max-width: 220px;
   transition: border-color 0.12s;
 }

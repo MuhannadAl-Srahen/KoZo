@@ -116,6 +116,9 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
           {game.planned_month && (
             <span className={s.planChip} title="Planned to play this month">{formatMonthKey(game.planned_month)}</span>
           )}
+          {!game.is_installed && !selectionMode && (
+            <span className={s.notInstalledChip} data-not-installed>Not installed</span>
+          )}
         </div>
 
         {/* Selection checkbox — top-right */}

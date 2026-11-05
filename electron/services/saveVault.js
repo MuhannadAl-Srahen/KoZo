@@ -177,8 +177,22 @@ function readBlob(vault, hash) {
 }
 
 // ── Snapshots ───────────────────────────────────────────────────────────────
+// Pure: a restore point names the folders it came from, with that PC's Windows user in them.
+// On another PC with another user name that's nobody's home, and the game would never read
+// a save put there. Public and the like are the same on every PC.
+function mapSource(src, home) {
+  const text = String(src)
+  const m = /^[a-z]:[\\/]users[\\/]([^\\/]+)(?=[\\/]|$)/i.exec(text)
+  if (!m || /^(public|default|default user|all users)$/i.test(m[1])) return text
+  const mine = String(home).replace(/[\\/]+$/, '')
+  return m[0].toLowerCase() === mine.toLowerCase() ? text : mine + text.slice(m[0].length)
+}
+const sourcesHere = (sources) => (sources || []).map(src => mapSource(src, require('os').homedir()))
+
 function readSnapshot(vault, id) {
-  return JSON.parse(fs.readFileSync(path.join(vault, 'snapshots', `${safeId(id)}.json`), 'utf8'))
+  const snap = JSON.parse(fs.readFileSync(path.join(vault, 'snapshots', `${safeId(id)}.json`), 'utf8'))
+  snap.sources = sourcesHere(snap.sources)
+  return snap
 }
 
 function listSnapshots(game) {
@@ -192,7 +206,7 @@ function listSnapshots(game) {
       const snap = JSON.parse(fs.readFileSync(path.join(vault, 'snapshots', n), 'utf8'))
       out.push({
         id: snap.id, createdAt: snap.createdAt, reason: snap.reason, label: snap.label || null,
-        sources: snap.sources, files: snap.files.length, bytes: snap.bytes,
+        sources: sourcesHere(snap.sources), files: snap.files.length, bytes: snap.bytes,
       })
     } catch {}
   }
@@ -297,6 +311,9 @@ function compare(game, id) {
 function restore(game, id) {
   const vault = vaultDir(game)
   const snap = readSnapshot(vault, id)
+  // A restore point from another PC can name a drive this one doesn't have.
+  const away = snap.sources.find(src => !fs.existsSync(path.parse(src).root))
+  if (away) throw new Error(`This restore point's save folder is on ${path.parse(away).root}, which this PC doesn't have. Nothing was changed`)
   const exists = snap.sources.filter(src => fs.existsSync(src))
   let safety = null
   if (exists.length) {
@@ -597,6 +614,6 @@ function migrateLegacy(game) {
 }
 
 module.exports = {
-  snapshot, listSnapshots, restore, compare, exportSnapshot, remove,
+  snapshot, listSnapshots, restore, compare, exportSnapshot, remove, mapSource,
   prune, prunePolicy, gc, usage, enforceCap, capGb, syncMirror, migrateLegacy, mirrorRoot, cleanEmpty,
 }

@@ -1,0 +1,100 @@
+/* Same skin as SearchableSelect, so a date and a dropdown in one toolbar match. */
+.trigger {
+  composes: input from '../../styles/controls.module.css';
+  text-align: left;
+  cursor: pointer;
+}
+.trigger.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  width: 138px;
+  padding: var(--sp-6) var(--sp-10);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.icon { flex-shrink: 0; color: var(--text-muted); }
+.value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-primary); }
+.placeholder { flex: 1; min-width: 0; color: var(--text-muted); }
+.clear {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 2px;
+  border-radius: var(--r-sm);
+  color: var(--text-muted);
+}
+.clear:hover { color: var(--text-primary); background: var(--surface-3); }
+
+.pop {
+  position: fixed;
+  z-index: var(--z-popover, 1000);
+  width: 268px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  padding: 12px;
+  border-radius: var(--r-lg);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  box-shadow: var(--elev-3), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  animation: pop var(--dur-base, 160ms) var(--ease, ease-out);
+}
+@keyframes pop { from { opacity: 0; transform: translateY(-4px) scale(0.98); } }
+
+.head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); }
+.month { font-size: var(--fs-sm); font-weight: 700; color: var(--text-primary); }
+.nav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.nav:hover { border-color: var(--ab); color: var(--a); }
+
+.grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.weekday {
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.day {
+  height: 32px;
+  border: none;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.day:hover:not(:disabled) { background: var(--surface-3); }
+.day:disabled { opacity: 0.3; cursor: default; }
+.dayOutside { color: var(--text-muted); }
+.dayToday { box-shadow: inset 0 0 0 1px var(--ab); color: var(--a); font-weight: 700; }
+.dayOn, .dayOn:hover:not(:disabled) { background: var(--a); color: var(--accent-ink); font-weight: 700; }
+
+.foot { display: flex; justify-content: space-between; gap: var(--sp-8); }
+.footBtn {
+  padding: 4px 10px;
+  border: none;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--a);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.footBtn:hover:not(:disabled) { background: var(--surface-3); }
+.footBtn:disabled { color: var(--text-muted); cursor: default; }

@@ -96,7 +96,7 @@ function addGameListItem(data) {
 }
 
 function updateGameListItem(id, data) {
-  const allowed = ['game_id', 'steam_app_id', 'name', 'banner_url', 'category_id', 'status', 'rating', 'is_favorite', 'genres', 'display_order', 'release_date', 'planned_month', 'release_watch']
+  const allowed = ['game_id', 'steam_app_id', 'name', 'banner_url', 'category_id', 'status', 'rating', 'is_favorite', 'genres', 'display_order', 'release_date', 'planned_month', 'release_watch', 'price_target_cents', 'price_target_cc', 'price_target_hit']
   // Setting a game to Upcoming starts watching its release; any other status
   // leaves the watch alone (only Untrack or the release itself ends it).
   // A game that came out long ago has no release to wait for.
@@ -189,6 +189,14 @@ function ensureListRowForGame(game) {
     if (linked.game_id !== game.id) db.prepare('UPDATE game_list SET game_id = ? WHERE id = ?').run(game.id, linked.id)
     return null
   }
+  // A row kept after its game was deleted, written with other punctuation, is the same game.
+  const { nameKey } = require('../../services/steamGridDb')
+  const key = nameKey(game.name)
+  const same = key && db.prepare('SELECT id, name FROM game_list WHERE game_id IS NULL').all().find(r => nameKey(r.name) === key)
+  if (same) {
+    db.prepare('UPDATE game_list SET game_id = ? WHERE id = ?').run(game.id, same.id)
+    return null
+  }
   // Game List cards load remote art only — use the Steam portrait when there is one.
   const banner = game.steam_app_id
     ? `https://cdn.akamai.steamstatic.com/steam/apps/${game.steam_app_id}/library_600x900_2x.jpg`
@@ -209,4 +217,11 @@ function syncLibraryToList() {
   return added
 }
 
-module.exports = { plannedMonths, setPlannedMonth, ensureListRowForGame, syncLibraryToList, listStatusForGame, reorderGameListPage, listGameListItems, getGameListItem, addGameListItem, updateGameListItem, deleteGameListItem, distinctGenres }
+// Pure: a row with nothing to show and nothing the user said about it. Deleting its game
+// would leave a blank card, so it goes too. A rating, a plan or a price alert keeps it.
+function isBlankRow(r) {
+  return !!r && !r.steam_app_id && !r.banner_url && !r.game_banner_local_path && !r.rating && !r.planned_month
+    && !r.is_favorite && !r.price_target_cents && !r.release_watch && !['finished', 'dropped'].includes(r.status)
+}
+
+module.exports = { isBlankRow, plannedMonths, setPlannedMonth, ensureListRowForGame, syncLibraryToList, listStatusForGame, reorderGameListPage, listGameListItems, getGameListItem, addGameListItem, updateGameListItem, deleteGameListItem, distinctGenres }

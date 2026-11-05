@@ -23,8 +23,11 @@ import Settings from './pages/Settings'
 import UnknownGamePrompt from './components/UnknownGamePrompt'
 import Tour from './components/Tour'
 import RestoreOffer from './components/RestoreOffer'
+import DriveOffer from './components/DriveOffer'
 import LevelUpCelebration from './components/LevelUpCelebration'
 import UpdateBanner from './components/UpdateBanner'
+import DriveNewsBar from './components/DriveNewsBar'
+import LaunchMissCard from './components/LaunchMissCard'
 import GamepadHints from './components/GamepadHints'
 
 // Controller navigation — must live under the router so useNavigate works.
@@ -55,6 +58,7 @@ function Shell() {
       <Sidebar />
       <div className="app-main">
         <UpdateBanner />
+        <DriveNewsBar />
         <Routes>
           <Route path="/" element={<Library />} />
           <Route path="/game/:id" element={<GameDetail />} />
@@ -142,6 +146,12 @@ function Wallpaper() {
 export default function App() {
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [restoreOffer, setRestoreOffer] = useState(null)   // { found, drive } on a fresh install with a backup around
+  // Another PC's backup on this Google account: the three questions. After them, a new
+  // user who brought nothing in still gets the walkthrough.
+  const [driveOffer, setDriveOffer] = useState(null)
+  const walkthroughAfterOffer = useRef(false)
+  const showDriveOffer = (offer) => { setRestoreOffer(null); setDriveOffer(offer) }
+  useEffect(() => window.kozo?.events?.onDriveOffer?.(showDriveOffer), [])
   // A game was just marked Finished somewhere: ask for a 1 to 10 rating.
   const [rateGame, setRateGame] = useState(null)
   // Move to Library (Game List, Now out) hands its moved games here so the
@@ -185,6 +195,11 @@ export default function App() {
       recheck = setTimeout(ask, 2500)
     }
     window.addEventListener('focus', onFocus)
+    // Someone clicking or typing here is the proof it's in front, whatever the last answer
+    // said. A stale answer froze every spinner on a window in plain use.
+    const onInput = () => { otherAppInFront = false; mark() }
+    window.addEventListener('pointerdown', onInput, true)
+    window.addEventListener('keydown', onInput, true)
     mark()
     const offFront = window.kozo?.events?.onAppInFront?.((inFront) => { otherAppInFront = inFront === false; mark() })
     ask()
@@ -194,6 +209,8 @@ export default function App() {
       document.removeEventListener('visibilitychange', mark)
       window.removeEventListener('blur', mark)
       window.removeEventListener('focus', onFocus)
+      window.removeEventListener('pointerdown', onInput, true)
+      window.removeEventListener('keydown', onInput, true)
       delete document.documentElement.dataset.inactive
     }
   }, [])
@@ -222,7 +239,7 @@ export default function App() {
         window.kozo.api.drive?.status?.().catch(() => null),
       ])
       const list = found?.ok ? found.data.filter(f => f.games > 0) : []
-      if (list.length || drive?.data?.configured) { setRestoreOffer({ found: list, drive: drive?.data || null }); return }
+      if (list.length || drive?.data?.configured) { walkthroughAfterOffer.current = true; setRestoreOffer({ found: list, drive: drive?.data || null }); return }
       setShowOnboarding(true)
     }
     check()
@@ -245,9 +262,11 @@ export default function App() {
             window — an in-app copy here would show duplicates. */}
         <GamepadNav />
         <UnknownGamePrompt />
+        <LaunchMissCard />
         <LevelUpCelebration />
         {showOnboarding && <Tour onDone={() => setShowOnboarding(false)} />}
-        {restoreOffer && <RestoreOffer found={restoreOffer.found} drive={restoreOffer.drive} onClose={() => { setRestoreOffer(null); setShowOnboarding(true) }} />}
+        {restoreOffer && <RestoreOffer found={restoreOffer.found} drive={restoreOffer.drive} onOffer={showDriveOffer} onClose={() => { walkthroughAfterOffer.current = false; setRestoreOffer(null); setShowOnboarding(true) }} />}
+        {driveOffer && <DriveOffer offer={driveOffer} onClose={() => { setDriveOffer(null); if (walkthroughAfterOffer.current) { walkthroughAfterOffer.current = false; setShowOnboarding(true) } }} />}
         {rateGame && <RateGameModal game={rateGame} onClose={() => setRateGame(null)} />}
         <GamepadHints />
         {playable && <MakePlayableModal games={playable} onClose={() => setPlayable(null)} />}

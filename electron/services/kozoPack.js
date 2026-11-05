@@ -135,7 +135,8 @@ function importAll(packPath, onProgress) {
   const saves = require('./saveBackup').rootPath()
   const r = readPack(packPath, {
     destFor: (p) => (p.startsWith('Saves/') && saves ? path.join(saves, ...p.slice(6).split('/')) : null),
-    keep: (p, dest) => /\/blobs\//.test(p) && fs.existsSync(dest),
+    // A folder's meta.json says which game here owns it, so another PC's never replaces it.
+    keep: (p, dest) => /\/blobs\/|\/meta\.json$/.test(p) && fs.existsSync(dest),
     onProgress,
   })
   let dataPath = null

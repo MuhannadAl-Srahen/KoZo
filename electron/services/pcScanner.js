@@ -2,6 +2,7 @@
 
 const fs   = require('fs')
 const path = require('path')
+const { looksLikeGame } = require('./exeCheck')
 
 // Executables that are never game launchers
 const NOT_GAME_EXES = new Set([
@@ -86,6 +87,8 @@ const NESTED_SKIP = new Set([
   'dependencies','prerequisites','node_modules','.git','__installer',
   'crashreportclient','engine',
 ])
+// "RedistInstallers", "__Prerequisites": folders like these can't all be listed by name.
+const INSTALLER_FOLDER_RE = /redist|prereq|installers?$/i
 
 // A game's own internal folders. When scanning a directory for *sibling* games
 // we skip these so e.g. "<Game>\Binaries" isn't mistaken for its own game.
@@ -115,6 +118,18 @@ function isDriveRoot(p) {
   return /^[a-z]:[\\/]?$/i.test(p)
 }
 
+// Pure: the same folder, or one inside the other, so the same game. "C:\\Games" holds other
+// games, so being inside it says nothing.
+function sameGameFolder(a, b) {
+  const norm = (p) => String(p || '').replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase()
+  const x = norm(a), y = norm(b)
+  if (!x || !y) return false
+  if (x === y) return true
+  const [outer, inner] = x.length < y.length ? [x, y] : [y, x]
+  if (!inner.startsWith(outer + '\\')) return false
+  return !isDriveRoot(outer) && !CONTAINER_NAMES.has(path.win32.basename(outer))
+}
+
 // Collect .exe files inside `gamePath` up to `maxDepth` folders deep. Many
 // cracked / unzipped games keep the launcher nested (e.g.
 // "<Game>\Binaries\Win64\Game-Shipping.exe"), so a flat scan misses them.
@@ -132,7 +147,7 @@ function collectExes(gamePath, maxDepth) {
         }
       } else if (e.isDirectory() && depth < maxDepth) {
         const lower = e.name.toLowerCase()
-        if (NESTED_SKIP.has(lower) || SKIP_FOLDERS.has(lower)) continue
+        if (NESTED_SKIP.has(lower) || SKIP_FOLDERS.has(lower) || INSTALLER_FOLDER_RE.test(lower)) continue
         walk(path.join(dir, e.name), depth + 1)
       }
     }
@@ -215,7 +230,16 @@ function cleanGameName(folderName) {
   n = n.replace(/\bv\d+(\.\d+)*[a-z]?\b/gi, ' ')             // v644, v1.2.3
   n = n.replace(/[-–—\s]+$/g, ' ')                           // trailing dashes
   n = n.replace(/\s{2,}/g, ' ').trim()
+  n = tidyFolderName(n) || n
   return n || folderName
+}
+
+// Pure: a name written with hyphens for spaces ("Red-Alert-2-Yuris-Revenge"), else null.
+// One hyphen is a real name ("Half-Life"), and anything with spaces already reads fine.
+function tidyFolderName(name) {
+  const n = String(name || '').trim()
+  if (!n || /\s/.test(n) || (n.match(/[-_]+/g) || []).length < 2) return null
+  return n.replace(/[-_]+/g, ' ').trim()
 }
 
 // Helper/handler executables that ship beside a game but are not the game.
@@ -226,10 +250,14 @@ function cleanGameName(folderName) {
 const HELPER_EXE_RE = new RegExp([
   'cr[as]?sh(pad)?[-_. ]?(handler|report(er)?|dump(er)?)',
   '^crs[-_. ]',                                  // Crash Reporting Service: crs-handler, crs-uploader
-  '[-_. ](handler|uploader)[-_. 0-9]*\\.exe$',
+  '[-_. ](handler|uploader|helper)[-_. 0-9]*\\.exe$',   // Options_INI_Helper.exe
   '^(updater|update|patcher|installer|setup|service|helper|daemon|' +
     'watchdog|telemetry|activation|cleanup|redist\\w*|prereq\\w*)[-_. 0-9]*\\.exe$',
   'anticheat|battleye|vcredist|dxsetup|dotnetfx',
+  '[-_. ](installer|setup)[-_. 0-9]*\\.exe$',          // CnCNet5_YR_Installer.exe
+  '(^|[-_. ])(map|level|world)[-_. ]?(editor|edit|builder)[-_. 0-9]*\\.exe$',   // WorldBuilder.exe
+  '(^|[-_. ])editor[-_. 0-9]*\\.exe$|modkit|modtools',
+  'resolution[-_. 0-9]*\\.exe$',                       // YuriScreenResolution.exe
 ].join('|'), 'i')
 
 function isHelperExe(name) {
@@ -245,6 +273,15 @@ function acronymOf(s) {
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .split(/[^A-Za-z0-9]+/).filter(Boolean)
     .map(w => w[0]).join('').toLowerCase()
+}
+
+// Pure: does this exe carry the folder's name or its initials?
+function namesTheGame(exeName, folderName) {
+  const base = alnum(String(exeName || '').replace(/\.exe$/i, ''))
+  const slug = alnum(folderName).slice(0, 8)
+  if (slug && base.startsWith(slug)) return true
+  const acro = acronymOf(folderName)
+  return acro.length >= 2 && base === acro
 }
 
 function pickBestExe(exes, folderName) {
@@ -273,7 +310,10 @@ function pickBestExe(exes, folderName) {
   const shipping = pool.find(e => /-shipping\.exe$/i.test(e.name))
   if (shipping) return shipping.name
 
-  return pool.slice().sort((a, b) => b.size - a.size)[0].name
+  // What loads a game's parts beats what is merely big: gamemd-spawn.exe is 5 MB, and the
+  // installer beside it 104 MB.
+  const games = pool.filter(e => e.looksGame)
+  return (games.length ? games : pool).slice().sort((a, b) => b.size - a.size)[0].name
 }
 
 // Does the folder (within 2 levels) carry a file that proves it's a game?
@@ -389,10 +429,24 @@ function buildEntry(gamePath, lenient) {
   // Steam/GOG/Epic installdirs are already clean; only de-cruft cracked repacks.
   const name = type === 'Cracked' ? cleanGameName(folderName) : folderName
 
-  // Prefer a launcher sitting directly in the game folder (the real entry point)
-  // over nested helper exes; only fall back to nested ones when there is none.
-  const directExes = exes.filter(e => e.dir === gamePath)
-  const pool = directExes.length ? directExes : exes
+  // A store starts its own games. In a folder of files, a tool is never taken for want of
+  // anything better: Play would open it and playtime would count it. With no game file the
+  // scan says so, and the folder can't be added.
+  const fromFiles = type === 'Cracked'
+  const real = exes.filter(e => !isHelperExe(e.name))
+  if (fromFiles && !real.length) {
+    return { name, exe_name: null, install_path: gamePath, detected_type: type, steam_app_id: appid, is_cracked: 1, no_game_file: true }
+  }
+  const usable = real.length ? real : exes
+  for (const e of usable) e.looksGame = looksLikeGame(path.join(e.dir, e.name))
+  const isSure = (e) => e.looksGame || namesTheGame(e.name, folderName) || /-shipping\.exe$/i.test(e.name)
+
+  // A file directly in the game folder is the real start, unless only a file further in
+  // shows any sign of being the game.
+  const directExes = usable.filter(e => e.dir === gamePath)
+  const pool = directExes.some(isSure) ? directExes
+    : usable.some(isSure) ? usable.filter(isSure)
+    : directExes.length ? directExes : usable
   const bestName = pickBestExe(pool, folderName)
   const bestExe  = pool.find(e => e.name === bestName) || pool[0]
 
@@ -409,6 +463,8 @@ function buildEntry(gamePath, lenient) {
     steam_app_id: appid,
     is_cracked: (type !== 'Steam' && type !== 'Epic' && type !== 'GOG' &&
                  type !== 'Ubisoft' && type !== 'EA' && type !== 'Xbox') ? 1 : 0,
+    // Nothing says it's the game, so it isn't ticked with the others.
+    ...(fromFiles && !isSure(bestExe) ? { exe_unsure: true } : {}),
   }
 }
 
@@ -499,4 +555,4 @@ function getDefaultScanPaths() {
   return [...new Set(found)]
 }
 
-module.exports = { scanFolder, getDefaultScanPaths, pickBestExe, isGameExe, isHelperExe, isJunkFolder }
+module.exports = { scanFolder, getDefaultScanPaths, pickBestExe, isGameExe, isHelperExe, isJunkFolder, cleanGameName, tidyFolderName, collectExes, sameGameFolder, namesTheGame }

@@ -16,6 +16,7 @@ import { useSteamArt } from '../lib/steamArt'
 import PlanMonthModal from '../components/modals/PlanMonthModal'
 import RateGameModal from '../components/modals/RateGameModal'
 import useCardZoom from '../lib/useCardZoom'
+import SearchableSelect from '../components/ui/SearchableSelect'
 import { ratingColor } from '../components/ui/RatingPicker'
 import s from './PlayPlan.module.css'
 
@@ -51,6 +52,8 @@ const VIEWS = [
   { key: 'roadmap',  label: 'Roadmap',  Icon: IconLayoutColumns },
   { key: 'list',     label: 'List',     Icon: IconList },
 ]
+const MAIN_VIEWS = VIEWS.slice(0, 3)   // the rest wait under "More views"
+const MORE_VIEWS = VIEWS.slice(3)
 const VIEW_KEY = 'kozo:plan:view'
 
 function shiftMonth(key, by) {
@@ -865,12 +868,23 @@ export default function PlayPlan() {
       <div className={s.toolbar}>
         <h1 className={s.pageTitle}><IconCalendarEvent size={16} stroke={1.7} /> Play Plan</h1>
         <div className={s.views} role="tablist" aria-label="Play Plan view">
-          {VIEWS.map(v => (
+          {MAIN_VIEWS.map(v => (
             <button key={v.key} type="button" role="tab" aria-selected={view === v.key}
               className={`${s.viewBtn} ${view === v.key ? s.viewOn : ''}`} onClick={() => setView(v.key)} title={v.label}>
               <v.Icon size={15} stroke={1.8} /> <span className={s.viewLabel}>{v.label}</span>
             </button>
           ))}
+        </div>
+        <div className={MORE_VIEWS.some(v => v.key === view) ? s.moreOn : undefined} data-plan-more="">
+          <SearchableSelect
+            value={MORE_VIEWS.some(v => v.key === view) ? view : ''}
+            onChange={v => { if (v) setView(v) }}
+            options={MORE_VIEWS.map(v => ({ value: v.key, label: v.label }))}
+            placeholder="More views"
+            searchable={false}
+            clearable={false}
+            width={128}
+          />
         </div>
         <div className={s.spacer} />
         <button className={s.btnPrimary} onClick={() => openAdd(view === 'roadmap' ? rmStart : (view === 'focus' || view === 'board') ? oneMonth : thisMonth)}>

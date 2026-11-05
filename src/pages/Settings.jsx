@@ -12,7 +12,7 @@ import {
   IconPlugConnected, IconBrandGoogleDrive,
 } from '@tabler/icons-react'
 import { useAccentColor } from '../context/AccentColorContext'
-import { useAppearance, DEFAULT_APPEARANCE, FONTS, bgTone } from '../context/AppearanceContext'
+import { useAppearance, DEFAULT_APPEARANCE, FONTS, bgTone, bgToneHex } from '../context/AppearanceContext'
 import ColorPicker from '../components/ui/ColorPicker'
 import GameCard from '../components/GameCard'
 import { NAV_ITEMS } from '../components/Sidebar'
@@ -268,15 +268,20 @@ function GeneralTab() {
 // Idle / AFK: stop counting playtime after this long with no input.
 let idleCache = null
 let awayCache = null
+let breakCache = null
 function IdleSection() {
   const [idlePause, setIdlePause] = useState(idleCache ?? '5')      // minutes, 0 = off
   const [awayPause, setAwayPause] = useState(awayCache ?? '60')     // seconds, 0 = off
+  const [breakEvery, setBreakEvery] = useState(breakCache ?? '0')   // minutes, 0 = off
   useEffect(() => {
     window.kozo?.api?.settings?.get?.('idle_pause_min').then(r => {
       if (r?.ok) { idleCache = r.data || '5'; setIdlePause(idleCache) }
     })
     window.kozo?.api?.settings?.get?.('away_pause_sec').then(r => {
       if (r?.ok) { awayCache = r.data ?? '60'; setAwayPause(awayCache) }
+    })
+    window.kozo?.api?.settings?.get?.('break_reminder_min').then(r => {
+      if (r?.ok) { breakCache = r.data ?? '0'; setBreakEvery(breakCache) }
     })
   }, [])
   // Saves the moment it changes.
@@ -289,6 +294,11 @@ function IdleSection() {
     setAwayPause(v)
     awayCache = v
     window.kozo?.api?.settings?.set('away_pause_sec', String(parseInt(v) || 0))
+  }
+  function pickBreak(v) {
+    setBreakEvery(v)
+    breakCache = v
+    window.kozo?.api?.settings?.set('break_reminder_min', String(parseInt(v) || 0))
   }
   return (
       <section className={s.section}>
@@ -332,6 +342,30 @@ function IdleSection() {
               {label}
             </button>
           ))}
+        </div>
+
+        <div className={s.sectionHeader} style={{ marginTop: 'var(--sp-16)' }}>
+          <IconClock size={15} stroke={1.6} />
+          <span>Break reminder</span>
+        </div>
+        <p className={s.sectionDesc}>
+          A small message over the game after this much play, and again each time after that.
+          Time KoZo has paused doesn't count.
+        </p>
+        <div className={s.sensitivityRow} role="group" aria-label="Break reminder">
+          {[['0', 'Off'], ['60', '1h'], ['120', '2h'], ['180', '3h'], ['240', '4h']].map(([v, label]) => (
+            <button key={v}
+              type="button"
+              aria-pressed={breakEvery === v}
+              className={`${s.sensitivityBtn} ${breakEvery === v ? s.sensitivityActive : ''}`}
+              onClick={() => pickBreak(v)}>
+              {label}
+            </button>
+          ))}
+          <button type="button" className={s.sensitivityBtn} style={{ marginLeft: 'var(--sp-8)' }}
+            onClick={() => window.kozo?.api?.overlay?.testBreak?.()}>
+            Try it
+          </button>
         </div>
       </section>
   )
@@ -1414,8 +1448,8 @@ function LookCustomize() {
         <div className={s.colorRows}>
           <div className={s.colorRow}>
             <span className={s.segLabel}>Background color</span>
-            <ColorPicker value={prefs.bgColor} onChange={v => v && setPrefs({ bgColor: v, theme: 'custom' })} presets={presets} label="Background color" />
-            <span className={s.sectionDescQuiet}>Any color, kept dark so text and cards stay readable. Picking one switches to Custom.</span>
+            <ColorPicker value={prefs.bgColor} onChange={v => v && setPrefs({ bgColor: v, theme: 'custom' })} presets={presets} label="Background color" resultOf={bgToneHex} />
+            <span className={s.sectionDescQuiet}>Any color, made dark so text and cards stay readable. The box shows the color you get. Picking one switches to Custom.</span>
           </div>
         </div>
         <p className={s.sectionDescQuiet}>Accent tint colors the background with your accent color.</p>
@@ -1726,11 +1760,15 @@ const FEATURE_GROUPS = [
     items: [
       { Icon: IconSearch,         name: 'Scan PC', go: '/?scan=1',          desc: 'Finds installed games (Steam, Epic, GOG, Xbox, cracked) on your drives, with the right launcher badge, right from the Library toolbar.' },
       { Icon: IconDeviceGamepad2, name: 'Add manually', go: '/?add=1',     desc: 'Point KoZo at any .exe, perfect for offline games.' },
-      { Icon: IconDownload,       name: 'Import from launchers', go: '/?launchers=1', desc: 'Finds the games installed through Epic, GOG and Xbox and adds the ones you pick, with Play going through their launcher.' },
       { Icon: IconStar,           name: 'Favorites', go: '/',        desc: 'Star a game to pin it to the top of your Library and Game List.' },
       { Icon: IconList,           name: 'Game List', go: '/game-list',        desc: 'A backlog / wishlist with statuses, genres, search, and Spotify-style custom lists.' },
       { Icon: IconStar,           name: 'Discounts', go: '/deals',         desc: 'Steam sales ranked for you: your Game List games on sale first (with a badge when one goes on sale), a deal score from the discount, reviews and your taste, and whether it is the lowest price ever.' },
       { Icon: IconStar,           name: 'Games like', go: '/like',          desc: 'Search any game and see the games that play most like it, ranked by shared Steam tags, Steam\'s own picks and reviews, with the reasons.' },
+      { Icon: IconList,           name: 'Steam wishlist', go: '/game-list?wishlist=1', desc: 'Bring the games on your Steam wishlist into your Game List. You choose which, and games not out yet are tracked.' },
+      { Icon: IconStar,           name: 'Price alerts', go: '/deals',        desc: 'Choose a price for a game under its Prices tab. KoZo tells you when it gets there, and shows other stores and the lowest price ever.' },
+      { Icon: IconStar,           name: 'Game news', go: '/',                desc: 'A Steam game\'s page has its developer\'s news, and shows what changed since you last played.' },
+      { Icon: IconStar,           name: 'Your year', go: '/activity?tab=year', desc: 'Your year in games: hours, top games, rarest achievement and more, as a picture you can share.' },
+      { Icon: IconClock,          name: 'Break reminder', go: 'tab:tracking', desc: 'An optional message over the game after a set amount of play.' },
       { Icon: IconEyeOff,         name: 'Status filter & hidden games', go: '/', desc: 'Filter the Library by Playing/Finished/Dropped/On hold; hidden games tuck into a collapsed section at the bottom (their stats still count).' },
       { Icon: IconLayoutGrid,     name: 'Drag & drop ordering', go: '/', desc: 'Pick "Custom order" and drag cards into any arrangement you like, in the Library and the Game List.' },
     ],

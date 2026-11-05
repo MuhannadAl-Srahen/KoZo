@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { IconTrophy, IconPlayerPlay, IconX, IconClock, IconDeviceGamepad2, IconSparkles, IconArrowBigUpLines, IconPlus, IconCalendarEvent } from '@tabler/icons-react'
+import { IconTrophy, IconPlayerPlay, IconClock, IconDeviceGamepad2, IconSparkles, IconArrowBigUpLines, IconPlus, IconCalendarEvent, IconTag, IconCoffee } from '@tabler/icons-react'
 import { applyAccent } from './context/AccentColorContext'
 import { fileUrl } from './lib/utils'
 import { playAchievement, playLevelUp, playSessionStart, holdAudio, releaseAudio } from './lib/sounds'
@@ -48,7 +48,7 @@ let hoveredToastId = null
 
 // Shared dismiss-with-animation: plays the slide-out, then removes the toast.
 // `auto` runs it on a timer; the returned `close` lets the user trigger it early
-// (click anywhere on the toast or the X). Clears the auto timer so it fires once.
+// (click anywhere on the toast). Clears the auto timer so it fires once.
 function useAutoClose(onDismiss, ms) {
   const [leaving, setLeaving] = useState(false)
   const timerRef = useRef(null)
@@ -88,7 +88,8 @@ function useAutoClose(onDismiss, ms) {
 }
 
 // Props shared by every toast so hovering captures the mouse and the card is
-// fully click-to-dismiss, with a hover-revealed X for an explicit close.
+// fully click-to-dismiss. There is no X, by the user's choice: it sat on top of the XP
+// number, and a click anywhere on the card already closes it.
 // `leaving` gates the capture: a toast re-hovered DURING its 300ms slide-out
 // must not re-take the mouse — close() has already handed clicks back to the
 // game, and with the window staying visible between in-session toasts a stale
@@ -104,15 +105,6 @@ function toastInteractions(close, leaving = false, hoverId = null) {
   }
 }
 
-function CloseButton({ close }) {
-  return (
-    <button className={s.closeBtn} title="Dismiss"
-      onClick={(e) => { e.stopPropagation(); close() }}>
-      <IconX size={12} stroke={2.2} />
-    </button>
-  )
-}
-
 // ── Session-start toast ───────────────────────────────────────────────────────
 
 function SessionToast({ toast, onDismiss }) {
@@ -120,7 +112,6 @@ function SessionToast({ toast, onDismiss }) {
   return (
     <div className={`${s.toast} ${s.sessionToast} ${leaving ? s.toastOut : s.toastIn}`}
       {...toastInteractions(close, leaving, hoverId)}>
-      <CloseButton close={close} />
       <div className={s.toastHeader}>
         <span className={s.liveDot} />
         <span className={s.toastHeaderText}>Now Playing</span>
@@ -151,7 +142,6 @@ function StatusToast({ toast, onDismiss }) {
   return (
     <div className={`${s.toast} ${s.statusToast} ${leaving ? s.toastOut : s.toastIn}`}
       {...toastInteractions(close, leaving, hoverId)}>
-      <CloseButton close={close} />
       <div className={s.toastHeader}>
         <IconClock size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
         <span className={s.toastHeaderText}>{idle ? 'KoZo' : 'Session'}</span>
@@ -193,7 +183,6 @@ function LevelUpToast({ toast, onDismiss }) {
   return (
     <div className={`${s.toast} ${s.levelUpToast} ${leaving ? s.toastOut : s.toastIn}`}
       {...toastInteractions(close, leaving, hoverId)}>
-      <CloseButton close={close} />
       <div className={s.toastHeader}>
         <IconArrowBigUpLines size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
         <span className={s.toastHeaderText}>Level Up!</span>
@@ -223,7 +212,6 @@ function SessionEndToast({ toast, onDismiss }) {
   return (
     <div className={`${s.toast} ${s.sessionToast} ${leaving ? s.toastOut : s.toastIn}`}
       {...toastInteractions(close, leaving, hoverId)}>
-      <CloseButton close={close} />
       <div className={s.toastHeader}>
         <IconSparkles size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
         <span className={s.toastHeaderText}>Session Complete</span>
@@ -269,7 +257,6 @@ function OverlayToast({ toast, onDismiss }) {
   return (
     <div className={`${s.toast} ${leaving ? s.toastOut : s.toastIn}`}
       {...toastInteractions(close, leaving, hoverId)}>
-      <CloseButton close={close} />
       {/* Header bar */}
       <div className={s.toastHeader}>
         <IconTrophy size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
@@ -357,7 +344,6 @@ function UnknownGameToast({ toast, onDismiss }) {
   return (
     <div className={`${s.toast} ${leaving ? s.toastOut : s.toastIn}`}
       {...toastInteractions(close, leaving, hoverId)}>
-      <CloseButton close={close} />
       <div className={s.toastHeader}>
         <IconDeviceGamepad2 size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
         <span className={s.toastHeaderText}>New Game Detected</span>
@@ -382,6 +368,38 @@ function UnknownGameToast({ toast, onDismiss }) {
   )
 }
 
+// ── Play was pressed, the watched file never started ──
+// The card in KoZo's window asks which program it is. This only says so when another window
+// is in front, which may be the game itself.
+function LaunchMissToast({ toast, onDismiss }) {
+  const { leaving, close, hoverId } = useAutoClose(onDismiss, 12000)
+  function open(e) {
+    e.stopPropagation()
+    try { window.kozo?.api?.overlay?.openLaunchMiss?.() } catch {}
+    close()
+  }
+  return (
+    <div className={`${s.toast} ${leaving ? s.toastOut : s.toastIn}`} {...toastInteractions(close, leaving, hoverId)}>
+      <div className={s.toastHeader}>
+        <IconDeviceGamepad2 size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
+        <span className={s.toastHeaderText}>Not being counted</span>
+      </div>
+      <div className={s.toastBody}>
+        <div className={s.toastIcon}>
+          <IconDeviceGamepad2 size={22} stroke={1.5} style={{ color: 'var(--a)' }} />
+        </div>
+        <div className={s.toastInfo}>
+          <div className={s.toastName}>{toast.name}</div>
+          <div className={s.toastDesc}>KoZo can't see it running.</div>
+          <div className={s.unknownActions}>
+            <button className={s.unknownAddBtn} onClick={open}>Choose its program</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Release toast ─────────────────────────────────────────────────────────────
 // A tracked upcoming game's release date has passed. Informational only — the
 // Game List entry has already regrouped itself under "Out now" by the time this
@@ -394,7 +412,6 @@ function ReleaseToast({ toast, onDismiss }) {
   return (
     <div className={`${s.toast} ${s.releaseToast} ${leaving ? s.toastOut : s.toastIn}`}
       {...toastInteractions(close, leaving, hoverId)}>
-      <CloseButton close={close} />
       <div className={s.toastHeader}>
         <IconCalendarEvent size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
         <span className={s.toastHeaderText}>Out Now</span>
@@ -420,6 +437,68 @@ function ReleaseToast({ toast, onDismiss }) {
               ? `Released ${one.release_date}. It's under "Out now" in your Game List`
               : games.map(g => g.name).slice(0, 4).join(', ')}
           </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// A game reached the price the user set (Discounts).
+function PriceToast({ toast, onDismiss }) {
+  const { leaving, close, hoverId } = useAutoClose(onDismiss, 10000)
+  const games = toast.games || []
+  const one = games.length === 1 ? games[0] : null
+  const art = games.find(g => g.artUrl)
+  return (
+    <div className={`${s.toast} ${s.releaseToast} ${leaving ? s.toastOut : s.toastIn}`}
+      {...toastInteractions(close, leaving, hoverId)}>
+      <div className={s.toastHeader}>
+        <IconTag size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
+        <span className={s.toastHeaderText}>At your price</span>
+      </div>
+      <div className={s.toastBody}>
+        {art
+          ? <ToastArt key={art.artUrl} artUrl={art.artUrl} className={s.liveGlow} />
+          : (
+            <div className={`${s.toastIcon} ${s.releaseIcon}`}>
+              <IconTag size={22} stroke={1.5} style={{ color: 'var(--a)' }} />
+            </div>
+          )}
+        <div className={s.toastInfo}>
+          <div className={s.toastName}>{one ? one.name : `${games.length} games reached your price`}</div>
+          <div className={s.toastDesc}>
+            {one
+              ? (one.priceText ? `Now ${one.priceText}. Your alert was ${one.targetText}` : 'See it under Discounts')
+              : games.map(g => g.name).slice(0, 4).join(', ')}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Settings > Tracking > Break reminder. No chime: this one can wait.
+function BreakToast({ toast, onDismiss }) {
+  const { leaving, close, hoverId } = useAutoClose(onDismiss, 9000)
+  const hasArt = toast.artPath || toast.artUrl
+  return (
+    <div className={`${s.toast} ${s.releaseToast} ${leaving ? s.toastOut : s.toastIn}`}
+      {...toastInteractions(close, leaving, hoverId)}>
+      <div className={s.toastHeader}>
+        <IconCoffee size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
+        <span className={s.toastHeaderText}>Time for a break?</span>
+      </div>
+      <div className={s.toastBody}>
+        {hasArt
+          ? <ToastArt artPath={toast.artPath} artUrl={toast.artUrl} className={s.liveGlow} />
+          : (
+            <div className={`${s.toastIcon} ${s.releaseIcon}`}>
+              <IconCoffee size={22} stroke={1.5} style={{ color: 'var(--a)' }} />
+            </div>
+          )}
+        <div className={s.toastInfo}>
+          <div className={s.toastName}>{toast.gameName}</div>
+          <div className={s.toastDesc}>You have played for {flashTime(toast.playedSec || 0)}</div>
         </div>
       </div>
     </div>
@@ -525,10 +604,28 @@ export default function OverlayApp() {
         : capToasts([...q, { id: ++nextId.current, type: 'unknown', ...data }]))
     })
 
+    on(window.kozo?.events?.onLaunchMissOverlay, (data) => {
+      if (!data?.gameId) return
+      setToasts(q => q.some(t => t.type === 'launchMiss' && t.gameId === data.gameId)
+        ? q
+        : capToasts([...q, { id: ++nextId.current, type: 'launchMiss', ...data }]))
+    })
+
     // A tracked upcoming game reached its release date.
     on(window.kozo?.events?.onReleaseOverlay, (data) => {
       if (!data?.games?.length) return
       setToasts(q => capToasts([...q, { id: ++nextId.current, type: 'release', ...data }]))
+    })
+
+    // A game reached the price the user set.
+    on(window.kozo?.events?.onPriceOverlay, (data) => {
+      if (!data?.games?.length) return
+      setToasts(q => capToasts([...q, { id: ++nextId.current, type: 'price', ...data }]))
+    })
+
+    // Break reminder. Never two at once.
+    on(window.kozo?.events?.onBreakOverlay, (data) => {
+      setToasts(q => capToasts([...q.filter(t => t.type !== 'break'), { id: ++nextId.current, type: 'break', ...data }]))
     })
 
     // Tell main both listeners are attached — it flushes any queued messages
@@ -564,8 +661,14 @@ export default function OverlayApp() {
           ? <SessionEndToast key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
           : t.type === 'unknown'
           ? <UnknownGameToast key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
+          : t.type === 'launchMiss'
+          ? <LaunchMissToast key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
           : t.type === 'release'
           ? <ReleaseToast    key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
+          : t.type === 'price'
+          ? <PriceToast      key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
+          : t.type === 'break'
+          ? <BreakToast      key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
           : <OverlayToast    key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
       )}
     </div>

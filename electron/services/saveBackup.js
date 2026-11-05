@@ -483,4 +483,30 @@ function migrateRoot(oldDir, newDir) {
   }
 }
 
-module.exports = { backupSave, listBackups, restoreBackup, deleteBackup, autoBackupGame, rootPath, migrateRoot, gameDir, existingGameDir }
+// The folders under the backups, by name.
+function folderNames() {
+  try { return fs.readdirSync(rootPath(), { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name) } catch { return [] }
+}
+
+// Folders that came from another PC carry that PC's game ids, and here that id may be
+// another game or nothing. Point each at this PC's game, by what `resolve` finds for its
+// name, or at no id, so ownership falls back to the name.
+function adoptFolders(names, resolve) {
+  const root = rootPath()
+  for (const name of names || []) {
+    let entries = []
+    try { entries = fs.readdirSync(path.join(root, name), { withFileTypes: true }) } catch { continue }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue
+      const file = path.join(root, name, e.name, 'meta.json')
+      if (!fs.existsSync(file)) continue
+      const meta = readMeta(path.dirname(file))
+      const id = resolve(meta.gameName || name)
+      if (String(meta.gameId ?? '') === String(id ?? '')) continue
+      try { fs.writeFileSync(file, JSON.stringify({ ...meta, gameId: id }, null, 2)) } catch {}
+    }
+  }
+  ownedDirCache.clear()
+}
+
+module.exports = { backupSave, listBackups, restoreBackup, deleteBackup, autoBackupGame, rootPath, migrateRoot, gameDir, existingGameDir, folderNames, adoptFolders }

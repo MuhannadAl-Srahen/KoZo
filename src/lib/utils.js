@@ -11,7 +11,7 @@ const BANNER_COLORS = [
 // Exes that are never a game — warn if the user picks one as the executable.
 export const KNOWN_SYSTEM_EXES = new Set([
   'explorer.exe', 'svchost.exe', 'winlogon.exe', 'csrss.exe',
-  'lsass.exe', 'services.exe', 'system', 'taskmgr.exe',
+  'lsass.exe', 'services.exe', 'system', 'taskmgr.exe', 'smartscreen.exe', 'consent.exe',
 ])
 
 // "5m ago" / "Yesterday" / "Mar 4" for feed timestamps.
@@ -305,14 +305,24 @@ export function deriveGameNameFromPath(p) {
 export const HELPER_EXE_RE = new RegExp([
   'cr[as]?sh(pad)?[-_. ]?(handler|report(er)?|dump(er)?)', // crashhandler, crashpad_handler
   '^crs[-_. ]',                                  // Crash Reporting Service: crs-handler, crs-uploader
-  '[-_. ](handler|uploader)[-_. 0-9]*\\.exe$',   // anything-handler.exe
+  '[-_. ](handler|uploader|helper)[-_. 0-9]*\\.exe$',   // anything-handler.exe, Options_INI_Helper.exe
   '^(launcher|updater|update|patcher|installer|setup|service|helper|daemon|' +
     'watchdog|telemetry|activation|cleanup|redist\\w*|prereq\\w*)[-_. 0-9]*\\.exe$',
   'anticheat|battleye|vcredist|dxsetup|dotnetfx',
+  '[-_. ](installer|setup)[-_. 0-9]*\\.exe$',          // CnCNet5_YR_Installer.exe
+  '(^|[-_. ])(map|level|world)[-_. ]?(editor|edit|builder)[-_. 0-9]*\\.exe$',   // WorldBuilder.exe
+  '(^|[-_. ])editor[-_. 0-9]*\\.exe$|modkit|modtools',
+  'resolution[-_. 0-9]*\\.exe$',                       // YuriScreenResolution.exe
 ].join('|'), 'i')
 
 export function isHelperExe(name) {
   return HELPER_EXE_RE.test(String(name || '').toLowerCase())
+}
+
+// The watched file is something other than the game, so play won't be tracked. A launcher
+// doesn't count: it can be the right thing to start from.
+export function exeLooksLikeTool(name) {
+  return isHelperExe(name) && !/^launcher[-_. 0-9]*\.exe$/i.test(String(name))
 }
 
 // Filler that may legitimately separate a game's title from its folder name.

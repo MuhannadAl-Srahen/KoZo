@@ -660,7 +660,7 @@
 .foDoneRow > .dropAfter::after { top: 0; bottom: 0; width: 4px; right: -8px; }
 
 /* ── Board: Up next / Playing / Done columns ─────────────────── */
-.bd { display: grid; grid-template-columns: repeat(3, minmax(250px, 1fr)); gap: var(--sp-14, 14px); align-items: start; }
+.bd { display: grid; grid-template-columns: repeat(3, minmax(250px, 1fr)); gap: var(--sp-14, 14px); align-items: stretch; }
 .bdCol {
   display: flex;
   flex-direction: column;
@@ -834,3 +834,6 @@
 :global(html[data-motion="heavy"]) .lu:hover .luArt { box-shadow: 0 14px 30px rgba(0, 0, 0, 0.45), 0 0 0 1px color-mix(in srgb, var(--a) 45%, transparent), 0 0 18px color-mix(in srgb, var(--a) 28%, transparent); }
 :global(html[data-motion="heavy"]) .luPlaying:hover .luArt { box-shadow: 0 14px 30px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--status-playing), 0 0 22px color-mix(in srgb, var(--status-playing) 40%, transparent); }
 :global(html[data-motion="off"]) .lu:hover .luArt { transform: none; }
+
+/* The chosen view under "More views" looks chosen. */
+.moreOn :global(button) { border-color: var(--ab); color: var(--a); }

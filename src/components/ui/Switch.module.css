@@ -1,0 +1,36 @@
+.track {
+  flex-shrink: 0;
+  width: 38px;
+  height: 22px;
+  padding: 0;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  position: relative;
+  cursor: pointer;
+  transition: background var(--dur-slow) var(--ease), border-color var(--dur-slow) var(--ease),
+              box-shadow var(--dur-slow) var(--ease);
+}
+.track:focus-visible { outline: 2px solid var(--ab); outline-offset: 2px; }
+.track:disabled { cursor: default; opacity: 0.5; }
+
+.on {
+  background: var(--a);
+  border-color: var(--a);
+  box-shadow: var(--glow-1);
+}
+
+.thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  transition: transform var(--dur-slow) var(--ease), background var(--dur-slow) var(--ease);
+}
+.on .thumb {
+  transform: translateX(16px);
+  background: var(--accent-ink);
+}

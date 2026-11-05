@@ -41,34 +41,6 @@
   border-color: rgba(255, 255, 255, 0.18);
 }
 
-/* ── Close (X) button — appears on hover ────────────────────── */
-.closeBtn {
-  position: absolute;
-  top: 5px;
-  right: 6px;
-  z-index: 3;
-  width: 19px;
-  height: 19px;
-  padding: 0;
-  border: none;
-  border-radius: 5px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.07);
-  color: rgba(255, 255, 255, 0.55);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s, background 0.15s, color 0.15s;
-}
-
-.toast:hover .closeBtn { opacity: 1; }
-
-.closeBtn:hover {
-  background: rgba(255, 255, 255, 0.16);
-  color: #fff;
-}
-
 @keyframes slideIn {
   from { transform: translateX(110%); opacity: 0; }
   to   { transform: translateX(0);    opacity: 1; }

@@ -21,6 +21,7 @@ const DEFAULT_SETTINGS = [
   ['steam_user_id', ''],
   ['idle_pause_min', '5'],
   ['away_pause_sec', '60'],
+  ['break_reminder_min', '0'],
 ]
 
 function getDb() {
@@ -129,6 +130,12 @@ function runMigrations() {
     // Release alerts follow this flag, not the status: a tracked game moved
     // to Want to play before it comes out still gets its "Out now" alert.
     try { db.exec('ALTER TABLE game_list ADD COLUMN release_watch INTEGER DEFAULT 0') } catch (_) {}
+    // Price alert: tell me when this game is at or under this price. The amount
+    // only means something in the currency it was set in, so the country stays
+    // with it. price_target_hit = already told, until the price goes back above.
+    try { db.exec('ALTER TABLE game_list ADD COLUMN price_target_cents INTEGER') } catch (_) {}
+    try { db.exec('ALTER TABLE game_list ADD COLUMN price_target_cc TEXT') } catch (_) {}
+    try { db.exec('ALTER TABLE game_list ADD COLUMN price_target_hit INTEGER DEFAULT 0') } catch (_) {}
     // A .bat / .cmd / .lnk that starts the game (cracked copies often ship
     // one). Play runs it; exe_name stays the process KoZo watches for playtime.
     try { db.exec('ALTER TABLE games ADD COLUMN launch_file TEXT') } catch (_) {}
@@ -144,6 +151,16 @@ function runMigrations() {
     try { db.exec('ALTER TABLE games ADD COLUMN launch_uri TEXT') } catch (_) {}
     // Confirmed save locations (JSON array of absolute paths) for save backups.
     try { db.exec('ALTER TABLE games ADD COLUMN save_paths TEXT') } catch (_) {}
+    // One-time: a session that was thrown away used to leave its date behind, so a game
+    // with no play said "last played 2d ago".
+    try {
+      const done = db.prepare("SELECT value FROM settings WHERE key = 'unplayed_dates_v1'").get()
+      if (!done) {
+        db.exec(`UPDATE games SET last_played_at = NULL, first_played_at = NULL
+                 WHERE COALESCE(total_playtime_seconds, 0) = 0 AND id NOT IN (SELECT game_id FROM sessions)`)
+        db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('unplayed_dates_v1', '1')").run()
+      }
+    } catch (_) {}
     // One-time: sessions under a minute aren't kept any more (see
     // MIN_SESSION_SEC in queries/sessions.js); drop the old ones with their time.
     try {

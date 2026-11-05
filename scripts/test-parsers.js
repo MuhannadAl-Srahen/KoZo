@@ -226,6 +226,37 @@ console.log('\nlauncherImport')
 }
 
 // ── Pick for me ───────────────────────────────────────────────────────────────
+// src/lib/upcomingPick.js is an ES module; load it as a plain function body.
+console.log('\nupcoming top bar')
+{
+  const src = require('fs').readFileSync(path.join(__dirname, '..', 'src', 'lib', 'upcomingPick.js'), 'utf8')
+    .replace(/export function/g, 'function')
+  const { readPickMode, defaultPickMode, filterBuckets, pickDay } = new Function(src + '; return { readPickMode, defaultPickMode, filterBuckets, pickDay }')()
+  check('the old "picked" choice means Like my games', readPickMode('picked') === 'like')
+  check('the three choices read back', ['like', 'others', 'all'].every(m => readPickMode(m) === m))
+  check('nothing chosen stays unchosen', readPickMode(null) === null && readPickMode('nonsense') === null)
+  check('someone with matches starts on Like my games', defaultPickMode({ picks: { 5: { pct: 80 } } }) === 'like')
+  check('someone with none starts on All, not an empty calendar', defaultPickMode({ picks: {} }) === 'all' && defaultPickMode(null) === 'all')
+
+  const a = { appid: 1, match: 90 }, b = { appid: 2, match: 0 }, c = { appid: 3, match: 70 }, d = { appid: 4, match: 0 }
+  const buckets = { byDay: new Map([['x', [a, b]], ['y', [c]], ['z', [d]]]), byMonth: new Map([['m', [b]]]), later: [c, d], all: [a, b, c, d] }
+  const like = filterBuckets(buckets, 'like'), others = filterBuckets(buckets, 'others')
+  check('Like my games holds only matches', like.all.length === 2 && like.all.every(g => g.match > 0))
+  check('Other games holds only the rest', others.all.length === 2 && others.all.every(g => !g.match))
+  check('a game is in exactly one of the two', [...like.all, ...others.all].map(g => g.appid).sort().join() === '1,2,3,4')
+  check('a day left with nothing is gone', !like.byDay.has('z') && !others.byDay.has('y') && !like.byMonth.has('m'))
+  check('a day keeps only its own kind', like.byDay.get('x').length === 1 && others.byDay.get('x')[0].appid === 2)
+  check('no match on the TBA shelf either', like.later[0].appid === 3 && others.later[0].appid === 4)
+  check('All changes nothing', filterBuckets(buckets, 'all') === buckets)
+  check('the originals are not touched', buckets.all.length === 4 && buckets.byDay.get('x').length === 2)
+
+  const many = Array.from({ length: 12 }, (_, i) => ({ appid: i, match: i, popRank: 100 - i }))
+  check('a like day: best match first, 5 of them', pickDay(many, 'like').map(g => g.appid).join() === '11,10,9,8,7')
+  check('a same-match tie goes to the more popular', pickDay([{ appid: 1, match: 5, popRank: 9 }, { appid: 2, match: 5, popRank: 3 }], 'like')[0].appid === 2)
+  check('an others day: most popular first, 8 of them', pickDay(many, 'others').length === 8 && pickDay(many, 'others')[0].appid === 11)
+  check('picking a day leaves the list alone', many[0].appid === 0)
+}
+
 // src/lib/pickForMe.js is an ES module; load it as a plain function body.
 console.log('\npickForMe')
 {
@@ -271,7 +302,7 @@ console.log('\nrelease dates')
     countdownTo({ ts: 3 * 86400000 + 4 * 3600000, precision: 'day' }, 0) === 'in 3d 4h')
 }
 
-// Upcoming "Picked for you": Steam's More like this lists, scored.
+// Upcoming "Like my games": Steam's More like this lists, scored.
 console.log('\npicks')
 {
   const { scorePicks } = require(path.join(__dirname, '..', 'electron', 'services', 'steamApi.js'))
@@ -284,7 +315,7 @@ console.log('\npicks')
   check('everything listed is a pick', [10, 20, 30, 40].every(id => p[id]?.pct >= 45))
 }
 
-// Picked for you: sources come from the whole Game List, not only favourites.
+// Like my games: sources come from the whole Game List, not only favourites.
 console.log('\npick sources')
 {
   const { pickSources } = require(path.join(__dirname, '..', 'electron', 'services', 'steamApi.js'))
@@ -514,6 +545,140 @@ async function discordTests() {
 }
 
 // ── Achievement icon links ───────────────────────────────────────────────────
+console.log('\nprice alerts')
+{
+  const { moneyText, targetState, alertChanges } = require(path.join(__dirname, '..', 'electron', 'services', 'deals.js'))
+  check('money: dollars', moneyText(1000, '$19.99') === '$10.00')
+  check('money: comma decimals, symbol after', moneyText(1000, '19,99€') === '10,00€')
+  check('money: no decimals, thousands', moneyText(100000, '₹ 1,299') === '₹ 1,000')
+  check('money: yen', moneyText(120000, '¥ 1,200') === '¥ 1,200')
+  check('money: space thousands', moneyText(12000000, 'Rp 120 000') === 'Rp 120 000')
+  check('money: two letter symbol', moneyText(2999, 'R$ 29,99') === 'R$ 29,99')
+  check('money: symbol with a dollar sign stays', moneyText(500, 'CDN$ 9.99') === 'CDN$ 5.00')
+  check('money: no sample still gives a number', moneyText(1250, null) === '12.50')
+
+  check('alert: no target', targetState({ final: 100, target: null }) === null)
+  check('alert: above the target waits', targetState({ final: 1100, target: 1000, targetCc: 'US', cc: 'US' }) === 'waiting')
+  check('alert: exactly the target counts', targetState({ final: 1000, target: 1000, targetCc: 'US', cc: 'US' }) === 'reached')
+  check('alert: under the target counts', targetState({ final: 999, target: 1000 }) === 'reached')
+  check('alert: free counts', targetState({ final: 0, target: 1000 }) === 'reached')
+  check('alert: another currency is never compared', targetState({ final: 1, target: 1000, targetCc: 'US', cc: 'DE' }) === 'currency')
+  check('alert: no price from Steam is unknown', targetState({ final: null, target: 1000 }) === 'unknown')
+
+  const ch = alertChanges([
+    { id: 'new', state: 'reached', hit: false }, { id: 'told', state: 'reached', hit: true },
+    { id: 'back', state: 'waiting', hit: true }, { id: 'wait', state: 'waiting', hit: false },
+    { id: 'gone', state: 'unknown', hit: true }, { id: 'money', state: 'currency', hit: true },
+  ])
+  check('alert: speaks once when reached', ch.fire.map(a => a.id).join() === 'new')
+  check('alert: can speak again only after going back above', ch.clear.map(a => a.id).join() === 'back')
+
+  const src = require('fs').readFileSync(path.join(__dirname, '..', 'src', 'lib', 'money.js'), 'utf8').replace(/export function/g, 'function')
+  const parseMoney = new Function(src + '; return parseMoney')()
+  check('typed: whole number', parseMoney('10') === 1000)
+  check('typed: dot decimals', parseMoney('9.99') === 999)
+  check('typed: comma decimals', parseMoney('9,99') === 999)
+  check('typed: one decimal', parseMoney('9.5') === 950)
+  check('typed: symbol and thousands', parseMoney('$ 1,299') === 129900)
+  check('typed: european thousands', parseMoney('1.299,50') === 129950)
+  check('typed: no number', parseMoney('abc') === null && parseMoney('') === null)
+}
+
+console.log('\ngame news')
+{
+  const { newsBlocks, shapeNews } = require(path.join(__dirname, '..', 'electron', 'services', 'steamNews.js'))
+  // The markup as Steam really sends it (Cyberpunk 2077, Balatro).
+  const real = '[h1]Deckbuilders Fest![/h1][p][/p][p]Enjoy 20% off during &amp; after [b]Steam[/b] Fest.[/p][p][img src="{STEAM_CLAN_IMAGE}/44150325/d899.jpg"][/img][dynamiclink href="https://store.steampowered.com/app/2379780/Balatro/"][/dynamiclink][/p][previewyoutube="uMzXH1QJx6M;full"][/previewyoutube][list][*][p][Console] Fixed a [url=https://x.y]crash[/url][/p][/*][*]Older style item[/list][img]{STEAM_CLAN_IMAGE}/1/old.png[/img][p]End[/p]'
+  const b = newsBlocks(real)
+  const types = b.map(x => x.type).join()
+  check('news: block order', types === 'h,p,img,link,link,li,li,img,p', types)
+  check('news: heading text', b[0].text === 'Deckbuilders Fest!')
+  check('news: formatting goes, text and entities stay', b[1].text === 'Enjoy 20% off during & after Steam Fest.', b[1].text)
+  check('news: image placeholder becomes a real address', b[2].src === 'https://clan.fastly.steamstatic.com/images/44150325/d899.jpg', b[2].src)
+  check('news: old image style too', b[7].src === 'https://clan.fastly.steamstatic.com/images/1/old.png', b[7].src)
+  check('news: store link', b[3].href === 'https://store.steampowered.com/app/2379780/Balatro/')
+  check('news: video link', b[4].href === 'https://www.youtube.com/watch?v=uMzXH1QJx6M')
+  check('news: words in brackets stay', b[5].text === '[Console] Fixed a crash', b[5].text)
+  check('news: older list style', b[6].text === 'Older style item')
+  check('news: a <p> tag word is not a tag', newsBlocks('[patch] and [points]')[0].text === '[patch] and [points]')
+  check('news: raw html stays out', newsBlocks('<script>x</script>Hi<br>there')[0].text === 'xHi there')
+  check('news: only https images', newsBlocks('[img]http://a.b/c.jpg[/img]').length === 0 && newsBlocks('[img]{STEAM_APP_IMAGE}/c.jpg[/img]').length === 0)
+  check('news: only https links', newsBlocks('[dynamiclink href="javascript:alert(1)"][/dynamiclink]').length === 0)
+  check('news: nothing gives nothing', newsBlocks('').length === 0 && newsBlocks(null).length === 0)
+  {
+    // A real Call of Duty patch post is this long: past the limit, no raw markup.
+    const long = newsBlocks('[list]' + '[*][p]A change[/p][/*]'.repeat(800) + '[/list]')
+    check('news: a very long post has no raw markup left', long.every(b => !/\[\/?[*p]|\[\/?list/.test(b.text || '')), long.find(b => /\[/.test(b.text || ''))?.text?.slice(0, 60))
+    check('news: a very long post says the rest is on Steam', /on Steam/.test(long[long.length - 1].text) && long.length <= 603, long.length)
+    const fits = newsBlocks('[list]' + '[*][p]A change[/p][/*]'.repeat(50) + '[/list]')
+    check('news: a normal list is all there, with no such note', fits.length === 50 && !fits.some(b => /on Steam/.test(b.text)), fits.length)
+  }
+  const [one] = shapeNews([{ gid: '5', title: 'A &amp; B', url: 'https://x.y/1', date: 100, tags: ['patchnotes'], contents: '[p]' + 'word '.repeat(80) + '[/p]' }])
+  check('news: shape', one.id === '5' && one.title === 'A & B' && one.date === 100000 && one.patch === true)
+  check('news: short excerpt', one.excerpt.length <= 203 && one.excerpt.endsWith('...'), String(one.excerpt.length))
+  check('news: not patch notes without the tag', shapeNews([{ gid: 1, tags: [], contents: '' }])[0].patch === false)
+  check('news: a bad address is dropped', shapeNews([{ gid: 1, url: 'javascript:x', contents: '' }])[0].url === null)
+}
+
+console.log('\nwishlist')
+{
+  const { wishlistNew, wishlistStatus, releaseText } = require(path.join(__dirname, '..', 'electron', 'services', 'wishlist.js'))
+  const items = [{ appid: 1, added: 10 }, { appid: 2, added: 30 }, { appid: 3, added: 20 }, { appid: 2, added: 30 }, { appid: 0 }, { appid: 'x' }]
+  check('wishlist: newest first, repeats and bad ids out', wishlistNew(items, [], []).map(i => i.appid).join() === '2,3,1')
+  check('wishlist: on the list stays out', wishlistNew(items, [2], []).map(i => i.appid).join() === '3,1')
+  check('wishlist: owned stays out', wishlistNew(items, [], [3]).map(i => i.appid).join() === '2,1')
+  check('wishlist: ids as text match too', wishlistNew([{ appid: 5 }], ['5'], []).length === 0)
+  const now = Date.UTC(2026, 5, 1)
+  check('wishlist: not out yet = upcoming', wishlistStatus({ releasedAt: now + 1000 }, now) === 'upcoming')
+  check('wishlist: out = want to play', wishlistStatus({ releasedAt: now - 1000 }, now) === 'want_to_play')
+  check('wishlist: marked coming soon = upcoming', wishlistStatus({ release: { soon: true, ts: now - 1000 } }, now) === 'upcoming')
+  check('wishlist: no date = want to play', wishlistStatus({}, now) === 'want_to_play')
+  check('wishlist: a message date stays', releaseText({ release: { text: 'When it is done' } }) === 'When it is done')
+  check('wishlist: a vague year stays vague', releaseText({ release: { ts: Date.UTC(2027, 5, 15), display: 'date_year' } }) === '2027')
+  check('wishlist: a vague month stays vague', /^[A-Z][a-z]{2} 2027$/.test(releaseText({ release: { ts: Date.UTC(2027, 5, 15), display: 'date_month' } })))
+  check('wishlist: a real date is precise', /^[A-Z][a-z]{2} \d{1,2}, 2027$/.test(releaseText({ release: { ts: Date.UTC(2027, 5, 15), display: 'date_full' } })))
+  check('wishlist: no date gives none', releaseText({}) === null)
+}
+
+console.log('\nbreak reminder')
+{
+  const { breakDue } = require(path.join(__dirname, '..', 'electron', 'services', 'breakReminder.js'))
+  const H = 3600
+  let r = breakDue({ activeSec: 5, everySec: H, state: null })
+  check('break: nothing at the start', r.due === false && r.state.stage === 0)
+  r = breakDue({ activeSec: H - 1, everySec: H, state: r.state })
+  check('break: not before the time', r.due === false)
+  r = breakDue({ activeSec: H, everySec: H, state: r.state })
+  check('break: at the time', r.due === true)
+  r = breakDue({ activeSec: H + 5, everySec: H, state: r.state })
+  check('break: only once for that hour', r.due === false)
+  r = breakDue({ activeSec: 2 * H, everySec: H, paused: true, state: r.state })
+  check('break: waits while paused', r.due === false)
+  r = breakDue({ activeSec: 2 * H + 5, everySec: H, state: r.state })
+  check('break: speaks when back from a pause', r.due === true)
+  check('break: KoZo restarting mid-session stays quiet', breakDue({ activeSec: 5 * H, everySec: H, state: null }).due === false)
+  const changed = breakDue({ activeSec: 3 * H, everySec: 2 * H, state: { everySec: H, stage: 2 } })
+  check('break: changing the setting stays quiet', changed.due === false && changed.state.everySec === 2 * H)
+  check('break: off', breakDue({ activeSec: 9 * H, everySec: 0, state: { everySec: H, stage: 1 } }).due === false)
+  check('break: off clears it', breakDue({ activeSec: 9 * H, everySec: 0, state: { everySec: H, stage: 1 } }).state === null)
+  check('break: a negative time is no time', breakDue({ activeSec: -50, everySec: H, state: { everySec: H, stage: 0 } }).due === false)
+}
+
+console.log('\nyour year')
+{
+  const { longestStreak, busiestMonth } = require(path.join(__dirname, '..', 'electron', 'db', 'queries', 'yearReview.js'))
+  check('streak: none', longestStreak([]) === 0)
+  check('streak: one day', longestStreak(['2026-03-01']) === 1)
+  check('streak: days in a row', longestStreak(['2026-03-01', '2026-03-02', '2026-03-03', '2026-03-09']) === 3)
+  check('streak: any order, repeats ignored', longestStreak(['2026-03-03', '2026-03-01', '2026-03-02', '2026-03-02']) === 3)
+  check('streak: across a month', longestStreak(['2026-01-31', '2026-02-01']) === 2)
+  check('streak: across clock changes', longestStreak(['2026-03-28', '2026-03-29', '2026-03-30', '2026-10-24', '2026-10-25', '2026-10-26']) === 3)
+  check('streak: across a leap day', longestStreak(['2028-02-28', '2028-02-29', '2028-03-01']) === 3)
+  check('busiest: none played', busiestMonth(Array(12).fill(0)) === null)
+  check('busiest: 1 to 12', busiestMonth([0, 5, 9, 2, 0, 0, 0, 0, 0, 0, 0, 0]) === 3)
+  check('busiest: last month', busiestMonth([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9]) === 12)
+}
+
 console.log('\nachIconUrl')
 {
   const { achIconUrl } = require(path.join(__dirname, '..', 'electron', 'db', 'achIcons.js'))
@@ -576,7 +741,655 @@ console.log('\nforegroundProbe')
   check('a controller just used is not idle', ci.msSinceInput() < 1000)
 }
 
+// ── A session's window ────────────────────────────────────────────────────────
+// src/lib/sessionDetail.js is an ES module; load it as a plain function body.
+console.log('\nsession window')
+{
+  const src = require('fs').readFileSync(path.join(__dirname, '..', 'src', 'lib', 'sessionDetail.js'), 'utf8')
+    .replace(/export function/g, 'function')
+  const { pausedSeconds, sessionGroups } = new Function(src + '; return { pausedSeconds, sessionGroups }')()
+  const at = (min) => new Date(Date.UTC(2026, 10, 4, 12, min)).toISOString()
+
+  check('paused: what ran but did not count', pausedSeconds({ started_at: at(0), ended_at: at(120), duration_seconds: 3600 }) === 3600)
+  check('paused: nothing when all of it counted', pausedSeconds({ started_at: at(0), ended_at: at(60), duration_seconds: 3600 }) === 0)
+  check('paused: never below zero', pausedSeconds({ started_at: at(0), ended_at: at(10), duration_seconds: 3600 }) === 0)
+  check('paused: a session with no end', pausedSeconds({ started_at: at(0), ended_at: null, duration_seconds: 0 }) === 0)
+  check('paused: uses the clock, not the idle column saved late', pausedSeconds({ started_at: '2026-11-04T12:11:15.574Z', ended_at: '2026-11-04T14:23:01.943Z', duration_seconds: 3879, idle_seconds: 4002 }) === 4027)
+
+  const achs = [
+    { id: 10, session_id: 1, unlock_id: 1, unlocked_at: at(50) },
+    { id: 11, session_id: 1, unlock_id: 2, unlocked_at: at(5) },
+    { id: 12, session_id: 1, unlock_id: 3, unlocked_at: null },
+    { id: 13, session_id: 2, unlock_id: 4, unlocked_at: at(210) },
+    { id: 14, session_id: null, unlock_id: 5, unlocked_at: at(6) },
+    { id: 15, session_id: null, unlock_id: null, unlocked_at: null },
+    { id: 16, session_id: 1, unlock_id: null, unlocked_at: null },
+  ]
+  const later = { id: 2, started_at: at(200), ended_at: at(260), duration_seconds: 3600 }
+  const earlier = { id: 1, started_at: at(0), ended_at: at(120), duration_seconds: 3600 }
+  const one = sessionGroups([earlier], achs)
+  check('a session: only what it earned, in the order it came', JSON.stringify(one.groups[0].unlocks.map(a => a.id)) === '[11,10,12]')
+  check('a session: another session on the same day stays out', !one.groups[0].unlocks.some(a => a.id === 13))
+  check('a session: an unlock with no link stays out', !one.groups[0].unlocks.some(a => a.id === 14))
+  check('a session: totals', one.played === 3600 && one.paused === 3600 && one.unlocks === 3)
+  const day = sessionGroups([later, earlier], achs)
+  check('a day: earliest session first', JSON.stringify(day.groups.map(g => g.session.id)) === '[1,2]')
+  check('a day: each session keeps its own', day.groups[0].unlocks.length === 3 && day.groups[1].unlocks.length === 1)
+  check('a day: totals add up', day.played === 7200 && day.paused === 3600 && day.unlocks === 4)
+  const input = [later, earlier]
+  sessionGroups(input, achs)
+  check('the page\'s own lists stay as they were', input[0] === later && achs[0].id === 10)
+}
+
+// ── Adding another PC's library ───────────────────────────────────────────────
+console.log('\nlibrary merge')
+{
+  const { planMerge, planIsEmpty, gameResolver, nameKey } = require(path.join(__dirname, '..', 'electron', 'services', 'libraryMerge.js'))
+// The laptop and the PC: ids collide on purpose. Game 4 is a different game on each.
+const local = {
+  games: [
+    { id: 4, name: 'Laptop Only', steam_app_id: 100, exe_name: 'l.exe', total_playtime_seconds: 500, first_played_at: '2026-01-01T00:00:00.000Z', last_played_at: '2026-01-02T00:00:00.000Z' },
+    { id: 5, name: 'Both By Id', steam_app_id: 200, exe_name: 'mine.exe', install_path: 'C:/mine', total_playtime_seconds: 1000, completion_status: 'playing', first_played_at: '2026-03-01T00:00:00.000Z', last_played_at: '2026-03-02T00:00:00.000Z' },
+    { id: 6, name: 'Red Alert 2', steam_app_id: null, exe_name: 'ra2.exe', total_playtime_seconds: 0 },
+  ],
+  sessions: [{ id: 1, game_id: 5, started_at: '2026-03-01T00:00:00.000Z' }],
+  achievements: [{ id: 1, game_id: 5, steam_api_name: 'A1' }, { id: 2, game_id: 5, steam_api_name: 'A2' }],
+  achievement_unlocks: [{ id: 1, achievement_id: 1, session_id: 1, unlocked_at: '2026-03-01T01:00:00.000Z' }, { id: 2, achievement_id: 2, session_id: null, unlocked_at: '2026-01-01T00:00:00.000Z' }],
+  game_list: [
+    { id: 1, game_id: 4, steam_app_id: 100, name: 'Laptop Only', status: 'playing', rating: 5, display_order: 3 },
+    { id: 2, game_id: 5, steam_app_id: 200, name: 'Both By Id', status: 'playing', rating: null, planned_month: null },
+    { id: 3, game_id: null, steam_app_id: 777, name: 'Wanted Here', status: 'want_to_play' },
+  ],
+}
+const pc = {
+  app: 'kozo', install: 'pc',
+  games: [
+    { id: 4, name: 'Different Name, Same Id', steam_app_id: 200, exe_name: 'theirs.exe', install_path: 'D:/theirs', total_playtime_seconds: 9000, completion_status: 'finished', is_installed: 1 },
+    { id: 5, name: 'PC Only', steam_app_id: 300, exe_name: 'p.exe', install_path: 'D:/here', total_playtime_seconds: 7200, is_installed: 1, banner_local_path: 'D:/art.jpg', hero_local_path: 'D:/h.jpg', save_paths: '["D:/s"]', first_played_at: '2026-02-01T00:00:00.000Z' },
+    { id: 6, name: 'Red-Alert-2', steam_app_id: 2229830, exe_name: 'other.exe', total_playtime_seconds: 60 },
+    { id: 7, name: 'Same Name', steam_app_id: 111, exe_name: 'x.exe', total_playtime_seconds: 0 },
+    { id: 8, name: 'Old Game', steam_app_id: 400, exe_name: 'o.exe', is_archived: 1, total_playtime_seconds: 0 },
+  ],
+  sessions: [
+    { id: 1, game_id: 4, started_at: '2026-03-01T00:00:00.000Z', ended_at: '2026-03-01T02:00:00.000Z', duration_seconds: 7200 },   // already here
+    { id: 2, game_id: 4, started_at: '2026-02-20T00:00:00.000Z', ended_at: '2026-02-20T01:00:00.000Z', duration_seconds: 3600 },   // new, earlier
+    { id: 3, game_id: 4, started_at: '2026-04-20T00:00:00.000Z', ended_at: '2026-04-20T00:30:00.000Z', duration_seconds: 1800 },   // new, later
+    { id: 4, game_id: 4, started_at: '2026-05-01T00:00:00.000Z', ended_at: null, duration_seconds: null },                        // still running there
+    { id: 5, game_id: 5, started_at: '2026-02-01T00:00:00.000Z', ended_at: '2026-02-01T02:00:00.000Z', duration_seconds: 7200 },
+  ],
+  achievements: [
+    { id: 9, game_id: 4, steam_api_name: 'A1', display_name: 'One' },
+    { id: 10, game_id: 4, steam_api_name: 'A2', display_name: 'Two' },
+    { id: 11, game_id: 4, steam_api_name: 'A3', display_name: 'Three' },
+    { id: 12, game_id: 5, steam_api_name: 'P1', display_name: 'Pee' },
+  ],
+  achievement_unlocks: [
+    { id: 1, achievement_id: 9, session_id: 2, unlocked_at: '2026-02-20T00:30:00.000Z', source: 'steam_api' },   // earlier than here: wins
+    { id: 2, achievement_id: 10, session_id: 2, unlocked_at: '2026-02-20T00:40:00.000Z', source: 'steam_api' },  // later than here: ours stays
+    { id: 3, achievement_id: 11, session_id: 3, unlocked_at: '2026-04-20T00:10:00.000Z', source: 'crack' },
+    { id: 4, achievement_id: 12, session_id: 5, unlocked_at: '2026-02-01T01:00:00.000Z', source: 'crack' },
+  ],
+  game_list: [
+    { id: 1, game_id: 4, steam_app_id: 200, name: 'Different Name, Same Id', status: 'finished', rating: 9, planned_month: '2026-12', is_favorite: 1, price_target_cents: 500, price_target_cc: 'US', price_target_hit: 0 },
+    { id: 2, game_id: 5, steam_app_id: 300, name: 'PC Only', status: 'playing' },
+    { id: 3, game_id: null, steam_app_id: 777, name: 'wanted here!', status: 'finished' },       // same game, status stays ours
+    { id: 4, game_id: null, steam_app_id: null, name: 'Laptop  Only', status: 'dropped' },       // by name, status stays ours
+    { id: 5, game_id: null, steam_app_id: 888, name: 'New Wish', status: 'upcoming', release_watch: 1, category_id: 3 },
+    { id: 6, game_id: null, steam_app_id: 888, name: 'New Wish', status: 'upcoming' },            // twice in the file
+  ],
+}
+
+const plan = planMerge([pc], local, { exists: (p) => p === 'D:/here' })
+const byName = (name) => plan.newGames.find(g => g.name === name)
+
+check('name key: spelling', nameKey('Red-Alert-2') === nameKey('red alert 2') && nameKey('Foo: Bar!') === nameKey('foo bar'))
+check('name key: other alphabets', nameKey('黒い砂漠') !== '' && nameKey('黒い砂漠') !== nameKey('原神'))
+check('colliding ids: their game 4 becomes our game 5, by Steam id', !byName('Different Name, Same Id'))
+check('same Steam id: no second game', plan.newGames.filter(g => g.steam_app_id === 200).length === 0)
+check('new game added with a new id', byName('PC Only')?.id < 0)
+check('another spelling is the same game', !byName('Red-Alert-2'))
+check('no Steam id here, one there: filled in', plan.gameChanges.get(6)?.steam_app_id === 2229830)
+check('new game: pictures and save folders of that PC dropped', byName('PC Only').banner_local_path === null && byName('PC Only').hero_local_path === null && byName('PC Only').save_paths === null)
+check('new game: installed only when the folder is here', byName('PC Only').is_installed === 1)
+check('new game: not here means not installed', byName('Same Name').is_installed === 0)
+check('matched game keeps this PC\'s folder, exe and status', !('install_path' in (plan.gameChanges.get(5) || {})) && !('exe_name' in (plan.gameChanges.get(5) || {})) && !('completion_status' in (plan.gameChanges.get(5) || {})))
+check('same start time is not added twice', plan.newSessions.filter(s => s.started_at === '2026-03-01T00:00:00.000Z').length === 0)
+check('a session still running there is skipped', !plan.newSessions.some(s => !s.ended_at))
+check('sessions moved to our game id', plan.newSessions.filter(s => s.game_id === 5).length === 2)
+check('playtime grows only by what was added', plan.gameChanges.get(5)?.total_playtime_seconds === 1000 + 3600 + 1800, plan.gameChanges.get(5)?.total_playtime_seconds)
+check('first played moves back, last played forward', plan.gameChanges.get(5)?.first_played_at === '2026-02-20T00:00:00.000Z' && plan.gameChanges.get(5)?.last_played_at === '2026-04-20T00:30:00.000Z')
+check('a new game keeps its own playtime once', byName('PC Only').total_playtime_seconds === 7200)
+check('achievement already here is not added', plan.newAchievements.filter(a => a.game_id === 5).map(a => a.steam_api_name).join() === 'A3')
+check('earlier unlock wins, and points at the moved session', plan.unlockChanges.length === 1 && plan.unlockChanges[0].id === 1 && plan.unlockChanges[0].unlocked_at === '2026-02-20T00:30:00.000Z' && plan.unlockChanges[0].session_id < 0)
+check('later unlock changes nothing', !plan.unlockChanges.some(c => c.id === 2))
+check('new unlock points at its moved session', plan.newUnlocks.some(u => u.source === 'crack' && u.session_id < 0))
+check('Game List: no duplicate of a game already here', !plan.newList.some(r => /Laptop|Wanted|Different/.test(r.name)))
+check('Game List: twice in the file is added once', plan.newList.filter(r => r.steam_app_id === 888).length === 1)
+check('Game List: this PC\'s status stays', ![...plan.listChanges.values()].some(c => 'status' in c))
+check('Game List: empty fields are filled', plan.listChanges.get(2)?.rating === 9 && plan.listChanges.get(2)?.planned_month === '2026-12' && plan.listChanges.get(2)?.is_favorite === 1 && plan.listChanges.get(2)?.price_target_cents === 500)
+check('Game List: a rating here is not replaced', !('rating' in (plan.listChanges.get(1) || {})))
+check('Game List: a new row drops the old category', plan.newList.every(r => r.category_id === null))
+check('Game List: a new row links our new game', plan.newList.find(r => r.name === 'PC Only')?.game_id === byName('PC Only').id)
+check('Game List: new rows go after ours', plan.newList.every(r => r.display_order > 3))
+check('counts: list', plan.counts.list.fresh === 2 && plan.counts.list.total === 5, JSON.stringify(plan.counts.list))
+check('counts: library leaves archived games out', plan.counts.library.fresh === 2 && plan.counts.library.total === 4, JSON.stringify(plan.counts.library))
+check('counts: new playtime and unlocks', plan.counts.library.seconds === 3600 + 1800 + 7200 && plan.counts.library.sessions === 3 && plan.counts.library.unlocks === 2, JSON.stringify(plan.counts.library))
+
+// Same name under two Steam ids stays two games.
+{
+  const two = planMerge([{ games: [{ id: 1, name: 'Foo', steam_app_id: 2, exe_name: '' }] }], { games: [{ id: 1, name: 'Foo', steam_app_id: 1, exe_name: '' }] })
+  check('same name, different Steam ids: two games', two.newGames.length === 1)
+  const list = planMerge([{ game_list: [{ id: 1, name: 'Foo', steam_app_id: 2, status: 'want_to_play' }] }], { game_list: [{ id: 1, name: 'Foo', steam_app_id: 1, status: 'want_to_play' }] })
+  check('same for a list row', list.newList.length === 1)
+}
+
+// The three questions in order, on an in-memory copy of what the database would hold.
+function applyToMemory(tables, p) {
+  const ids = new Map(); let next = 1000
+  const real = (id) => (id != null && id < 0 ? ids.get(id) : id)
+  const t = JSON.parse(JSON.stringify(tables))
+  for (const g of p.newGames) { const id = next++; ids.set(g.id, id); t.games.push({ ...g, id }) }
+  for (const [id, f] of p.gameChanges) Object.assign(t.games.find(g => g.id === id), f)
+  for (const s of p.newSessions) { const id = next++; ids.set(s.id, id); t.sessions.push({ ...s, id, game_id: real(s.game_id) }) }
+  for (const a of p.newAchievements) { const id = next++; ids.set(a.id, id); t.achievements.push({ ...a, id, game_id: real(a.game_id) }) }
+  for (const u of p.newUnlocks) t.achievement_unlocks.push({ ...u, id: next++, achievement_id: real(u.achievement_id), session_id: real(u.session_id) })
+  for (const c of p.unlockChanges) Object.assign(t.achievement_unlocks.find(u => u.id === c.id), { unlocked_at: c.unlocked_at, session_id: real(c.session_id) })
+  for (const r of p.newList) t.game_list.push({ ...r, id: next++, game_id: real(r.game_id) })
+  for (const [id, f] of p.listChanges) Object.assign(t.game_list.find(r => r.id === id), { ...f, ...('game_id' in f ? { game_id: real(f.game_id) } : {}) })
+  return t
+}
+{
+  const all = applyToMemory(local, plan)
+  check('running it again adds nothing', planIsEmpty(planMerge([pc], all, { exists: () => true })), JSON.stringify([...planMerge([pc], all).gameChanges]))
+
+  // Question 1 then question 2, what the window really does.
+  const afterList = applyToMemory(local, planMerge([pc], local, { list: true, library: false }))
+  check('Game List only: no games, sessions or achievements', afterList.games.length === local.games.length && afterList.sessions.length === local.sessions.length && afterList.achievements.length === local.achievements.length)
+  check('Game List only: new rows are in, not linked to a game that is not here', afterList.game_list.find(r => r.name === 'PC Only')?.game_id === null)
+  const q2 = planMerge([pc], afterList, { list: false, library: true })
+  const afterBoth = applyToMemory(afterList, q2)
+  const pcOnly = afterBoth.games.find(g => g.name === 'PC Only')
+  check('then Library: the row from question 1 gets linked, not doubled', afterBoth.game_list.filter(r => r.steam_app_id === 300).length === 1 && afterBoth.game_list.find(r => r.steam_app_id === 300).game_id === pcOnly.id)
+  check('then Library: same result as both at once', afterBoth.games.length === all.games.length && afterBoth.sessions.length === all.sessions.length && afterBoth.game_list.length === all.game_list.length)
+
+  const onlyLib = applyToMemory(local, planMerge([pc], local, { list: false, library: true }))
+  check('Library only: new games bring their rows', onlyLib.game_list.some(r => r.steam_app_id === 300))
+  check('Library only: rows of other games stay out', !onlyLib.game_list.some(r => r.steam_app_id === 888))
+  check('neither: nothing', planIsEmpty(planMerge([pc], local, { list: false, library: false })))
+
+  // Two other PCs that both have the same game.
+  const third = { games: [{ id: 50, name: 'PC Only', steam_app_id: 300, exe_name: 'p.exe', total_playtime_seconds: 100 }], sessions: [{ id: 1, game_id: 50, started_at: '2026-06-01T00:00:00.000Z', ended_at: '2026-06-01T00:01:40.000Z', duration_seconds: 100 }], game_list: [{ id: 9, game_id: 50, steam_app_id: 300, name: 'PC Only', status: 'finished' }] }
+  const twoPcs = planMerge([pc, third], local, {})
+  check('two PCs with one game: added once', twoPcs.newGames.filter(g => g.steam_app_id === 300).length === 1 && twoPcs.newList.filter(r => r.steam_app_id === 300).length === 1)
+  check('two PCs with one game: both playtimes count', twoPcs.newGames.find(g => g.steam_app_id === 300).total_playtime_seconds === 7300)
+  check('two PCs: the session sits on the one new game', twoPcs.newSessions.filter(s => s.started_at === '2026-06-01T00:00:00.000Z')[0].game_id === twoPcs.newGames.find(g => g.steam_app_id === 300).id)
+}
+
+// An empty PC and an empty backup.
+{
+  const fresh = planMerge([pc], { games: [], sessions: [], achievements: [], achievement_unlocks: [], game_list: [] }, {})
+  check('empty PC: everything comes in', fresh.newGames.length === 5 && fresh.newList.length === 5, JSON.stringify([fresh.newGames.length, fresh.newList.length]))
+  check('empty backup: nothing', planIsEmpty(planMerge([{ app: 'kozo', games: [] }], local, {})))
+}
+
+// Which game a save folder belongs to here.
+{
+  const resolve = gameResolver([pc], local.games)
+  check('folder: by name', resolve('Laptop Only') === 4)
+  check('folder: another spelling', resolve('Red Alert-2') === 6)
+  check('folder: their name, our game, through the Steam id', resolve('Different Name, Same Id') === 5)
+  check('folder: game not here', resolve('Nothing Like It') === null)
+}
+}
+
+// ── A library file per PC, and what Drive has that this PC lacks ──────────────
+console.log('\ngoogle drive files')
+{
+  const { pickLibraries, missingSaves } = require(path.join(__dirname, '..', 'electron', 'services', 'googleDrive.js'))
+  const f = (name, install, at, games = 1, list = 1) => ({ name, install, at, games, list })
+  check('library: this PC\'s own file is never offered', pickLibraries([f('a', 'me', '2')], 'me').length === 0)
+  check('library: an empty file is not offered', pickLibraries([f('a', 'pc', '2', 0, 0)], 'me').length === 0)
+  check('library: only a Game List still counts', pickLibraries([f('a', 'pc', '2', 0, 3)], 'me').length === 1)
+  check('library: the newest file per PC', pickLibraries([f('old', 'pc', '1'), f('new', 'pc', '2')], 'me').map(x => x.name).join() === 'new')
+  check('library: two PCs, newest first', pickLibraries([f('a', 'one', '1'), f('b', 'two', '2')], 'me').map(x => x.name).join() === 'b,a')
+  check('library: an old shared file from this PC stays out', pickLibraries([f('Data/kozo-autobackup.json', 'me', '9'), f('b', 'two', '2')], 'me').map(x => x.name).join() === 'b')
+  check('library: an old file with no install id still counts', pickLibraries([f('old', null, '1')], 'me').length === 1)
+
+  const remote = new Map([
+    ['Saves/G/vault/meta.json', { id: 'm', size: 10 }],
+    ['Saves/G/vault/snapshots/s.json', { id: 's', size: 20 }],
+    ['Saves/G/vault/blobs/here.gz', { id: 'h', size: 30 }],
+    ['Saves/G/vault/blobs/new.gz', { id: 'n', size: 40 }],
+    ['Saves/../evil.gz', { id: 'e', size: 1 }],
+    ['Saves/G/..\\evil.gz', { id: 'e2', size: 1 }],
+    ['Data/kozo-library-x.json', { id: 'd', size: 1 }],
+  ])
+  const items = missingSaves(remote, 'C:/root', (p) => /here\.gz$/.test(p))
+  check('saves: only what this PC lacks, nothing else', items.map(i => i.id).join() === 'n,s,m', items.map(i => i.id).join())
+  check('saves: pieces, then restore points, then the owner', items[0].id === 'n' && items[2].id === 'm')
+}
+
+// ── Where a restore point goes on another PC ──────────────────────────────────
+console.log('\nsave paths')
+{
+  const { mapSource } = require(path.join(__dirname, '..', 'electron', 'services', 'saveVault.js'))
+  const home = 'C:\\Users\\Laptop'
+  check('path: another user name moves to this home', mapSource('C:\\Users\\Other\\AppData\\Roaming\\Game', home) === 'C:\\Users\\Laptop\\AppData\\Roaming\\Game')
+  check('path: this home stays as written', mapSource('c:\\users\\laptop\\Saved Games\\X', home) === 'c:\\users\\laptop\\Saved Games\\X')
+  check('path: Public is the same everywhere', mapSource('C:\\Users\\Public\\Documents\\X', home) === 'C:\\Users\\Public\\Documents\\X')
+  check('path: a game folder stays', mapSource('D:\\Games\\X\\saves', home) === 'D:\\Games\\X\\saves')
+  check('path: forward slashes', mapSource('C:/Users/Other/Game', home) === 'C:\\Users\\Laptop/Game')
+  check('path: the home itself', mapSource('C:\\Users\\Other', home) === 'C:\\Users\\Laptop')
+  check('path: a folder only starting with Users', mapSource('C:\\UsersOld\\Other\\X', home) === 'C:\\UsersOld\\Other\\X')
+}
+
+// ── A tool or an installer is not the game ────────────────────────────────────
+console.log('\ntool exes')
+{
+  const { isHelperExe, pickBestExe } = require(path.join(__dirname, '..', 'electron', 'services', 'pcScanner.js'))
+  for (const n of ['WorldBuilder.exe', 'CnCNet5_YR_Installer.exe', 'map-editor.exe', 'LevelEditor.exe', 'Editor.exe', 'game_editor.exe', 'Game_Setup.exe', 'ModKit.exe', 'unity_modtools.exe', 'crs-handler.exe']) check('tool: ' + n, isHelperExe(n))
+  for (const n of ['Halls of Torment.exe', 'AlienShooter.exe', 'Atomic Exile.exe', 'generals.exe', 'gamemd.exe', 'Cyberpunk2077.exe', 'Builder.exe', 'WorldBox.exe', 'Fortnite.exe', 'Setup Your Base.exe', 'Red Dead Redemption 2.exe', 'Editorial.exe']) check('game: ' + n, !isHelperExe(n))
+  check('tool: Scan PC prefers the game when there is one', pickBestExe([{ name: 'WorldBuilder.exe', size: 9e8 }, { name: 'generals.exe', size: 1e6 }], 'Zero Hour') === 'generals.exe')
+  check('tool: a folder with only a tool still has an answer', pickBestExe([{ name: 'WorldBuilder.exe', size: 1 }], 'Zero Hour') === 'WorldBuilder.exe')
+}
+
+// ── Background color ───────────────────────────────────────────────────────
+console.log('\nbackground color')
+{
+  const src = require('fs').readFileSync(path.join(__dirname, '..', 'src', 'lib', 'bgTone.js'), 'utf8').replace(/export function/g, 'function')
+  const { bgTone, bgToneHex } = new Function(src + '; return { bgTone, bgToneHex }')()
+  const hexOf = (h, s, v) => {
+    const f = (n) => { const k = (n + h / 60) % 6; return Math.round(255 * (v - v * s * Math.max(0, Math.min(k, 4 - k, 1)))).toString(16).padStart(2, '0') }
+    return `#${f(5)}${f(3)}${f(1)}`
+  }
+  // The whole color square, for a few hues.
+  const grid = []
+  for (const h of [0, 120, 240, 300]) for (let s = 0; s <= 10; s++) for (let v = 0; v <= 10; v++) grid.push(hexOf(h, s / 10, v / 10))
+  check('bg: it always stays dark', grid.every(c => { const t = bgTone(c); return t.l >= 4 && t.l <= 16 && t.s <= 55 }))
+  check('bg: white, gray and black all differ', new Set(['#ffffff', '#808080', '#000000'].map(bgToneHex)).size === 3, ['#ffffff', '#808080', '#000000'].map(bgToneHex).join())
+  // The bug: most of the square landed on one color.
+  const row = (h, v) => new Set(Array.from({ length: 11 }, (_, s) => bgToneHex(hexOf(h, s / 10, v)))).size
+  check('bg: along the top of the square the color keeps changing', row(0, 1) >= 10, row(0, 1))
+  const down = new Set(Array.from({ length: 11 }, (_, v) => bgToneHex(hexOf(200, 0.8, v / 10)))).size
+  check('bg: down the square the color keeps changing', down >= 10, down)
+  const hues = new Set([0, 60, 120, 180, 240, 300].map(h => bgToneHex(hexOf(h, 1, 1)))).size
+  check('bg: every hue is its own color', hues === 6, hues)
+  const red = bgToneHex('#ff0000')
+  check('bg: red comes out red', parseInt(red.slice(1, 3), 16) > parseInt(red.slice(3, 5), 16) * 2, red)
+  const blue = bgToneHex('#2060ff')
+  check('bg: blue comes out blue', parseInt(blue.slice(5, 7), 16) > parseInt(blue.slice(1, 3), 16) * 2, blue)
+  check('bg: a broken value still gives a color', bgToneHex('nonsense').startsWith('#'))
+  // Contrast against the lightest surface a pick can reach (+5.5% lightness).
+  const lum = (hex) => {
+    const c = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(x => (x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4))
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+  }
+  const contrast = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05) }
+  const lightest = hexOf(0, 0, 0.215)
+  check('bg: quiet text is readable on the lightest shade', contrast('#9292b0', lightest) >= 3, contrast('#9292b0', lightest).toFixed(2))
+  check('bg: main text is easy to read on it', contrast('#ececf8', lightest) >= 7, contrast('#ececf8', lightest).toFixed(2))
+}
+
+// ── Another PC has something new ───────────────────────────────────────────
+console.log('\ndrive news')
+{
+  const { newsSince } = require(path.join(__dirname, '..', 'electron', 'services', 'libraryMerge.js'))
+  const zero = { list: 0, games: 0, sessions: 0, unlocks: 0, saves: 0 }
+  check('news: nothing there, nothing new', newsSince(zero, null).isNew === false)
+  check('news: a first look at another PC is news', newsSince({ ...zero, list: 2 }, null).isNew === true)
+  check('news: the same counts are not news twice', newsSince({ ...zero, list: 2 }, { ...zero, list: 2 }).isNew === false)
+  check('news: one more game is news', newsSince({ ...zero, list: 3 }, { ...zero, list: 2 }).isNew === true)
+  check('news: fewer is not news (a yes brought them in)', newsSince({ ...zero, list: 1 }, { ...zero, list: 30 }).isNew === false)
+  const after = newsSince(zero, { ...zero, list: 30 })
+  check('news: after a yes, what comes later is new again', newsSince({ ...zero, list: 1 }, after.seen).isNew === true)
+  check('news: a saved game counts too', newsSince({ ...zero, saves: 1 }, zero).isNew === true)
+  const src = require('fs').readFileSync(path.join(__dirname, '..', 'src', 'lib', 'driveNews.js'), 'utf8')
+    .replace(/^import .*$/m, '').replace(/export function/g, 'function')
+  const { driveNewsText } = new Function('formatPlaytime', src + '; return { driveNewsText }')((s) => `${Math.round(s / 3600)}h`)
+  const pc = [{ name: 'DESKTOP-ABC' }]
+  check('news: the bar names the PC and what is new', driveNewsText({ pcs: pc, list: { fresh: 2 }, library: { fresh: 1, seconds: 7200, sessions: 3, unlocks: 1 }, saves: { games: 1 } })
+    === 'DESKTOP-ABC has something new: 2 games on the Game List, 1 game in the Library, 2h of play, 1 achievement, saves for 1 game.')
+  check('news: several PCs read right', driveNewsText({ pcs: [{ name: 'A' }, { name: 'B' }], list: { fresh: 1 } }) === 'Your other PCs have something new: 1 game on the Game List.')
+  check('news: no dashes in its text', !/[\u2013\u2014]/.test(driveNewsText({ pcs: pc, list: { fresh: 1 } })))
+}
+
+// ── Play and the watched file never starts ─────────────────────────────────
+console.log('\nplay check')
+{
+  const { candidatesFor, launchAfterPick } = require(path.join(__dirname, '..', 'electron', 'services', 'launchCheck.js'))
+  const base = { watched: 'launcher.exe', deny: new Set(['explorer.exe', 'smartscreen.exe']), isHelper: (n) => /crashpad|unins|editor/i.test(n), isGame: (f) => !/cncnetqm|clientdx/i.test(f) }
+  const found = candidatesFor({ ...base,
+    running: [{ name: 'gamemd.exe' }, { name: 'Discord.exe' }, { name: 'smartscreen.exe' }, { name: 'newtool.exe' }, { name: 'CnCNetQM.exe' }, { name: 'clientdx.exe' }, { name: 'editor.exe' }],
+    inFolder: [{ name: 'gamemd.exe', dir: 'C:\\G' }, { name: 'launcher.exe', dir: 'C:\\G' }, { name: 'editor.exe', dir: 'C:\\G' }, { name: 'CnCNetQM.exe', dir: 'C:\\G\\Qt' }, { name: 'clientdx.exe', dir: 'C:\\G\\R' }],
+  })
+  check('check: a running game file in the game folder is offered', found[0]?.exe_name === 'gamemd.exe' && found[0].install_path === 'C:\\G')
+  check('check: nothing else', found.length === 1, found.map(f => f.exe_name).join())
+  check('check: a Windows program that started after Play is never offered', !found.some(f => f.exe_name === 'smartscreen.exe'))
+  check('check: an online client in the folder is not the game', !found.some(f => /cncnetqm|clientdx/i.test(f.exe_name)))
+  check('check: what merely started after Play is not offered', !found.some(f => f.exe_name === 'newtool.exe'))
+  check('check: not running, not offered', candidatesFor({ ...base, running: [], inFolder: [{ name: 'gamemd.exe', dir: 'C:\\G' }] }).length === 0)
+  check('check: at most five', candidatesFor({ ...base, running: Array.from({ length: 9 }, (_, i) => ({ name: `g${i}.exe` })), inFolder: Array.from({ length: 9 }, (_, i) => ({ name: `g${i}.exe`, dir: 'C:\\G' })) }).length === 5)
+  const pick = { oldFile: 'C:\\G\\launcher.exe', oldExists: true, newFile: 'C:\\G\\game.exe', oldIsTool: false, hasLauncher: false }
+  check('pick: what started the game keeps starting it', launchAfterPick(pick) === 'C:\\G\\launcher.exe')
+  check('pick: not if it is gone', launchAfterPick({ ...pick, oldExists: false }) === null)
+  check('pick: not if it was a tool', launchAfterPick({ ...pick, oldIsTool: true }) === null)
+  check('pick: not when a launcher is already set', launchAfterPick({ ...pick, hasLauncher: true }) === null)
+  check('pick: not when it is the same file', launchAfterPick({ ...pick, newFile: 'c:\\g\\LAUNCHER.exe' }) === null)
+}
+
+// ── Is it the game? What Scan PC may use ─────────────────────────────────────
+console.log('\ngame file check')
+{
+  const fs = require('fs')
+  const ec = require(path.join(__dirname, '..', 'electron', 'services', 'exeCheck.js'))
+  const scanner = require(path.join(__dirname, '..', 'electron', 'services', 'pcScanner.js'))
+  // The smallest program the reader accepts: headers, one section, an import table.
+  const fakeExe = (dlls, pad = 0) => {
+    const raw = 0x400, va = 0x1000
+    const desc = Buffer.alloc((dlls.length + 1) * 20)
+    let at = desc.length
+    const names = dlls.map((d, i) => { const b = Buffer.from(d + '\0', 'latin1'); desc.writeUInt32LE(va + at, i * 20 + 12); at += b.length; return b })
+    const body = Buffer.concat([desc, ...names])
+    const head = Buffer.alloc(raw)
+    head.write('MZ', 0, 'latin1'); head.writeUInt32LE(0x80, 0x3c)
+    head.write('PE\0\0', 0x80, 'latin1'); head.writeUInt16LE(1, 0x86); head.writeUInt16LE(0xe0, 0x94)
+    head.writeUInt16LE(0x10b, 0x98)
+    head.writeUInt32LE(va, 0x98 + 96 + 8); head.writeUInt32LE(body.length, 0x98 + 96 + 12)
+    const sec = 0x98 + 0xe0
+    head.writeUInt32LE(body.length, sec + 8); head.writeUInt32LE(va, sec + 12); head.writeUInt32LE(body.length, sec + 16); head.writeUInt32LE(raw, sec + 20)
+    return Buffer.concat([head, body, Buffer.alloc(pad)])
+  }
+  // Not under Temp: Scan PC never looks inside a temp folder.
+  const root = path.join(require('os').homedir(), `kozo-scan-test-${process.pid}`)
+  const put = (rel, buf = Buffer.alloc(16)) => { const f = path.join(root, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, buf); return f }
+  try {
+    const draws = put('reader/game.exe', fakeExe(['KERNEL32.dll', 'ddraw.dll', 'DSOUND.dll']))
+    const plain = put('reader/plain.exe', fakeExe(['KERNEL32.dll', 'USER32.dll']))
+    check('reader: lists what a program loads', ec.readImports(draws)?.dlls.join() === 'kernel32.dll,ddraw.dll,dsound.dll', ec.readImports(draws)?.dlls.join())
+    check('reader: something that is no program', ec.readImports(put('reader/x.exe', Buffer.from('not a program'))) === null)
+    check('reader: a file that is not there', ec.readImports(path.join(root, 'nope.exe')) === null)
+    check('reader: graphics or game sound count', ec.loadsGameParts(['d3d11.dll']) && ec.loadsGameParts(['dinput8.dll']) && ec.loadsGameParts(['binkw32.dll']) && ec.loadsGameParts(['steam_api64.dll']))
+    check('reader: everyday libraries do not', !ec.loadsGameParts(['kernel32.dll', 'user32.dll', 'mscoree.dll', 'qt5core.dll']))
+    check('reader: an engine starter counts by the files beside it', ec.engineBeside('Bar.exe', ['UnityPlayer.dll']) && ec.engineBeside('Bar.exe', ['Bar.pck']) && ec.engineBeside('Bar.exe', ['Bar_Data']))
+    check('reader: and nothing else beside it does', !ec.engineBeside('Bar.exe', ['readme.txt', 'foo.dll']))
+    check('reader: the two kinds of file', ec.looksLikeGame(draws) && !ec.looksLikeGame(plain))
+
+    // The folder that went wrong: only a map editor and a settings helper, a wrapper around it.
+    put('zh-wrapper/Zero Hour/WorldBuilder.exe', fakeExe(['mss32.dll']))
+    put('zh-wrapper/Zero Hour/RedistInstallers/Options_Helper/Options_INI_Helper.exe', fakeExe(['USER32.dll']))
+    put('zh-wrapper/Zero Hour/_CommonRedist/DirectX/DXSETUP.exe', fakeExe(['USER32.dll']))
+    const [zh] = scanner.scanFolder(path.join(root, 'zh-wrapper'))
+    check('scan: only tools means no game file', zh?.no_game_file === true && zh.exe_name === null, JSON.stringify(zh))
+    check('scan: and never a helper', zh?.exe_name !== 'Options_INI_Helper.exe')
+    check('scan: an installer folder is not looked in', !scanner.collectExes(path.join(root, 'zh-wrapper'), 4).some(e => e.name === 'Options_INI_Helper.exe'))
+    check('tool: a helper by name', scanner.isHelperExe('Options_INI_Helper.exe') && scanner.isHelperExe('settings-helper.exe'))
+
+    // Red Alert 2: the 5 MB game beside a 100 MB installer and an online client.
+    put('ra2/Game/gamemd-spawn.exe', fakeExe(['ddraw.dll', 'DSOUND.dll'], 5000))
+    put('ra2/Game/CnCNet5_YR_Installer.exe', fakeExe(['KERNEL32.dll'], 90000))
+    put('ra2/Game/CnCNetYRLauncher.exe', fakeExe(['mscoree.dll']))
+    put('ra2/Game/YuriScreenResolution.exe', fakeExe(['USER32.dll'], 9000))
+    put('ra2/Game/Syringe.exe', fakeExe(['KERNEL32.dll'], 8000))
+    put('ra2/Game/Qt/CnCNetQM.exe', fakeExe(['Qt5Core.dll'], 40000))
+    const [ra2] = scanner.scanFolder(path.join(root, 'ra2'))
+    check('scan: what loads a game beats what is big', ra2?.exe_name === 'gamemd-spawn.exe', ra2?.exe_name)
+    check('scan: and it is sure of it', !ra2?.exe_unsure && !ra2?.no_game_file)
+    check('scan: its own folder', ra2?.install_path === path.join(root, 'ra2', 'Game'), ra2?.install_path)
+
+    put('Halls Game/Halls Game.exe', fakeExe(['KERNEL32.dll']))
+    const [named] = scanner.scanFolder(path.join(root, 'Halls Game'))
+    check('scan: an exe named after the game is fine with a small starter', named?.exe_name === 'Halls Game.exe' && !named.exe_unsure)
+
+    put('unity-one/Bar.exe', fakeExe(['KERNEL32.dll'])); put('unity-one/UnityPlayer.dll')
+    const [unity] = scanner.scanFolder(path.join(root, 'unity-one'))
+    check('scan: an engine starter is fine', unity?.exe_name === 'Bar.exe' && !unity.exe_unsure)
+
+    put('odd-folder/Thing.exe', fakeExe(['KERNEL32.dll']))
+    const [odd] = scanner.scanFolder(path.join(root, 'odd-folder'))
+    check('scan: no sign of a game means not sure, never ticked for you', odd?.exe_name === 'Thing.exe' && odd.exe_unsure === true, JSON.stringify(odd))
+
+    put('deep-one/Launcher.exe', fakeExe(['KERNEL32.dll']))
+    put('deep-one/bin/Real.exe', fakeExe(['d3d9.dll']))
+    const [deep] = scanner.scanFolder(path.join(root, 'deep-one'))
+    check('scan: the game further in beats a starter with no sign', deep?.exe_name === 'Real.exe' && deep.install_path === path.join(root, 'deep-one', 'bin'), deep?.exe_name)
+
+    put('direct-one/Setup_Tool_Setup.exe', fakeExe(['KERNEL32.dll']))
+    put('direct-one/bin/Good.exe', fakeExe(['d3d9.dll']))
+    const [direct] = scanner.scanFolder(path.join(root, 'direct-one'))
+    check('scan: a tool in the folder does not beat the game further in', direct?.exe_name === 'Good.exe', direct?.exe_name)
+
+    // Same game?
+    const same = scanner.sameGameFolder
+    check('folder: the same one', same('C:\\Games\\Foo', 'c:/games/foo/'))
+    check('folder: one inside the other', same('C:\\Games\\Foo\\Bar', 'C:\\Games\\Foo') && same('C:\\Games\\Foo', 'C:\\Games\\Foo\\Redist\\Helper'))
+    check('folder: side by side is not', !same('C:\\Games\\Foo', 'C:\\Games\\Foobar'))
+    check('folder: a library of games is not one game', !same('C:\\Games', 'C:\\Games\\Foo') && !same('C:\\', 'C:\\Foo'))
+    check('folder: nothing is not a match', !same('', 'C:\\Games\\Foo') && !same(null, null))
+
+    const sgdb = require(path.join(__dirname, '..', 'electron', 'services', 'steamGridDb.js'))
+    check('name: punctuation does not make another game', sgdb.nameKey('Command and Conquer Generals Zero Hour') === sgdb.nameKey('Command & Conquer: Generals - Zero Hour'))
+    check('name: other games stay other', sgdb.nameKey('Red Alert 2') !== sgdb.nameKey('Red Alert 3'))
+    check('name: the real name when the search is sure', sgdb.officialName({ name: 'Command & Conquer: Generals – Zero Hour', score: 1 }) === 'Command & Conquer: Generals - Zero Hour')
+    check('name: not when it is not', sgdb.officialName({ name: 'Something', score: 0.6 }) === null && sgdb.officialName(null) === null)
+
+    // Scan PC and the launchers are one list.
+    const { mergeLauncherGames } = require(path.join(__dirname, '..', 'electron', 'services', 'launcherImport.js'))
+    const merged = mergeLauncherGames(
+      [{ name: 'Folder Only', install_path: 'C:\\Games\\A' }, { name: 'Hades', install_path: 'D:\\Epic Games\\Hades\\', exe_name: 'x.exe', detected_type: 'Cracked' }],
+      [{ name: 'Hades', install_path: 'd:/epic games/hades', detected_type: 'Epic', launch_uri: 'com.epicgames://x' }, { name: 'Forza', install_path: 'E:\\Xbox\\Forza', detected_type: 'Xbox' }])
+    check('launchers: a game in both is the launcher\'s', merged.filter(g => g.name === 'Hades').length === 1 && merged.find(g => g.name === 'Hades').launch_uri === 'com.epicgames://x')
+    check('launchers: the rest are added', merged.length === 3 && merged.some(g => g.name === 'Forza' && g.isInstalled))
+    check('launchers: folder games stay', merged[0].name === 'Folder Only')
+
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+}
+
+// ── Names, covers, blank cards, news previews ──────────────────────────────
+console.log('\nnames and covers')
+{
+  const scanner = require(path.join(__dirname, '..', 'electron', 'services', 'pcScanner.js'))
+  check('name: hyphens for spaces', scanner.tidyFolderName('Red-Alert-2-Yuris-Revenge') === 'Red Alert 2 Yuris Revenge')
+  check('name: underscores too', scanner.tidyFolderName('Some_Game_Name') === 'Some Game Name')
+  check('name: one hyphen is a real name', scanner.tidyFolderName('Half-Life') === null)
+  check('name: spaces already read fine', scanner.tidyFolderName('Spider-Man Miles-Morales Edition') === null)
+  check('name: a scan cleans the download site off too', scanner.cleanGameName('Command-and-Conquer-Generals-Zero-Hour-AnkerGames') === 'Command and Conquer Generals Zero Hour', scanner.cleanGameName('Command-and-Conquer-Generals-Zero-Hour-AnkerGames'))
+  check('name: a scan still reads Half-Life', scanner.cleanGameName('Half-Life') === 'Half-Life')
+  check('tool: a screen resolution tool is not the game', scanner.isHelperExe('YuriScreenResolution.exe'))
+  check('junk: a Redist folder is no game', scanner.isJunkFolder('Redist'))
+
+  const sgdb = require(path.join(__dirname, '..', 'electron', 'services', 'steamGridDb.js'))
+  // What the search really answered for these names.
+  const full = [
+    { id: 5446169, name: 'Command & Conquer and The Covert Operations' },
+    { id: 5446171, name: 'Command & Conquer: Red Alert 2 and Yuri’s Revenge' },
+    { id: 5446173, name: 'Command & Conquer: Tiberian Sun and Firestorm' },
+    { id: 1560, name: 'Command & Conquer: Red Alert 3' },
+  ]
+  const lastWords = [
+    { id: 5249925, name: 'Command & Conquer: Generals – Zero Hour' },
+    { id: 5268281, name: 'Command & Conquer: Generals – Zero Hour World Builder' },
+    { id: 4889513, name: 'Generals & Rulers' },
+  ]
+  const ra2 = [
+    { id: 38629, name: "Command & Conquer: Red Alert 2 - Yuri's Revenge" },
+    { id: 5334386, name: "Command & Conquer: Red Alert 2 - Yuri's Revenge - Red-Resurrection" },
+    { id: 5255740, name: 'Command & Conquer: Red Alert 2' },
+  ]
+  const zh = 'Command and Conquer Generals Zero Hour'
+  check('cover: the wrong C&C game is not good enough', sgdb.bestMatch(zh, full) === null)
+  check('cover: the right one wins over its map editor', sgdb.bestMatch(zh, lastWords)?.id === 5249925)
+  check('cover: Red Alert 2 finds Yuri\'s Revenge', sgdb.bestMatch('Red Alert 2 Yuris Revenge', ra2)?.id === 38629)
+  check('cover: an exact name is a full match', sgdb.matchScore('Alien Shooter', 'Alien Shooter') === 1)
+  check('cover: a sequel is not the same game', sgdb.bestMatch('Alien Shooter', [{ id: 2, name: 'Alien Shooter 2 Conscription' }, { id: 1, name: 'Alien Shooter' }])?.id === 1)
+  check('cover: nothing close, nothing picked', sgdb.bestMatch('Atomic Exile', [{ id: 1, name: 'Atomic Heart' }, { id: 2, name: 'Exile' }]) === null)
+
+  const { isBlankRow } = require(path.join(__dirname, '..', 'electron', 'db', 'queries', 'gameList.js'))
+  const blank = { status: 'want_to_play' }
+  check('row: nothing to show and nothing said is blank', isBlankRow(blank) === true)
+  for (const [what, extra] of [['a Steam id', { steam_app_id: 5 }], ['art', { banner_url: 'x' }], ['a rating', { rating: 7 }], ['a plan', { planned_month: '2026-11' }], ['a favorite', { is_favorite: 1 }], ['a price alert', { price_target_cents: 100 }], ['a tracked release', { release_watch: 1 }], ['finished', { status: 'finished' }]]) {
+    check(`row: ${what} keeps it`, isBlankRow({ ...blank, ...extra }) === false)
+  }
+
+  const { excerptOf } = require(path.join(__dirname, '..', 'electron', 'services', 'steamNews.js'))
+  const p = (text) => ({ type: 'p', text })
+  check('news: the greeting is skipped', excerptOf([p('Dear Adventurers,'), p('We fixed the crash on the boss.')]) === 'We fixed the crash on the boss.')
+  check('news: other greetings too', excerptOf([p('Hello everyone!'), p('Patch time.')]) === 'Patch time.' && excerptOf([p('Hi all,'), p('Patch time.')]) === 'Patch time.' && excerptOf([p('Dear Community,'), p('Patch time.')]) === 'Patch time.')
+  check('news: a short sign of a greeting keeps real text', excerptOf([p('Hi-Fi RUSH gets a new mode today, and it is free.')]).startsWith('Hi-Fi RUSH'))
+  check('news: a post that is only a greeting still says it', excerptOf([p('Dear Adventurers,')]) === 'Dear Adventurers,')
+}
+
+// ── Is a Steam account's data open? ───────────────────────────────────────────
+console.log('\nsteam privacy')
+{
+  const steam = require(path.join(__dirname, '..', 'electron', 'services', 'steamApi.js'))
+  const xml = (state) => `<profile><steamID64>1</steamID64><privacyState>${state}</privacyState><visibilityState>3</visibilityState></profile>`
+  check('profile page: public', steam.privacyFromProfileXml(xml('public')) === 'public')
+  check('profile page: private', steam.privacyFromProfileXml(xml('private')) === 'private')
+  check('profile page: friends only counts as closed', steam.privacyFromProfileXml(xml('friendsonly')) === 'private')
+  check('profile page: wrapped in CDATA', steam.privacyFromProfileXml('<privacyState><![CDATA[public]]></privacyState>') === 'public')
+  check('profile page: no answer', steam.privacyFromProfileXml('<html>busy</html>') === null && steam.privacyFromProfileXml(null) === null)
+  check('owned games: a list means open', steam.privacyFromOwnedGames({ response: { game_count: 36, games: [] } }) === 'public')
+  check('owned games: no games is still open', steam.privacyFromOwnedGames({ response: { game_count: 0 } }) === 'public')
+  check('owned games: an empty answer means closed', steam.privacyFromOwnedGames({ response: {} }) === 'private')
+  check('owned games: no answer', steam.privacyFromOwnedGames(null) === null && steam.privacyFromOwnedGames({}) === null)
+}
+
+// ── The version of a game's files ─────────────────────────────────────────────
+console.log('\ngame version')
+{
+  const v = require(path.join(__dirname, '..', 'electron', 'services', 'gameVersion.js'))
+
+  // A VS_VERSIONINFO block by hand, laid out as Windows lays it out.
+  const pad = (b) => Buffer.concat([b, Buffer.alloc((4 - (b.length % 4)) % 4)])
+  const wide = (t) => Buffer.from(t + '\0', 'utf16le')
+  const node = (key, value, isText, children = []) => {
+    const head = pad(Buffer.concat([Buffer.alloc(6), wide(key)]))
+    const body = value ? pad(value) : Buffer.alloc(0)
+    const kids = Buffer.concat(children.map(pad))
+    const all = Buffer.concat([head, body, kids])
+    all.writeUInt16LE(all.length, 0)
+    all.writeUInt16LE(value ? (isText ? value.length / 2 : value.length) : 0, 2)
+    all.writeUInt16LE(isText ? 1 : 0, 4)
+    return all
+  }
+  const fixedInfo = Buffer.alloc(52)
+  fixedInfo.writeUInt32LE(0xFEEF04BD, 0)
+  fixedInfo.writeUInt32LE((3 << 16) | 4, 8)
+  fixedInfo.writeUInt32LE((5 << 16) | 6, 12)
+  const str = (k, t) => node(k, wide(t), true)
+  const block = node('VS_VERSION_INFO', fixedInfo, false, [
+    node('StringFileInfo', null, true, [node('040904B0', null, true, [str('FileVersion', '2, 5, 0, 1'), str('ProductName', 'My Game')])]),
+    node('VarFileInfo', null, true, [node('Translation', Buffer.from([9, 4, 0xb0, 4]), false)]),
+  ])
+  const parsed = v.parseVersionBlock(block)
+  check('exe version: the numbers', parsed.fixed === '3.4.5.6', parsed.fixed)
+  check('exe version: the text', parsed.strings.FileVersion === '2, 5, 0, 1' && parsed.strings.ProductName === 'My Game', JSON.stringify(parsed.strings))
+  check('exe version: a broken block gives nothing, no crash', Object.keys(v.parseVersionBlock(Buffer.from([255, 255, 0, 0, 1, 0, 65, 0])).strings).length === 0)
+  check('exe version: the text wins over the numbers', v.exeVersion(parsed) === '2.5.0.1', v.exeVersion(parsed))
+  check('exe version: numbers when there is no text', v.exeVersion({ fixed: '3.4.5.6', strings: {} }) === '3.4.5.6')
+
+  if (process.platform === 'win32') {
+    const ping = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'PING.EXE')
+    const real = v.readExeVersion(ping)
+    check('exe version: read from a real Windows file', /^\d+\.\d+/.test(v.cleanVersion(real?.strings?.FileVersion) || ''), real?.strings?.FileVersion)
+  }
+  check('exe version: a file that is not an exe', v.readExeVersion(__filename) === null)
+  check('exe version: a missing file', v.readExeVersion('C:\\no\\such\\file.exe') === null)
+
+  check('clean: commas', v.cleanVersion('2, 5, 0, 1') === '2.5.0.1')
+  check('clean: trailing zeros go', v.cleanVersion('1.2.0.0') === '1.2')
+  check('clean: a real zero stays', v.cleanVersion('0.5.1.3') === '0.5.1.3' && v.cleanVersion('1.0.0.7') === '1.0.0.7')
+  check('clean: placeholders are no version', v.cleanVersion('1.0.0.0') === null && v.cleanVersion('0.0.0.0') === null)
+  check('clean: nothing', v.cleanVersion('') === null && v.cleanVersion(null) === null && v.cleanVersion('abc') === null)
+
+  const stamp = (strings) => v.exeVersion({ strings, fixed: null })
+  check('engine: Unreal\'s own version is not the game\'s', stamp({ FileVersion: '4.27.2.0', ProductName: 'UnrealGame' }) === null)
+  check('engine: nor Epic\'s', stamp({ FileVersion: '5.3.2.0', CompanyName: 'Epic Games, Inc.' }) === null)
+  check('engine: nor Unity\'s', stamp({ FileVersion: '2021.3.16.1', ProductName: 'Some Game' }) === null && stamp({ FileVersion: '6.0.1.2', FileDescription: 'Unity Player' }) === null)
+  check('engine: a game\'s own stays', stamp({ FileVersion: '0.5.1.3', ProductName: 'Atomic Exile' }) === '0.5.1.3')
+
+  const branches = '[{"name":"experimental","build_id":99},{"name":"public","build_id":21054390,"time_updated":1764856145}]'
+  check('branches: the public build', v.buildFromBranches(branches).build === 21054390)
+  check('branches: its date', new Date(v.buildFromBranches(branches).date).toISOString().startsWith('2025-12-04'))
+  check('branches: broken file', v.buildFromBranches('{nope') === null && v.buildFromBranches('[]') === null)
+  const acf = '"AppState"\n{\n\t"appid"\t\t"10"\n\t"LastUpdated"\t\t"1764856145"\n\t"buildid"\t\t"123456"\n}'
+  check('manifest: build and date', v.buildFromManifest(acf).build === 123456 && v.buildFromManifest(acf).date === 1764856145000)
+  check('manifest: none', v.buildFromManifest('{}') === null)
+  check('folder: a version', v.versionInFolder('Game.Name.v1.2.3-RUNE') === '1.2.3' && v.versionInFolder('Game Name v1.05') === '1.05' && v.versionInFolder('Game_v2_1') === '2.1')
+  check('folder: none', v.versionInFolder('Atomic.Exile') === null && v.versionInFolder('Dev2 Tools') === null && v.versionInFolder('Halo 3.5 Remake') === null)
+
+  check('title: a version', v.versionInTitle('Update 0.5.4.7') === '0.5.4.7' && v.versionInTitle('Hotfix 0.5.4.6') === '0.5.4.6' && v.versionInTitle('Patch v1.2 is live') === '1.2' && v.versionInTitle('What is new in 1.4.2') === '1.4.2')
+  check('title: a date is not a version', v.versionInTitle('HoT Patch | 2026-10-29') === null)
+  check('title: plain words', v.versionInTitle('Low FPS bug fixed.') === null && v.versionInTitle('New version!') === null && v.versionInTitle('Top 3.5 reasons') === null)
+
+  const post = (title, date, patch = true) => ({ title, date, patch })
+  check('news: the newest patch, by date', v.newsFacts([post('Update 1.1', 100), post('Update 1.2', 200), post('Sale!', 300, false)]).version === '1.2')
+  check('news: its date, patch notes only', v.newsFacts([post('Update 1.2', 200), post('Sale!', 300, false)]).at === 200)
+  check('news: a number from the last few patches', v.newsFacts([post('Hotfix', 300), post('Update 1.2', 200)]).version === '1.2')
+  check('news: an old number doesn\'t count', v.newsFacts([post('Fix', 500), post('Fix', 400), post('Fix', 300), post('Update 1.2', 200)]).version === null)
+  check('news: nothing', v.newsFacts([post('Sale!', 300, false)]) === null && v.newsFacts(null) === null)
+
+  check('compare: by number', v.compareVersions('1.10', '1.9') === 1 && v.compareVersions('0.5.1.3', '0.5.4.7') === -1)
+  check('compare: missing parts are zero', v.compareVersions('1.2', '1.2.0') === 0)
+
+  const day = 86400000, jan = Date.UTC(2026, 0, 1)
+  check('state: an old build is behind', v.versionState({ build: 21054390 }, { build: 26295339 }) === 'behind')
+  check('state: the same build is current', v.versionState({ build: 5 }, { build: 5 }) === 'current')
+  check('state: a newer build is current', v.versionState({ build: 6 }, { build: 5 }) === 'current')
+  check('state: an old version number is behind', v.versionState({ version: '0.5.1.3' }, { version: '0.5.4.7' }) === 'behind')
+  check('state: a build beats a version number', v.versionState({ build: 5, version: '1.0.1' }, { build: 5, version: '9.9' }) === 'current')
+  check('state: a date only says maybe', v.versionState({ date: jan }, { at: jan + 30 * day }) === 'maybe')
+  check('state: a close date says nothing', v.versionState({ date: jan }, { at: jan + day }) === 'unknown')
+  check('state: a date never says up to date', v.versionState({ date: jan + 30 * day }, { at: jan }) === 'unknown')
+  check('state: nothing from Steam', v.versionState({ build: 5 }, null) === 'unknown')
+
+  const behind = v.versionSummary({ version: '0.5.1.3', build: null, date: Date.UTC(2025, 11, 15, 12) }, { build: 26226397, at: Date.UTC(2026, 9, 26, 12), version: '0.5.4.7' })
+  check('tag: shows the version', behind.text === 'v0.5.1.3' && behind.state === 'behind')
+  check('tag: says both sides', /0\.5\.1\.3/.test(behind.hint) && /0\.5\.4\.7/.test(behind.hint) && /Oct 26, 2026/.test(behind.hint), behind.hint)
+  check('tag: a build', v.versionSummary({ version: null, build: 21054390, date: null }, null).text === 'Build 21054390')
+  check('tag: only a date', /^Files from \w+ 2018$/.test(v.versionSummary({ version: null, build: null, date: Date.UTC(2018, 0, 31, 12) }, null).text))
+  const maybe = v.versionSummary({ version: '2.5.0.1', build: null, date: Date.UTC(2018, 0, 31, 12) }, { build: 3863653, at: Date.UTC(2019, 4, 28, 12), version: null })
+  check('tag: a date comparison says it can be wrong', maybe.state === 'maybe' && /another store/.test(maybe.hint), maybe.hint)
+  check('tag: nothing known, no tag', v.versionSummary({ version: null, build: null, date: null }, null) === null && v.versionSummary(null, null) === null)
+  check('tag: no dashes in its text', ![behind, maybe].some(x => /[\u2013\u2014]/.test(x.text + x.hint)))
+}
+
+// Still on this PC? Called from the closing async block below.
+async function installCheckTests() {
+  const fs = require('fs')
+  const ic = require(path.join(__dirname, '..', 'electron', 'services', 'installCheck.js'))
+  const root = path.join(require('os').tmpdir(), `kozo-install-test-${process.pid}`)
+  const put = (rel) => { const f = path.join(root, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, 'x'); return f }
+  const has = async (rel, more = {}) => ic.hasGameFile({ id: Math.random(), install_path: path.join(root, rel), ...more })
+  try {
+    put('kept/Kept.exe')
+    put('uninstalled/saves/slot1.sav')
+    put('uninstalled/unins000.exe')
+    put('nested/bin/x64/Deep.exe')
+    put('launcher-only/start.bat')
+    const inst = {
+      kept: await has('kept', { exe_name: 'Kept.exe' }),
+      left: await has('uninstalled', { exe_name: 'Kept.exe' }),
+      nested: await has('nested', { exe_name: 'steam_1.exe' }),
+      bat: await has('launcher-only', { exe_name: 'Gone.exe', launch_file: path.join(root, 'launcher-only', 'start.bat') }),
+      uri: await has('nothing-here', { exe_name: 'x.exe', launch_uri: 'shell:AppsFolder/x' }),
+      gone: await has('nothing-here', { exe_name: 'x.exe' }),
+    }
+    check('installed: its file is there', inst.kept === true)
+    check('installed: saves left by an uninstaller are not a game', inst.left === false)
+    check('installed: an exe further in counts', inst.nested === true)
+    check('installed: the file it starts from counts', inst.bat === true)
+    check('installed: a store app is not judged by its folder', inst.uri === true)
+    check('installed: nothing there', inst.gone === false)
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  }
+}
+
 ;(async () => {
+  await installCheckTests()
   try { await discordTests() } catch (e) { check('discord tests ran', false, e.message) }
   console.log(`\n${pass} passed, ${fail} failed`)
   if (fail > 0) process.exitCode = 1

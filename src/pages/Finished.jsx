@@ -12,6 +12,7 @@ import FinishedGameModal from '../components/modals/FinishedGameModal'
 import ContextMenu from '../components/ui/ContextMenu'
 import InfoModal from '../components/ui/InfoModal'
 import useCardZoom from '../lib/useCardZoom'
+import CardSizeSlider from '../components/ui/CardSizeSlider'
 import { ratingColor } from '../components/ui/RatingPicker'
 import s from './Finished.module.css'
 
@@ -161,6 +162,7 @@ export default function Finished() {
         {games && <span className={s.count}>{games.length}</span>}
         {avg && <span className={s.avg}><IconStarFilled size={12} /> {avg} average</span>}
         <div className={s.spacer} />
+        <CardSizeSlider pageKey="finished" view="grid" defaults={{ grid: 200 }} opts={{ min: 140, max: 380 }} />
         <div className={s.sorts} role="radiogroup" aria-label="Sort">
           {SORTS.map(o => (
             <button key={o.key} className={`${s.sortBtn} ${sort === o.key ? s.sortOn : ''}`} onClick={() => pickSort(o.key)}>{o.label}</button>

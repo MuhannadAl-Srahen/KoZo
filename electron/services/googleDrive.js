@@ -18,8 +18,12 @@
 //   restore points are left out of the Drive copy (cloudPrunePlan); the copy
 //   on this PC is never touched. Saves bigger than 2 GB stay on this PC only.
 // - Files are named by their path under the backups ("Saves/Dead Cells/vault/
-//   blobs/<sha1>.gz", "Data/kozo-autobackup.json"), so restoring on a new PC
-//   is downloading them back to the same places.
+//   blobs/<sha1>.gz"), so restoring on a new PC is downloading them back to the
+//   same places.
+// - PCs on one Google account share the folder. Save files are named by their
+//   content, so they sit side by side. Each PC has its own library file
+//   ("Data/kozo-library-<install_id>.json"), so none replaces another's. Another
+//   PC's data only comes in when the user says yes (components/DriveOffer).
 
 const fs     = require('fs')
 const path   = require('path')
@@ -33,6 +37,21 @@ const UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files'
 const FOLDER_NAME = 'KoZo Backup'
 const BIG_GAME = 2 * 1024 ** 3
 const GB = 1024 ** 3
+const KEEP_FREE = 2 * GB   // same room saveVault keeps
+// This PC's and other PCs' library files, and the one shared file older versions wrote.
+const LIBRARY_FILE = /^Data\/kozo-(library-[^/]+|autobackup)\.json$/
+const libraryName = (install) => `Data/kozo-library-${install}.json`
+
+// Did this install write that file? A backups folder just taken over can hold another's.
+function ownsFile(file, install) {
+  try {
+    const fd = fs.openSync(file, 'r')
+    const head = Buffer.alloc(400)
+    const n = fs.readSync(fd, head, 0, 400, 0)
+    fs.closeSync(fd)
+    return /"install":"([^"]+)"/.exec(head.toString('utf8', 0, n))?.[1] === install
+  } catch { return false }
+}
 
 function settings() { return require('../db/queries/settings') }
 // The Google Cloud "Desktop app" client: the one the user pasted in KoZo
@@ -197,9 +216,9 @@ async function listRemote(folder) {
   let pageToken
   do {
     const r = await api('get', `${API}/files`, { params: {
-      q: `'${folder}' in parents and trashed=false`, fields: 'nextPageToken,files(id,name,size)', pageSize: 1000, pageToken,
+      q: `'${folder}' in parents and trashed=false`, fields: 'nextPageToken,files(id,name,size,modifiedTime)', pageSize: 1000, pageToken,
     } })
-    for (const f of r.data.files || []) out.set(f.name, { id: f.id, size: Number(f.size) || 0 })
+    for (const f of r.data.files || []) out.set(f.name, { id: f.id, size: Number(f.size) || 0, modified: f.modifiedTime || null })
     pageToken = r.data.nextPageToken
   } while (pageToken)
   return out
@@ -360,18 +379,20 @@ async function sync() {
       for (const map of [want, snapsWanted]) {
         for (const [name, abs] of map) {
           if (busy()) { syncSoon(); return { paused: true } }
-          if (remote.has(name)) { state.up[name] = state.up[name] || { id: remote.get(name).id }; continue }
+          // Already there, maybe from another PC on this account: not this PC's to delete later.
+          if (remote.has(name)) continue
           const id = await upload(folder, name, abs)
           state.up[name] = { id }
           up++; upBytes += fs.statSync(abs).size
           if (up % 25 === 0) writeState(state)
         }
       }
-      // KoZo data: replaced when it changed.
+      // This PC's library: its own file on Drive, replaced when it changed.
       const dataDir = s.getSetting('auto_backup_dir')
       const dataFile = dataDir && path.join(dataDir, 'kozo-autobackup.json')
-      if (dataFile && fs.existsSync(dataFile)) {
-        const name = 'Data/kozo-autobackup.json'
+      const me = require('./autoBackup').installId()
+      if (dataFile && fs.existsSync(dataFile) && ownsFile(dataFile, me)) {
+        const name = libraryName(me)
         const m = fs.statSync(dataFile).mtimeMs
         if (!remote.has(name) || (state.up[name]?.m || 0) < m) {
           const id = await upload(folder, name, dataFile, remote.get(name)?.id || null)
@@ -413,32 +434,108 @@ async function sync() {
   return syncing
 }
 
-// ── Restore (a new PC, or after a format) ───────────────────────────────────
-// Downloads what this PC is missing back to the same places. Returns the path
-// of the KoZo data file (to import) when there is one.
-async function restoreDown(onProgress) {
-  const folder = await folderId()
-  const remote = await listRemote(folder)
-  const savesRoot = require('./saveBackup').rootPath()
-  let n = 0, total = remote.size, dataPath = null
-  for (const [name, f] of remote) {
-    n++
-    let dest
-    if (name === 'Data/kozo-autobackup.json') dest = path.join(require('electron').app.getPath('temp'), `kozo-drive-${Date.now()}.json`)
-    else if (name.startsWith('Saves/')) {
-      const rel = name.slice(6).split('/')
-      if (rel.some(p => !p || p === '..' || p === '.')) continue
-      dest = path.join(savesRoot, ...rel)
-      if (fs.existsSync(dest)) continue
-    } else continue
-    const r = await api('get', `${API}/files/${f.id}`, { params: { alt: 'media' }, responseType: 'arraybuffer' })
-    fs.mkdirSync(path.dirname(dest), { recursive: true })
-    fs.writeFileSync(dest + '.tmp', Buffer.from(r.data))
-    fs.renameSync(dest + '.tmp', dest)
-    if (name.startsWith('Data/')) dataPath = dest
-    onProgress?.(n, total)
+// ── Another PC's backup on this account ─────────────────────────────────────
+// What it holds is offered in questions (components/DriveOffer): nothing comes down or
+// changes here until the user says yes.
+
+// Pure: the library files worth offering. The newest per install, never this PC's own,
+// never an empty one. Newest first. An old shared file with no install id counts on its own.
+function pickLibraries(files, me) {
+  const best = new Map()
+  for (const f of files) {
+    if (f.install && f.install === me) continue
+    if (!f.games && !f.list) continue
+    const key = f.install || f.name
+    const cur = best.get(key)
+    if (!cur || String(f.at || '') > String(cur.at || '')) best.set(key, f)
   }
-  return { files: n, dataPath }
+  return [...best.values()].sort((x, y) => String(y.at || '').localeCompare(String(x.at || '')))
+}
+
+async function librariesIn(remote) {
+  const files = []
+  for (const [name, f] of remote) {
+    if (!LIBRARY_FILE.test(name)) continue
+    try {
+      const r = await api('get', `${API}/files/${f.id}`, { params: { alt: 'media' }, responseType: 'arraybuffer' })
+      const data = JSON.parse(Buffer.from(r.data).toString('utf8'))
+      if (data.app !== 'kozo' || !Array.isArray(data.games)) continue
+      files.push({ name, install: data.install || null, pc: data.pc || null, at: data.exported_at || null, games: data.games.length, list: (data.game_list || []).length, data })
+    } catch (e) { logger.warn('googleDrive: could not read a library file', { message: e.message }) }
+  }
+  return pickLibraries(files, require('./autoBackup').installId())
+}
+
+// Changes only when another PC's library file or the save backups changed, so looking for
+// news downloads nothing the rest of the time.
+async function remoteStamp() {
+  const remote = await listRemote(await folderId())
+  const mine = libraryName(require('./autoBackup').installId())
+  const parts = []
+  let saves = 0
+  for (const [name, f] of remote) {
+    if (name.startsWith('Saves/')) saves++
+    else if (LIBRARY_FILE.test(name) && name !== mine) parts.push(`${name}:${f.size}:${f.modified}`)
+  }
+  return `${parts.sort().join('|')}#${saves}`
+}
+
+async function otherLibraries() {
+  return librariesIn(await listRemote(await folderId()))
+}
+
+// Pure: Drive's save files this PC lacks, in an order that never leaves a restore point with
+// missing pieces: the pieces, then the restore points, then the folder's owner.
+function missingSaves(remote, savesRoot, exists = fs.existsSync) {
+  const out = []
+  for (const [name, f] of remote) {
+    if (!name.startsWith('Saves/')) continue
+    const rel = name.slice(6).split('/')
+    if (rel.some(p => !p || p === '..' || p === '.' || /[\\:]/.test(p))) continue
+    const dest = path.join(savesRoot, ...rel)
+    if (exists(dest)) continue
+    out.push({ name, dest, id: f.id, size: f.size, game: rel[0] })
+  }
+  const rank = (n) => (/\/meta\.json$/.test(n) ? 2 : /\/snapshots\//.test(n) ? 1 : 0)
+  return out.sort((x, y) => rank(x.name) - rank(y.name))
+}
+const gamesIn = (items) => new Set(items.filter(i => /\/snapshots\//.test(i.name)).map(i => i.game)).size
+const sizeOf = (items) => items.reduce((sum, i) => sum + (i.size || 0), 0)
+
+async function whatIsThere() {
+  const remote = await listRemote(await folderId())
+  const savesRoot = require('./saveBackup').rootPath()
+  const items = missingSaves(remote, savesRoot)
+  const bytes = sizeOf(items)
+  const free = require('./backupHome').freeSpace(savesRoot)
+  const needs = bytes + KEEP_FREE
+  return {
+    libraries: await librariesIn(remote),
+    saves: { files: items.length, games: gamesIn(items), bytes, needs, enough: free == null || free >= needs },
+  }
+}
+
+// Downloads the save backups this PC lacks. They only go into the vault: a game's current
+// saves stay until the user puts one back. Waits while a game runs.
+async function restoreDown(onProgress) {
+  const remote = await listRemote(await folderId())
+  const savesRoot = require('./saveBackup').rootPath()
+  const items = missingSaves(remote, savesRoot)
+  const bytes = sizeOf(items)
+  const free = require('./backupHome').freeSpace(savesRoot)
+  if (free != null && free < bytes + KEEP_FREE) throw new Error('This PC does not have enough free space for those backups.')
+  let done = 0
+  const adopt = []
+  for (const item of items) {
+    while (busy()) await new Promise(r => setTimeout(r, 5000))
+    const r = await api('get', `${API}/files/${item.id}`, { params: { alt: 'media' }, responseType: 'arraybuffer' })
+    fs.mkdirSync(path.dirname(item.dest), { recursive: true })
+    fs.writeFileSync(item.dest + '.tmp', Buffer.from(r.data))
+    fs.renameSync(item.dest + '.tmp', item.dest)
+    if (/\/vault\/meta\.json$/.test(item.name)) adopt.push(item.game)
+    onProgress?.(++done, items.length)
+  }
+  return { files: done, games: gamesIn(items), bytes, adopt }
 }
 
 function status() {
@@ -457,4 +554,4 @@ function status() {
   }
 }
 
-module.exports = { configured, connected, connect, disconnect, sync, syncSoon, restoreDown, status, cloudPrunePlan }
+module.exports = { configured, connected, connect, disconnect, sync, syncSoon, restoreDown, status, cloudPrunePlan, whatIsThere, otherLibraries, remoteStamp, pickLibraries, missingSaves }

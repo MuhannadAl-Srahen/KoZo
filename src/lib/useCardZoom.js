@@ -1,11 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
-// Ctrl + mouse wheel resizes the cards of a grid (Library, Game List, Upcoming,
-// Steam calendar, Achievements, Profile). The grids read the column floor from
-// --card-min, so the size is just a CSS variable; it is remembered per page and
-// per view in localStorage. Limits default to 0.6x..1.7x of the view's default
-// size, so small posters and wide cards both stay usable.
+// A page's card size: Ctrl + mouse wheel over its grid or ui/CardSizeSlider (Library, Game
+// List, Upcoming, Steam calendar, Achievements, Profile). The grids read the column floor
+// from --card-min, so the size is just a CSS variable; it is remembered per page and per
+// view in localStorage. Limits default to 0.6x..1.7x of the view's default size, so small
+// posters and wide cards both stay usable.
 function clamp(n, min, max) { return Math.min(max, Math.max(min, n)) }
+
+const DEFAULTS = { big: 220, small: 168 }
+const CHANGED = 'kozo:cardsize'   // the slider and the grid are two users of one size
 
 // Ctrl + wheel with the pointer over a card grid resizes its cards; anywhere
 // else (toolbars, sidebar, pages without grids) App.jsx changes the UI scale.
@@ -25,14 +28,32 @@ function read(key, min, max) {
   } catch { return null }
 }
 
-export default function useCardZoom(pageKey, view, defaults = { big: 220, small: 168 }, opts = {}) {
+export function useCardSize(pageKey, view, defaults = DEFAULTS, opts = {}) {
   const base = defaults[view]
   const min = opts.min ?? Math.round((base || 160) * 0.6)
   const max = opts.max ?? Math.round((base || 160) * 1.7)
   const step = opts.step ?? Math.max(8, Math.round((base || 160) / 14))
   const storageKey = `kozo:cardsize:${pageKey}:${view}`
-  const [size, setSize] = useState(() => read(storageKey, min, max))
-  useEffect(() => { setSize(read(storageKey, min, max)) }, [storageKey])
+  const [size, setStored] = useState(() => read(storageKey, min, max))
+  useEffect(() => { setStored(read(storageKey, min, max)) }, [storageKey])
+  useEffect(() => {
+    const on = (e) => { if (e.detail?.key === storageKey) setStored(e.detail.size) }
+    window.addEventListener(CHANGED, on)
+    return () => window.removeEventListener(CHANGED, on)
+  }, [storageKey])
+  const setSize = (n) => {
+    const next = clamp(n, min, max)
+    try { localStorage.setItem(storageKey, String(next)) } catch {}
+    setStored(next)
+    window.dispatchEvent(new CustomEvent(CHANGED, { detail: { key: storageKey, size: next } }))
+  }
+  return { base, min, max, step, size, setSize }
+}
+
+export default function useCardZoom(pageKey, view, defaults = DEFAULTS, opts = {}) {
+  const { base, step, size, setSize } = useCardSize(pageKey, view, defaults, opts)
+  const latest = useRef(null)
+  latest.current = { size, setSize }
 
   useEffect(() => {
     if (!base) return   // list view has no card grid
@@ -41,15 +62,11 @@ export default function useCardZoom(pageKey, view, defaults = { big: 220, small:
       e.preventDefault()   // also stops Chromium's own Ctrl+wheel page zoom
       if (document.querySelector('[role="dialog"]')) return
       if (zoomGridAt(e.target) !== pageKey) return   // not over this grid: App scales the UI
-      setSize(prev => {
-        const next = clamp((prev ?? base) + (e.deltaY < 0 ? step : -step), min, max)
-        try { localStorage.setItem(storageKey, String(next)) } catch {}
-        return next
-      })
+      latest.current.setSize((latest.current.size ?? base) + (e.deltaY < 0 ? step : -step))
     }
     window.addEventListener('wheel', onWheel, { passive: false })
     return () => window.removeEventListener('wheel', onWheel)
-  }, [storageKey, base, min, max, step, pageKey])
+  }, [base, step, pageKey])
 
   if (!base) return undefined
   return size ? { '--zoom-grid': pageKey, '--card-min': `${size}px` } : { '--zoom-grid': pageKey }

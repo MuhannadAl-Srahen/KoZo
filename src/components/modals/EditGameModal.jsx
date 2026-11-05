@@ -1,18 +1,40 @@
 import React, { useState } from 'react'
 import {
   IconEdit, IconAlertTriangle, IconCrosshair, IconCheck, IconFolderOpen,
-  IconChevronDown, IconChevronRight,
+  IconChevronDown, IconChevronRight, IconPhotoSearch, IconUpload, IconX, IconDeviceGamepad2,
 } from '@tabler/icons-react'
 import Modal, { modalStyles as ms } from '../ui/Modal'
 import LauncherNote from '../ui/LauncherNote'
 import RunningProcessPicker from '../ui/RunningProcessPicker'
+import SearchableSelect from '../ui/SearchableSelect'
+import Switch from '../ui/Switch'
 import ImageCropModal from './ImageCropModal'
 import CoverPickerModal from './CoverPickerModal'
-import { FOREIGN_LAUNCHERS, KNOWN_SYSTEM_EXES, fileUrl } from '../../lib/utils'
+import { FOREIGN_LAUNCHERS, KNOWN_SYSTEM_EXES, exeLooksLikeTool, fileUrl } from '../../lib/utils'
 import cs from '../../styles/controls.module.css'
 import s from './AddGameModal.module.css'
+import e from './EditGameModal.module.css'
 
+const STORES = [
+  { value: 'steam', label: 'Steam' }, { value: 'epic', label: 'Epic' }, { value: 'gog', label: 'GOG' },
+  { value: 'xbox', label: 'Xbox' }, { value: 'ea', label: 'EA' }, { value: 'ubisoft', label: 'Ubisoft' },
+  { value: 'manual', label: 'Other' },
+]
 
+function OptionRow({ label, hint, children }) {
+  return (
+    <div className={e.row}>
+      <div className={e.rowText}>
+        <div className={e.rowLabel}>{label}</div>
+        {hint && <div className={e.rowHint}>{hint}</div>}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+// The cover and the three things people come here for are in view; everything that's set once
+// sits under More options, with what it's set to on the closed row.
 export default function EditGameModal({ game, onClose, onSaved }) {
   const [name, setName]               = useState(game.name || '')
   const [exeName, setExeName]         = useState(game.exe_name || '')
@@ -25,23 +47,17 @@ export default function EditGameModal({ game, onClose, onSaved }) {
   const [steamAppId, setSteamAppId]   = useState(game.steam_app_id ? String(game.steam_app_id) : '')
   const [runAsAdmin, setRunAsAdmin]   = useState(game.run_as_admin ? 1 : 0)
   const [errors, setErrors]           = useState({})
-  const [exeWarn, setExeWarn]         = useState(false)
   const [saving, setSaving]           = useState(false)
   const [saved, setSaved]             = useState(false)
   const [showPicker, setShowPicker]   = useState(false)
-  // Cover art. Add Game could always set one, Edit never could — so a game
-  // already in the library that Steam has no art for (anything not on Steam:
-  // League of Legends, a launcher-exclusive, an emulated title) was stuck with
-  // the placeholder forever, with no way to fix it from the UI.
   const [coverPath, setCoverPath]     = useState(game.banner_local_path || '')
   const [cropSrc, setCropSrc]         = useState(null)
   const [findCover, setFindCover]     = useState(false)
-  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [showMore, setShowMore]       = useState(false)
 
-  function onExeChange(val) {
-    setExeName(val)
-    setExeWarn(KNOWN_SYSTEM_EXES.has(val.toLowerCase().trim()))
-  }
+  const exe = exeName.trim()
+  const systemExe = KNOWN_SYSTEM_EXES.has(exe.toLowerCase())
+  const toolExe = !systemExe && exeLooksLikeTool(exe)
 
   // One predicate drives BOTH the field's visibility and whether save keeps the
   // value, so an App ID can never be held while hidden nor destroyed while
@@ -50,22 +66,30 @@ export default function EditGameModal({ game, onClose, onSaved }) {
   // launchers and plain manual entries.
   const appIdRelevant = source === 'steam' || source === 'cracked' || isCracked === 1
 
+  // A scanner/discovery-added cracked copy is stored as source='cracked', which isn't a store,
+  // but without an option for it a stray pick would silently drop it.
+  const stores = game.source === 'cracked' ? [{ value: 'cracked', label: 'Cracked' }, ...STORES] : STORES
+  const summary = [
+    isCracked ? 'Cracked' : 'Official',
+    stores.find(o => o.value === source)?.label,
+    isInstalled ? 'Installed' : 'Not installed',
+    runAsAdmin ? 'Runs as administrator' : null,
+  ].filter(Boolean).filter((v, i, all) => all.indexOf(v) === i).join(', ')
+
   async function handleSave() {
     const newErrors = {}
-    if (!name.trim())    newErrors.name = 'Game name is required'
-    if (!exeName.trim()) newErrors.exeName = 'Executable name is required'
-    if (exeName.trim() && !exeName.toLowerCase().trim().endsWith('.exe')) {
-      newErrors.exeName = 'Must end in .exe'
-    }
+    if (!name.trim()) newErrors.name = 'Game name is required'
+    // No file is allowed: a game whose file is gone can still have its name and cover edited.
+    if (exe && !exe.toLowerCase().endsWith('.exe')) newErrors.exeName = 'Must end in .exe'
     const sid = appIdRelevant ? steamAppId.trim() : ''
-    if (sid && !/^\d+$/.test(sid)) newErrors.steamAppId = 'Steam App ID must be numeric'
+    if (sid && !/^\d+$/.test(sid)) { newErrors.steamAppId = 'Must be a number'; setShowMore(true) }
     if (Object.keys(newErrors).length) { setErrors(newErrors); return }
 
     setSaving(true)
     try {
       const res = await window.kozo?.api?.games?.update(game.id, {
         name: name.trim(),
-        exe_name: exeName.trim(),
+        exe_name: exe,
         install_path: installPath.trim() || null,
         launch_file: launchFile || null,
         is_installed: isInstalled,
@@ -86,10 +110,26 @@ export default function EditGameModal({ game, onClose, onSaved }) {
       } else {
         setErrors({ save: res?.error || 'Failed to save changes' })
       }
-    } catch (e) {
+    } catch (err) {
       setSaving(false)
-      setErrors({ save: e?.message || 'Something went wrong' })
+      setErrors({ save: err?.message || 'Something went wrong' })
     }
+  }
+
+  async function browseExe() {
+    const res = await window.kozo?.api?.dialog?.pickExe(installPath || undefined)
+    if (res?.ok && res.data) {
+      setExeName(res.data.exe_name || '')
+      setInstallPath(res.data.install_path)
+      setLaunchFile(res.data.launch_file || '')
+      setCandidates(res.data.candidates || [])
+      setErrors(p => ({ ...p, exeName: '' }))
+    }
+  }
+
+  async function uploadCover() {
+    const res = await window.kozo?.api?.dialog?.pickImageData?.()
+    if (res?.ok && res.data?.dataUrl) setCropSrc(res.data.dataUrl)
   }
 
   return (
@@ -98,7 +138,7 @@ export default function EditGameModal({ game, onClose, onSaved }) {
       title={`Edit "${game.name}"`}
       icon={<IconEdit size={16} stroke={1.6} />}
       onClose={onClose}
-      width={540}
+      width={640}
       footer={
         <>
           <button type="button" className={ms.btnCancel} onClick={onClose}>Cancel</button>
@@ -119,296 +159,155 @@ export default function EditGameModal({ game, onClose, onSaved }) {
         </>
       }
     >
-      {/* Game name */}
-      <div className={s.field}>
-        <label className={`${s.label} ${s.labelRequired}`}>Game name</label>
-        <input
-          className={`${s.input} ${errors.name ? s.inputError : ''}`}
-          value={name}
-          onChange={e => { setName(e.target.value); setErrors(p => ({ ...p, name: '' })) }}
-        />
-        {errors.name && <div className={s.errorText}>{errors.name}</div>}
-      </div>
-
-      {/* Exe name with picker */}
-      <div className={s.field}>
-        <label className={`${s.label} ${s.labelRequired}`}>Executable name</label>
-        <div className={s.exeRow}>
-          <input
-            className={`${s.input} ${errors.exeName ? s.inputError : ''}`}
-            value={exeName}
-            onChange={e => { onExeChange(e.target.value); setErrors(p => ({ ...p, exeName: '' })) }}
-            placeholder="e.g. LOP-Win64-Shipping.exe"
-          />
-          <button
-            type="button"
-            className={s.pickBtn}
-            onClick={async () => {
-              const res = await window.kozo?.api?.dialog?.pickExe(installPath || undefined)
-              if (res?.ok && res.data) {
-                setExeName(res.data.exe_name || '')
-                setInstallPath(res.data.install_path)
-                setLaunchFile(res.data.launch_file || '')
-                setCandidates(res.data.candidates || [])
-                setExeWarn(KNOWN_SYSTEM_EXES.has((res.data.exe_name || '').toLowerCase()))
-                setErrors(p => ({ ...p, exeName: '' }))
-              }
-            }}
-            title="Browse for the game .exe file"
-          >
-            <IconFolderOpen size={14} stroke={1.7} />
-            Browse
-          </button>
-          <button
-            type="button"
-            className={s.pickBtn}
-            onClick={() => setShowPicker(v => !v)}
-            title="Pick from running processes"
-          >
-            <IconCrosshair size={14} stroke={1.7} />
-            Pick running
-          </button>
+      <div className={e.top} data-edit-game>
+        <div className={e.coverCol}>
+          <div className={e.cover} data-edit-cover>
+            {coverPath
+              ? <img src={fileUrl(coverPath, game.banner_rev || undefined)} alt="" />
+              : <IconDeviceGamepad2 size={30} stroke={1.2} className={e.coverEmpty} />}
+            {coverPath && (
+              <button type="button" className={e.coverRemove} onClick={() => setCoverPath('')} title="Remove the cover" aria-label="Remove the cover">
+                <IconX size={12} stroke={2.2} />
+              </button>
+            )}
+          </div>
+          <div className={e.coverBtns}>
+            <button type="button" className={e.coverBtn} onClick={() => setFindCover(true)} title="Find a cover on SteamGridDB" data-edit-find>
+              <IconPhotoSearch size={13} stroke={1.7} /> Find
+            </button>
+            <button type="button" className={e.coverBtn} onClick={uploadCover} title="Use your own image" data-edit-upload>
+              <IconUpload size={13} stroke={1.7} /> Upload
+            </button>
+          </div>
         </div>
 
-        <LauncherNote launchFile={launchFile} candidates={candidates} exeName={exeName}
-          onPickExe={(c) => { setExeName(c.exe_name); setInstallPath(c.install_path) }}
-          onClear={() => { setLaunchFile(''); setCandidates([]) }} />
+        <div className={e.fields}>
+          <div className={s.field}>
+            <label className={`${s.label} ${s.labelRequired}`}>Name</label>
+            <input
+              className={`${s.input} ${errors.name ? s.inputError : ''}`}
+              value={name}
+              onChange={ev => { setName(ev.target.value); setErrors(p => ({ ...p, name: '' })) }}
+            />
+            {errors.name && <div className={s.errorText}>{errors.name}</div>}
+          </div>
 
-        {showPicker && (
-          <div className={s.pickerWrap}>
-            <RunningProcessPicker
-              onClose={() => setShowPicker(false)}
-              onPick={(proc) => {
-                setExeName(proc.exe_name)
-                if (proc.install_path) setInstallPath(proc.install_path)
-                setExeWarn(KNOWN_SYSTEM_EXES.has(proc.exe_name.toLowerCase()))
-                setErrors(p => ({ ...p, exeName: '' }))
-                setShowPicker(false)
-              }}
+          <div className={s.field}>
+            <label className={s.label}>Game file</label>
+            <div className={s.exeRow}>
+              <input
+                className={`${s.input} ${errors.exeName ? s.inputError : ''}`}
+                value={exeName}
+                onChange={ev => { setExeName(ev.target.value); setErrors(p => ({ ...p, exeName: '' })) }}
+                placeholder="e.g. Game.exe"
+              />
+              <button type="button" className={s.pickBtn} onClick={browseExe} title="Choose the game's .exe, or the .bat or shortcut it starts from">
+                <IconFolderOpen size={14} stroke={1.7} /> Browse
+              </button>
+              <button type="button" className={s.pickBtn} onClick={() => setShowPicker(v => !v)} title="Choose from what's running now">
+                <IconCrosshair size={14} stroke={1.7} /> Running
+              </button>
+            </div>
+            {errors.exeName && <div className={s.errorText}>{errors.exeName}</div>}
+            {!exe && !errors.exeName && <div className={s.inputHint}>No game file yet, so KoZo can't start or track this game.</div>}
+            {systemExe && (
+              <div className={s.warning}>
+                <IconAlertTriangle size={14} stroke={1.8} className={s.warningIcon} />
+                This is a Windows program, not a game.
+              </div>
+            )}
+            {toolExe && (
+              <div className={s.warning}>
+                <IconAlertTriangle size={14} stroke={1.8} className={s.warningIcon} />
+                This looks like a tool or an installer, not the game.
+              </div>
+            )}
+          </div>
+
+          <div className={s.field}>
+            <label className={s.label}>Folder</label>
+            <input
+              className={s.input}
+              value={installPath}
+              onChange={ev => setInstallPath(ev.target.value)}
+              placeholder="e.g. C:\Games\Lies of P"
             />
           </div>
-        )}
-
-        {errors.exeName
-          ? <div className={s.errorText}>{errors.exeName}</div>
-          : <div className={s.inputHint}>Click "Browse" to pick the game's .exe (or the .bat or shortcut it starts from). Or "Pick running" if it's already open.</div>
-        }
-        {exeWarn && (
-          <div className={s.warning}>
-            <IconAlertTriangle size={14} stroke={1.8} className={s.warningIcon} />
-            This looks like a Windows system process. Are you sure?
-          </div>
-        )}
-      </div>
-
-      {/* Install path */}
-      <div className={s.field}>
-        <label className={s.label}>
-          Install path <span className={s.labelNote}>(optional)</span>
-        </label>
-        <input
-          className={s.input}
-          value={installPath}
-          onChange={e => setInstallPath(e.target.value)}
-          placeholder="e.g. C:\Games\Lies of P"
-        />
-        <div className={s.inputHint}>Used to detect crack emulator achievement files (Goldberg, Codex, etc.)</div>
-      </div>
-
-      {/* Everything below is rarely touched (auto-detected or set once at add
-          time) — collapsed so the modal stays a quick name/exe/path editor. */}
-      <button
-        type="button"
-        className={s.advancedToggle}
-        onClick={() => setShowAdvanced(v => !v)}
-        aria-expanded={showAdvanced}
-      >
-        {showAdvanced ? <IconChevronDown size={13} stroke={1.8} /> : <IconChevronRight size={13} stroke={1.8} />}
-        Advanced: status, launcher, copy type
-      </button>
-
-      {showAdvanced && <>
-      {/* Installed status — manual override for when detection is wrong */}
-      <div className={s.field}>
-        <label className={s.label}>Installation status</label>
-        <div className={s.pills}>
-          <button
-            type="button"
-            className={`${s.pill} ${isInstalled ? s.pillActive : ''}`}
-            onClick={() => setIsInstalled(1)}
-          >
-            Installed
-          </button>
-          <button
-            type="button"
-            className={`${s.pill} ${!isInstalled ? s.pillActive : ''}`}
-            onClick={() => setIsInstalled(0)}
-          >
-            Not installed
-          </button>
-        </div>
-        <div className={s.inputHint}>
-          Rescan in Settings auto-detects this for Steam games; use this only to override.
         </div>
       </div>
 
-      {/* Launcher / source — drives the library badge */}
-      <div className={s.field}>
-        <label className={s.label}>Launcher</label>
-        <div className={s.pills} style={{ flexWrap: 'wrap' }}>
-          {[
-            // A scanner/discovery-added cracked copy is stored as source='cracked',
-            // which isn't a launcher — but without a pill for it no option would
-            // render active and a stray click would silently drop it.
-            ...(game.source === 'cracked' ? [['cracked', 'Cracked']] : []),
-            ['steam', 'Steam'], ['epic', 'Epic'], ['gog', 'GOG'],
-            ['xbox', 'Xbox'], ['ea', 'EA'], ['ubisoft', 'Ubisoft'], ['manual', 'Other'],
-          ].map(([val, lbl]) => (
-            <button
-              key={val}
-              type="button"
-              className={`${s.pill} ${source === val ? s.pillActive : ''}`}
-              onClick={() => {
-                setSource(val)
-                // A stray Steam App ID on a foreign launcher would (wrongly) trigger
-                // Steam sync UI — drop it when switching to one.
-                if (FOREIGN_LAUNCHERS.has(val)) setSteamAppId('')
-              }}
-            >
-              {lbl}
-            </button>
-          ))}
-        </div>
-        <div className={s.inputHint}>
-          Which store/launcher this game is from, shown as a badge on the cover. A cracked
-          copy keeps its own "Cracked" badge regardless of this. KoZo can only sync
-          achievements for Steam and cracked games.
-        </div>
-      </div>
+      <LauncherNote launchFile={launchFile} candidates={candidates} exeName={exeName}
+        onPickExe={(c) => { setExeName(c.exe_name); setInstallPath(c.install_path) }}
+        onClear={() => { setLaunchFile(''); setCandidates([]) }} />
 
-      {/* Steam App ID — only relevant for Steam (and cracked games that use the
-          Steam schema for achievement names/icons). Hidden for foreign launchers. */}
-      {appIdRelevant && (
-        <div className={s.field}>
-          <label className={s.label}>
-            Steam App ID <span className={s.labelNote}>(optional)</span>
-          </label>
-          <input
-            className={`${s.input} ${errors.steamAppId ? s.inputError : ''}`}
-            value={steamAppId}
-            onChange={e => { setSteamAppId(e.target.value); setErrors(p => ({ ...p, steamAppId: '' })) }}
-            placeholder="e.g. 1627720"
+      {showPicker && (
+        <div className={s.pickerWrap}>
+          <RunningProcessPicker
+            onClose={() => setShowPicker(false)}
+            onPick={(proc) => {
+              setExeName(proc.exe_name)
+              if (proc.install_path) setInstallPath(proc.install_path)
+              setErrors(p => ({ ...p, exeName: '' }))
+              setShowPicker(false)
+            }}
           />
-          {errors.steamAppId
-            ? <div className={s.errorText}>{errors.steamAppId}</div>
-            : <div className={s.inputHint}>Steam's numeric game ID, used to pull achievements + cover art. Found in the store page URL (store.steampowered.com/app/<b>1627720</b>/).</div>}
         </div>
       )}
 
-      {/* Cracked flag — controls launch + how achievements are sourced */}
-      <div className={s.field}>
-        <label className={s.label}>Copy type</label>
-        <div className={s.pills}>
-          <button
-            type="button"
-            className={`${s.pill} ${!isCracked ? s.pillActive : ''}`}
-            onClick={() => setIsCracked(0)}
-          >
-            Official
-          </button>
-          <button
-            type="button"
-            className={`${s.pill} ${isCracked ? s.pillActive : ''}`}
-            onClick={() => setIsCracked(1)}
-          >
-            Cracked / offline
-          </button>
-        </div>
-        <div className={s.inputHint}>
-          Cracked games launch the local .exe (never Steam) and pull achievements from crack
-          emulator files (Goldberg, CODEX, online-fix, etc) instead of the Steam API.
-        </div>
-      </div>
+      <button type="button" className={e.more} onClick={() => setShowMore(v => !v)} aria-expanded={showMore} data-edit-more>
+        {showMore ? <IconChevronDown size={14} stroke={1.8} /> : <IconChevronRight size={14} stroke={1.8} />}
+        <span className={e.moreLabel}>More options</span>
+        {!showMore && <span className={e.moreSummary} data-edit-summary>{summary}</span>}
+      </button>
 
-      {/* Run as administrator — some repacks/copies need elevation to launch at
-          all; KoZo also sets this automatically the first time Play needs it. */}
-      <div className={s.field}>
-        <label className={s.label}>Launch</label>
-        <div className={s.pills}>
-          <button
-            type="button"
-            className={`${s.pill} ${!runAsAdmin ? s.pillActive : ''}`}
-            onClick={() => setRunAsAdmin(0)}
-          >
-            Normal
-          </button>
-          <button
-            type="button"
-            className={`${s.pill} ${runAsAdmin ? s.pillActive : ''}`}
-            onClick={() => setRunAsAdmin(1)}
-          >
-            Run as administrator
-          </button>
-        </div>
-        <div className={s.inputHint}>
-          Turn this on if Play doesn't seem to do anything. Some copies (especially
-          repacks installed under Program Files) need admin rights to launch at all.
-        </div>
-      </div>
-      </>}
-
-      <div className={s.field}>
-        <label className={s.label}>
-          Cover image{' '}
-          <span style={{ color: 'var(--text-secondary)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
-            (optional)
-          </span>
-        </label>
-        <div className={s.fileRow}>
-          {coverPath && (
-            <img
-              src={fileUrl(coverPath, Date.now())}
-              alt=""
-              style={{
-                width: 34, height: 51, objectFit: 'cover',
-                borderRadius: 4, border: '1px solid var(--border)', flexShrink: 0,
+      {showMore && (
+        <div className={e.options} data-edit-options>
+          <OptionRow label="Installed on this PC">
+            <Switch label="Installed on this PC" checked={!!isInstalled} onChange={v => setIsInstalled(v ? 1 : 0)} />
+          </OptionRow>
+          <OptionRow label="Cracked copy" hint="Starts the file directly. Achievements come from its own files, not Steam.">
+            <Switch label="Cracked copy" checked={!!isCracked} onChange={v => setIsCracked(v ? 1 : 0)} />
+          </OptionRow>
+          <OptionRow label="Run as administrator" hint="Turn this on if Play does nothing.">
+            <Switch label="Run as administrator" checked={!!runAsAdmin} onChange={v => setRunAsAdmin(v ? 1 : 0)} />
+          </OptionRow>
+          <OptionRow label="Store" hint="The badge on its cover.">
+            <SearchableSelect
+              value={source}
+              options={stores}
+              width={140}
+              searchable={false}
+              clearable={false}
+              onChange={(v) => {
+                setSource(v)
+                // A stray Steam App ID on a foreign launcher would (wrongly) trigger
+                // Steam sync UI: drop it when switching to one.
+                if (FOREIGN_LAUNCHERS.has(v)) setSteamAppId('')
               }}
             />
+          </OptionRow>
+          {appIdRelevant && (
+            <OptionRow label="Steam App ID" hint={errors.steamAppId || 'The number in its Steam store address.'}>
+              <input
+                className={`${s.input} ${e.appId} ${errors.steamAppId ? s.inputError : ''}`}
+                value={steamAppId}
+                onChange={ev => { setSteamAppId(ev.target.value); setErrors(p => ({ ...p, steamAppId: '' })) }}
+                placeholder="None"
+              />
+            </OptionRow>
           )}
-          <button
-            type="button"
-            className={s.fileBtn}
-            onClick={async () => {
-              const res = await window.kozo?.api?.dialog?.pickImageData?.()
-              if (res?.ok && res.data?.dataUrl) setCropSrc(res.data.dataUrl)
-            }}
-          >
-            {coverPath ? 'Change cover' : 'Choose image'}
-          </button>
-          <button type="button" className={s.fileBtn} onClick={() => setFindCover(true)}>
-            Find cover
-          </button>
-          {coverPath
-            ? <button type="button" className={s.fileBtn} onClick={() => setCoverPath('')}>Remove</button>
-            : <span className={s.fileHint}>No file chosen</span>
-          }
         </div>
-        <div className={s.inputHint}>
-          Steam supplies art for games on Steam. For anything else (League of Legends,
-          launcher exclusives, emulated titles) use Find cover to pick one from SteamGridDB,
-          or choose your own image.
-        </div>
-      </div>
+      )}
 
       {errors.save && <div className={s.errorText} role="alert">{errors.save}</div>}
     </Modal>
 
-    {/* Sibling, not a child — same as AddGameModal. Modal portals to body, so
+    {/* Sibling, not a child: same as AddGameModal. Modal portals to body, so
         a crop modal declared inside another modal's subtree still escapes it,
         but keeping them siblings matches the pattern used everywhere else. */}
     {findCover && (
       <CoverPickerModal
-        game={game}
+        game={{ ...game, name: name.trim() || game.name }}
         onClose={() => setFindCover(false)}
         onApplied={(g) => { if (g?.banner_local_path) setCoverPath(g.banner_local_path); setFindCover(false) }}
       />

@@ -75,6 +75,17 @@ function shouldStartMinimized() {
   } catch { return false }
 }
 
+// Is each game still on this PC? Never while a game runs, and at most every 15 s.
+let lastInstallCheck = 0
+function checkInstalled() {
+  try {
+    if (Date.now() - lastInstallCheck < 15000) return
+    if (require('./services/processWatcher').isSessionActive()) return
+    lastInstallCheck = Date.now()
+    require('./services/installCheck').reconcile({ quick: true }).catch(() => {})
+  } catch {}
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -146,7 +157,10 @@ function createWindow() {
     // Cheap DB-only pass, so a release that passed while KoZo sat in the tray
     // shows up the moment the window opens.
     try { require('./services/releaseWatch').check() } catch {}
+    checkInstalled()
   })
+  // Back from uninstalling something: the card says so at once.
+  mainWindow.on('focus', checkInstalled)
   // destroy() (the unload-in-tray path below) skips 'close' but still fires
   // 'closed' — clear the module ref so getOrCreateMainWindow knows to recreate.
   mainWindow.on('closed', () => { mainWindow = null })
@@ -301,6 +315,17 @@ Close any program that may be using it and start KoZo again.`)
       settingsQ.setSetting('purged_junk_scan_games', '1')
       if (junk.length) require('./logger').info(`Removed ${junk.length} non-game scan import(s)`, { games: junk.map(g => g.name) })
     }
+    // Blank Game List cards left behind by a deleted junk game ("Redist"): nothing to show,
+    // nothing the user said about them, and a name no game has.
+    if (settingsQ.getSetting('purged_junk_list_rows') !== '1') {
+      const { isJunkFolder } = require('./services/pcScanner')
+      const { isBlankRow } = require('./db/queries/gameList')
+      const db = require('./db/database').getDb()
+      const rows = db.prepare('SELECT * FROM game_list WHERE game_id IS NULL').all().filter(r => isBlankRow(r) && isJunkFolder(r.name))
+      for (const r of rows) db.prepare('DELETE FROM game_list WHERE id = ?').run(r.id)
+      settingsQ.setSetting('purged_junk_list_rows', '1')
+      if (rows.length) require('./logger').info(`Removed ${rows.length} blank Game List row(s)`, { names: rows.map(r => r.name) })
+    }
   } catch (e) {
     try { require('./logger').warn('junk scan cleanup failed', { message: e.message }) } catch {}
   }
@@ -393,6 +418,7 @@ Close any program that may be using it and start KoZo again.`)
       require('./services/installCheck').reconcile().catch(() => {})
     })
   }, 6000)
+  setInterval(checkInstalled, 5 * 60 * 1000)
 
   // Re-test the Steam profile's readability once per launch. The private-profile
   // warning is persisted, and nothing else clears it — set Game details back to

@@ -55,7 +55,9 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
     }).catch(() => setResolvedUrls(p => ({ ...p, [appId]: '' })))
   }
 
-  const newCount = results.filter(r => !r.alreadyInLibrary).length
+  // A folder with no game file can't be added, and one KoZo isn't sure of waits for a hand tick.
+  const canAdd = (r) => !r.alreadyInLibrary && !r.no_game_file
+  const newCount = results.filter(r => canAdd(r) && !r.exe_unsure).length
 
   function toggle(key) {
     setSelected(prev => {
@@ -66,7 +68,7 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
   }
 
   function selectAllNew() {
-    setSelected(new Set(results.filter(r => !r.alreadyInLibrary).map(keyOf)))
+    setSelected(new Set(results.filter(r => canAdd(r) && !r.exe_unsure).map(keyOf)))
   }
 
   async function handleAdd() {
@@ -77,6 +79,7 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
         return {
           ...r,
           name: nameEdits[k] ?? r.name,
+          name_edited: nameEdits[k] !== undefined,
           detected_type: typeOverrides[k] ?? r.detected_type,
           is_cracked: typeOverrides[k] !== undefined
             ? (typeOverrides[k] === 'Cracked' ? 1 : 0)
@@ -137,7 +140,7 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
               disabled={selected.size === 0 || adding}
             >
               {adding
-                ? <><span style={{ animation: 'spin 0.7s linear infinite', display: 'inline-block', marginRight: 6 }}>↻</span>Adding…</>
+                ? <><span className="spin" style={{ display: 'inline-block', marginRight: 6 }}>↻</span>Adding…</>
                 : <><IconPlus size={14} stroke={2} style={{ marginRight: 4 }} />Add {selected.size} game{selected.size === 1 ? '' : 's'} to Library</>
               }
             </button>
@@ -212,8 +215,9 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
           return (
             <div
               key={key}
-              className={`${s.card} ${r.alreadyInLibrary ? s.cardDim : ''} ${selected.has(key) ? s.cardSelected : ''}`}
-              onClick={() => !r.alreadyInLibrary && toggle(key)}
+              className={`${s.card} ${!canAdd(r) ? s.cardDim : ''} ${selected.has(key) ? s.cardSelected : ''}`}
+              onClick={() => canAdd(r) && toggle(key)}
+              data-scan-card={r.alreadyInLibrary ? 'in-library' : r.no_game_file ? 'no-file' : r.exe_unsure ? 'unsure' : 'new'}
             >
               {/* Banner — blurred fill + contained cover so landscape art
                   (a header for a game with no portrait) still looks clean. */}
@@ -232,16 +236,18 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
                 )}
 
                 {/* Checkbox overlay */}
-                <div className={`${s.checkOverlay} ${isChecked ? s.checkOverlayOn : ''}`}>
-                  {isChecked && <IconCheck size={14} stroke={2.5} style={{ color: r.alreadyInLibrary ? 'var(--text-muted)' : '#fff' }} />}
-                </div>
+                {canAdd(r) || r.alreadyInLibrary ? (
+                  <div className={`${s.checkOverlay} ${isChecked ? s.checkOverlayOn : ''}`}>
+                    {isChecked && <IconCheck size={14} stroke={2.5} style={{ color: r.alreadyInLibrary ? 'var(--text-muted)' : '#fff' }} />}
+                  </div>
+                ) : null}
 
                 {/* Type badge */}
                 <div className={s.typeBadge}
                   style={{ color: ts.color, background: ts.bg, borderColor: ts.border }}
                   onClick={e => {
                     e.stopPropagation()
-                    if (r.alreadyInLibrary) return
+                    if (!canAdd(r)) return
                     const next = nextType(type, r.detected_type)
                     setTypeOverrides(p => {
                       const n = { ...p }
@@ -250,17 +256,20 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
                       return n
                     })
                   }}
-                  title={r.alreadyInLibrary ? undefined : 'Click to change type'}
+                  title={!canAdd(r) ? undefined : 'Click to change type'}
                 >
                   {type}
                 </div>
 
-                {r.isInstalled && !r.alreadyInLibrary && (
+                {r.isInstalled && canAdd(r) && (
                   <div className={s.installedTag}>Installed</div>
                 )}
 
                 {r.alreadyInLibrary && (
                   <div className={s.inLibraryOverlay}>In Library</div>
+                )}
+                {r.no_game_file && !r.alreadyInLibrary && (
+                  <div className={s.inLibraryOverlay}>No game file</div>
                 )}
               </div>
 
@@ -271,9 +280,15 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
                   value={name}
                   onChange={e => { e.stopPropagation(); setNameEdits(p => ({ ...p, [key]: e.target.value })) }}
                   onClick={e => e.stopPropagation()}
-                  disabled={r.alreadyInLibrary}
+                  disabled={!canAdd(r)}
                   placeholder="Game name"
                 />
+                {!r.alreadyInLibrary && (r.no_game_file || r.exe_name) && (
+                  <div className={`${s.exeLine} ${r.no_game_file || r.exe_unsure ? s.exeLineWarn : ''}`} title={r.exe_name || undefined}>
+                    {(r.no_game_file || r.exe_unsure) && <IconAlertTriangle size={11} stroke={2} />}
+                    <span>{r.no_game_file ? 'Only tools in this folder' : r.exe_unsure ? `Not sure: ${r.exe_name}` : r.exe_name}</span>
+                  </div>
+                )}
                 <div className={s.metaLine}>
                   {r.playtime > 0 && <span>{Math.round(r.playtime / 60)}h</span>}
                   {r.steam_app_id && <span>#{r.steam_app_id}</span>}

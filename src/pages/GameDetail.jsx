@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
-  IconChevronLeft, IconTrophy, IconLock, IconCheck, IconHistory,
+  IconChevronLeft, IconTrophy, IconLock, IconCheck, IconHistory, IconNews,
   IconDotsVertical, IconArchive, IconArrowBackUp, IconRefresh, IconEdit, IconPlayerPlayFilled,
   IconStethoscope, IconFolderOpen, IconDeviceFloppy, IconDownload,
   IconCircleCheck, IconCircleOff, IconEye, IconEyeOff, IconChevronDown,
@@ -9,9 +9,11 @@ import {
   IconLayoutDashboard, IconSparkles, IconLayoutSidebarRight, IconMovie, IconTarget, IconChartBar,
   IconInfoCircle, IconBrandSteam, IconClock,
 } from '@tabler/icons-react'
-import { getBannerBg, getBannerIcon, formatPlaytime, formatDate, formatDateTime, fileUrl, isSteamTracked, launcherLabel, localDayKey, rarityColor, timeAgo } from '../lib/utils'
+import { exeLooksLikeTool, getBannerBg, getBannerIcon, formatPlaytime, formatDate, formatDateTime, fileUrl, isSteamTracked, launcherLabel, localDayKey, rarityColor, timeAgo } from '../lib/utils'
 import { STATUS_META } from '../components/GameCard'
 import AchievementModal from '../components/modals/AchievementModal'
+import SessionDetail from '../components/SessionDetail'
+import { clockTime } from '../lib/sessionDetail'
 import EditGameModal from '../components/modals/EditGameModal'
 import SaveManagerModal from '../components/modals/SaveManagerModal'
 import InfoModal, { PrivacyHelp } from '../components/ui/InfoModal'
@@ -21,6 +23,7 @@ import GeneratedCover from '../components/GeneratedCover'
 import SteamGameModal, { StoreSections } from '../components/SteamGameModal'
 import AchImg from '../components/ui/AchImg'
 import { GamesLikeGrid } from './GamesLike'
+import GameNews, { NewsHeadlines } from '../components/GameNews'
 import { useAppearance } from '../context/AppearanceContext'
 import { useSteamArt } from '../lib/steamArt'
 import s from './GameDetail.module.css'
@@ -32,6 +35,13 @@ const STEAM_PRIVACY_URL = 'https://steamcommunity.com/my/edit/settings'
 // broadcast triggers. Mirrors the sentinel AchievementModal patches with.
 const OPTIMISTIC_UNLOCK_ID = -1
 
+// The version tag beside a game's name. No entry = nothing can be said about it.
+const VERSION_LOOK = {
+  behind: { label: 'Update out', className: (css) => css.versionBehind },
+  maybe: { label: 'May be outdated', className: (css) => css.versionMaybe },
+  current: { label: 'Up to date', className: () => '' },
+}
+
 // ── 30-day chart (Overview, Sessions) ──────────────────────────────────────
 // Local day buckets: started_at is UTC, so a prefix match would credit
 // late-night play to the previous day.
@@ -39,7 +49,8 @@ function buildDays(sessions, count = 30) {
   const byDay = new Map()
   for (const x of sessions) {
     const k = localDayKey(x.started_at)
-    byDay.set(k, (byDay.get(k) || 0) + (x.duration_seconds || 0))
+    const day = byDay.get(k) || { seconds: 0, count: 0 }
+    byDay.set(k, { seconds: day.seconds + (x.duration_seconds || 0), count: day.count + 1 })
   }
   const days = []
   const today = new Date()
@@ -47,23 +58,30 @@ function buildDays(sessions, count = 30) {
     const d = new Date(today)
     d.setDate(d.getDate() - i)
     const key = localDayKey(d)
-    days.push({ key, seconds: byDay.get(key) || 0, isToday: i === 0, label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) })
+    const played = byDay.get(key)
+    days.push({ key, seconds: played?.seconds || 0, count: played?.count || 0, isToday: i === 0, label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) })
   }
   return days
 }
 
-function MonthChart({ sessions }) {
+// One bar per day. Clicking a day shows its sessions in the list under the bars.
+function MonthChart({ sessions, onOpenDay, pickedDay = null }) {
   const data = buildDays(sessions)
   const max = Math.max(...data.map(d => d.seconds), 1)
   return (
     <>
-      <div className={s.monthChart}>
-        {data.map(d => (
-          <div key={d.key} className={`${s.monthBar} ${d.isToday ? s.monthToday : ''} ${d.seconds === 0 ? s.monthZero : ''}`}
-            title={`${d.label}: ${d.seconds ? formatPlaytime(d.seconds) : 'no play'}`}>
-            <div className={s.monthFill} style={{ height: `${Math.max((d.seconds / max) * 100, d.seconds > 0 ? 6 : 3)}%` }} />
-          </div>
-        ))}
+      <div className={`${s.monthChart} ${pickedDay ? s.monthChartPicked : ''}`}>
+        {data.map(d => {
+          const fill = <span className={s.monthFill} style={{ height: `${Math.max((d.seconds / max) * 100, d.seconds > 0 ? 6 : 3)}%` }} />
+          if (d.seconds === 0) return <div key={d.key} className={`${s.monthBar} ${s.monthZero}`} title={`${d.label}: no play`}>{fill}</div>
+          const text = `${d.label}: ${formatPlaytime(d.seconds)}, ${d.count} ${d.count === 1 ? 'session' : 'sessions'}`
+          return (
+            <button key={d.key} type="button" className={`${s.monthBar} ${d.isToday ? s.monthToday : ''} ${d.key === pickedDay ? s.monthPicked : ''}`} title={text} aria-label={text}
+              aria-pressed={d.key === pickedDay} data-month-day={d.key} onClick={() => onOpenDay(d.key)}>
+              {fill}
+            </button>
+          )
+        })}
       </div>
       <div className={s.monthAxis}><span>{data[0].label}</span><span>Today</span></div>
     </>
@@ -129,30 +147,30 @@ function AchCard({ ach, onClick, onQuickToggle }) {
 }
 
 // ── Session row ────────────────────────────────────────────────────────────
-function SessionRow({ session, maxDuration }) {
+function SessionRow({ session, maxDuration, open = false, onOpen }) {
   const widthPct = maxDuration > 0
     ? Math.max((session.duration_seconds / maxDuration) * 100, 2)
     : 2
 
   return (
-    <div className={s.sessionRow}>
-      <div className={s.sessionDate} title={formatDateTime(session.started_at)}>
+    <button type="button" className={`${s.sessionRow} ${open ? s.sessionRowOpen : ''}`} aria-expanded={open} data-session-row={session.id} onClick={() => onOpen(session)}>
+      <span className={s.sessionDate} title={formatDateTime(session.started_at)}>
         {formatDate(session.started_at)}
-      </div>
-      <div className={s.sessionTime}>
-        {new Date(session.started_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-      </div>
-      <div className={s.sessionDurBar} title={formatPlaytime(session.duration_seconds)}>
-        <div className={s.sessionDurFill} style={{ width: `${widthPct}%` }} />
-      </div>
-      <div className={s.sessionDuration}>{formatPlaytime(session.duration_seconds)}</div>
+      </span>
+      <span className={s.sessionTime}>
+        {clockTime(session.started_at)}
+      </span>
+      <span className={s.sessionDurBar} title={formatPlaytime(session.duration_seconds)}>
+        <span className={s.sessionDurFill} style={{ width: `${widthPct}%` }} />
+      </span>
+      <span className={s.sessionDuration}>{formatPlaytime(session.duration_seconds)}</span>
       {session.achievements_unlocked > 0 && (
-        <div className={s.sessionAchs} title={`${session.achievements_unlocked} achievements unlocked this session`}>
+        <span className={s.sessionAchs} title={`${session.achievements_unlocked} achievements unlocked this session`}>
           <IconTrophy size={11} stroke={1.5} />
           {session.achievements_unlocked}
-        </div>
+        </span>
       )}
-    </div>
+    </button>
   )
 }
 
@@ -171,6 +189,9 @@ export default function GameDetail() {
   const [reviews, setReviews]       = useState(null)
   const [isLive, setIsLive]         = useState(false)
   const [selectedAch, setSelectedAch] = useState(null)
+  const [pickedDay, setPickedDay]   = useState(null)   // the chart bar picked: the list under the bars shows that day
+  const [openSessionId, setOpenSessionId] = useState(null)
+  const [copyVersion, setCopyVersion] = useState(null)
   const [loading, setLoading]       = useState(true)
   const [menuOpen, setMenuOpen]     = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -202,7 +223,18 @@ export default function GameDetail() {
   useEffect(() => {
     idRef.current = id
     setLoading(true)
+    setPickedDay(null)
+    setOpenSessionId(null)
   }, [id])
+
+  // The version of this copy, and whether Steam has moved on (services/gameVersion.js).
+  useEffect(() => {
+    if (!game?.id) return
+    let alive = true
+    setCopyVersion(null)
+    window.kozo?.api?.games?.version?.(game.id).then(res => { if (alive && res?.ok) setCopyVersion(res.data) })
+    return () => { alive = false }
+  }, [game?.id, game?.install_path, game?.exe_name, game?.steam_app_id])
 
   // Automatic achievement sync — fires silently once per page visit so nobody
   // ever has to press a sync button. Live sessions are already covered by the
@@ -295,7 +327,9 @@ export default function GameDetail() {
   // Hero art source ladder: cached local hero → Steam's CDN hero → the generated
   // placeholder icon. Held in state rather than by mutating the <img> element,
   // because the blurred-fill pair means TWO elements share one source.
-  const bust = imgBust || undefined
+  // banner_rev moves whenever a file at the same path is rewritten; without it the page keeps
+  // showing the picture it already loaded.
+  const bust = ((game?.banner_rev || 0) + imgBust) || undefined
   const heroCdnUrl = game?.steam_app_id
     ? `https://cdn.akamai.steamstatic.com/steam/apps/${game.steam_app_id}/library_hero.jpg`
     : null
@@ -303,6 +337,17 @@ export default function GameDetail() {
   // misses — look the real one up (steam:appAssets) as the next rung.
   const [hashedHero, setHashedHero] = useState(null)
   const artAppId = game?.steam_app_id || game?.manual_appid || null
+  // The developer's own news. Only asked for when a page opens (cached 3 hours).
+  const [news, setNews] = useState(undefined)   // undefined = loading
+  const [newsOpen, setNewsOpen] = useState(null)
+  useEffect(() => {
+    setNews(undefined)
+    setNewsOpen(null)
+    if (!artAppId) return
+    let alive = true
+    window.kozo?.api?.steam?.news?.(artAppId).then(res => { if (alive) setNews(res?.ok ? (res.data || []) : []) })
+    return () => { alive = false }
+  }, [artAppId])
   useEffect(() => {
     setHashedHero(null)
     if (!artAppId) return
@@ -313,7 +358,7 @@ export default function GameDetail() {
     return () => { alive = false }
   }, [artAppId])
   const steamArt = useSteamArt(artAppId)
-  useEffect(() => { setCoverFailed(false) }, [id])
+  useEffect(() => { setCoverFailed(false) }, [id, game?.banner_local_path, game?.banner_rev])
   // The Steam store facts for Overview's "About the game".
   useEffect(() => {
     setStore(artAppId ? undefined : null); setReviews(null)
@@ -749,27 +794,65 @@ export default function GameDetail() {
   const nextUp = achievements.filter(a => !isUnlocked(a) && a.global_unlock_percent != null)
     .sort((a, b) => b.global_unlock_percent - a.global_unlock_percent).slice(0, 5)
   const monthStart = Date.now() - 30 * 86400000
+  // The list under the bars is on the Sessions tab, so a bar or a row elsewhere goes there.
+  // A bar narrows the list to that day, the same bar again shows every session, and a day
+  // with one session opens it. A row opens what happened in it, right under it. It doesn't
+  // narrow the list: a session older than 30 days has no bar to go back with.
+  const pickDay = (key) => {
+    const off = tab === 'sessions' && pickedDay === key
+    const day = sessions.filter(x => localDayKey(x.started_at) === key)
+    setPickedDay(off ? null : key)
+    setOpenSessionId(!off && day.length === 1 ? day[0].id : null)
+    setTab('sessions')
+  }
+  const toggleSession = (session) => {
+    if (tab !== 'sessions') setPickedDay(null)
+    setOpenSessionId(cur => (tab === 'sessions' && cur === session.id ? null : session.id))
+    setTab('sessions')
+  }
+  const pickedSessions = pickedDay ? sessions.filter(x => localDayKey(x.started_at) === pickedDay) : []
+  const listedSessions = pickedSessions.length ? pickedSessions : sessions
   const monthSecs = sessions.filter(x => new Date(x.started_at).getTime() >= monthStart).reduce((a, x) => a + (x.duration_seconds || 0), 0)
+
+  // "New" = after the last time you finished playing. Never played: nothing is new.
+  const lastEnded = sessions.reduce((m, x) => Math.max(m, x.ended_at ? new Date(x.ended_at).getTime() : 0), 0)
+  const newNews = lastEnded ? (news || []).filter(n => n.date > lastEnded) : []
 
   const TABS = [
     { key: 'overview', label: 'Overview', Icon: IconLayoutDashboard },
     { key: 'achievements', label: 'Achievements', Icon: IconTrophy, count: total > 0 ? `${unlocked}/${total}` : null },
     { key: 'sessions', label: 'Sessions', Icon: IconHistory, count: sessions.length || null },
+    artAppId && news?.length !== 0 && { key: 'news', label: 'News', Icon: IconNews, count: newNews.length || null },
     artAppId && store !== null && { key: 'about', label: 'About', Icon: IconInfoCircle },
     artAppId && { key: 'like', label: 'Games like this', Icon: IconSparkles },
   ].filter(Boolean)
   const shownTab = TABS.some(t => t.key === tab) ? tab : 'overview'
 
+  // The watched file is a tool or an installer, and it has never logged a session.
+  // Or there's no game file at all: KoZo won't use a wrong one for want of anything better.
+  const noGameFile = !!game.is_installed && !game.exe_name && !game.launch_file && !game.launch_uri && !game.steam_app_id
+  const exeNote = (noGameFile || (!!game.is_installed && sessions.length === 0 && exeLooksLikeTool(game.exe_name))) && (
+    <p className={s.exeNote} data-exe-note>
+      <IconAlertTriangle size={14} stroke={1.8} className={s.exeNoteIcon} />
+      {noGameFile
+        ? <span>KoZo found no game file for this game, so it can't start it or track your play. If your antivirus removed the file, restore it, or reinstall the game.</span>
+        : <span>KoZo is watching <b>{game.exe_name}</b>, which looks like a tool or installer, not the game, so your play won't be tracked.</span>}
+      <button type="button" className={s.exeNoteBtn} onClick={() => setShowEdit(true)}>Choose the exe</button>
+    </p>
+  )
   const chips = (
     <div className={s.chipRow}>
-      {status && (
-        <span className={s.statusChip} style={{ '--st': status.color }}><status.Icon size={12} /> {status.label}</span>
-      )}
       {genres.slice(0, 5).map(g => <span key={g} className={s.genreChip} title={g}>{g}</span>)}
       {!!game.is_cracked && (
         <span className={s.crackBadge}>
           CRACKED
           {crackScanInfo?.sources?.length > 0 && <span className={s.crackBadgeSource}> · {crackScanInfo.sources.join(', ')}</span>}
+        </span>
+      )}
+      {copyVersion && (
+        <span className={`${s.versionChip} ${VERSION_LOOK[copyVersion.state]?.className(s) || ''}`} title={copyVersion.hint} data-game-version={copyVersion.state}>
+          {copyVersion.text}
+          {VERSION_LOOK[copyVersion.state] && <span className={s.versionState}> · {VERSION_LOOK[copyVersion.state].label}</span>}
         </span>
       )}
     </div>
@@ -795,7 +878,7 @@ export default function GameDetail() {
           style={status ? { '--st': status.color } : undefined}
         >
           {status ? <status.Icon size={15} /> : <IconCircleCheck size={15} />}
-          {status ? status.label : 'Set status'}
+          {status ? <span><span className={s.statusKey}>Status:</span> {status.label}</span> : 'Set status'}
           <IconChevronDown size={13} stroke={2} />
         </button>
         {statusMenuOpen && (
@@ -944,6 +1027,7 @@ export default function GameDetail() {
             <div className={`${s.frame} ${s.cineInfo}`}>
               <div className={s.gameName} title={game.name}>{game.name}</div>
               {chips}
+              {exeNote}
               <div className={s.statLine}>
                 {statBits.map((b, i) => <React.Fragment key={i}>{i > 0 && <span className={s.dot} />}<span>{b}</span></React.Fragment>)}
               </div>
@@ -962,6 +1046,7 @@ export default function GameDetail() {
             <div className={s.headText}>
               <div className={s.gameName} title={game.name}>{game.name}</div>
               {chips}
+              {exeNote}
               {actions}
             </div>
           </div>
@@ -985,6 +1070,16 @@ export default function GameDetail() {
             <div key={shownTab} className={`${s.main} ${s.tabView}`}>
               {shownTab === 'overview' && (
                 <div className={s.overview}>
+                  {newNews.length > 0 && (
+                    <div className={`${s.card} ${s.wide}`}>
+                      <div className={s.cardHead}>
+                        <IconNews size={14} /> Since you last played
+                        <span className={s.cardHeadSpacer} />
+                        <button type="button" className={s.linkBtn} onClick={() => { setNewsOpen(null); setTab('news') }}>All news</button>
+                      </div>
+                      <NewsHeadlines items={newNews.slice(0, 3)} onOpen={(id) => { setNewsOpen(id); setTab('news') }} />
+                    </div>
+                  )}
                   {total > 0 && (
                     <div className={s.card}>
                       <div className={s.cardHead}>
@@ -1037,7 +1132,7 @@ export default function GameDetail() {
                       <span className={s.cardHeadSpacer} />
                       <span className={s.monthTotal}>{monthSecs ? formatPlaytime(monthSecs) : 'No play'}</span>
                     </div>
-                    {monthSecs ? <MonthChart sessions={sessions} /> : <p className={s.muted}>No play in the last 30 days.{game.last_played_at ? ` Last played ${timeAgo(game.last_played_at)}.` : ''}</p>}
+                    {monthSecs ? <MonthChart sessions={sessions} onOpenDay={pickDay} /> : <p className={s.muted}>No play in the last 30 days.{game.last_played_at ? ` Last played ${timeAgo(game.last_played_at)}.` : ''}</p>}
                   </div>
 
                   <div className={s.card}>
@@ -1048,7 +1143,7 @@ export default function GameDetail() {
                     </div>
                     {sessions.length === 0
                       ? <p className={s.muted}>KoZo logs one automatically the next time you play.</p>
-                      : <div className={s.sessionList}>{sessions.slice(0, 3).map(x => <SessionRow key={x.id} session={x} maxDuration={maxDuration} />)}</div>}
+                      : <div className={s.sessionList}>{sessions.slice(0, 3).map(x => <SessionRow key={x.id} session={x} maxDuration={maxDuration} onOpen={toggleSession} />)}</div>}
                   </div>
 
                   {artAppId && store !== null && (
@@ -1134,14 +1229,21 @@ export default function GameDetail() {
                         <span className={s.cardHeadSpacer} />
                         <span className={s.monthTotal}>{monthSecs ? formatPlaytime(monthSecs) : 'No play'}</span>
                       </div>
-                      {monthSecs ? <MonthChart sessions={sessions} /> : <p className={s.muted}>No play in the last 30 days.{game.last_played_at ? ` Last played ${timeAgo(game.last_played_at)}.` : ''}</p>}
+                      {monthSecs ? <MonthChart sessions={sessions} onOpenDay={pickDay} pickedDay={pickedSessions.length ? pickedDay : null} /> : <p className={s.muted}>No play in the last 30 days.{game.last_played_at ? ` Last played ${timeAgo(game.last_played_at)}.` : ''}</p>}
                     </div>
                     <div className={s.sessionList}>
-                      {sessions.map(session => <SessionRow key={session.id} session={session} maxDuration={maxDuration} />)}
+                      {listedSessions.map(session => (
+                        <React.Fragment key={session.id}>
+                          <SessionRow session={session} maxDuration={maxDuration} open={openSessionId === session.id} onOpen={toggleSession} />
+                          {openSessionId === session.id && <SessionDetail session={session} achievements={achievements} onOpenAchievement={setSelectedAch} />}
+                        </React.Fragment>
+                      ))}
                     </div>
                   </>
                 )
               )}
+
+              {shownTab === 'news' && <GameNews items={news} lastEnded={lastEnded} openId={newsOpen} />}
 
               {shownTab === 'about' && (
                 <div className={s.aboutTab}>

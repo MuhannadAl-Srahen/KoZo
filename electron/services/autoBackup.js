@@ -26,7 +26,7 @@ const fs   = require('fs')
 const path = require('path')
 const logger = require('../logger')
 
-const SECRET_SETTINGS = new Set(['steam_api_key', 'steamgriddb_key', 'gdrive_token', 'gdrive_folder_id', 'gdrive_email', 'gdrive_client_id', 'gdrive_client_secret', 'install_id'])
+const SECRET_SETTINGS = new Set(['steam_api_key', 'steamgriddb_key', 'gdrive_token', 'gdrive_folder_id', 'gdrive_email', 'gdrive_client_id', 'gdrive_client_secret', 'install_id', 'drive_news_seen', 'launch_miss_dismissed'])
 
 const TABLES = ['games', 'sessions', 'achievements', 'achievement_unlocks', 'game_list', 'categories', 'custom_lists', 'custom_list_games', 'settings']
 
@@ -54,7 +54,7 @@ function getConfig() {
 
 function buildPayload() {
   const db = require('../db/database').getDb()
-  const payload = { version: 1, app: 'kozo', install: installId(), exported_at: new Date().toISOString(), auto: true }
+  const payload = { version: 1, app: 'kozo', install: installId(), pc: require('os').hostname(), exported_at: new Date().toISOString(), auto: true }
   for (const t of TABLES) {
     try { payload[t] = db.prepare(`SELECT * FROM ${t}`).all() } catch { payload[t] = [] }
   }
@@ -171,4 +171,4 @@ function startPeriodic() {
   }, PERIODIC_MS)
 }
 
-module.exports = { markDirty, flush, writeNow, getConfig, startPeriodic, buildPayload }
+module.exports = { markDirty, flush, writeNow, getConfig, startPeriodic, buildPayload, installId }

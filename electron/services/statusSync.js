@@ -137,6 +137,19 @@ function onSessionStarted(gameId) {
   }
 }
 
+// A session under a minute is thrown away, and so is what it changed: nobody played, so the
+// game isn't "last played 1m ago" and "Playing". `before` is the game as it was at the start.
+function undoSessionStart(gameId, before) {
+  if (!before) return
+  const game = db().prepare('SELECT completion_status FROM games WHERE id = ?').get(gameId)
+  if (!game) return
+  db().prepare('UPDATE games SET last_played_at = ?, first_played_at = ? WHERE id = ?')
+    .run(before.last_played_at ?? null, before.first_played_at ?? null, gameId)
+  if (game.completion_status === 'playing' && before.completion_status !== 'playing') {
+    setGameStatus(gameId, before.completion_status ?? null)
+  }
+}
+
 // A game was just marked Finished (Library or Game List): the renderer opens
 // the 1 to 10 rating dialog. The rating lives on the Game List row.
 function announceFinished({ gameId = null, listId = null }) {
@@ -158,4 +171,4 @@ function announceFinished({ gameId = null, listId = null }) {
   } catch (e) { logger.warn('statusSync: finished announce failed', { message: e.message }) }
 }
 
-module.exports = { setGameStatus, syncFromGameList, onSessionStarted, announceFinished, SHARED_STATUSES }
+module.exports = { setGameStatus, syncFromGameList, onSessionStarted, undoSessionStart, announceFinished, SHARED_STATUSES }

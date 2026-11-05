@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
+import { bgTone, bgToneHex } from '../lib/bgTone'
 
 // Settings → Appearance beyond the accent color: UI scale, spacing, corners,
 // what game cards show, sidebar order and start page, and a background
@@ -62,23 +63,7 @@ export const FONTS = {
 // The Custom theme: any color becomes a dark background in its hue, so text,
 // cards and every page keep the same contrast as the stock themes (styles/
 // customize.css builds the surfaces from these three numbers).
-export function bgTone(hex) {
-  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim())
-  if (!m) return { h: 250, s: 24, l: 8 }
-  const n = parseInt(m[1], 16)
-  const r = (n >> 16) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255
-  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min
-  let h = 0
-  if (d) h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4
-  h = Math.round((h * 60 + 360) % 360)
-  const l = (max + min) / 2
-  const s = d ? d / (1 - Math.abs(2 * l - 1)) : 0
-  return {
-    h,
-    s: Math.round(Math.min(35, s * 100)),
-    l: Math.round(Math.min(13, Math.max(4, l * 100)) * 10) / 10,
-  }
-}
+export { bgTone, bgToneHex }
 
 // Old or partial saved values never break the app: fill in every missing key.
 function normalize(saved) {

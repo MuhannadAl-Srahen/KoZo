@@ -1,0 +1,57 @@
+.card {
+  position: fixed;
+  right: var(--sp-16);
+  bottom: var(--sp-16);
+  /* Under dialogs and menus: it never blocks an answer to something else. */
+  z-index: calc(var(--z-popover, 1000) - 1);
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  padding: var(--sp-12);
+  border-radius: var(--r-card);
+  background: var(--surface-2);
+  border: 1px solid var(--ab);
+  box-shadow: var(--elev-3);
+}
+.title { display: flex; align-items: center; gap: var(--sp-6); font-size: var(--fs-md); font-weight: 700; color: var(--text-primary); overflow-wrap: anywhere; }
+.title svg { flex-shrink: 0; color: var(--a); }
+.text { margin: 0; font-size: var(--fs-sm); color: var(--text-secondary); overflow-wrap: anywhere; }
+.text b { color: var(--text-primary); font-weight: 600; }
+.error { margin: 0; font-size: var(--fs-xs); color: var(--danger, #f87171); }
+.list { display: flex; flex-direction: column; gap: var(--sp-4); }
+.option {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-8);
+  width: 100%;
+  padding: var(--sp-6) var(--sp-10);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.option:hover:not(:disabled) { border-color: var(--ab); background: var(--ad); }
+.option small { flex-shrink: 0; font-size: var(--fs-2xs); color: var(--text-muted); }
+.exe { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.foot { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-8); color: var(--text-muted); }
+.btn {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn:hover { border-color: var(--ab); color: var(--a); }

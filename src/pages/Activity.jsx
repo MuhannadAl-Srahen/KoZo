@@ -1,9 +1,10 @@
 import React from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { IconChartBar, IconHistory, IconTrophy } from '@tabler/icons-react'
+import { IconChartBar, IconHistory, IconTrophy, IconCalendarStats } from '@tabler/icons-react'
 import Statistics from './Statistics'
 import Sessions from './Sessions'
 import AchievementsHub from './AchievementsHub'
+import YearReview from './YearReview'
 import s from './Activity.module.css'
 
 // Activity: Statistics (Overview), Sessions and Achievements under one tab.
@@ -13,6 +14,7 @@ const TABS = [
   { key: 'overview',     label: 'Overview',     Icon: IconChartBar, Page: Statistics },
   { key: 'sessions',     label: 'Sessions',     Icon: IconHistory,  Page: Sessions },
   { key: 'achievements', label: 'Achievements', Icon: IconTrophy,   Page: AchievementsHub },
+  { key: 'year',         label: 'Your year',    Icon: IconCalendarStats, Page: YearReview },
 ]
 
 export default function Activity() {

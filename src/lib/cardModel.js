@@ -1,5 +1,5 @@
 import {
-  IconPlayerPlayFilled, IconCircleCheckFilled, IconX,
+  IconDeviceGamepad2, IconCircleCheckFilled, IconX,
   IconPlayerPauseFilled, IconClock, IconCalendar,
 } from '@tabler/icons-react'
 import { LAUNCHERS } from './utils'
@@ -14,7 +14,7 @@ import { LAUNCHERS } from './utils'
 
 // Statuses the LIBRARY can set on a game (games.completion_status).
 export const LIBRARY_STATUSES = {
-  playing:  { label: 'Playing',  color: 'var(--status-playing)',  Icon: IconPlayerPlayFilled },
+  playing:  { label: 'Playing',  color: 'var(--status-playing)',  Icon: IconDeviceGamepad2 },
   finished: { label: 'Finished', color: 'var(--status-finished)', Icon: IconCircleCheckFilled },
   on_hold:  { label: 'On hold',  color: 'var(--status-onhold)',   Icon: IconPlayerPauseFilled },
   dropped:  { label: 'Dropped',  color: 'var(--status-dropped)',  Icon: IconX },

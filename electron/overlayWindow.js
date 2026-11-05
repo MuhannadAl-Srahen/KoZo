@@ -212,9 +212,15 @@ function sendStatusFlash(data)    { _send('status:overlay',          data) }
 function sendLevelUp(data)        { _send('xp:overlay',              data) }
 function sendSessionEnded(data)   { _send('sessionEnd:overlay',      data) }
 function sendUnknownGame(data)    { _send('unknownGame:overlay',      data) }
+// Play was pressed, the watched file never started, and another window is in front.
+function sendLaunchMiss(data)     { _send('launchMiss:overlay',       data) }
 // "It's out now" for a tracked upcoming game. The overlay is the app's ONLY
 // notification surface (§6) — never a native Notification.
 function sendReleaseFlash(data)   { _send('release:overlay',          data) }
+// A game reached the price the user set (services/deals.js).
+function sendPriceFlash(data)     { _send('price:overlay',            data) }
+// Settings > Tracking > Break reminder.
+function sendBreakReminder(data)  { _send('break:overlay',            data) }
 
 // Toggle whether the overlay captures mouse clicks. The window is click-through
 // by default (events pass to the game). When the cursor is over a toast the
@@ -281,4 +287,4 @@ function applyAccent(hex) {
 
 // getWindow lets ipc.js tell the overlay apart from the main window (e.g. to
 // focus the main window when an overlay notification is clicked).
-module.exports = { getOrCreate, warm, getWindow: () => _win, sendAchievements, sendSessionStarted, sendStatusFlash, sendLevelUp, sendSessionEnded, sendUnknownGame, sendReleaseFlash, hideOverlay, markReady, setInteractive, applyAccent }
+module.exports = { getOrCreate, warm, getWindow: () => _win, sendAchievements, sendSessionStarted, sendStatusFlash, sendLevelUp, sendSessionEnded, sendUnknownGame, sendLaunchMiss, sendReleaseFlash, sendPriceFlash, sendBreakReminder, hideOverlay, markReady, setInteractive, applyAccent }

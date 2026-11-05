@@ -741,3 +741,16 @@
 /* Minimal: cover and name, nothing else. */
 :global(html[data-card-style="minimal"]) .gameInfo,
 :global(html[data-card-style="minimal"]) .bannerGenres { display: none; }
+
+/* A dimmer picture alone was easy to miss on a game that's gone from this PC. */
+.notInstalledChip {
+  align-self: flex-start;
+  margin-top: 3px;
+  padding: 1px var(--sp-6);
+  border-radius: var(--r-pill);
+  background: rgba(8, 8, 14, 0.72);
+  border: 1px solid var(--border);
+  color: var(--on-art);
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+}
