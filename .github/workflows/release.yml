@@ -31,8 +31,10 @@ jobs:
         run: bun install --frozen-lockfile
 
       # Unit tests, then the whole app on a throwaway profile (every page,
-      # menus, controller, Big Picture). A failure stops the release.
+      # menus, controller, Big Picture). A failure stops the release. Bash, because it
+      # stops at the first failed command: PowerShell here only checked the last one.
       - name: Test
+        shell: bash
         run: |
           node scripts/test-parsers.js
           node scripts/test-backup-copy.js
@@ -40,14 +42,15 @@ jobs:
           bunx vite build
           bunx electron scripts/smoke-test.js
 
-      # KoZo's Google client for Drive sign-in, kept out of the public code. With
-      # no secrets set, the build simply has no Google row (docs/google-drive.md).
+      # KoZo's Google client for Drive sign-in, kept out of the public code
+      # (docs/google-drive.md). The Google app is published, so a build without them
+      # would hide Google sign-in from everyone: missing secrets stop the release.
       - name: Add the Google client
         env:
           KOZO_GOOGLE_CLIENT_ID: ${{ secrets.KOZO_GOOGLE_CLIENT_ID }}
           KOZO_GOOGLE_CLIENT_SECRET: ${{ secrets.KOZO_GOOGLE_CLIENT_SECRET }}
         run: |
-          node -e "const {KOZO_GOOGLE_CLIENT_ID:id,KOZO_GOOGLE_CLIENT_SECRET:secret}=process.env; if(id&&secret){require('fs').writeFileSync('electron/defaults.local.js','module.exports='+JSON.stringify({GOOGLE_CLIENT_ID:id,GOOGLE_CLIENT_SECRET:secret})+'\n');console.log('Google client added')}else{console.log('No Google client secrets: Drive sign-in stays off in this build')}"
+          node -e "const {KOZO_GOOGLE_CLIENT_ID:id,KOZO_GOOGLE_CLIENT_SECRET:secret}=process.env; if(!id||!secret){console.log('::error::The secrets KOZO_GOOGLE_CLIENT_ID and KOZO_GOOGLE_CLIENT_SECRET are not set, so this build would have no Google sign-in');process.exit(1)} require('fs').writeFileSync('electron/defaults.local.js','module.exports='+JSON.stringify({GOOGLE_CLIENT_ID:id,GOOGLE_CLIENT_SECRET:secret})+'\n');console.log('Google client added')"
 
       - name: Build and publish release
         env:

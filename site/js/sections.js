@@ -377,7 +377,9 @@
     if (!b) return
     var l = LOOKS[Number(b.dataset.i)]
     document.querySelectorAll('.look-btn').forEach(function (x) { x.setAttribute('aria-pressed', String(x === b)) })
-    $('look-img').src = l.img
+    var lookImg = $('look-img')
+    lookImg.srcset = l.img.replace('shots/', 'shots/sm/') + ' 1200w, ' + l.img + ' 2000w'
+    lookImg.src = l.img
     $('look-cap').textContent = l.cap
     game.setAccent(l.color, true)
   })

@@ -359,27 +359,31 @@
   addEventListener('resize', function () { clearTimeout(fitTimer); fitTimer = setTimeout(fitLockup, 80) })
 
   // ── Download: the real file, version and size, from GitHub ──
+  // Asked on every visit, so a new release shows as soon as it's published. A tab keeps the answer
+  // for 10 minutes only. A release whose installer is still uploading is skipped, and if GitHub
+  // doesn't answer, the links already go to the newest release's page.
   function applyRelease(r) {
     if (!r || !r.url) return
     document.querySelectorAll('[data-download]').forEach(function (a) { a.href = r.url })
-    document.querySelectorAll('[data-dl-meta]').forEach(function (m) { m.textContent = r.version + ', ' + r.size + ' MB' })
+    document.querySelectorAll('[data-dl-meta]').forEach(function (m) { m.textContent = r.version + ', ' + r.size + ' MB'; m.hidden = false })
   }
-  try {
-    var cached = JSON.parse(sessionStorage.getItem('kozo-release') || 'null')
-    if (cached) applyRelease(cached)
-    else {
-      fetch('https://api.github.com/repos/MuhannadAl-Srahen/KoZo/releases/latest', { headers: { Accept: 'application/vnd.github+json' } })
-        .then(function (res) { return res.ok ? res.json() : null })
-        .then(function (rel) {
-          var asset = rel && (rel.assets || []).filter(function (a) { return /\.exe$/i.test(a.name) })[0]
-          if (!asset) return
-          var r = { url: asset.browser_download_url, version: rel.tag_name, size: Math.round(asset.size / 1048576) }
-          applyRelease(r)
-          try { sessionStorage.setItem('kozo-release', JSON.stringify(r)) } catch (e) {}
-        })
-        .catch(function () {})   // the link already goes to the Releases page
-    }
-  } catch (e) {}
+  var cachedRelease = null
+  try { cachedRelease = JSON.parse(sessionStorage.getItem('kozo-release') || 'null') } catch (e) {}
+  if (cachedRelease && cachedRelease.at && Date.now() - cachedRelease.at < 10 * 60 * 1000) applyRelease(cachedRelease)
+  else if (window.fetch) {
+    fetch('https://api.github.com/repos/MuhannadAl-Srahen/KoZo/releases/latest', { headers: { Accept: 'application/vnd.github+json' }, cache: 'no-store' })
+      .then(function (res) { return res.ok ? res.json() : null })
+      .then(function (rel) {
+        var asset = rel && !rel.draft && (rel.assets || []).filter(function (a) {
+          return /\.exe$/i.test(a.name) && a.size > 0 && (!a.state || a.state === 'uploaded')
+        })[0]
+        if (!asset) return
+        var r = { url: asset.browser_download_url, version: rel.tag_name, size: Math.round(asset.size / 1048576), at: Date.now() }
+        applyRelease(r)
+        try { sessionStorage.setItem('kozo-release', JSON.stringify(r)) } catch (e) {}
+      })
+      .catch(function () {})
+  }
 
   // ── Going ──
   renderHud()
