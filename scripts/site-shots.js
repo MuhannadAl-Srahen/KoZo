@@ -176,21 +176,25 @@ app.whenReady().then(async () => {
   const encoder = new BrowserWindow({ show: false, webPreferences: { offscreen: true } })
   await encoder.loadURL('data:text/html,<canvas id=c></canvas>')
   const taken = []
+  // Each screenshot is saved twice: 2000 px for sharp screens, 1200 px (shots/sm) for the rest.
   async function save(name, width = 2000, quality = 0.82) {
     if (ONLY && !ONLY.includes(name)) return
     await focus()
     const banned = await ev(`/cracked/i.test(document.body.innerText)`)
     if (banned) console.log(`WARNING: ${name} says "cracked" somewhere`)
     const png = (await wc.capturePage()).toDataURL()
-    const data = await encoder.webContents.executeJavaScript(`(async () => {
+    const encode = (w, q) => encoder.webContents.executeJavaScript(`(async () => {
       const img = new Image(); img.src = ${JSON.stringify(png)}; await img.decode()
-      const c = document.getElementById('c'); const w = Math.min(${width}, img.width); const h = Math.round(img.height * w / img.width)
+      const c = document.getElementById('c'); const w = Math.min(${w}, img.width); const h = Math.round(img.height * w / img.width)
       c.width = w; c.height = h
       const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(img, 0, 0, w, h)
-      return c.toDataURL('image/webp', ${quality})
+      return c.toDataURL('image/webp', ${q})
     })()`)
+    const data = await encode(width, quality)
     const buf = Buffer.from(data.split(',')[1], 'base64')
     fs.writeFileSync(path.join(OUT, `${name}.webp`), buf)
+    fs.mkdirSync(path.join(OUT, 'sm'), { recursive: true })
+    fs.writeFileSync(path.join(OUT, 'sm', `${name}.webp`), Buffer.from((await encode(1200, 0.8)).split(',')[1], 'base64'))
     taken.push(`${name} ${Math.round(buf.length / 1024)}KB`)
     console.log('shot', name, Math.round(buf.length / 1024) + 'KB')
   }

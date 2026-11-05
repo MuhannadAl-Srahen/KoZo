@@ -128,6 +128,7 @@ open Settings > Secrets and variables > Actions and add:
 
 `release.yml` writes them to `electron/defaults.local.js` (gitignored) before
 building, so Settings > Connections and Settings > Backups show **Sign in with
-Google**. Add them only after the app is published, or everyone else gets the 403
-above. Google treats a desktop app's secret as not really secret, and the sign-in
-also uses PKCE.
+Google**. The app was published (In production) on 2026-11-05, so `release.yml` now
+stops a release when either secret is missing: 1.9.0 shipped before they were added and
+has no Google row. Google treats a desktop app's secret as not really secret, and the
+sign-in also uses PKCE.

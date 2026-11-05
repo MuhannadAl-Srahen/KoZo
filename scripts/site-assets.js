@@ -164,13 +164,39 @@ async function buildOg() {
   await new Promise(r => setTimeout(r, 3200))
   await win.webContents.insertCSS('html { scrollbar-width: none; } .hud, #toasts, #session, #hive-tag, .eyebrow-score, .cta-row, .meta { display: none !important; } .hero { padding-block: 40px !important; }')
   await new Promise(r => setTimeout(r, 400))
-  const shot = await cdp('Page.captureScreenshot', { format: 'png' })
+  const shot = await cdp('Page.captureScreenshot', { format: 'jpeg', quality: 86 })
   const buf = Buffer.from(shot.data, 'base64')
-  fs.writeFileSync(path.join(OUT, 'og.png'), buf)
+  fs.writeFileSync(path.join(OUT, 'og.jpg'), buf)
   console.log(`share picture: ${Math.round(buf.length / 1024)} KB`)
   dbg.detach()
   win.destroy()
   server.close()
+}
+
+// A 1200 px copy of every screenshot in shots/sm, for normal screens and phones. site-shots.js
+// writes both when it takes them; this rebuilds the small ones from the big ones.
+async function buildSmallShots() {
+  const dir = path.join(OUT, 'shots'), sm = path.join(dir, 'sm')
+  fs.mkdirSync(sm, { recursive: true })
+  const win = new BrowserWindow({ show: false, webPreferences: { offscreen: true } })
+  await win.loadURL('data:text/html,<canvas id=c></canvas>')
+  let before = 0, after = 0
+  for (const f of fs.readdirSync(dir).filter(n => n.endsWith('.webp'))) {
+    const big = fs.readFileSync(path.join(dir, f))
+    const data = await win.webContents.executeJavaScript(`(async () => {
+      const img = new Image(); img.src = 'data:image/webp;base64,${big.toString('base64')}'; await img.decode()
+      const w = Math.min(1200, img.width), h = Math.round(img.height * w / img.width)
+      const c = document.getElementById('c'); c.width = w; c.height = h
+      const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(img, 0, 0, w, h)
+      return c.toDataURL('image/webp', 0.8)
+    })()`)
+    const buf = Buffer.from(data.split(',')[1], 'base64')
+    fs.writeFileSync(path.join(sm, f), buf)
+    before += big.length
+    after += buf.length
+  }
+  console.log(`small screenshots: ${Math.round(after / 1024)} KB instead of ${Math.round(before / 1024)} KB`)
+  win.destroy()
 }
 
 app.on('window-all-closed', () => {})
@@ -184,5 +210,6 @@ app.whenReady().then(async () => {
   }
   if (!only || only === 'scene') await buildScene()
   if (!only || only === 'og') await buildOg()
+  if (!only || only === 'small') await buildSmallShots()
   app.exit(0)
 }).catch(e => { console.error(e); app.exit(1) })

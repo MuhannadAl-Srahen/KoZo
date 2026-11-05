@@ -43,6 +43,14 @@ const SIZES = [
 const TYPES = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.webp': 'image/webp', '.woff2': 'font/woff2', '.png': 'image/png', '.json': 'application/json' }
 const server = http.createServer((req, res) => {
   const p = decodeURIComponent(req.url.split('?')[0])
+  // A pretend newer release, so the Download buttons can be checked without asking GitHub.
+  if (p === '/__release.json') {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
+    return res.end(JSON.stringify({ tag_name: 'v9.9.9', draft: false, assets: [
+      { name: 'KoZo-Installer-9.9.9.exe.blockmap', size: 140000, state: 'uploaded', browser_download_url: 'https://example.invalid/blockmap' },
+      { name: 'KoZo-Installer-9.9.9.exe', size: 134000000, state: 'uploaded', browser_download_url: 'https://example.invalid/KoZo-Installer-9.9.9.exe' },
+    ] }))
+  }
   const file = path.join(ROOT, p === '/' ? 'index.html' : p)
   fs.readFile(file, (e, buf) => {
     if (e) { res.writeHead(404); return res.end() }
@@ -66,7 +74,7 @@ function check(where, name, ok, extra = '') {
 function checkFiles() {
   const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8')
   const pages = ['index.html', 'privacy.html', 'terms.html']
-  const texts = [...pages, 'js/game.js', 'js/sections.js', 'assets/covers.js']
+  const texts = [...pages, 'js/game.js', 'js/sections.js', 'js/smooth.js', 'assets/covers.js']
   for (const f of texts) {
     const t = read(f)
     check('words', `${f} has no long dashes`, !/[–—]/.test(t))
@@ -88,9 +96,17 @@ function checkFiles() {
   // Google's brand check: the home page must link the privacy policy, at the address given to Google.
   check('google', 'the home page links Privacy and Terms', /href="privacy\.html"/.test(read('index.html')) && /href="terms\.html"/.test(read('index.html')))
   check('google', 'the privacy page says how Google data is used', /drive\.file/.test(read('privacy.html')) && /Limited Use/.test(read('privacy.html')))
+  for (const f of pages) {
+    for (const m of read(f).matchAll(/srcset="([^"]+)"/g)) {
+      for (const part of m[1].split(',')) { const u = part.trim().split(/\s+/)[0]; check('links', `${f} points at ${u}`, fs.existsSync(path.join(ROOT, u))) }
+    }
+  }
+  for (const f of fs.readdirSync(path.join(ROOT, 'assets/shots')).filter(n => n.endsWith('.webp'))) {
+    check('weight', `shots/${f} has a small copy`, fs.existsSync(path.join(ROOT, 'assets/shots/sm', f)))
+  }
   const css = read('css/site.css')
   for (const m of css.matchAll(/url\('\.\.\/([^']+)'\)/g)) check('links', `the stylesheet points at ${m[1]}`, fs.existsSync(path.join(ROOT, m[1])))
-  const js = ['js/hive.js', 'js/game.js', 'js/sections.js'].reduce((s, f) => s + fs.statSync(path.join(ROOT, f)).size, 0)
+  const js = ['js/hive.js', 'js/game.js', 'js/sections.js', 'js/smooth.js'].reduce((s, f) => s + fs.statSync(path.join(ROOT, f)).size, 0)
   const first = js + fs.statSync(path.join(ROOT, 'css/site.css')).size + fs.statSync(path.join(ROOT, 'index.html')).size +
     fs.statSync(path.join(ROOT, 'assets/covers.webp')).size + ['anybody', 'hanken-grotesk', 'martian-mono'].reduce((s, n) => s + fs.statSync(path.join(ROOT, `assets/fonts/${n}.woff2`)).size, 0)
   console.log(`weight: scripts ${Math.round(js / 1024)} KB, first screen ${Math.round(first / 1024)} KB`)
@@ -148,6 +164,7 @@ async function runSize([name, width, height, touch], port) {
   const errors = []
   wc.on('console-message', (e) => { if (e.level >= 2 && !/api\.github\.com|net::ERR/.test(e.message)) errors.push(e.message) })
   wc.on('render-process-gone', () => errors.push('the page crashed'))
+  wc.session.webRequest.onBeforeRequest({ urls: ['https://api.github.com/*'] }, (d, cb) => cb({ redirectURL: `http://127.0.0.1:${port}/__release.json` }))
   await win.loadURL(`http://127.0.0.1:${port}/`)
   const ev = (code) => wc.executeJavaScript(code, true)
   const where = `${name} ${width}x${height}`
@@ -180,6 +197,9 @@ async function runSize([name, width, height, touch], port) {
 
   await sleep(2600)
   const flat = await ev(`document.documentElement.classList.contains('flat')`)
+  const newest = await ev(`({ meta: [...document.querySelectorAll('[data-dl-meta]')].map(m => m.hidden ? '' : m.textContent), links: [...document.querySelectorAll('.hud [data-download], #finale [data-download]')].map(a => a.href) })`)
+  check(where, 'Download shows the newest release, read from GitHub', newest.meta.length === 2 && newest.meta.every(m => m === 'v9.9.9, 128 MB'), newest.meta.join(' | '))
+  if (!touch) check(where, 'every Download button gets the newest installer', newest.links.length >= 2 && newest.links.every(h => h.endsWith('/KoZo-Installer-9.9.9.exe')), newest.links.join(' | '))
   check(where, 'the size is what was asked for', (await ev('innerWidth')) === width, await ev('innerWidth'))
   await shot('hero')
 
@@ -194,6 +214,27 @@ async function runSize([name, width, height, touch], port) {
   check(where, 'the top bar fits on one line', !first.hudOverlap && !first.hudPast)
   check(where, 'the hero starts below the top bar', first.copyTop >= first.hudBottom - 1, Math.round(first.copyTop))
   if (height >= 720 && width > 880) check(where, 'Download is on the first screen', first.ctaBottom <= first.vh, Math.round(first.ctaBottom))
+
+  // ── The wheel glides, and so do links to a part of the page ──
+  if (!touch) {
+    const watch = (ms) => ev(`new Promise(done => { const ys = [], t0 = performance.now(); (function f(now) { ys.push(scrollY); if (now - t0 < ${ms}) requestAnimationFrame(f); else done(ys) })(t0) })`)
+    await scrollTo(0, 300)
+    let seen = watch(1100)
+    await sleep(40)
+    await cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: Math.round(width / 2), y: Math.round(height / 2), deltaX: 0, deltaY: 300 })
+    let ys = await seen
+    let steps = new Set(ys.filter(v => v > 2 && v < 298).map(Math.round)).size
+    check(where, 'the wheel glides instead of jumping', steps >= 6, steps + ' steps')
+    check(where, '...and lands where the wheel asked', Math.abs(ys[ys.length - 1] - 300) <= 2, Math.round(ys[ys.length - 1]))
+    await scrollTo(0, 300)
+    const goal = await ev(`document.querySelector('#dive').getBoundingClientRect().top + scrollY - parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop)`)
+    seen = watch(1800)
+    await press('.hero-copy .btn-text')
+    ys = await seen
+    steps = new Set(ys.filter(v => v > 2 && v < goal - 2).map(Math.round)).size
+    check(where, '"See it work" glides to the tour', steps >= 6 && Math.abs(ys[ys.length - 1] - goal) <= 3, steps + ' steps, ended ' + Math.round(ys[ys.length - 1]) + ' of ' + Math.round(goal))
+    await scrollTo(0, 300)
+  }
 
   // ── Titles: one width, inside their box ──
   const titles = await ev(`[...document.querySelectorAll('[data-fit]')].map(b => {
@@ -423,6 +464,10 @@ async function runMotionOff(port) {
   check(name, 'its switch says off', (await ev(`document.querySelector('#motion-toggle').getAttribute('aria-checked')`)) === 'false')
   check(name, 'everything is still there', (await ev(`document.querySelectorAll('.beat img').length`)) === 3 && (await ev(`getComputedStyle(document.querySelector('.beat figcaption')).position`)) === 'static')
   check(name, 'no sideways scrolling', (await ev('document.documentElement.scrollWidth')) <= (await ev('innerWidth')) + 1)
+  await ev(`window.__wheel = null; addEventListener('wheel', e => { window.__wheel = e.defaultPrevented }); true`)
+  await win.webContents.sendInputEvent({ type: 'mouseWheel', x: 700, y: 450, deltaX: 0, deltaY: -120 })
+  await sleep(300)
+  check(name, 'with Animations off the wheel is the browser\'s own', (await ev('window.__wheel')) === false, String(await ev('window.__wheel')))
   check(name, 'no errors', errors.length === 0, errors.slice(0, 2).join(' | '))
   win.destroy()
 }
