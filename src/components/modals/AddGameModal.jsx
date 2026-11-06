@@ -362,7 +362,7 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
           )}
           {!hasSgdbKey && (
             <div className={s.searchHint}>
-              Not on Steam? Add a free SteamGridDB key in Settings, Steam, to find covers for any game.
+              Not on Steam? Add a free SteamGridDB key in Settings, Connections, Advanced, to find covers for any game.
             </div>
           )}
 

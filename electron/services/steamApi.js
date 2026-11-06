@@ -221,12 +221,6 @@ async function getGlobalAchievementPercentages(appId) {
 // The page rows are zipped onto the percent-sorted api list; if the page can't
 // be fetched/validated we degrade to api-names-only (matching still works —
 // unlock recording only needs api names). Returns getSchemaForGame's shape.
-function decodeEntities(s) {
-  return String(s || '')
-    .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-}
-
 async function getSchemaKeyless(appId) {
   try {
     const data = await getJSON(

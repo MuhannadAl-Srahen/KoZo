@@ -43,7 +43,9 @@ function create() {
       allowRunningInsecureContent: false,
     },
   })
-  if (app.isPackaged) {
+  // Like the main window and the overlay: tests run the built app with KOZO_RENDERER=dist, and
+  // without it this popup came up blank in every test, so nothing ever looked at it.
+  if (app.isPackaged || process.env.KOZO_RENDERER === 'dist') {
     _win.loadFile(path.join(__dirname, '../renderer-dist/index.html'), { query: { tray: '1' } })
   } else {
     _win.loadURL('http://localhost:5173?tray=1')

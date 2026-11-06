@@ -517,7 +517,7 @@ export default function GameDetail() {
         lines.push('This game has no Steam achievements at all.')
       } else if (diag.error === 'invalid_key') {
         variant = 'error'
-        lines.push('Steam rejected your Web API key. Check it in Settings → Steam.')
+        lines.push('Steam rejected your Web API key. Check it in Settings, Connections, Advanced.')
       } else if (diag.error) {
         variant = 'error'
         lines.push(`Steam error: ${diag.error}`)
@@ -640,7 +640,7 @@ export default function GameDetail() {
         setInfo({
           variant: 'warning',
           title: 'Unlocks found, but no achievement list to match them against',
-          message: 'Your crack is saving unlocks, but KoZo couldn\'t fetch this game\'s achievement list from Steam yet. Check the AppID (Edit game), or add a Steam API key in Settings → Steam, then run this check again.',
+          message: 'Your crack is saving unlocks, but KoZo couldn\'t fetch this game\'s achievement list from Steam yet. Check the AppID (Edit game), or add a Steam API key in Settings, Connections, Advanced, then run this check again.',
           lines,
         })
         break
@@ -1179,7 +1179,7 @@ export default function GameDetail() {
                       <IconAlertTriangle size={15} stroke={1.8} className={s.privacyIcon} />
                       <div>
                         {syncPrivacyError === 'profile_not_found'
-                          ? 'Your Steam profile could not be read. Check the Steam ID in Settings → Steam.'
+                          ? 'Your Steam profile could not be read. Check your Steam account in Settings, Connections.'
                           : 'Steam won\'t return unlocks for this game over the web, usually because it isn\'t owned on your Steam account (Steam reports that as "profile is not public" either way), or because your profile\'s Game details are private. KoZo still reads unlocks from the Steam app on this PC, so this only costs you Steam\'s unlock dates.'}
                       </div>
                     </div>

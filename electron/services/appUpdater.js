@@ -49,26 +49,33 @@ function getAutoUpdater() {
       lastPct = percent
       setState({ state: 'downloading', percent })
     })
-    autoUpdater.on('update-downloaded', async (info) => {
+    autoUpdater.on('update-downloaded', (info) => {
       setState({ state: 'ready', version: info?.version || _state.version, notes: notesText(info?.releaseNotes) || _state.notes, percent: 100 })
-      try {
-        const { dialog } = require('electron')
-        const r = await dialog.showMessageBox({
-          type: 'info',
-          title: 'KoZo update ready',
-          message: `KoZo ${info?.version || ''} has been downloaded.`,
-          detail: 'Restart now to apply the update, or it installs automatically the next time you quit.',
-          buttons: ['Restart now', 'Later'],
-          defaultId: 0,
-          cancelId: 1,
-        })
-        if (r.response === 0) autoUpdater.quitAndInstall()
-      } catch (e) {
-        logger.warn('appUpdater: update-downloaded dialog failed', { message: e.message })
-      }
+      // Never over a game: the download can finish mid-game (KoZo starts with Windows, a game
+      // starts right after), and a box popping up can pull a full-screen game out of focus. The
+      // in-app bar says it's ready meanwhile; the question waits until no game is running.
+      require('./processWatcher').runWhenIdle('updateReady', () => { askToRestart(info) })
     })
   }
   return autoUpdater
+}
+
+async function askToRestart(info) {
+  try {
+    const { dialog } = require('electron')
+    const r = await dialog.showMessageBox({
+      type: 'info',
+      title: 'KoZo update ready',
+      message: `KoZo ${info?.version || ''} has been downloaded.`,
+      detail: 'Restart now to apply the update, or it installs automatically the next time you quit.',
+      buttons: ['Restart now', 'Later'],
+      defaultId: 0,
+      cancelId: 1,
+    })
+    if (r.response === 0) getAutoUpdater().quitAndInstall()
+  } catch (e) {
+    logger.warn('appUpdater: update-downloaded dialog failed', { message: e.message })
+  }
 }
 
 // Startup check — fire-and-forget, never throws outward.
@@ -201,4 +208,4 @@ async function fetchReleaseNotes(version) {
   return { version, notes: String(r.data?.body || '').trim(), url: r.data?.html_url || null }
 }
 
-module.exports = { setupAutoUpdate, checkForUpdates, fetchLatestRelease, isNewer, getState, installUpdate, fetchReleaseNotes }
+module.exports = { setupAutoUpdate, checkForUpdates, fetchLatestRelease, isNewer, getState, installUpdate, fetchReleaseNotes, getAutoUpdater }
