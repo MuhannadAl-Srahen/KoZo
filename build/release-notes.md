@@ -18,3 +18,6 @@ New in 1.9
 Fixed in 1.9.2
 • The "update ready" question never pops up while you're playing.
 • Messages that sent you to a Settings tab that no longer exists now point to Connections.
+• Games that start without a launcher are labeled No launcher everywhere.
+• The tray popup is only as tall as what it shows.
+• Easier-to-read labels on discount cards and in Scan PC.

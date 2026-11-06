@@ -11,7 +11,7 @@
 // webContents.executeJavaScript. Prints PASS/FAIL like test-parsers.js and
 // exits 1 on any failure. Never touches your real KoZo data (own userData).
 
-const { app } = require('electron')
+const { app, BrowserWindow } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
@@ -99,6 +99,7 @@ app.whenReady().then(async () => {
     const list = await api.gameList.list({ limit: 50 })
     for (const row of (list.data?.items || [])) await api.gameList.update(row.id, { status: 'want_to_play' })
     await api.games.update(ids[2], { completion_status: 'finished' })
+    await api.games.update(ids[1], { is_cracked: 1 })   // a game with no launcher: its page must not say cracked
     return ids
   })()`)
   check('seed 3 games', Array.isArray(seeded) && seeded.length === 3, JSON.stringify(seeded))
@@ -113,6 +114,7 @@ app.whenReady().then(async () => {
     ['#/activity?tab=overview', 'Activity overview', false], ['#/activity?tab=sessions', 'Activity sessions', false],
     ['#/activity?tab=achievements', 'Activity achievements', false], ['#/profile', 'Profile', false],
     ['#/settings', 'Settings', false], [`#/game/${seeded?.[0]}`, 'Game page', false],
+    [`#/game/${seeded?.[1]}`, 'Game page, no launcher', false],
   ]
   for (const [hash, label, hasMenu] of pages) {
     const before = errors.length
@@ -120,11 +122,15 @@ app.whenReady().then(async () => {
     const st = await ev(`(() => {
       const main = document.querySelector('.app-main')
       return { text: (main?.innerText || '').trim().length, boundary: /Something went wrong/i.test(document.body.innerText),
-               over: main ? main.scrollWidth > main.clientWidth + 2 : true }
+               over: main ? main.scrollWidth > main.clientWidth + 2 : true,
+               crack: (document.body.innerText.match(/.{0,30}\\bcrack(ed|s)?\\b.{0,30}/i) || [''])[0] }
     })()`)
     check(`${label}: renders`, st.text > 20 && !st.boundary, JSON.stringify(st))
     check(`${label}: no errors`, errorsSince(before).length === 0, errorsSince(before).join(' | '))
     check(`${label}: no sideways scroll`, !st.over)
+    // The app's words match the site's: games with no launcher, never cracked (the maker's call).
+    // Pages listing Steam's store are skipped: a game there can really be called "Crack".
+    if (!/^#\/(upcoming|like|deals)/.test(hash)) check(`${label}: never says cracked`, !st.crack, st.crack)
     if (hasMenu) {
       const menu = await ev(`(async () => {
         const card = document.querySelector('.app-main [data-gpnav]')
@@ -156,6 +162,39 @@ app.whenReady().then(async () => {
     return out
   })()`)
   check('Settings: every tab renders', tabs.length > 3 && tabs.every(Boolean), JSON.stringify(tabs))
+  const crackTabs = await ev(`(async () => {
+    const out = [], sel = '.app-main nav[aria-label="Settings sections"] button'
+    for (let i = 0; i < document.querySelectorAll(sel).length; i++) {
+      document.querySelectorAll(sel)[i].click()
+      await new Promise(r => setTimeout(r, 400))
+      const m = document.body.innerText.match(/.{0,30}\\bcrack(ed|s)?\\b.{0,30}/i)
+      if (m) out.push(m[0])
+    }
+    return out
+  })()`)
+  check('Settings: no tab says cracked', crackTabs.length === 0, crackTabs.join(' | '))
+
+  // The Edit window of a game with no launcher, More options open: its Store option said
+  // "Cracked" after the rest of the app had stopped saying it.
+  await go(`#/game/${seeded?.[1]}`, 1500)
+  const editText = await ev(`(async () => {
+    const more = [...document.querySelectorAll('button')].find(x => x.title === 'Game options')
+    if (!more) return 'no menu button'
+    more.click()
+    await new Promise(r => setTimeout(r, 300))
+    const edit = [...document.querySelectorAll('button')].find(b => /^\\s*edit game\\s*$/i.test(b.innerText))
+    if (!edit) return 'no edit item'
+    edit.click()
+    await new Promise(r => setTimeout(r, 700))
+    const dlg = document.querySelector('[role=dialog]')
+    if (!dlg) return 'no dialog'
+    ;[...dlg.querySelectorAll('button')].find(b => /more options/i.test(b.innerText))?.click()
+    await new Promise(r => setTimeout(r, 300))
+    return document.querySelector('[role=dialog]')?.innerText || 'closed'
+  })()`)
+  check('Edit: opens for a game with no launcher', /No launcher/.test(editText), editText.slice(0, 80))
+  check('Edit: never says cracked', !/\bcrack(ed|s)?\b/i.test(editText), (editText.match(/.{0,30}\bcrack.{0,30}/i) || [''])[0])
+  await escape()
 
   // Backups: a copy in a folder of your own (a path skips the folder dialog).
   const copyTo = fs.mkdtempSync(path.join(os.homedir(), '.kozo-smoke-copy-'))
@@ -1144,6 +1183,29 @@ app.whenReady().then(async () => {
     check('overlay: timer bar animates', look.barAnim !== 'none', look.barAnim)
     check('overlay: no errors', overlayErrors.length === 0, overlayErrors.join(' | '))
 
+  }
+
+  // ── Tray popup: its own size, and as tall as what it shows ──
+  // It was blank in every test (it ignored KOZO_RENDERER), then zoomed to 80% by the main
+  // window's scale rule once it learned to fit its content.
+  {
+    const tw = require(path.join(root, 'electron', 'trayWindow.js'))
+    tw.show({ x: 900, y: 700, width: 24, height: 24 })
+    let twin = null
+    for (let i = 0; i < 60 && !twin; i++) { await sleep(150); twin = BrowserWindow.getAllWindows().find(w => /tray=1/.test(w.webContents.getURL())) || null }
+    check('tray: the popup opens', !!twin)
+    if (twin) {
+      await sleep(1500)
+      const st = await twin.webContents.executeJavaScript(`(() => {
+        const p = document.querySelector('[class*=panel]')
+        return { text: document.body.innerText.trim(), zoom: window.kozo.ui.getZoom(), w: innerWidth,
+                 gap: p ? Math.round(innerHeight - p.getBoundingClientRect().bottom) : -1, clipped: p ? p.scrollHeight > p.clientHeight + 1 : true }
+      })()`, true)
+      check('tray: shows the profile and a way into KoZo', /Open KoZo/.test(st.text) && /Lv \d/.test(st.text), st.text.slice(0, 80))
+      check('tray: keeps its own size', st.zoom === 1 && st.w === 340, JSON.stringify({ zoom: st.zoom, w: st.w }))
+      check('tray: as tall as what it shows', st.gap >= 4 && st.gap <= 8 && !st.clipped, JSON.stringify({ gap: st.gap, clipped: st.clipped }))
+      tw.hide()
+    }
   }
 
   check('no renderer errors overall', errors.length === 0, errors.join(' | '))

@@ -447,7 +447,7 @@
   border-radius: 0 var(--r-card) 0 var(--r-sm);
   background: var(--a);
   color: var(--accent-ink);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 800;
   text-transform: uppercase;
 }

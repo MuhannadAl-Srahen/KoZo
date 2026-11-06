@@ -337,7 +337,7 @@ export default function BackupsTab({ onManageSaves }) {
       {offPcOpen && (
         <Modal title="Keep a copy off this PC" icon={<IconCloudUp size={16} />} onClose={() => setOffPcOpen(false)} width={500}
           footer={<button type="button" className={ms.btnCancel} onClick={() => setOffPcOpen(false)}>Close</button>}>
-          <p className={b.foldNote}>Free, in your own storage. Pick one, and KoZo keeps it up to date.</p>
+          <p className={b.foldNote}>In your own storage. Pick one, and KoZo keeps it up to date.</p>
           <div className={b.actionsCol}>
             {clouds.map(c => {
               const Icon = CLOUD_ICONS[c.id] || IconCloud

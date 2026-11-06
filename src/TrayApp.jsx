@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   IconPlayerPlayFilled, IconPlayerPause, IconPlayerPlay, IconTrophy, IconClock,
   IconLayoutDashboard, IconChartBar, IconPower, IconDeviceGamepad2, IconMoonStars,
@@ -32,6 +32,26 @@ function Cover({ g, className }) {
 export default function TrayApp() {
   const [data, setData] = useState(null)
   const [, setTick] = useState(0)
+  const panelRef = useRef(null)
+
+  // The window is only as tall as this panel: measured after each change (layout is read
+  // directly, so it works before the window is shown) and whenever a part of it resizes.
+  // scrollHeight, not the box: the panel can't be taller than the window yet, so its box
+  // would never report the content that doesn't fit.
+  useLayoutEffect(() => {
+    const el = panelRef.current
+    if (!el || !data) return
+    let last = 0
+    const send = () => {
+      const h = Math.ceil(el.scrollHeight) + 2 + 12   // its 1px border, and the 6px inset top and bottom
+      if (h !== last) { last = h; window.kozo?.api?.tray?.fit?.(h) }
+    }
+    send()
+    const ro = new ResizeObserver(send)
+    ro.observe(el)
+    for (const part of el.children) ro.observe(part)
+    return () => ro.disconnect()
+  }, [data])
 
   async function load() {
     const res = await window.kozo?.api?.tray?.data?.()
@@ -60,7 +80,7 @@ export default function TrayApp() {
     })
   }
 
-  if (!data) return <div className={s.panel} />
+  if (!data) return <div className={`${s.panel} ${s.panelLoading}`} />
 
   const { profile, live, recent, todaySec, paused } = data
   const now = Date.now()
@@ -68,7 +88,7 @@ export default function TrayApp() {
   const today = todaySec + live.reduce((n, g) => n + Math.max(0, liveSec(g)), 0)
 
   return (
-    <div className={s.panel}>
+    <div className={s.panel} ref={panelRef}>
       <header className={s.head}>
         {profile.avatar
           ? <img className={s.avatar} src={fileUrl(profile.avatar)} alt="" />

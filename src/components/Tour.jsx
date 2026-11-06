@@ -24,14 +24,14 @@ const STEPS = [
   {
     route: '/', target: 'scan-pc',
     title: 'Find your games in one click',
-    body: 'Scan PC looks through your drives for Steam, Epic, GOG, Xbox and cracked games, then lets you pick which ones to add.',
+    body: 'Scan PC looks through your drives for Steam, Epic, GOG, Xbox and games with no launcher, then lets you pick which ones to add.',
     action: { label: 'Scan my PC now', click: true },
     waitText: 'Scanning your PC. This can take a minute, the results open by themselves.',
   },
   {
     route: '/', target: 'add-game',
     title: 'Or add any game yourself',
-    body: 'Search Steam or point KoZo at any .exe. Offline and cracked games work too.',
+    body: 'Search Steam or point KoZo at any .exe. Games with no launcher work too.',
     action: { label: 'Add a game', click: true },
   },
   {
@@ -283,7 +283,7 @@ function Welcome() {
       <h2 className={s.heroTitle}>Welcome to KoZo</h2>
       <p className={s.body}>
         KoZo spots the games you launch, records your playtime and syncs achievements, even for
-        cracked and offline games. Everything stays on your PC. Let's take a quick tour of the real app.
+        games with no launcher at all. Everything stays on your PC. Let's take a quick tour of the real app.
       </p>
       <div className={s.features}>
         <div className={s.feature}><IconChartBar size={18} /><span>Tracks itself</span></div>

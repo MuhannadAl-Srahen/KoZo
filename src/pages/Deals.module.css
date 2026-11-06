@@ -62,8 +62,8 @@
   padding: 4px 8px; border-radius: 10px; background: color-mix(in srgb, #0b0b12 72%, transparent);
   font-size: var(--fs-lg); font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums;
 }
-.scoreNum i { margin-left: 1px; font-size: 9px; font-style: normal; font-weight: 700; opacity: 0.7; }
-.score small { font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; margin-top: 3px; opacity: 0.9; }
+.scoreNum i { margin-left: 1px; font-size: 10px; font-style: normal; font-weight: 700; opacity: 0.7; }
+.score small { font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; margin-top: 3px; opacity: 0.9; }
 .score_great { color: var(--success); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--success) 55%, transparent); }
 .score_good { color: var(--a); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a) 50%, transparent); }
 .score_ok { color: var(--text-secondary); }

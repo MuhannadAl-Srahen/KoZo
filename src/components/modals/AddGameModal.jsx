@@ -534,14 +534,14 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
             <label className={s.label}>Copy type</label>
             <div className={s.pills}>
               <button type="button" className={`${s.pill} ${!isCracked ? s.pillActive : ''}`} onClick={() => setIsCracked(0)}>Official</button>
-              <button type="button" className={`${s.pill} ${isCracked ? s.pillActive : ''}`} onClick={() => setIsCracked(1)}>Cracked / offline</button>
+              <button type="button" className={`${s.pill} ${isCracked ? s.pillActive : ''}`} onClick={() => setIsCracked(1)}>No launcher</button>
             </div>
             <div className={s.inputHint}>
               {isCracked
-                ? 'Launches the local .exe directly (never Steam). Reads achievements from crack emulator files (Goldberg, CODEX, etc).'
+                ? 'Launches the local .exe directly (never Steam). Reads achievements from emulator files (Goldberg, CODEX and others).'
                 : selected
                   ? 'Syncs achievements via Steam API after each session.'
-                  : 'Mark as Cracked if this is not a legitimate copy from Steam, GOG, Epic, etc.'
+                  : 'Choose No launcher if the game doesn\'t start from Steam, GOG, Epic or another launcher.'
               }
             </div>
           </div>
@@ -567,8 +567,8 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
                 ))}
               </div>
               <div className={s.inputHint}>
-                Shown as a badge on the cover. KoZo only syncs achievements for Steam and
-                cracked games. Other launchers track playtime &amp; sessions only.
+                Shown as a badge on the cover. KoZo syncs achievements for Steam games and games
+                with no launcher. Other launchers track playtime and sessions only.
               </div>
             </div>
           )}

@@ -3139,6 +3139,9 @@ handle('tray:data', () => {
   }
 })
 
+// The popup's panel height: the window is only as tall as what it shows.
+handle('tray:fit', (height) => { require('./trayWindow').fit(height); return true })
+
 handle('tray:action', async (action, arg) => {
   const trayWindow = require('./trayWindow')
   const watcher = require('./services/processWatcher')
