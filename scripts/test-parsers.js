@@ -1388,8 +1388,79 @@ async function installCheckTests() {
   }
 }
 
+// The "update ready, restart?" box never pops up over a game: the download can finish
+// mid-game, and a box there can pull a full-screen game out of focus.
+async function updaterTests() {
+  const Module = require('module')
+  const { EventEmitter } = require('events')
+  const fakeUpdater = Object.assign(new EventEmitter(), { quitAndInstall() {}, checkForUpdates: async () => {} })
+  let asked = 0
+  const fakeElectron = {
+    app: { isPackaged: false, getVersion: () => '1.0.0', getPath: () => require('os').tmpdir() },
+    dialog: { showMessageBox: async () => { asked++; return { response: 1 } } },
+    BrowserWindow: { getAllWindows: () => [] },
+  }
+  let playing = true, queued = null
+  const pwPath = require.resolve(path.join(__dirname, '..', 'electron', 'services', 'processWatcher.js'))
+  const upPath = require.resolve(path.join(__dirname, '..', 'electron', 'services', 'appUpdater.js'))
+  const savedPw = require.cache[pwPath]
+  require.cache[pwPath] = { id: pwPath, filename: pwPath, loaded: true, exports: {
+    isSessionActive: () => playing,
+    runWhenIdle: (key, fn) => { if (!playing) fn(); else queued = fn },
+  } }
+  delete require.cache[upPath]
+  const realLoad = Module._load
+  Module._load = function (req, ...rest) {
+    if (req === 'electron-updater') return { autoUpdater: fakeUpdater }
+    if (req === 'electron') return fakeElectron
+    return realLoad.call(this, req, ...rest)
+  }
+  try {
+    const up = require(upPath)
+    up.getAutoUpdater()
+    fakeUpdater.emit('update-downloaded', { version: '9.9.9' })
+    await new Promise(r => setTimeout(r, 20))
+    check('update: ready is known at once', up.getState().state === 'ready' && up.getState().version === '9.9.9')
+    check('update: no box while a game is running', asked === 0)
+    playing = false
+    if (queued) queued()
+    await new Promise(r => setTimeout(r, 20))
+    check('update: the box comes once the game is closed', asked === 1, `asked ${asked}`)
+    fakeUpdater.emit('update-downloaded', { version: '9.9.10' })
+    await new Promise(r => setTimeout(r, 20))
+    check('update: with no game it asks right away', asked === 2, `asked ${asked}`)
+  } finally {
+    Module._load = realLoad
+    delete require.cache[upPath]
+    if (savedPw) require.cache[pwPath] = savedPw; else delete require.cache[pwPath]
+  }
+}
+
+// Every "Settings, X" a message points people to is a real Settings tab. The Steam tab was
+// renamed Connections, and six messages kept sending people to a tab that no longer existed.
+function settingsPathTests() {
+  const fs = require('fs')
+  const srcDir = path.join(__dirname, '..', 'src')
+  const settings = fs.readFileSync(path.join(srcDir, 'pages', 'Settings.jsx'), 'utf8')
+  const tabs = new Set([...settings.matchAll(/key: '[a-z]+',\s+label: '([A-Za-z ]+)'/g)].map(m => m[1]))
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(path.join(d, e.name)) : /\.jsx?$/.test(e.name) ? [path.join(d, e.name)] : [])
+  const bad = []
+  for (const f of walk(srcDir)) {
+    fs.readFileSync(f, 'utf8').split('\n').forEach((line, i) => {
+      if (/^\s*(\/\/|\*|\/\*)/.test(line)) return
+      for (const m of line.replace(/\/\/.*$/, '').matchAll(/(?<![A-Za-z])Settings(?:,| →| >) ?([A-Z][a-z]+)/g)) {
+        if (!tabs.has(m[1])) bad.push(`${path.relative(srcDir, f)}:${i + 1} ${m[1]}`)
+      }
+    })
+  }
+  check('settings: the tab names were read', tabs.size >= 8, [...tabs].join(','))
+  check('settings: every "Settings, X" in a message is a real tab', bad.length === 0, bad.join(' | '))
+}
+
 ;(async () => {
+  settingsPathTests()
   await installCheckTests()
+  try { await updaterTests() } catch (e) { check('updater tests ran', false, e.message) }
   try { await discordTests() } catch (e) { check('discord tests ran', false, e.message) }
   console.log(`\n${pass} passed, ${fail} failed`)
   if (fail > 0) process.exitCode = 1

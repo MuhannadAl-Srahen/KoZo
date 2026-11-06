@@ -60,6 +60,22 @@ jobs:
           bunx vite build
           bunx electron-builder --publish always
 
+      # KoZo's "What's new" after an update shows the GitHub release's text, and electron-builder
+      # only puts build/release-notes.md in latest.yml. Notes that don't name this version are
+      # last release's, so they're left off rather than shown again.
+      - name: Release notes
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if head -n 1 build/release-notes.md | tr -d '\r' | grep -q "^KoZo ${version}\$"; then
+            gh release edit "$GITHUB_REF_NAME" --notes-file build/release-notes.md
+          else
+            echo "::warning::build/release-notes.md is not for ${version}, so the release has no notes"
+          fi
+
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:

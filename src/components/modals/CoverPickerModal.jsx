@@ -3,7 +3,7 @@ import { IconPhotoSearch, IconSearch, IconLoader2, IconCheck } from '@tabler/ico
 import Modal, { modalStyles as ms } from '../ui/Modal'
 import s from './CoverPickerModal.module.css'
 
-// Pick a cover from SteamGridDB (Settings → Steam → Covers for non-Steam games).
+// Pick a cover from SteamGridDB (the key is in Settings, Connections, Advanced).
 // Search by name, choose the matching game, click a cover to apply it; the
 // game's wide SteamGridDB banner is applied too when one exists.
 export default function CoverPickerModal({ game, onClose, onApplied }) {
@@ -21,7 +21,7 @@ export default function CoverPickerModal({ game, onClose, onApplied }) {
     setBusy(false)
     if (!res?.ok) {
       setError(/no_key/.test(res?.error || '')
-        ? 'Add your free SteamGridDB key in Settings, Steam, Covers for non-Steam games.'
+        ? 'Add your free SteamGridDB key in Settings, Connections, Advanced.'
         : /invalid_key/.test(res?.error || '') ? 'SteamGridDB rejected the saved key. A key has 32 characters: paste the whole key in Settings.' : (res?.error || 'Search failed.'))
       setMatches([])
       return

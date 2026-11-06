@@ -1932,7 +1932,7 @@ function AboutTab() {
           {[
             ['Platform',            'Windows (Electron 41)'],
             ['Runtime',             'React 19 + SQLite'],
-            ['Data storage',        'Local, nothing leaves your PC'],
+            ['Data storage',        'On this PC. Backups go only where you choose'],
             ['Steam integration',   'Steam Web API (optional). Public profiles sync without a key'],
             ['Crack support',       'Goldberg, CODEX, EMPRESS, ALI213, SSE, CreamAPI, SKIDROW, Reloaded, online-fix'],
           ].map(([k, v]) => (

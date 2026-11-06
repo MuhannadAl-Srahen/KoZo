@@ -12,6 +12,7 @@ Local-first Windows game tracker: Electron 41 (main, CommonJS) + React 19 / Vite
 - VS Code's terminal sets `ELECTRON_RUN_AS_NODE=1`, so run Electron through `env -u ELECTRON_RUN_AS_NODE` there, or `require('electron')` fails with "Cannot find module".
 - `npm test` = parsers + `vite build` + `electron scripts/smoke-test.js`: the real app on a throwaway profile (own userData, `KOZO_RENDERER=dist` loads `renderer-dist`): every page, right-click menus, narrow width, controller across page changes, Pick for me, Big Picture. CI runs it before publishing.
 - CI: `.github/workflows/release.yml`. Runs on `v*` tags, using bun on windows-latest, and publishes a GitHub release that electron-updater reads.
+- Release notes: `build/release-notes.md`, first line `KoZo <version>`. electron-builder puts it in `latest.yml`, and `release.yml` puts it on the GitHub release, which is what KoZo's "What's new" shows after an update. Rewrite it for every release: notes naming another version are left off (1.9.0 and 1.9.1 went out with none, so people saw only "Bug fixes and improvements.").
 
 ## Layout
 ```
@@ -87,7 +88,7 @@ Plain HTML, CSS and JS with no build step, published to GitHub Pages at `kozoapp
 | discordPresence | Discord Rich Presence over the local pipe (no package), settings `discord_presence` + `discord_client_id` (the user's own Discord app). Driven by `processWatcher.onChange`; connects only while a session is active, retries at most once a minute. |
 | launcherImport | Reads Epic manifests, the GOG registry (or `goggame-*.info`) and Xbox packages (`powershell.exe` Get-AppxPackage + MicrosoftGame.config). Part of Scan PC: `scanner:scan` merges them (pure `mergeLauncherGames`: a game in both is the launcher's, which knows how to start it); there is no separate button (the user's call). On launch an idle background pass broadcasts `launchers:found` for the Library strip (`launcher_seen` = reviewed keys). |
 | controllerWake | The combo in setting `pad_wake_combo` (Settings > Shortcuts: `guide` = Xbox button via XInputGetStateEx #100, default, falling back to LB + RB + Menu; `lbrbmenu`; `viewmenu`; `off`) held 1s, read by desktopProbe, calls `showFromAnywhere({ gamepad: true })`; `settings:set` restarts the probe via `setCombo`. In main.js, also bound to Ctrl+Shift+K, it brings KoZo to front and sends `gamepad:wake`. |
-| appUpdater | electron-updater: broadcasts `app:update` state for `UpdateBanner`, and `app:whatsNew` shows release notes once after an update. |
+| appUpdater | electron-updater: broadcasts `app:update` state for `UpdateBanner`, and `app:whatsNew` shows release notes once after an update (the GitHub release's text, so a release with none shows "Bug fixes and improvements."). Downloads by itself; the "Restart now / Later" box goes through `processWatcher.runWhenIdle`, because a box popping up mid-game can pull a full-screen game out of focus. Otherwise it installs on quit. |
 | trackingSelfTest, notifications | Settings → "Test achievement tracking"; notifications is a no-op. |
 
 ## Renderer

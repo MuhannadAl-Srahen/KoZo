@@ -342,7 +342,7 @@ function SteamConnect() {
         </button>
       )}
       {msg && <div className={s.err}>{msg}</div>}
-      <p className={s.note}>Your Steam profile's Game details must be Public for achievement sync. You can change this later in Settings, Steam.</p>
+      <p className={s.note}>Your Steam profile's Game details must be Public for achievement sync. You can change this later in Settings, Connections.</p>
     </div>
   )
 }
