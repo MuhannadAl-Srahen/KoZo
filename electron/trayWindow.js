@@ -11,6 +11,11 @@ const logger = require('./logger')
 
 const W = 340
 const H = 500
+// The popup is as tall as what it shows (the page reports its panel's height through
+// tray:fit). A fixed 500 px left a big empty middle on a day with nothing played.
+const MIN_H = 200
+const MAX_H = 640
+const FIT_WAIT_MS = 400
 const IDLE_DESTROY_MS = 3 * 60 * 1000
 const REFRESH_MS = 5000
 
@@ -18,8 +23,14 @@ let _win = null
 let _destroyTimer = null
 let _refreshTimer = null
 let _hiddenAt = 0
+let _height = H
+let _fitted = false
+let _place = null           // the work area, the x, and whether it hangs from the top
+let _pendingReveal = null
 
 function create() {
+  _height = H
+  _fitted = false
   _win = new BrowserWindow({
     width: W,
     height: H,
@@ -67,12 +78,33 @@ function position(trayBounds) {
     : screen.getCursorScreenPoint()
   const { workArea } = screen.getDisplayNearestPoint(point)
   let x = point.x - Math.round(W / 2)
-  let y = trayBounds && trayBounds.y < workArea.y + workArea.height / 2
-    ? workArea.y + 8                                   // taskbar on top
-    : workArea.y + workArea.height - H - 8             // taskbar at the bottom
   x = Math.max(workArea.x + 8, Math.min(x, workArea.x + workArea.width - W - 8))
-  y = Math.max(workArea.y + 8, Math.min(y, workArea.y + workArea.height - H - 8))
-  _win.setBounds({ x, y, width: W, height: H })
+  _place = { workArea, x, top: !!trayBounds && trayBounds.y < workArea.y + workArea.height / 2 }
+  applyBounds()
+}
+
+// Pure: where the popup goes for a height. It hangs from the taskbar's edge, so a new height
+// keeps that edge where it is.
+function boundsFor(place, height) {
+  const { workArea, x, top } = place
+  const h = Math.min(height, workArea.height - 16)
+  const y = top ? workArea.y + 8 : workArea.y + workArea.height - h - 8
+  return { x, y: Math.max(workArea.y + 8, y), width: W, height: h }
+}
+
+function applyBounds() {
+  if (!_win || _win.isDestroyed() || !_place) return
+  _win.setBounds(boundsFor(_place, _height))
+}
+
+// The page measured its panel. The first time, the popup waits for this before it shows.
+function fit(height) {
+  const h = Math.round(Math.max(MIN_H, Math.min(MAX_H, Number(height) || H)))
+  const changed = h !== _height
+  _height = h
+  _fitted = true
+  if (changed) applyBounds()
+  if (_pendingReveal) { const r = _pendingReveal; _pendingReveal = null; r() }
 }
 
 function push() {
@@ -86,14 +118,21 @@ function show(trayBounds) {
   const win = _win && !_win.isDestroyed() ? _win : create()
   position(trayBounds)
   const reveal = () => {
+    if (win.isDestroyed()) return
     win.show()
     win.focus()
     push()
     clearInterval(_refreshTimer)
     _refreshTimer = setInterval(push, REFRESH_MS)
   }
-  if (win.webContents.isLoading()) win.webContents.once('did-finish-load', reveal)
-  else reveal()
+  // A new popup first measures itself, so it doesn't show at the old size and then jump.
+  const revealFitted = () => {
+    if (_fitted) { reveal(); return }
+    _pendingReveal = reveal
+    setTimeout(() => { if (_pendingReveal === reveal) { _pendingReveal = null; reveal() } }, FIT_WAIT_MS)
+  }
+  if (win.webContents.isLoading()) win.webContents.once('did-finish-load', revealFitted)
+  else revealFitted()
 }
 
 function hide() {
@@ -113,4 +152,4 @@ function toggle(trayBounds) {
   show(trayBounds)
 }
 
-module.exports = { toggle, show, hide }
+module.exports = { toggle, show, hide, fit, boundsFor }

@@ -505,8 +505,8 @@ export default function GameDetail() {
     const lines = []
     if (d.achievementCount)   lines.push(`${d.achievementCount} achievements in schema`)
     if (d.playerUnlocksAdded) lines.push(`${d.playerUnlocksAdded} new Steam unlock${d.playerUnlocksAdded === 1 ? '' : 's'} imported`)
-    if (d.crackUnlocksAdded)  lines.push(`${d.crackUnlocksAdded} new crack unlock${d.crackUnlocksAdded === 1 ? '' : 's'} imported`)
-    if (d.schemaSkipped)      lines.push('Schema unavailable from Steam. The crack file scan still ran.')
+    if (d.crackUnlocksAdded)  lines.push(`${d.crackUnlocksAdded} new emulator unlock${d.crackUnlocksAdded === 1 ? '' : 's'} imported`)
+    if (d.schemaSkipped)      lines.push('Steam had no achievement list for it. The emulator file scan still ran.')
     if (diag && !diag.error) {
       lines.push(`Unlocks Steam reports for you: ${diag.steam_unlocks ?? 0}`)
       lines.push(`Stored in KoZo: ${diag.local_unlocked ?? 0} / ${diag.local_total ?? 0}`)
@@ -583,21 +583,21 @@ export default function GameDetail() {
         break
 
       case 'emu-not-persisting': {
-        const emu = diag.emulator || 'This crack\'s emulator'
+        const emu = diag.emulator || 'This game\'s emulator'
         setInfo({
           variant: 'warning',
-          title: 'Your crack never saves achievements to disk',
-          message: `${emu} created its achievements file but has never written a single unlock to it, even though the game shows popups. KoZo can't read what the crack doesn't save. You can mark achievements manually (click any achievement below → "Mark as Unlocked"), or replace the emulator with Goldberg/GSE, which does save unlocks.`,
+          title: 'This game\'s emulator never saves achievements to disk',
+          message: `${emu} created its achievements file but has never written a single unlock to it, even though the game shows popups. KoZo can't read what the emulator doesn't save. You can mark achievements manually (click any achievement below → "Mark as Unlocked"), or replace the emulator with Goldberg/GSE, which does save unlocks.`,
           lines,
         })
         break
       }
 
       case 'unreadable-format': {
-        const emu = diag.emulator || 'This crack\'s emulator'
+        const emu = diag.emulator || 'This game\'s emulator'
         setInfo({
           variant: 'warning',
-          title: 'KoZo can\'t read this crack\'s achievement file yet',
+          title: 'KoZo can\'t read this emulator\'s achievement file yet',
           message: `${emu} IS saving to its achievements file, it's been modified since it was created, but in a layout KoZo's parser doesn't recognize. This isn't "never saves to disk"; it's a format gap on KoZo's end. You can mark achievements manually below for now while this gets sorted out.`,
           lines,
         })
@@ -640,7 +640,7 @@ export default function GameDetail() {
         setInfo({
           variant: 'warning',
           title: 'Unlocks found, but no achievement list to match them against',
-          message: 'Your crack is saving unlocks, but KoZo couldn\'t fetch this game\'s achievement list from Steam yet. Check the AppID (Edit game), or add a Steam API key in Settings, Connections, Advanced, then run this check again.',
+          message: 'The emulator is saving unlocks, but KoZo couldn\'t fetch this game\'s achievement list from Steam yet. Check the AppID (Edit game), or add a Steam API key in Settings, Connections, Advanced, then run this check again.',
           lines,
         })
         break
@@ -650,8 +650,8 @@ export default function GameDetail() {
         // single unlock — and KoZo can repair that in one click.
         setInfo({
           variant: 'warning',
-          title: 'This crack has achievements disabled',
-          message: 'The Goldberg emulator in this crack ships without an achievements list (steam_settings\\achievements.json is missing), so the game never tracks or saves ANY unlock, no matter how long you play. KoZo can write the list into the crack so tracking starts working. Unlocks from earlier sessions can\'t be recovered (the emulator never recorded them), mark those manually below.',
+          title: 'This game\'s emulator has achievements turned off',
+          message: 'The Goldberg emulator in this game ships without an achievements list (steam_settings\\achievements.json is missing), so the game never tracks or saves ANY unlock, no matter how long you play. KoZo can write the list into the game\'s folder so tracking starts working. Unlocks from earlier sessions can\'t be recovered (the emulator never recorded them), mark those manually below.',
           lines,
           actions: [
             {
@@ -664,7 +664,7 @@ export default function GameDetail() {
                   setInfo({
                     variant: 'success',
                     title: `Achievement tracking enabled (${r.data.count} achievements)`,
-                    message: 'Restart the game. From the next launch the crack will save every unlock, and KoZo will show it instantly.',
+                    message: 'Restart the game. From the next launch the emulator will save every unlock, and KoZo will show it instantly.',
                   })
                 } else {
                   const reason = r?.data?.reason
@@ -672,7 +672,7 @@ export default function GameDetail() {
                     variant: 'error',
                     title: 'Could not enable tracking',
                     message: r?.data?.error || r?.error ||
-                      (reason === 'no_schema'   ? 'KoZo couldn\'t fetch this game\'s achievement list from Steam to write into the crack.'
+                      (reason === 'no_schema'   ? 'KoZo couldn\'t fetch this game\'s achievement list from Steam to write into the game\'s folder.'
                      : reason === 'no_goldberg' ? 'Couldn\'t find the emulator\'s folder inside the game\'s install path.'
                      : 'Unknown error.'),
                   })
@@ -696,8 +696,8 @@ export default function GameDetail() {
       case 'no-emulator':
         setInfo({
           variant: 'warning',
-          title: 'No Steam emulator found in this crack',
-          message: 'KoZo checked the install folder (configs AND dlls) and found no Steam emulator at all, so this crack doesn\'t produce unlock files anywhere (some, like this one, use their own launcher\'s stats system instead of Steam). The achievement list is loaded, but there is no automatic unlock source for this build, mark achievements manually by clicking one below. If the game DOES show achievement popups in-game, play a bit and run this check again, the deep scan will catch any file the crack writes under this game\'s AppID.',
+          title: 'No Steam emulator found in this game\'s folder',
+          message: 'KoZo checked the install folder (configs AND dlls) and found no Steam emulator at all, so this copy doesn\'t produce unlock files anywhere (some, like this one, use their own launcher\'s stats system instead of Steam). The achievement list is loaded, but there is no automatic unlock source for this build, mark achievements manually by clicking one below. If the game DOES show achievement popups in-game, play a bit and run this check again, the deep scan will catch any file the crack writes under this game\'s AppID.',
           lines,
         })
         break
@@ -705,10 +705,10 @@ export default function GameDetail() {
       default:   // 'no-files'
         setInfo({
           variant: 'warning',
-          title: 'No crack achievement files found yet',
+          title: 'No emulator achievement files found yet',
           message: diag.installPath
-            ? 'Most emulators create their achievements file only after your first unlock in-game. KoZo also deep-scanned every save folder on this PC for this game\'s AppID and found nothing yet. Play a bit, unlock something, then check again. If the game shows popups but nothing ever appears here, the crack may not save unlocks at all, you can always mark achievements manually (click one below).'
-            : 'No install path set. Edit the game → Browse to the .exe. The install path is needed to detect the crack\'s emulator and its save files.',
+            ? 'Most emulators create their achievements file only after your first unlock in-game. KoZo also deep-scanned every save folder on this PC for this game\'s AppID and found nothing yet. Play a bit, unlock something, then check again. If the game shows popups but nothing ever appears here, the emulator may not save unlocks at all, you can always mark achievements manually (click one below).'
+            : 'No install path set. Edit the game → Browse to the .exe. The install path is needed to find the game\'s emulator and its save files.',
           lines,
         })
     }
@@ -845,7 +845,7 @@ export default function GameDetail() {
       {genres.slice(0, 5).map(g => <span key={g} className={s.genreChip} title={g}>{g}</span>)}
       {!!game.is_cracked && (
         <span className={s.crackBadge}>
-          CRACKED
+          No launcher
           {crackScanInfo?.sources?.length > 0 && <span className={s.crackBadgeSource}> · {crackScanInfo.sources.join(', ')}</span>}
         </span>
       )}
@@ -1187,7 +1187,7 @@ export default function GameDetail() {
 
                   {total === 0 ? (
                     game.is_cracked ? (
-                      <EmptyState Icon={IconTrophy} title="No achievements yet" desc="They appear here as soon as the crack writes your first unlock to disk." />
+                      <EmptyState Icon={IconTrophy} title="No achievements yet" desc="They appear here as soon as the emulator writes your first unlock to disk." />
                     ) : steamTracked ? (
                       <EmptyState Icon={IconTrophy} title="No achievements found" desc={'Run "Check achievements" from the ⋮ menu to pull this game\'s list from Steam.'} />
                     ) : (
@@ -1285,7 +1285,7 @@ export default function GameDetail() {
 
                 <div className={s.card}>
                   <div className={s.cardHead}><IconDeviceGamepad2 size={14} /> Game info</div>
-                  <div className={s.factRow}><span>Launcher</span><span>{game.is_cracked ? 'Cracked' : launcherLabel(game.source)}</span></div>
+                  <div className={s.factRow}><span>Launcher</span><span>{game.is_cracked ? 'No launcher' : launcherLabel(game.source)}</span></div>
                   <div className={s.factRow}><span>On this PC</span><span>{game.is_installed ? 'Installed' : 'Not installed'}</span></div>
                   {!!game.install_path && <div className={s.factRow}><span>Folder</span><button type="button" className={s.factBtn} onClick={handleOpenFolder} title={game.install_path}>Open folder</button></div>}
                   {artAppId && <div className={s.factRow}><span>Steam</span><button type="button" className={s.factBtn} onClick={() => window.kozo?.api?.shell?.openExternal(`https://store.steampowered.com/app/${artAppId}`)}>Store page</button></div>}

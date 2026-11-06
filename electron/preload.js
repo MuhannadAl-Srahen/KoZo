@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 24,
+  rev: 25,
   // Settings → Appearance → UI scale.
   ui: {
     setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
@@ -234,6 +234,8 @@ contextBridge.exposeInMainWorld('kozo', {
     tray: {
       data: () => ipcRenderer.invoke('tray:data'),
       action: (name, arg) => ipcRenderer.invoke('tray:action', name, arg),
+      // The popup's panel height, so the window is only as tall as what it shows.
+      fit: (height) => ipcRenderer.invoke('tray:fit', height),
     },
     releases: {
       unseen: () => ipcRenderer.invoke('releases:unseen'),

@@ -206,11 +206,11 @@ export function fileUrl(winPath, bust) {
 
 // ── Launchers / sources ─────────────────────────────────────────────────────
 // One source of truth for badge labels + colors. Steam achievements come from
-// the Steam Web API and cracked from emulator files; the other launchers have
+// the Steam Web API and no-launcher games from emulator files; the other launchers have
 // no achievement source KoZo can read.
 export const LAUNCHERS = {
   steam:   { label: 'Steam',   color: '#60a5fa' },
-  cracked: { label: 'Cracked', color: '#fbbf24' },
+  cracked: { label: 'No launcher', color: '#fbbf24' },   // the word the site uses too
   epic:    { label: 'Epic',    color: '#d1d5db' },
   gog:     { label: 'GOG',     color: '#c084fc' },
   xbox:    { label: 'Xbox',    color: '#4ade80' },

@@ -40,9 +40,9 @@ async function runSelfTest() {
         JSON.stringify({ [TEST_ACH_NAME]: { earned: true, earned_time: Math.floor(Date.now() / 1000) } }),
         'utf8'
       )
-      step('Create synthetic crack file (Goldberg format)', true, emuDir)
+      step('Create a test emulator file (Goldberg format)', true, emuDir)
     } catch (e) {
-      step('Create synthetic crack file (Goldberg format)', false, e.message)
+      step('Create a test emulator file (Goldberg format)', false, e.message)
       return { ok: false, steps }
     }
 
@@ -91,12 +91,12 @@ async function runSelfTest() {
       scan = await require('./crackWatcher').scanGameForCrackAchievements(gameId, { fresh: true })
       const hit = scan.hits?.[0]
       step(
-        'Crack scanner finds & parses the file',
+        'The emulator scanner finds and reads the file',
         (scan.added ?? 0) === 1,
         hit ? `matched via ${hit.source}: ${hit.path}` : `added=${scan.added} candidates=${scan.candidatesTried}`
       )
     } catch (e) {
-      step('Crack scanner finds & parses the file', false, e.message)
+      step('The emulator scanner finds and reads the file', false, e.message)
       return { ok: false, steps }
     }
 

@@ -35,6 +35,9 @@ function nextType(current, detected) {
   return cycle[(cycle.indexOf(current) + 1) % cycle.length]
 }
 
+// What a scan type is called on screen. The value stays 'Cracked' (it sets is_cracked).
+const typeLabel = (t) => (t === 'Cracked' ? 'No launcher' : t)
+
 export default function ScanResultModal({ results, onClose, onAdd, title }) {
   const [selected, setSelected]       = useState(() => new Set())
   const [nameEdits, setNameEdits]     = useState({})
@@ -166,7 +169,7 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
             <button key={t}
               className={`${s.typePill} ${typeFilter === t ? s.typePillActive : ''}`}
               onClick={() => setTypeFilter(t)}>
-              {t === 'all' ? `All (${results.length})` : t}
+              {t === 'all' ? `All (${results.length})` : typeLabel(t)}
             </button>
           ))}
         </div>
@@ -258,7 +261,7 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
                   }}
                   title={!canAdd(r) ? undefined : 'Click to change type'}
                 >
-                  {type}
+                  {typeLabel(type)}
                 </div>
 
                 {r.isInstalled && canAdd(r) && (

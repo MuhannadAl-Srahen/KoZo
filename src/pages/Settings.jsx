@@ -1213,7 +1213,7 @@ function ScanPCTab() {
           <span>Scan PC for Games</span>
         </div>
         <p className={s.sectionDesc}>
-          Scans your folders for installed games (Steam, Epic, GOG, cracked) and skips system apps. You pick which to add.
+          Scans your folders for installed games (Steam, Epic, GOG and games with no launcher) and skips system apps. You pick which to add.
         </p>
 
         <div className={s.pathList}>
@@ -1750,7 +1750,7 @@ const FEATURE_GROUPS = [
     title: 'Achievements',
     items: [
       { Icon: IconBrandSteam, name: 'Steam sync', go: '/activity?tab=achievements',        desc: 'Imports your unlocks via the Steam Web API, automatically while you play and after each session. No interval to set.' },
-      { Icon: IconTrophy,     name: 'Cracked-game sync', go: '/activity?tab=achievements', desc: 'Reads Goldberg, CODEX, RUNE, EMPRESS, SKIDROW and more, watched live, so unlocks appear instantly.' },
+      { Icon: IconTrophy,     name: 'Emulator achievements', go: '/activity?tab=achievements', desc: 'Reads Goldberg, CODEX, RUNE, EMPRESS, SKIDROW and more, watched live, so unlocks appear instantly.' },
       { Icon: IconBell,       name: 'Live game overlay', go: 'overlay:test', desc: 'A toast pops over your game the moment you unlock something, Steam-style, in your accent color.' },
       { Icon: IconDownload,   name: 'Achievement lists for any launcher', go: '/activity?tab=achievements', desc: "Xbox/Epic/other games auto-match a Steam achievement list on add, then tick off the ones you've earned." },
     ],
@@ -1758,7 +1758,7 @@ const FEATURE_GROUPS = [
   {
     title: 'Library',
     items: [
-      { Icon: IconSearch,         name: 'Scan PC', go: '/?scan=1',          desc: 'Finds installed games (Steam, Epic, GOG, Xbox, cracked) on your drives, with the right launcher badge, right from the Library toolbar.' },
+      { Icon: IconSearch,         name: 'Scan PC', go: '/?scan=1',          desc: 'Finds installed games (Steam, Epic, GOG, Xbox and games with no launcher) on your drives, with the right launcher badge, right from the Library toolbar.' },
       { Icon: IconDeviceGamepad2, name: 'Add manually', go: '/?add=1',     desc: 'Point KoZo at any .exe, perfect for offline games.' },
       { Icon: IconStar,           name: 'Favorites', go: '/',        desc: 'Star a game to pin it to the top of your Library and Game List.' },
       { Icon: IconList,           name: 'Game List', go: '/game-list',        desc: 'A backlog / wishlist with statuses, genres, search, and Spotify-style custom lists.' },
@@ -1776,7 +1776,7 @@ const FEATURE_GROUPS = [
   {
     title: 'Saves & Backups',
     items: [
-      { Icon: IconDeviceFloppy, name: 'Saves found for you', go: 'tab:data', desc: 'KoZo finds where each game saves by itself: known locations, cracked-game folders, Steam Cloud, and the folders a game writes while you play.' },
+      { Icon: IconDeviceFloppy, name: 'Saves found for you', go: 'tab:data', desc: 'KoZo finds where each game saves by itself: known locations, emulator folders, Steam Cloud, and the folders a game writes while you play.' },
       { Icon: IconArchive,      name: 'Automatic save backups', go: 'tab:data', desc: 'Before and after every session, with restore points by day. Only changed files take space. Restore any game, or all of them at once.' },
       { Icon: IconCloud,        name: 'Google Drive copy', go: 'tab:data', desc: 'Your saves and library copied to your Google Drive, so even a full format cannot take them. Get everything back on a new PC in one click.' },
     ],
@@ -1895,7 +1895,7 @@ function AboutTab() {
             <div className={s.aboutVersion}>Version {version || '…'}</div>
             <div className={s.aboutDesc}>
               A local-first game tracker for Windows. Track playtime, sessions, and
-              achievements, even for cracked and offline games.
+              achievements, even for games with no launcher at all.
             </div>
           </div>
         </div>
@@ -1934,7 +1934,7 @@ function AboutTab() {
             ['Runtime',             'React 19 + SQLite'],
             ['Data storage',        'On this PC. Backups go only where you choose'],
             ['Steam integration',   'Steam Web API (optional). Public profiles sync without a key'],
-            ['Crack support',       'Goldberg, CODEX, EMPRESS, ALI213, SSE, CreamAPI, SKIDROW, Reloaded, online-fix'],
+            ['Emulators',           'Goldberg, CODEX, EMPRESS, ALI213, SSE, CreamAPI, SKIDROW, Reloaded, online-fix'],
           ].map(([k, v]) => (
             <div key={k} className={s.aboutDetailRow}>
               <span className={s.aboutDetailKey}>{k}</span>
@@ -1948,7 +1948,7 @@ function AboutTab() {
       <section className={s.section}>
         <div className={s.sectionHeader}><IconStethoscope size={15} stroke={1.6} /><span>Diagnostics</span></div>
         <p className={s.sectionDesc}>
-          Verify the achievement pipeline end to end: KoZo plants a synthetic crack file,
+          Verify the achievement pipeline end to end: KoZo plants a test emulator file,
           runs the real scanner on it, records the unlock in the database, and fires the
           real in-game overlay toast, then cleans everything up.
         </p>

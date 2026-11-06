@@ -68,9 +68,9 @@ export default function EditGameModal({ game, onClose, onSaved }) {
 
   // A scanner/discovery-added cracked copy is stored as source='cracked', which isn't a store,
   // but without an option for it a stray pick would silently drop it.
-  const stores = game.source === 'cracked' ? [{ value: 'cracked', label: 'Cracked' }, ...STORES] : STORES
+  const stores = game.source === 'cracked' ? [{ value: 'cracked', label: 'No launcher' }, ...STORES] : STORES
   const summary = [
-    isCracked ? 'Cracked' : 'Official',
+    isCracked ? 'No launcher' : 'Official',
     stores.find(o => o.value === source)?.label,
     isInstalled ? 'Installed' : 'Not installed',
     runAsAdmin ? 'Runs as administrator' : null,
@@ -265,8 +265,8 @@ export default function EditGameModal({ game, onClose, onSaved }) {
           <OptionRow label="Installed on this PC">
             <Switch label="Installed on this PC" checked={!!isInstalled} onChange={v => setIsInstalled(v ? 1 : 0)} />
           </OptionRow>
-          <OptionRow label="Cracked copy" hint="Starts the file directly. Achievements come from its own files, not Steam.">
-            <Switch label="Cracked copy" checked={!!isCracked} onChange={v => setIsCracked(v ? 1 : 0)} />
+          <OptionRow label="No launcher" hint="Starts the file directly. Achievements come from emulator files, not Steam.">
+            <Switch label="No launcher" checked={!!isCracked} onChange={v => setIsCracked(v ? 1 : 0)} />
           </OptionRow>
           <OptionRow label="Run as administrator" hint="Turn this on if Play does nothing.">
             <Switch label="Run as administrator" checked={!!runAsAdmin} onChange={v => setRunAsAdmin(v ? 1 : 0)} />

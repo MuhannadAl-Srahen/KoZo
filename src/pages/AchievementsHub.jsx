@@ -134,7 +134,7 @@ export default function AchievementsHub() {
             <EmptyState
               Icon={IconTrophy}
               title="No achievements yet"
-              desc="Add Steam or cracked games and start unlocking. Every unlock lands here automatically."
+              desc="Add Steam games, or games with no launcher, and start unlocking. Every unlock lands here automatically."
             />
           )}
 
