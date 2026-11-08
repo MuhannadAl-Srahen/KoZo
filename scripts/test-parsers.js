@@ -231,7 +231,7 @@ console.log('\nupcoming top bar')
 {
   const src = require('fs').readFileSync(path.join(__dirname, '..', 'src', 'lib', 'upcomingPick.js'), 'utf8')
     .replace(/export function/g, 'function')
-  const { readPickMode, defaultPickMode, filterBuckets, pickDay } = new Function(src + '; return { readPickMode, defaultPickMode, filterBuckets, pickDay }')()
+  const { readPickMode, defaultPickMode, filterBuckets, pickDay, onlyIds, weekRows } = new Function(src + '; return { readPickMode, defaultPickMode, filterBuckets, pickDay, onlyIds, weekRows }')()
   check('the old "picked" choice means Like my games', readPickMode('picked') === 'like')
   check('the three choices read back', ['like', 'others', 'all'].every(m => readPickMode(m) === m))
   check('nothing chosen stays unchosen', readPickMode(null) === null && readPickMode('nonsense') === null)
@@ -255,6 +255,24 @@ console.log('\nupcoming top bar')
   check('a same-match tie goes to the more popular', pickDay([{ appid: 1, match: 5, popRank: 9 }, { appid: 2, match: 5, popRank: 3 }], 'like')[0].appid === 2)
   check('an others day: most popular first, 8 of them', pickDay(many, 'others').length === 8 && pickDay(many, 'others')[0].appid === 11)
   check('picking a day leaves the list alone', many[0].appid === 0)
+
+  // Steam's own picks (signed in to the Steam store) and its Monday-to-Friday weeks.
+  check('signed in to the Steam store starts on its picks', defaultPickMode({ picks: { 5: { pct: 80 } } }, true) === 'steam' && readPickMode('steam') === 'steam')
+  const only = onlyIds(buckets, new Set([2, 3]))
+  check('Steam picks hold only its games', only.all.map(g => g.appid).join() === '2,3' && !only.byDay.has('z') && only.byDay.get('x').length === 1)
+  check("a Steam day keeps Steam's order", pickDay([{ appid: 1, steamRank: 4 }, { appid: 2, steamRank: 1 }], 'steam')[0].appid === 2)
+  // Sunday Nov 8 2026: Steam starts on Monday Nov 9, like the maker's screenshot.
+  const games = new Map([['2026-11-09', [{ appid: 1 }]], ['2026-11-14', [{ appid: 2 }]], ['2026-11-18', [{ appid: 3 }]]])
+  const rows = weekRows(games, '2026-11-08', '2026-11-08')
+  check('weeks start on the Monday after a weekend', rows[0].cells[0].key === '2026-11-09' && rows[0].cells.length === 5, JSON.stringify(rows.map(r => r.key)))
+  check('a Saturday release shows on the Monday after', rows[1].cells[0].key === '2026-11-16' && rows[1].cells[0].list.some(g => g.appid === 2))
+  check('every weekday is a box, empty or not', rows[1].cells[2].list[0].appid === 3 && rows[1].cells[1].list.length === 0)
+  check('two weeks, no more', rows.length === 2, String(rows.length))
+  const mid = weekRows(new Map([['2026-11-11', [{ appid: 9 }]]]), '2026-11-11', '2026-11-11')
+  check('on a Wednesday the week starts on its Monday, the past days dimmed', mid[0].cells[0].key === '2026-11-09' && mid[0].cells[0].past && !mid[0].cells[2].past)
+  const cal = require(path.join(__dirname, '..', 'electron', 'services', 'steamStore.js')).calendarItems
+  check("Steam's calendar answer: id and date", JSON.stringify(cal({ arrAppInfos: [{ appid: 10, nReleaseDate: 1762700000 }, { appid: 0, nReleaseDate: 5 }, { appid: 11 }] })) === JSON.stringify([{ appid: 10, ts: 1762700000000 }]))
+  check('not signed in has no items', cal({ arrAppInfos: [], strResultMessage: 'Not logged in' }).length === 0 && cal(null).length === 0)
 }
 
 // src/lib/pickForMe.js is an ES module; load it as a plain function body.

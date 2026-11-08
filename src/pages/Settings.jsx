@@ -912,6 +912,7 @@ function SteamTab() {
               {signingIn ? <><IconLoader2 size={13} className="spin" /> Waiting…</> : (steamUserId ? 'Change account' : 'Sign in')}
             </button>
           </ConnRow>
+          <SteamStoreRow />
           <ConnRow icon={<IconBrandDiscord size={20} />} name="Discord"
             tone={discord.on && discord.msg?.type === 'success' ? 'ok' : discord.on && discord.msg ? 'warn' : 'muted'}
             status={discord.on ? (discord.msg?.text || 'On. Shows your game while you play.') : 'Off. Turn on to show the game you play on Discord.'}>
@@ -1078,6 +1079,31 @@ function useSgdb() {
     } else { setState('error'); setMsg(d?.message || res?.error || 'Could not check the key.') }
   }
   return { builtIn, key, setKey, saved, savedBad, state, msg, save, working: !savedBad && (builtIn || !!saved) }
+}
+
+// Steam's own picks on Upcoming: a sign-in to the Steam store on Steam's own page, in a
+// KoZo window (services/steamStore.js). Separate from the Steam account above, which only
+// reads your profile.
+function SteamStoreRow() {
+  const [state, setState] = useState(null)   // null = not known yet
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { window.kozo?.api?.steamStore?.isSignedIn?.().then(r => setState(!!(r?.ok && r.data))) }, [])
+  async function signIn() {
+    setBusy(true)
+    try { const r = await window.kozo?.api?.steamStore?.signIn?.(); if (r?.ok) setState(!!r.data) } finally { setBusy(false) }
+  }
+  async function signOut() { await window.kozo?.api?.steamStore?.signOut?.(); setState(false) }
+  return (
+    <ConnRow icon={<IconBrandSteam size={20} />} name="Steam's picks for you"
+      tone={state ? 'ok' : 'muted'}
+      status={state ? 'Signed in to the Steam store. Upcoming shows the games Steam picks for you.' : "Sign in on Steam's own page to see the games Steam picks for you on Upcoming. KoZo never sees your password."}>
+      {state
+        ? <button type="button" className={s.testBtn} onClick={signOut}>Sign out</button>
+        : <button type="button" className={s.testBtn} disabled={busy || state === null} onClick={signIn}>
+            {busy ? <><IconLoader2 size={13} className="spin" /> Waiting…</> : 'Sign in'}
+          </button>}
+    </ConnRow>
+  )
 }
 
 function ConnRow({ icon, name, status, tone = 'muted', children }) {

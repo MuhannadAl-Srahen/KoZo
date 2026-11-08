@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 27,
+  rev: 28,
   // Settings → Appearance → UI scale.
   ui: {
     setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
@@ -83,6 +83,13 @@ contextBridge.exposeInMainWorld('kozo', {
       get: (key) => ipcRenderer.invoke('settings:get', key),
       set: (key, value) => ipcRenderer.invoke('settings:set', key, value),
       getAll: () => ipcRenderer.invoke('settings:getAll'),
+    },
+    // Steam's Personal Calendar (Upcoming), signed in to the Steam store.
+    steamStore: {
+      calendar: () => ipcRenderer.invoke('steamStore:calendar'),
+      isSignedIn: () => ipcRenderer.invoke('steamStore:isSignedIn'),
+      signIn: () => ipcRenderer.invoke('steamStore:signIn'),
+      signOut: () => ipcRenderer.invoke('steamStore:signOut'),
     },
     steam: {
       testKey: (key) => ipcRenderer.invoke('steam:testKey', key),

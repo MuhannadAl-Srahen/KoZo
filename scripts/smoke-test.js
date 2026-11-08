@@ -819,13 +819,21 @@ app.whenReady().then(async () => {
       await new Promise(r => setTimeout(r, 100))
       if (document.querySelector('.app-main [class*=steamCapFrame]')) break
     }
-    const days = [...document.querySelectorAll('.app-main [class*=steamDay_]')].filter(d => d.querySelector('[class*=steamDayHead]'))
-    return { days: days.length, empty: days.filter(d => !d.querySelector('[class*=steamCapFrame]')).length, text: document.querySelector('.app-main').innerText }
+    // Steam's look: every weekday is a box, empty or not (data-games = its releases).
+    const days = [...document.querySelectorAll('.app-main [data-day]')].filter(d => Number(d.dataset.games) > 0)
+    const weeks = [...document.querySelectorAll('.app-main [class*=steamWeek_]')]
+    return {
+      days: days.length, empty: days.filter(d => !d.querySelector('[class*=steamCapFrame]')).length,
+      weeks: weeks.length, fiveEach: weeks.every(w => w.querySelectorAll('[data-day]').length === 5),
+      heads: [...document.querySelectorAll('.app-main [class*=steamWeekHead] span')].map(s => s.textContent.trim()).join(','),
+      text: document.querySelector('.app-main').innerText,
+    }
   })()`)
   // Offline there are no games at all, which isn't what this checks.
   if (upcoming.days) {
-    check('Upcoming: every day shows games', upcoming.empty === 0, `${upcoming.empty} of ${upcoming.days} days are empty`)
+    check('Upcoming: every day with releases shows games', upcoming.empty === 0, `${upcoming.empty} of ${upcoming.days} days are empty`)
     check('Upcoming: no "No picks" days', !/No picks/.test(upcoming.text))
+    check("Upcoming: Steam's Monday to Friday weeks", upcoming.weeks > 0 && upcoming.fiveEach && /^monday,tuesday,wednesday,thursday,friday$/i.test(upcoming.heads), JSON.stringify({ weeks: upcoming.weeks, fiveEach: upcoming.fiveEach, heads: upcoming.heads }))
   }
 
   // Upcoming's top bar, on made-up releases so it runs the same on GitHub's machine.
