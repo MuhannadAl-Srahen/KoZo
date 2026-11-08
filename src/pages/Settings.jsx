@@ -265,6 +265,39 @@ function GeneralTab() {
   )
 }
 
+// When a game starts: KoZo can get out of the way (setting minimize_on_play,
+// processWatcher minimizes the main window when it first sees the game).
+let minimizeOnPlayCache = null
+function GameStartSection() {
+  const [on, setOn] = useState(minimizeOnPlayCache ?? false)
+  useEffect(() => {
+    window.kozo?.api?.settings?.get?.('minimize_on_play').then(r => {
+      if (r?.ok) { minimizeOnPlayCache = r.data === '1'; setOn(minimizeOnPlayCache) }
+    })
+  }, [])
+  function toggle(v) {
+    setOn(v)
+    minimizeOnPlayCache = v
+    window.kozo?.api?.settings?.set('minimize_on_play', v ? '1' : '0')
+  }
+  return (
+    <section className={s.section}>
+      <div className={s.sectionHeader}>
+        <IconRocket size={15} stroke={1.6} />
+        <span>When a game starts</span>
+      </div>
+      <div className={s.toggleList}>
+        <ToggleRow
+          label="Minimize KoZo when a game starts"
+          desc="KoZo moves to the taskbar a moment after the game opens, wherever you started it from."
+          checked={on}
+          onChange={toggle}
+        />
+      </div>
+    </section>
+  )
+}
+
 // Idle / AFK: stop counting playtime after this long with no input.
 let idleCache = null
 let awayCache = null
@@ -1268,6 +1301,7 @@ function ScanPCTab() {
 function TrackingTab() {
   return (
     <div className={s.tabContent}>
+      <GameStartSection />
       <IdleSection />
       <ScanPCTab />
     </div>

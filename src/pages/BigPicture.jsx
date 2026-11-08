@@ -50,7 +50,7 @@ function useHeroArt(g) {
     steamHero.set(id, null)
     window.kozo?.api?.steam?.appAssets?.([id]).then(res => {
       const a = res?.ok ? res.data?.[id] : null
-      steamHero.set(id, a?.hero || a?.header || null)
+      steamHero.set(id, a?.hero2x || a?.hero || a?.header2x || a?.header || null)
       bump(n => n + 1)
     }).catch(() => {})
   }, [g?.id])

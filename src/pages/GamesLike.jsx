@@ -102,7 +102,7 @@ export function GamesLikeGrid({ appId, pageKey = 'like', compact = false }) {
   async function addToList(g) {
     setAdding(g.appid)
     const res = await window.kozo?.api?.gameList?.add?.({
-      steam_app_id: g.appid, name: g.name, banner_url: g.portrait || null,
+      steam_app_id: g.appid, name: g.name, banner_url: g.portrait2x || g.portrait || null,
       status: g.soon ? 'upcoming' : 'want_to_play', rating: null, game_id: null,
     })
     setAdding(null)
@@ -182,7 +182,7 @@ export function GamesLikeGrid({ appId, pageKey = 'like', compact = false }) {
           appId={open.appid}
           name={open.name}
           release={open.soon ? open.release?.text : null}
-          art={{ header: open.header, capsule: open.capsule }}
+          art={{ header: open.header, header2x: open.header2x, capsule: open.capsule }}
           match={{ pct: open.pct, tone: tone(open.pct), reason: open.shared.length ? `Shares ${open.shared.slice(0, 4).join(', ')} with ${data?.seed?.name || 'this game'}` : null }}
           onClose={() => setOpen(null)}
           actions={badge(open) ? (

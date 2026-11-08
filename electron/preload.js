@@ -4,11 +4,13 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 25,
+  rev: 26,
   // Settings → Appearance → UI scale.
   ui: {
     setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
     getZoom: () => { try { return webFrame.getZoomFactor() } catch { return 1 } },
+    // Frees pictures the page no longer shows (App.jsx, after leaving a page full of them).
+    clearCache: () => { try { webFrame.clearCache() } catch {} },
   },
   api: {
     games: {
@@ -231,12 +233,6 @@ contextBridge.exposeInMainWorld('kozo', {
       heroes: (sgdbId) => ipcRenderer.invoke('sgdb:heroes', sgdbId),
       apply: (gameId, coverUrl, heroUrl) => ipcRenderer.invoke('sgdb:apply', gameId, coverUrl, heroUrl),
     },
-    tray: {
-      data: () => ipcRenderer.invoke('tray:data'),
-      action: (name, arg) => ipcRenderer.invoke('tray:action', name, arg),
-      // The popup's panel height, so the window is only as tall as what it shows.
-      fit: (height) => ipcRenderer.invoke('tray:fit', height),
-    },
     releases: {
       unseen: () => ipcRenderer.invoke('releases:unseen'),
       dismiss: (ids) => ipcRenderer.invoke('releases:dismiss', ids),
@@ -319,7 +315,6 @@ contextBridge.exposeInMainWorld('kozo', {
       onPackProgress: sub('pack:progress', pass),
       onDealsChanged: sub('deals:changed', pass),
       onDealsUpdated: sub('deals:updated', pass),
-      onTrayRefresh: sub('tray:refresh', pass),
       onAccentChanged: sub('accent:changed', pass),
       onUnknownProcessAdd: sub('unknown-process:add', pass),
       onLaunchMiss: sub('launch:miss', pass),

@@ -112,7 +112,10 @@
   background:
     radial-gradient(40% 40% at 20% 25%, color-mix(in srgb, var(--a) 16%, transparent), transparent 70%),
     radial-gradient(35% 35% at 80% 70%, color-mix(in srgb, var(--accent-2, var(--a)) 12%, transparent), transparent 70%);
-  animation: kzAmbient 40s ease-in-out infinite alternate;
+  /* Steps, not smooth: a smooth drift redrew the whole window on every refresh,
+     measured at about 14% GPU and 8% CPU on any page; 2 small moves a second
+     (about 1 px each) look the same and cost about 0.3% GPU. */
+  animation: kzAmbient 40s steps(80) infinite alternate;
 }
 @keyframes kzAmbient {
   from { transform: translate(0, 0) rotate(0deg); }

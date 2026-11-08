@@ -167,7 +167,8 @@ export default function SteamGameModal({
     return () => { alive = false }
   }, [appId])
 
-  const lead = [art?.hero, art?.capsule, art?.header, ...fallbackArt].filter(Boolean)
+  // The big picture in the gallery is the sharp one; its thumbnail stays normal size.
+  const lead = [art?.hero2x || art?.hero, art?.capsule, art?.header2x || art?.header, ...fallbackArt].filter(Boolean)
   // Trailers first, like the store page, then the art and screenshots. Nothing
   // shows until Steam answers (the skeleton has the same shape): the art alone
   // would be on screen for a moment, then be replaced by the trailer.

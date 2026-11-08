@@ -353,7 +353,7 @@ export default function GameDetail() {
     if (!artAppId) return
     let alive = true
     window.kozo?.api?.steam?.appAssets?.([artAppId]).then(res => {
-      if (alive && res?.ok) setHashedHero(res.data?.[artAppId]?.hero || null)
+      if (alive && res?.ok) setHashedHero(res.data?.[artAppId]?.hero2x || res.data?.[artAppId]?.hero || null)
     })
     return () => { alive = false }
   }, [artAppId])
@@ -1298,7 +1298,7 @@ export default function GameDetail() {
       </div>
 
       {showStore && artAppId && (
-        <SteamGameModal appId={artAppId} name={game.name} art={{ hero: steamArt?.hero, capsule: steamArt?.capsule, header: steamArt?.header }} onClose={() => setShowStore(false)} />
+        <SteamGameModal appId={artAppId} name={game.name} art={{ hero: steamArt?.hero, hero2x: steamArt?.hero2x, capsule: steamArt?.capsule, header: steamArt?.header, header2x: steamArt?.header2x }} onClose={() => setShowStore(false)} />
       )}
 
       {selectedAch && (

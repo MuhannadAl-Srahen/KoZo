@@ -1185,27 +1185,25 @@ app.whenReady().then(async () => {
 
   }
 
-  // ── Tray popup: its own size, and as tall as what it shows ──
-  // It was blank in every test (it ignored KOZO_RENDERER), then zoomed to 80% by the main
-  // window's scale rule once it learned to fit its content.
+  // ── Tray: Windows' own menu (the KoZo popup was slow to open, the maker's call) ──
   {
-    const tw = require(path.join(root, 'electron', 'trayWindow.js'))
-    tw.show({ x: 900, y: 700, width: 24, height: 24 })
-    let twin = null
-    for (let i = 0; i < 60 && !twin; i++) { await sleep(150); twin = BrowserWindow.getAllWindows().find(w => /tray=1/.test(w.webContents.getURL())) || null }
-    check('tray: the popup opens', !!twin)
-    if (twin) {
-      await sleep(1500)
-      const st = await twin.webContents.executeJavaScript(`(() => {
-        const p = document.querySelector('[class*=panel]')
-        return { text: document.body.innerText.trim(), zoom: window.kozo.ui.getZoom(), w: innerWidth,
-                 gap: p ? Math.round(innerHeight - p.getBoundingClientRect().bottom) : -1, clipped: p ? p.scrollHeight > p.clientHeight + 1 : true }
-      })()`, true)
-      check('tray: shows the profile and a way into KoZo', /Open KoZo/.test(st.text) && /Lv \d/.test(st.text), st.text.slice(0, 80))
-      check('tray: keeps its own size', st.zoom === 1 && st.w === 340, JSON.stringify({ zoom: st.zoom, w: st.w }))
-      check('tray: as tall as what it shows', st.gap >= 4 && st.gap <= 8 && !st.clipped, JSON.stringify({ gap: st.gap, clipped: st.clipped }))
-      tw.hide()
+    const watcher = require(path.join(root, 'electron', 'services', 'processWatcher.js'))
+    const labels = (m) => (m ? m.items.map(i => i.label).filter(Boolean) : [])
+    const find = (m, label) => (m ? m.items.find(i => i.label === label) : null)
+    const menu = require(path.join(root, 'electron', 'tray.js')).currentMenu()
+    check('tray: the menu builds', !!menu)
+    check('tray: has a way into KoZo and out', labels(menu).includes('Open KoZo') && labels(menu).includes('Quit KoZo'), labels(menu).join(' | '))
+    const pauseItem = find(menu, 'Pause tracking')
+    check('tray: offers Pause tracking', !!pauseItem, labels(menu).join(' | '))
+    if (pauseItem) {
+      pauseItem.click()
+      const after = require(path.join(root, 'electron', 'tray.js')).currentMenu()
+      check('tray: pausing works and the menu says Resume', watcher.isPaused() === true && !!find(after, 'Resume tracking'), labels(after).join(' | '))
+      find(after, 'Resume tracking')?.click()
+      check('tray: resuming works', watcher.isPaused() === false)
     }
+    const jump = find(menu, 'Jump back in')
+    if (jump) check('tray: Jump back in lists games', jump.submenu.items.length > 0 && jump.submenu.items.length <= 5, String(jump.submenu.items.length))
   }
 
   check('no renderer errors overall', errors.length === 0, errors.join(' | '))

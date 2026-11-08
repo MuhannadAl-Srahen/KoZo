@@ -29,7 +29,11 @@ async function flush(ids, attempt = 0) {
     }
     for (const id of batch) {
       const a = res.data?.[id] || res.data?.[String(id)] || null
-      deliver(id, a ? { header: a.header || null, hero: a.hero || null, capsule: a.capsule || null, portrait: a.portrait || null } : null)
+      // Normal size for cards; the `*2x` ones for a picture that fills a big space.
+      deliver(id, a ? {
+        header: a.header || null, hero: a.hero || null, capsule: a.capsule || null, portrait: a.portrait || null,
+        hero2x: a.hero2x || a.hero || null, header2x: a.header2x || a.header || null, portrait2x: a.portrait2x || a.portrait || null,
+      } : null)
     }
   }
 }

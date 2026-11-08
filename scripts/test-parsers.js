@@ -362,7 +362,11 @@ console.log('\ngames like')
 // Discounts: the deal score and the price-history verdict.
 console.log('\ndeals')
 {
-  const { dealScore, lowState, tasteMatch } = require(path.join(__dirname, '..', 'electron', 'services', 'deals.js'))
+  const { dealScore, lowState, tasteMatch, wellReviewed } = require(path.join(__dirname, '..', 'electron', 'services', 'deals.js'))
+  check('deals: 500+ reviews at 80%+ show', wellReviewed({ count: 500, pct: 80 }) === true)
+  check('deals: 100% of a dozen reviews is hidden', wellReviewed({ count: 12, pct: 100 }) === false)
+  check('deals: 50,000 reviews at 79% is hidden', wellReviewed({ count: 50000, pct: 79 }) === false)
+  check('deals: no reviews is hidden', wellReviewed(null) === false)
   const good = { count: 50000, pct: 95 }
   check('deeper discount scores higher', dealScore({ pct: 80, reviews: good, match: 0.5 }) > dealScore({ pct: 20, reviews: good, match: 0.5 }))
   check('few reviews do not beat many', dealScore({ pct: 50, reviews: { count: 15, pct: 100 }, match: 0.5 }) < dealScore({ pct: 50, reviews: good, match: 0.5 }))
@@ -1458,22 +1462,20 @@ function settingsPathTests() {
 }
 
 // The tray popup is as tall as what it shows, hanging from the taskbar's edge.
-function trayBoundsTests() {
-  const { boundsFor } = require(path.join(__dirname, '..', 'electron', 'trayWindow.js'))
-  const workArea = { x: 0, y: 0, width: 1920, height: 1040 }
-  const bottom = boundsFor({ workArea, x: 1500, top: false }, 300)
-  check('tray: above a bottom taskbar, its bottom stays put', bottom.y + bottom.height === 1032 && bottom.height === 300, JSON.stringify(bottom))
-  const taller = boundsFor({ workArea, x: 1500, top: false }, 420)
-  check('tray: a taller popup grows upward', taller.y + taller.height === 1032 && taller.y < bottom.y)
-  const top = boundsFor({ workArea, x: 1500, top: true }, 300)
-  check('tray: under a top taskbar, it starts at the top', top.y === 8 && top.height === 300, JSON.stringify(top))
-  const huge = boundsFor({ workArea: { x: 0, y: 0, width: 1280, height: 600 }, x: 900, top: false }, 900)
-  check('tray: never taller than the screen', huge.height === 584 && huge.y === 8, JSON.stringify(huge))
+function gpuTrimTests() {
+  const { shouldTrim, MIN_GAP_MS } = require(path.join(__dirname, '..', 'electron', 'services', 'gpuTrim.js'))
+  const base = { now: 10 * MIN_GAP_MS, lastAt: 0, windowShown: false, sessionActive: false, compositing: 'enabled', mb: 300 }
+  check('gpuTrim: frees a big graphics process with nothing on screen', shouldTrim(base) === true)
+  check('gpuTrim: never with a window on screen', shouldTrim({ ...base, windowShown: true }) === false)
+  check('gpuTrim: never during a game', shouldTrim({ ...base, sessionActive: true }) === false)
+  check('gpuTrim: at most once every 2 hours', shouldTrim({ ...base, lastAt: base.now - MIN_GAP_MS + 60000 }) === false && shouldTrim({ ...base, lastAt: base.now - MIN_GAP_MS }) === true)
+  check('gpuTrim: leaves a small process alone', shouldTrim({ ...base, mb: 80 }) === false)
+  check('gpuTrim: never when drawing without the graphics card', shouldTrim({ ...base, compositing: 'disabled_software' }) === false && shouldTrim({ ...base, compositing: undefined }) === false)
 }
 
 ;(async () => {
   settingsPathTests()
-  trayBoundsTests()
+  gpuTrimTests()
   await installCheckTests()
   try { await updaterTests() } catch (e) { check('updater tests ran', false, e.message) }
   try { await discordTests() } catch (e) { check('discord tests ran', false, e.message) }

@@ -100,11 +100,7 @@ function normalize(saved) {
 let zoomPref = 1
 let zoomNow = 1
 let zoomLock = null
-// The tray popup loads the same bundle (?tray=1), and at 340 px wide this rule zoomed it to
-// 80% the moment it resized to fit its content. It keeps its own size.
-const IS_TRAY = new URLSearchParams(window.location.search).get('tray') === '1'
 function applyZoom() {
-  if (IS_TRAY) return
   const current = window.kozo?.ui?.getZoom?.() || zoomNow || 1
   const physical = window.innerWidth * current
   const z = zoomLock ?? Math.min(zoomPref, Math.max(0.8, physical / 1000))

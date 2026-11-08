@@ -50,8 +50,23 @@ function GamepadNav() {
 
 // Big Picture takes the whole window (no sidebar); every other page sits in
 // the normal layout.
+// Pages that show hundreds of store pictures. A hash route never navigates, so the
+// browser keeps every picture it decoded there; leaving one clears that cache.
+const PICTURE_PAGES = new Set(['/upcoming', '/deals', '/like'])
+function useFreePicturesOnLeave(pathname) {
+  const prev = useRef(pathname)
+  useEffect(() => {
+    const was = prev.current
+    prev.current = pathname
+    if (was === pathname || !PICTURE_PAGES.has(was) || PICTURE_PAGES.has(pathname)) return
+    const t = setTimeout(() => window.kozo?.ui?.clearCache?.(), 1500)
+    return () => clearTimeout(t)
+  }, [pathname])
+}
+
 function Shell() {
   const location = useLocation()
+  useFreePicturesOnLeave(location.pathname)
   if (location.pathname === '/big') return <BigPicture />
   return (
     <div className="app-layout">

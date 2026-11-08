@@ -235,6 +235,15 @@ function tasteMatch(vec, tags) {
   return dot / (vn * (Math.sqrt(cn) || 1))
 }
 
+// Pure: is a sale worth showing to someone who hasn't asked for this game? Steam's own
+// "Very Positive" line: 80% or more, of at least 500 reviews (the maker's call: the page
+// filled with tiny games at 100% of a dozen reviews). Game List games always show.
+const MIN_REVIEWS = 500
+const MIN_POSITIVE = 80
+function wellReviewed(reviews) {
+  return (reviews?.count || 0) >= MIN_REVIEWS && (reviews?.pct || 0) >= MIN_POSITIVE
+}
+
 // Pure: the deal score (0..99). Discount depth, review quality (a Wilson
 // lower bound, so 20 reviews at 100% do not beat 50,000 at 95%) and your
 // taste; an all-time low adds a bonus, a "sale" above the usual low loses some.
@@ -429,6 +438,7 @@ async function gamePrices(appid) {
 function shape(f, extra) {
   return {
     appid: f.appid, name: f.name, header: f.header, capsule: f.capsule, portrait: f.portrait,
+    header2x: f.header2x, portrait2x: f.portrait2x,
     reviews: f.reviews, releasedAt: f.releasedAt, price: f.price, developers: f.developers,
     ...extra,
   }
@@ -449,7 +459,7 @@ async function compute() {
 
   const onSale = (id) => { const f = facts.get(id); return f && f.price && f.price.pct > 0 && f.type === 0 ? f : null }
   const yoursIds = wantIds.filter(onSale)
-  const dealIds = specials.filter(id => onSale(id) && !owned.has(id) && !wantIds.includes(id))
+  const dealIds = specials.filter(id => onSale(id) && wellReviewed(facts.get(id).reviews) && !owned.has(id) && !wantIds.includes(id))
   // CheapShark: your list, plus the Steam deals it knows (a few calls).
   // The page never waits long for it: after 5 seconds it shows what is known,
   // and the rest arrives with a deals:updated push when CheapShark answers.
@@ -539,7 +549,8 @@ async function getDeals({ force = false } = {}) {
     return running
   }
   if (!fresh && !running) running = compute().catch(e => logger.warn('deals: refresh failed', { message: e.message })).finally(() => { running = null })
-  return cache.data
+  // A list saved before the review floor existed still holds small games: drop them now.
+  return { ...cache.data, deals: (cache.data.deals || []).filter(g => wellReviewed(g.reviews)) }
 }
 
 // Background: every 6 hours when no game is running, so the badge appears on
@@ -554,4 +565,4 @@ function start() {
   timer = setInterval(tick, 6 * 60 * 60 * 1000)
 }
 
-module.exports = { getDeals, gamePrices, setTarget, refreshAlerts, lowInfo, markSeen, unseen, start, dealScore, tasteMatch, lowState, moneyText, targetState, alertChanges }
+module.exports = { getDeals, gamePrices, setTarget, refreshAlerts, lowInfo, markSeen, unseen, start, dealScore, wellReviewed, tasteMatch, lowState, moneyText, targetState, alertChanges }

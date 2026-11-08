@@ -473,6 +473,10 @@
   border: 1px solid var(--neutral-border);
   border-radius: var(--r-card);
   overflow: hidden;
+  /* The list grows as you scroll (up to 20 feed pages): days off screen aren't drawn,
+     so their covers don't sit in memory as drawn pictures. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 420px;
 }
 .steamDayHead {
   padding: var(--sp-8) var(--sp-10);
