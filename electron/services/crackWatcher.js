@@ -151,6 +151,29 @@ function parseCodexIni(text) {
   return out
 }
 
+// TENOKE (tenoke.ini beside the game) saves in SteamData\user_stats.ini beside the
+// game. The format, from the format strings in its own steam_api64.dll:
+//   [ACHIEVEMENTS]
+//   "q_Caverns_Boss_1" = {unlocked = true, time = 1762620000}
+//   [STATS]
+//   "kills" = 12.000000
+function parseTenokeIni(text) {
+  const out = []
+  let inAch = false
+  for (const raw of String(text || '').split(/\r?\n/)) {
+    const line = raw.trim()
+    const sec = line.match(/^\[([^\]]+)\]$/)
+    if (sec) { inAch = sec[1].trim().toUpperCase() === 'ACHIEVEMENTS'; continue }
+    if (!inAch || !line || line.startsWith(';') || line.startsWith('#')) continue
+    const m = line.match(/^"?([^"=]+?)"?\s*=\s*\{(.*)\}\s*$/)
+    if (!m) continue
+    if (!/\bunlocked\s*=\s*(true|1)\b/i.test(m[2])) continue
+    const t = m[2].match(/\btime\s*=\s*(\d+)/i)
+    out.push({ name: m[1].trim(), unlocktime: t ? parseInt(t[1]) : 0 })
+  }
+  return out
+}
+
 // SmartSteamEmu binary (stats.bin):
 //   4-byte header: int32LE = entry count
 //   Each entry: 24 bytes
@@ -325,6 +348,11 @@ function buildCandidates(game) {
     add(path.join(ip, 'Profile', 'VALVE', 'Stats', 'achievements.ini'),        I, 'Hoodlum')
     // SSE inside game
     cands.push({ path: path.join(ip, 'SmartSteamEmu', 'stats.bin'), parse: 'sse', source: 'SSE' })
+    // TENOKE: SteamData beside the game, also when the game sits one folder down.
+    add(path.join(ip, 'SteamData', 'user_stats.ini'),                         parseTenokeIni, 'TENOKE')
+    for (const dir of tenokeDirs(ip)) {
+      if (dir !== ip) add(path.join(dir, 'SteamData', 'user_stats.ini'),       parseTenokeIni, 'TENOKE')
+    }
   }
 
   return cands
@@ -348,6 +376,12 @@ function configRoots(installPath) {
     }
   } catch {}
   return roots
+}
+
+// The folders that hold a tenoke.ini: the install folder or one level down.
+function tenokeDirs(installPath) {
+  if (!installPath || !exists(installPath)) return []
+  return configRoots(installPath).filter(r => exists(path.join(r, 'tenoke.ini')))
 }
 
 function readEmuConfigAppIds(installPath) {
@@ -413,6 +447,7 @@ function detectEmulator(installPath) {
       if (/PLAZA/i.test(emuIni)) return 'PLAZA'
       return 'CODEX/RUNE-family (steam_emu.ini)'
     }
+    if (exists(path.join(root, 'tenoke.ini')))            return 'TENOKE'
     if (exists(path.join(root, 'steam_settings')) ||
         exists(path.join(root, 'ColdClientLoader.ini'))) return 'Goldberg'
     if (exists(path.join(root, 'OnlineFix.ini')) ||
@@ -581,6 +616,8 @@ function recursiveScan(rootPath, appid, fresh = false) {
           hits.push({ path: path.join(dir, ent.name), parse: parseCodexIni, source: 'auto-INI' })
         } else if (lower === 'stats.bin') {
           hits.push({ path: path.join(dir, ent.name), parse: 'sse', source: 'auto-SSE' })
+        } else if (lower === 'user_stats.ini' && path.basename(dir).toLowerCase() === 'steamdata') {
+          hits.push({ path: path.join(dir, ent.name), parse: parseTenokeIni, source: 'auto-TENOKE' })
         }
       } else if (ent.isDirectory()) {
         if (SKIP_DIRS.has(lower)) continue
@@ -1243,6 +1280,7 @@ function scheduleScan(gameId, changedPath, { catchUp = false } = {}) {
 const WATCH_NAMES = new Set([
   'achievements.json', 'achievements.ini', 'achiev.ini', 'stats.ini',
   'stats.bin', 'creamapi.achievements.cfg',
+  'user_stats.ini',   // TENOKE (SteamData\user_stats.ini)
 ])
 
 function watchGame(gameId) {
@@ -1389,5 +1427,5 @@ module.exports = {
   buildCandidates, readEmuConfigAppIds, detectEmulator, diagnoseGame, myDocsDir,
   inspectGoldberg, enableGoldbergAchievements, deepScanForAppIds, collectCandidates,
   // Pure parsers — exported for the standalone test script (scripts/test-parsers.js)
-  parseGoldbergJson, parseCodexIni, parseSseBinary,
+  parseGoldbergJson, parseCodexIni, parseTenokeIni, parseSseBinary,
 }

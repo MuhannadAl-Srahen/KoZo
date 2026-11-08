@@ -1462,6 +1462,51 @@ function settingsPathTests() {
 }
 
 // The tray popup is as tall as what it shows, hanging from the taskbar's edge.
+function crackSaveTests() {
+  const cs = require(path.join(__dirname, '..', 'electron', 'services', 'crackSaves.js'))
+  const ip = 'C:\\Games\\Halls of Torment'
+  const gse = 'C:\\Users\\me\\AppData\\Roaming\\GSE Saves\\2218750\\remote'
+  const tenoke = ip + '\\SteamData'
+  const opts = { appid: '2218750', installPath: ip }
+  check('crack saves: Goldberg remote is a cloud folder', cs.isCloudFolder(gse, opts) === true)
+  check('crack saves: TENOKE SteamData in the game is one', cs.isCloudFolder(tenoke, opts) === true)
+  check('crack saves: a SteamData elsewhere is not', cs.isCloudFolder('D:\\Other\\SteamData', opts) === false)
+  check('crack saves: another game\'s remote is not', cs.isCloudFolder('C:\\x\\GSE Saves\\999\\remote', opts) === false)
+  const roaming = 'C:\\Users\\me\\AppData\\Roaming\\HallsOfTorment'
+  const moved = cs.retarget([gse, roaming], { ...opts, current: tenoke })
+  check('crack saves: a restore goes to the current crack\'s folder', moved[0] === tenoke && moved[1] === roaming, JSON.stringify(moved))
+  check('crack saves: already there, nothing moves', JSON.stringify(cs.retarget([gse, tenoke], { ...opts, current: tenoke })) === JSON.stringify([gse, tenoke]))
+  check('crack saves: unknown crack, nothing moves', JSON.stringify(cs.retarget([gse], { ...opts, current: null })) === JSON.stringify([gse]))
+  check('crack saves: 92 KB of progress beats a fresh 1.6 KB profile', cs.hasMoreProgress(91892, 1612) === true)
+  check('crack saves: the same progress is not offered again', cs.hasMoreProgress(91892, 91892) === false)
+  check('crack saves: a tiny backup is never offered', cs.hasMoreProgress(900, 0) === false)
+
+  const { parseTenokeIni } = require(path.join(__dirname, '..', 'electron', 'services', 'crackWatcher.js'))
+  const ini = [
+    '[ACHIEVEMENTS]',
+    '"q_Caverns_Boss_1" = {unlocked = true, time = 1762620000}',
+    '"q_Locked" = {unlocked = false, time = 0}',
+    'q_Bare = {unlocked = true, time = 1762620500}',
+    '[STATS]',
+    '"kills" = 12.000000',
+  ].join('\r\n')
+  const got = parseTenokeIni(ini)
+  check('TENOKE: unlocked achievements with their time', got.length === 2 && got[0].name === 'q_Caverns_Boss_1' && got[0].unlocktime === 1762620000 && got[1].name === 'q_Bare', JSON.stringify(got))
+  check('TENOKE: stats are not achievements', !got.some(a => a.name === 'kills'))
+  check('TENOKE: an empty file has none', parseTenokeIni('').length === 0)
+
+  const gv = require(path.join(__dirname, '..', 'electron', 'services', 'gameVersion.js'))
+  const oldIni = gv.loaderTargetFromIni('[Launcher]\r\nTarget=HallsOfTorment.exe\r\nStartIn=Halls of Torment\r\nCommandLine=--rendering-driver opengl3\r\n')
+  check('loader: the older layout names its game', oldIni && oldIni.exe === 'HallsOfTorment.exe' && oldIni.dir === 'Halls of Torment', JSON.stringify(oldIni))
+  const gbe = gv.loaderTargetFromIni('[SteamClient]\nExe=game.exe\nExeRunDir=.\nAppId=480\n')
+  check('loader: ColdClientLoader names its game', gbe && gbe.exe === 'game.exe' && gbe.dir === '.', JSON.stringify(gbe))
+  check('loader: no exe, no target', gv.loaderTargetFromIni('[Launcher]\nStartIn=x\n') === null)
+  const DAY = 86400000
+  const newer = gv.pickNewerCopy({ file: 'old.exe', created: 1000 * DAY }, [{ file: 'a.exe', created: 1000.5 * DAY }, { file: 'b.exe', created: 1300 * DAY }])
+  check('newer copy: one installed later is found', newer && newer.file === 'b.exe', JSON.stringify(newer))
+  check('newer copy: copies made the same day are not', gv.pickNewerCopy({ file: 'old.exe', created: 1000 * DAY }, [{ file: 'a.exe', created: 1000.5 * DAY }]) === null)
+}
+
 function gpuTrimTests() {
   const { shouldTrim, MIN_GAP_MS } = require(path.join(__dirname, '..', 'electron', 'services', 'gpuTrim.js'))
   const base = { now: 10 * MIN_GAP_MS, lastAt: 0, windowShown: false, sessionActive: false, compositing: 'enabled', mb: 300 }
@@ -1476,6 +1521,7 @@ function gpuTrimTests() {
 ;(async () => {
   settingsPathTests()
   gpuTrimTests()
+  crackSaveTests()
   await installCheckTests()
   try { await updaterTests() } catch (e) { check('updater tests ran', false, e.message) }
   try { await discordTests() } catch (e) { check('discord tests ran', false, e.message) }

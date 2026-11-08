@@ -89,6 +89,12 @@ function detect(game) {
   }
   try { for (const h of require('./saveManifest').pathsFor(game)) add(h.path, 'known') } catch {}
   for (const p of emulatorDirs(game)) add(p, 'emulator')
+  // The folder the game's current crack saves to, also when it sits inside the
+  // game's own folder (TENOKE's SteamData), which emulatorDirs leaves out.
+  try {
+    const cur = require('./crackSaves').currentCloudFolder(game)
+    if (cur && isDir(cur) && safeList(cur).length) add(cur, 'emulator')
+  } catch {}
   for (const p of steamCloudDirs(game)) add(p, 'steam')
   return found.map(({ path: p, how }) => ({ path: p, how }))
 }

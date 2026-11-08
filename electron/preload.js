@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 26,
+  rev: 27,
   // Settings → Appearance → UI scale.
   ui: {
     setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('kozo', {
       list: () => ipcRenderer.invoke('games:list'),
       get: (id) => ipcRenderer.invoke('games:get', id),
       version: (id) => ipcRenderer.invoke('games:version', id),
+      useCopy: (id, file) => ipcRenderer.invoke('games:useCopy', id, file),
       add: (data) => ipcRenderer.invoke('games:add', data),
       planMonth: (gameIds, month) => ipcRenderer.invoke('games:planMonth', gameIds, month),
       finished: () => ipcRenderer.invoke('games:finished'),
@@ -135,6 +136,9 @@ contextBridge.exposeInMainWorld('kozo', {
       deleteBackup: (gameId, backupId) => ipcRenderer.invoke('saves:deleteBackup', gameId, backupId),
       setPaths: (gameId, paths) => ipcRenderer.invoke('saves:setPaths', gameId, paths),
       compare: (gameId, id) => ipcRenderer.invoke('saves:compare', gameId, id),
+      progressOffer: (gameId) => ipcRenderer.invoke('saves:progressOffer', gameId),
+      bringProgress: (gameId, id) => ipcRenderer.invoke('saves:bringProgress', gameId, id),
+      dismissOffer: (gameId) => ipcRenderer.invoke('saves:dismissOffer', gameId),
       exportSnapshot: (gameId, id) => ipcRenderer.invoke('saves:export', gameId, id),
       storage: () => ipcRenderer.invoke('saves:storage'),
       setCap: (gb) => ipcRenderer.invoke('saves:setCap', gb),

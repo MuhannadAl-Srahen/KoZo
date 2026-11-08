@@ -45,6 +45,20 @@ function handle(channel, fn) {
 handle('games:list', () => gamesQ.listGamesWithStats())
 handle('games:get', (id) => gamesQ.getGame(id))
 handle('games:version', (id) => require('./services/gameVersion').getVersion(id))
+// "Use the new copy": an update installed beside the old copy. Play starts the new file
+// from now on; only an exe inside the game's own folder is accepted.
+handle('games:useCopy', (id, file) => {
+  const game = gamesQ.getGame(id)
+  if (!game) throw new Error('Game not found')
+  const p = path.resolve(String(file || ''))
+  const root = path.resolve(String(game.install_path || ''))
+  if (!game.install_path || !p.toLowerCase().startsWith(root.toLowerCase() + path.sep) || !/\.exe$/i.test(p) || !require('fs').existsSync(p)) {
+    throw new Error("That file isn't in this game's folder")
+  }
+  gamesQ.updateGame(id, { exe_name: path.basename(p), launch_file: p })
+  broadcast('game:updated', id)
+  return gamesQ.getGame(id)
+})
 // Shared by games:add and gameList:moveToLibrary: insert, fetch Steam art +
 // genres + achievements, and make sure the game is on the Game List too.
 // `quick` (Move to Library): don't wait for the banner download; the row's own
@@ -278,6 +292,16 @@ handle('saves:listBackups', (gameId) => {
   return { snapshots: vault.listSnapshots(game), bytes: vault.usage(game) }
 })
 handle('saves:compare', (gameId, id) => require('./services/saveVault').compare(saveGame(gameId), id))
+// A game whose crack changed (an update): its progress from the old crack's folder,
+// offered on its page and at Play (services/crackSaves.js).
+handle('saves:progressOffer', (gameId) => require('./services/crackSaves').progressOffer(saveGame(gameId)))
+handle('saves:bringProgress', (gameId, id) => {
+  const game = saveGame(gameId)
+  const r = require('./services/saveVault').restore(game, id)   // lands in the current crack's folder
+  try { require('./services/saveDetect').confirmFor(game) } catch {}
+  return r
+})
+handle('saves:dismissOffer', (gameId) => { require('./services/crackSaves').dismissOffer(saveGame(gameId)); return true })
 handle('saves:restore', (gameId, id) => require('./services/saveVault').restore(saveGame(gameId), id))
 handle('saves:deleteBackup', (gameId, id) => require('./services/saveVault').remove(saveGame(gameId), id))
 handle('saves:export', async (gameId, id) => {

@@ -27,7 +27,8 @@ function stub(rel, exports) {
 }
 stub('logger.js', { info() {}, warn() {}, error() {}, debug() {} })
 stub('db/queries/settings.js', { getSetting: k => store[k], setSetting: (k, v) => { store[k] = v } })
-stub('services/processWatcher.js', { isSessionActive: () => busy, runWhenIdle: (_k, fn) => fn() })
+const runningIds = new Set()
+stub('services/processWatcher.js', { isSessionActive: () => busy, runWhenIdle: (_k, fn) => fn(), getActiveSessions: () => new Map([...runningIds].map(i => [i, {}])) })
 
 const origLoad = Module._load
 Module._load = function (req, ...rest) {
@@ -181,6 +182,49 @@ async function main() {
   await copy.syncNow()
   check('uses its KoZo Saves layout', exists(legacy, 'KoZo Saves', 'Game A', 'vault', 'blobs', 'aaa.gz'))
   store.save_mirror_dir = ''
+
+  console.log('\nA game whose crack changed')
+  {
+    const cs = require(path.join(root, 'services', 'crackSaves.js'))
+    const appData = path.join(tmp, 'crack-appdata')
+    const savedEnv = process.env.APPDATA
+    process.env.APPDATA = appData
+    const gameDir = path.join(tmp, 'games', 'Halls of Torment')
+    const game = { id: 77, name: 'Halls of Torment', steam_app_id: 2218750, install_path: gameDir, is_cracked: 1 }
+    const gse = path.join(appData, 'GSE Saves', '2218750', 'remote')
+    const progress = 'P'.repeat(92000)
+    // Before the update: Goldberg, real progress in GSE Saves, backed up after play.
+    fs.mkdirSync(path.join(gameDir, 'steam_settings'), { recursive: true })
+    write(path.join(gse, 'HoT_profile.dat'), progress)
+    check('Goldberg: its save folder is GSE Saves', cs.currentCloudFolder(game) === gse, cs.currentCloudFolder(game))
+    const snap = vault.snapshot(game, [gse], 'after-play')
+    check('the progress is backed up', !!snap.id, JSON.stringify(snap))
+    // The update: TENOKE, which starts a fresh profile in SteamData beside the game.
+    fs.rmSync(path.join(gameDir, 'steam_settings'), { recursive: true, force: true })
+    write(path.join(gameDir, 'tenoke.ini'), '[TENOKE]\nid = 2218750\n')
+    write(path.join(gameDir, 'SteamData', 'HoT_profile.dat'), 'fresh')
+    const tenokeDir = path.join(gameDir, 'SteamData')
+    check('TENOKE: its save folder is SteamData', cs.currentCloudFolder(game) === tenokeDir, cs.currentCloudFolder(game))
+    const offer = cs.progressOffer(game)
+    check('the progress is offered', offer && offer.id === snap.id && offer.crack === 'TENOKE', JSON.stringify(offer))
+    runningIds.add(game.id)
+    let refused = false
+    try { vault.restore(game, offer.id) } catch (e) { refused = /Close Halls of Torment first/.test(e.message) }
+    check('a restore waits until the game is closed', refused && fs.readFileSync(path.join(tenokeDir, 'HoT_profile.dat'), 'utf8') === 'fresh')
+    runningIds.delete(game.id)
+    const r = vault.restore(game, offer.id)
+    check('the progress lands where the new crack reads', fs.readFileSync(path.join(tenokeDir, 'HoT_profile.dat'), 'utf8') === progress)
+    check('the old crack\'s files are untouched', fs.readFileSync(path.join(gse, 'HoT_profile.dat'), 'utf8') === progress)
+    const before = vault.listSnapshots(game).find(s => s.id === r.safety)
+    check('what was there is kept as a restore point', !!before && before.reason === 'before-restore', JSON.stringify(before))
+    check('nothing is offered once it is there', cs.progressOffer(game) === null)
+    // "Not now" is remembered for this folder.
+    write(path.join(tenokeDir, 'HoT_profile.dat'), 'fresh again')
+    check('a fresh profile again is offered again', !!cs.progressOffer(game))
+    cs.dismissOffer(game)
+    check('"Not now" stops asking for this folder', cs.progressOffer(game) === null)
+    process.env.APPDATA = savedEnv
+  }
 
   console.log('\nFinding cloud folders')
   const fakeHome = path.join(tmp, 'home')
