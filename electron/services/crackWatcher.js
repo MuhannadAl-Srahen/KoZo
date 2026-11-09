@@ -224,6 +224,13 @@ let _myDocs = null
 function myDocsDir() {
   if (_myDocs) return _myDocs
   const home = os.homedir()
+  // Windows' own answer for Documents (redirection included), with no reg.exe to start:
+  // that spawn blocked KoZo's start for about 40 ms. The registry read stays as the
+  // fallback where Electron's app isn't available (worker threads).
+  try {
+    const docs = require('electron').app?.getPath?.('documents')
+    if (docs) { _myDocs = docs; return _myDocs }
+  } catch {}
   try {
     const { execSync } = require('child_process')
     const reg = execSync(

@@ -539,6 +539,23 @@ function markSeen() {
   return true
 }
 
+// Game List games on sale, for the badge on their cards (the maker: "-50%" in the Game List,
+// not only on Discounts). The stored answer only, never a request: the 6-hourly refresh and
+// the Discounts page keep it current. A sale past its end, or an answer over 2 days old, says
+// nothing.
+function saleMap() {
+  loadDisk()
+  if (!cache?.data || Date.now() - (cache.at || 0) > 2 * 86400000) return {}
+  const now = Date.now()
+  const out = {}
+  for (const g of cache.data.yours || []) {
+    if (!(g.price?.pct > 0)) continue
+    if (g.price.endsAt && g.price.endsAt < now) continue   // endsAt is in ms
+    out[g.appid] = { pct: g.price.pct, finalText: g.price.finalText || null, originalText: g.price.originalText || null, lowest: g.low === 'lowest' }
+  }
+  return out
+}
+
 // Cached answer at once (memory or disk); refreshed in the background when
 // older than an hour or the country changed. `force` waits for a fresh one.
 async function getDeals({ force = false } = {}) {
@@ -565,4 +582,4 @@ function start() {
   timer = setInterval(tick, 6 * 60 * 60 * 1000)
 }
 
-module.exports = { getDeals, gamePrices, setTarget, refreshAlerts, lowInfo, markSeen, unseen, start, dealScore, wellReviewed, tasteMatch, lowState, moneyText, targetState, alertChanges }
+module.exports = { getDeals, saleMap, gamePrices, setTarget, refreshAlerts, lowInfo, markSeen, unseen, start, dealScore, wellReviewed, tasteMatch, lowState, moneyText, targetState, alertChanges }

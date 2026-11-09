@@ -1,0 +1,118 @@
+/* The uninstalled card: the same corner and surface as LaunchMissCard. */
+.card {
+  position: fixed;
+  right: var(--sp-16);
+  bottom: var(--sp-16);
+  /* Under dialogs and menus: it never blocks an answer to something else. */
+  z-index: calc(var(--z-popover, 1000) - 1);
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  padding: var(--sp-12);
+  border-radius: var(--r-card);
+  background: var(--surface-2);
+  border: 1px solid var(--ab);
+  box-shadow: var(--elev-3);
+}
+/* The "which program is it?" card takes the corner first; this one waits under it. */
+:global(body:has([data-launch-miss])) .card { display: none; }
+
+.head { display: flex; align-items: center; gap: var(--sp-10); min-width: 0; }
+.art {
+  position: relative;
+  flex-shrink: 0;
+  width: 44px;
+  height: 58px;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--surface-3);
+}
+.art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.headText { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.title { display: flex; align-items: center; gap: 5px; font-size: var(--fs-xs); font-weight: 700; color: var(--a); text-transform: uppercase; letter-spacing: 0.04em; }
+.title svg { flex-shrink: 0; }
+.name { font-size: var(--fs-md); font-weight: 700; color: var(--text-primary); overflow-wrap: anywhere; line-height: 1.25; }
+.count { font-size: var(--fs-2xs); color: var(--text-muted); }
+
+.text { margin: 0; font-size: var(--fs-sm); color: var(--text-secondary); line-height: var(--lh-base, 1.45); overflow-wrap: anywhere; }
+.text b { color: var(--text-primary); font-weight: 600; }
+.label { font-size: var(--fs-2xs); font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+
+.chips { display: flex; flex-wrap: wrap; gap: var(--sp-6); }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.chip:hover:not(:disabled) { border-color: var(--ab); background: var(--ad); color: var(--a); }
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  width: 100%;
+  padding: var(--sp-8) var(--sp-10);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.option svg { flex-shrink: 0; color: var(--text-muted); }
+.option span { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.option b { font-size: var(--fs-sm); font-weight: 600; }
+.option small { font-size: var(--fs-2xs); color: var(--text-muted); overflow-wrap: anywhere; }
+.option:hover:not(:disabled) { border-color: var(--ab); background: var(--ad); }
+.option:hover:not(:disabled) svg { color: var(--a); }
+.optionDanger:hover:not(:disabled) { border-color: color-mix(in srgb, var(--error) 55%, transparent); background: color-mix(in srgb, var(--error) 10%, transparent); }
+.optionDanger:hover:not(:disabled) svg { color: var(--error); }
+
+.confirm { display: flex; flex-direction: column; gap: var(--sp-8); }
+.row { display: flex; justify-content: flex-end; gap: var(--sp-8); }
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn:hover:not(:disabled) { border-color: var(--ab); color: var(--a); }
+.danger { background: var(--error); border-color: transparent; color: #fff; }
+.danger:hover:not(:disabled) { filter: brightness(1.08); color: #fff; border-color: transparent; }
+
+.error { margin: 0; font-size: var(--fs-xs); color: var(--error); }
+.foot { display: flex; justify-content: flex-end; }
+.link {
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.link:hover:not(:disabled) { color: var(--a); text-decoration: underline; }
+button:disabled { opacity: 0.6; cursor: default; }

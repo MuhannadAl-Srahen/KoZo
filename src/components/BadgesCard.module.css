@@ -1,0 +1,61 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+  padding: var(--sp-16);
+  border-radius: var(--r-card);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); }
+.title { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); font-weight: 700; color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.04em; }
+.title svg { color: var(--a); }
+.note { font-size: var(--fs-xs); color: var(--text-muted); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: var(--sp-8); }
+.badge {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  min-width: 0;
+  padding: var(--sp-10);
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+}
+.icon {
+  position: relative;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+}
+.earned { border-color: color-mix(in srgb, var(--a) 40%, transparent); background: color-mix(in srgb, var(--a) 8%, var(--surface-1)); }
+.earned .icon {
+  background: radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--a) 55%, #fff 10%), color-mix(in srgb, var(--a) 30%, transparent));
+  color: var(--accent-ink, #0b0b12);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--a) 35%, transparent), 0 4px 14px -4px color-mix(in srgb, var(--a) 70%, transparent);
+}
+.locked .icon { background: var(--surface-3); color: var(--text-muted); }
+.lock {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.name { font-size: var(--fs-sm); font-weight: 700; color: var(--text-primary); overflow-wrap: anywhere; }
+.locked .name { color: var(--text-secondary); }
+.desc { font-size: var(--fs-2xs); color: var(--text-muted); line-height: 1.35; overflow-wrap: anywhere; }
+.progress { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+.bar { flex: 1; height: 4px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+.bar span { display: block; height: 100%; border-radius: inherit; background: var(--a); }
+.count { flex-shrink: 0; font-size: var(--fs-2xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }

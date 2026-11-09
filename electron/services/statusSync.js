@@ -139,6 +139,8 @@ function onSessionStarted(gameId) {
 
 // A session under a minute is thrown away, and so is what it changed: nobody played, so the
 // game isn't "last played 1m ago" and "Playing". `before` is the game as it was at the start.
+// The Game List rows too: clearing a game's status leaves its rows alone (see setGameStatus),
+// so a game added and opened for 30 s stayed "Playing" on the Game List (Need for Speed).
 function undoSessionStart(gameId, before) {
   if (!before) return
   const game = db().prepare('SELECT completion_status FROM games WHERE id = ?').get(gameId)
@@ -148,6 +150,23 @@ function undoSessionStart(gameId, before) {
   if (game.completion_status === 'playing' && before.completion_status !== 'playing') {
     setGameStatus(gameId, before.completion_status ?? null)
   }
+  for (const r of before.list_statuses || []) {
+    if (r.status === 'playing') continue
+    const now = db().prepare('SELECT status FROM game_list WHERE id = ?').get(r.id)
+    if (now?.status === 'playing') db().prepare('UPDATE game_list SET status = ? WHERE id = ?').run(r.status, r.id)
+  }
+}
+
+// The Game List rows of a game and their statuses, kept at a session's start for undoSessionStart.
+function listStatusesFor(gameId) {
+  try {
+    const game = db().prepare('SELECT id, name, steam_app_id FROM games WHERE id = ?').get(gameId)
+    if (!game) return []
+    const rows = linkedListRows(game)
+    if (!rows.length) return []
+    const get = db().prepare('SELECT id, status FROM game_list WHERE id = ?')
+    return rows.map(r => get.get(r.id)).filter(Boolean)
+  } catch { return [] }
 }
 
 // A game was just marked Finished (Library or Game List): the renderer opens
@@ -171,4 +190,4 @@ function announceFinished({ gameId = null, listId = null }) {
   } catch (e) { logger.warn('statusSync: finished announce failed', { message: e.message }) }
 }
 
-module.exports = { setGameStatus, syncFromGameList, onSessionStarted, undoSessionStart, announceFinished, SHARED_STATUSES }
+module.exports = { setGameStatus, syncFromGameList, onSessionStarted, undoSessionStart, listStatusesFor, announceFinished, SHARED_STATUSES }

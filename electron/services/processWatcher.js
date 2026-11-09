@@ -653,6 +653,7 @@ async function tick() {
       if (buf.ticks >= 2 && now - buf.firstSeen >= sensitivityMs) {
         // How the game was, in case this turns out to be under a minute and is thrown away.
         const before = { last_played_at: game.last_played_at, first_played_at: game.first_played_at, completion_status: game.completion_status }
+        try { before.list_statuses = require('./statusSync').listStatusesFor(game.id) } catch {}
         const session = sessionsQ.resumeOrStartSession(game.id)
         const pid = procByName.get(exeLower)?.pid || null
         // A merged session carries the idle time already excluded from its first

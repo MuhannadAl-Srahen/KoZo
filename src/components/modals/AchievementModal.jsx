@@ -1,8 +1,9 @@
 import React, { useState } from 'react'
 import {
   IconTrophy, IconLock, IconCheck, IconStar,
-  IconBulb, IconBook, IconSearch, IconExternalLink,
+  IconBulb, IconBook, IconSearch, IconExternalLink, IconBrandYoutube,
 } from '@tabler/icons-react'
+import { guideLinks, openGuide } from '../../lib/achGuides'
 import Modal from '../ui/Modal'
 import AchImg from '../ui/AchImg'
 import { rarityLabel, formatDateTime } from '../../lib/utils'
@@ -24,11 +25,10 @@ export default function AchievementModal({ achievement: initialAch, game, onClos
 
   // Cracked and foreign-launcher games keep their matched appid in manual_appid,
   // so guides still work for them.
-  const appId = game?.steam_app_id || game?.manual_appid || null
   const achName = ach.display_name || ach.steam_api_name || ''
-  const guidesUrl = `https://steamcommunity.com/app/${appId}/guides/?searchText=${encodeURIComponent(achName)}`
-  const webUrl = `https://duckduckgo.com/?q=${encodeURIComponent(`${game?.name || ''} "${achName}" achievement how to unlock`)}`
-  const open = (url) => window.kozo?.api?.shell?.openExternal?.(url)
+  const guides = guideLinks(game, ach)
+  const GUIDE_ICON = { steam: IconBook, youtube: IconBrandYoutube, web: IconSearch }
+  const open = openGuide
 
   async function toggle() {
     setBusy(true)
@@ -96,20 +96,21 @@ export default function AchievementModal({ achievement: initialAch, game, onClos
             that actually have answers: the game's own Steam guides (searched
             for this achievement by name) and the open web. Shown for locked
             achievements, and for hidden ones where the description is no help. */}
-        {(!unlocked || !ach.description) && appId && (
+        {(!unlocked || !ach.description) && (
           <div className={s.howTo}>
             <div className={s.howToTitle}>
               <IconBulb size={13} stroke={1.8} /> How to unlock
             </div>
             <div className={s.howToActions}>
-              <button className={s.howToBtn} onClick={() => open(guidesUrl)}>
-                <IconBook size={13} stroke={1.8} /> Steam guides
-                <IconExternalLink size={11} stroke={1.8} className={s.howToExt} />
-              </button>
-              <button className={s.howToBtn} onClick={() => open(webUrl)}>
-                <IconSearch size={13} stroke={1.8} /> Search the web
-                <IconExternalLink size={11} stroke={1.8} className={s.howToExt} />
-              </button>
+              {guides.map(g => {
+                const Icon = GUIDE_ICON[g.key] || IconSearch
+                return (
+                  <button key={g.key} className={s.howToBtn} onClick={() => open(g.url)} data-guide={g.key}>
+                    <Icon size={13} stroke={1.8} /> {g.label}
+                    <IconExternalLink size={11} stroke={1.8} className={s.howToExt} />
+                  </button>
+                )
+              })}
             </div>
           </div>
         )}

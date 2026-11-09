@@ -23,11 +23,15 @@ export default function StorageTab() {
   useEffect(() => {
     load()
     window.kozo?.api?.storage?.measure?.()
+    // At most one reload a second while counting: reloading after every game redrew the
+    // whole list 500 times for 500 games (scripts/perf-check.js). The end always reloads.
+    let timer = null
+    const soon = () => { if (!timer) timer = setTimeout(() => { timer = null; load() }, 1000) }
     const off = window.kozo?.events?.onStorageProgress?.((p) => {
-      if (p?.finished) { setProgress(null); load() }
-      else { setProgress(p); if (p?.gameId) load() }
+      if (p?.finished) { clearTimeout(timer); timer = null; setProgress(null); load() }
+      else { setProgress(p); if (p?.gameId) soon() }
     })
-    return () => off?.()
+    return () => { off?.(); clearTimeout(timer) }
   }, [])
 
   const drives = data?.drives || []

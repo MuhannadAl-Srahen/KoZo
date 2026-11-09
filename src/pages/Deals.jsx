@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   IconDiscount2, IconRefresh, IconThumbUp, IconTrendingDown, IconClock, IconBuildingStore, IconPlus, IconCheck,
-  IconSparkles, IconListCheck, IconBrandSteam, IconChevronDown, IconBell,
+  IconSparkles, IconListCheck, IconBrandSteam, IconChevronDown, IconBell, IconSearch, IconX, IconLoader2,
 } from '@tabler/icons-react'
 import SteamGameModal from '../components/SteamGameModal'
 import GamePrices, { lowestLine } from '../components/GamePrices'
@@ -35,6 +35,15 @@ const SORTS = [
 const PAGE = 36
 
 let dealsCache = null   // module cache: a revisit paints at once
+
+// Search: "need for speed" finds "Need for Speed™ Most Wanted" (marks and punctuation ignored).
+function searchKey(v) {
+  return String(v || '').toLowerCase().replace(/[™®©:'’".,!?\-–—_/()[\]]/g, ' ').replace(/\s+/g, ' ').trim()
+}
+function matchesSearch(name, term) {
+  const k = searchKey(term)
+  return !k || searchKey(name).includes(k)
+}
 
 function scoreTone(n) { return n >= 80 ? 'great' : n >= 65 ? 'good' : 'ok' }
 function scoreWord(n) { return n >= 80 ? 'Great deal' : n >= 65 ? 'Good deal' : 'Deal' }
@@ -121,6 +130,22 @@ function AlertRow({ a, us, onOpen }) {
   )
 }
 
+// A Steam search hit with no deal on this page: its window opens on the Prices tab.
+function SteamHitRow({ h, onOpen }) {
+  const [art, setArt] = useState(h.header_image || h.capsule)
+  return (
+    <button type="button" className={s.alertRow} data-gpnav data-deal-steam-hit={h.steam_app_id} onClick={() => onOpen(h)}>
+      <span className={s.alertArt}>
+        {art ? <img src={art} alt="" loading="lazy" decoding="async" onError={() => setArt(art !== h.capsule ? h.capsule : null)} /> : <GeneratedCover name={h.name} compact />}
+      </span>
+      <span className={s.alertBody}>
+        <span className={s.alertTop}><span className={s.alertName} title={h.name}>{h.name}</span></span>
+        <span className={s.alertLine}>Its price now, the lowest ever and a price alert</span>
+      </span>
+    </button>
+  )
+}
+
 function DealsSkeleton({ count = 9 }) {
   return (
     <div className={s.grid}>
@@ -145,6 +170,12 @@ export default function Deals() {
   const [openTab, setOpenTab] = useState('overview')
   const [added, setAdded] = useState(() => new Set())
   const [adding, setAdding] = useState(null)
+  // Search: filters every section by name, and looks the name up on Steam too, so a game
+  // that isn't on sale here can still be opened for its price and an alert.
+  const [query, setQuery] = useState('')
+  const [hits, setHits] = useState(null)        // null = not searched; [] = nothing on Steam
+  const [hitsBusy, setHitsBusy] = useState(false)
+  const searchRef = useRef(null)
   const zoomStyle = useCardZoom('deals', 'grid', { grid: 260 }, { min: 200, max: 440 })
 
   function load(force = false) {
@@ -174,10 +205,26 @@ export default function Deals() {
       reviews: (a, b) => (b.reviews?.pct || 0) - (a.reviews?.pct || 0) || (b.reviews?.count || 0) - (a.reviews?.count || 0),
       ending: (a, b) => (a.price.endsAt || 9e15) - (b.price.endsAt || 9e15),
     }[sort]
+    if (query.trim()) list = list.filter(g => matchesSearch(g.name, query))
     return [...list].sort(by)
-  }, [data, filter, sort])
+  }, [data, filter, sort, query])
 
-  useEffect(() => { setShown(PAGE) }, [filter, sort])
+  useEffect(() => { setShown(PAGE) }, [filter, sort, query])
+
+  // Steam's own search, a moment after typing stops.
+  useEffect(() => {
+    const q = query.trim()
+    if (q.length < 2) { setHits(null); setHitsBusy(false); return }
+    let alive = true
+    setHitsBusy(true)
+    const t = setTimeout(async () => {
+      const res = await window.kozo?.api?.steam?.search?.(q)
+      if (!alive) return
+      setHitsBusy(false)
+      setHits(res?.ok ? (res.data || []) : [])
+    }, 350)
+    return () => { alive = false; clearTimeout(t) }
+  }, [query])
 
   async function addToList(g) {
     setAdding(g.appid)
@@ -188,14 +235,34 @@ export default function Deals() {
 
   function openWindow(g, tab = 'overview') { setOpenTab(tab); setOpen(g) }
 
-  const yours = data?.yours || []
+  const searching = !!query.trim()
+  const yours = (data?.yours || []).filter(g => matchesSearch(g.name, query))
   const us = data?.cc === 'US'
-  const alerts = data?.alerts || []
+  const alerts = (data?.alerts || []).filter(a => matchesSearch(a.name, query))
+  // Steam hits that aren't already a card or an alert on this page.
+  const listed = new Set([...(data?.deals || []), ...(data?.yours || []), ...(data?.alerts || [])].map(g => Number(g.appid)))
+  const steamHits = (hits || []).filter(h => !listed.has(Number(h.steam_app_id))).slice(0, 8)
   const reachedCount = alerts.filter(a => a.state === 'reached').length
   return (
     <div className={s.page}>
       <div className={s.toolbar}>
         <h1 className={s.pageTitle}><IconDiscount2 size={16} stroke={1.7} /> Discounts</h1>
+        <div className={`${s.searchBox} hasRing`} data-deals-search>
+          <IconSearch size={13} stroke={1.6} className={s.searchIcon} />
+          <input
+            ref={searchRef}
+            className={s.searchInput}
+            placeholder="Search a game…" aria-label="Search discounts"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Escape' && query) { e.stopPropagation(); setQuery('') } }}
+          />
+          {query && (
+            <button type="button" className={s.searchClear} onClick={() => { setQuery(''); searchRef.current?.focus() }} aria-label="Clear search">
+              <IconX size={12} stroke={2} />
+            </button>
+          )}
+        </div>
         <div className={s.spacer} />
         <CardSizeSlider pageKey="deals" view="grid" defaults={{ grid: 260 }} opts={{ min: 200, max: 440 }} />
         {data?.at && <span className={s.updated}>Prices for {data.cc}, checked {timeAgo(data.at)}</span>}
@@ -209,7 +276,7 @@ export default function Deals() {
           <EmptyState Icon={IconDiscount2} title="Couldn't load the sales" desc={error} action={{ label: 'Try again', Icon: IconRefresh, onClick: () => load(true) }} />
         ) : (
           <>
-            {data?.taste?.length > 0 && (
+            {!searching && data?.taste?.length > 0 && (
               <div className={s.taste}>
                 <IconSparkles size={14} /> Ranked for you: you play a lot of
                 {data.taste.map(t => <span key={t} className={s.tasteChip}>{t}</span>)}
@@ -228,8 +295,8 @@ export default function Deals() {
               </section>
             )}
 
-            {/* Your Game List games on sale: the reason to open this page. */}
-            <section className={s.section}>
+            {/* Your Game List games on sale: the reason to open this page. While searching, only with a match. */}
+            {(!searching || yours.length > 0) && <section className={s.section}>
               <div className={s.sectionHead}>
                 <IconListCheck size={15} /> On your Game List
                 {yours.length > 0 && <span className={s.count}>{yours.length} on sale</span>}
@@ -245,7 +312,7 @@ export default function Deals() {
                   {yours.map((g, i) => <DealCard key={g.appid} g={g} i={i} us={us} onOpen={openWindow} />)}
                 </div>
               )}
-            </section>
+            </section>}
 
             <section className={s.section}>
               <div className={s.sectionHead}>
@@ -265,7 +332,9 @@ export default function Deals() {
                 </div>
               </div>
               {!data ? <DealsSkeleton /> : deals.length === 0 ? (
-                <EmptyState Icon={IconDiscount2} title="Nothing matches" desc="Try another filter." />
+                searching
+                  ? <p className={s.quiet} data-deals-nomatch>No game on sale here matches “{query.trim()}”.{steamHits.length ? ' Steam has it below: open it for its price.' : ''}</p>
+                  : <EmptyState Icon={IconDiscount2} title="Nothing matches" desc="Try another filter." />
               ) : (
                 <>
                   <div className={s.grid} style={zoomStyle}>
@@ -279,6 +348,24 @@ export default function Deals() {
                 </>
               )}
             </section>
+
+            {searching && (hitsBusy || hits) && (
+              <section className={s.section} data-deals-steam>
+                <div className={s.sectionHead}>
+                  <IconBrandSteam size={15} /> On Steam
+                  {hitsBusy && <IconLoader2 size={13} className="spin" />}
+                </div>
+                {steamHits.length > 0 ? (
+                  <div className={s.alerts}>
+                    {steamHits.map(h => (
+                      <SteamHitRow key={h.steam_app_id} h={h} onOpen={(x) => openWindow({ appid: x.steam_app_id, name: x.name, header: x.header_image, capsule: x.capsule }, 'prices')} />
+                    ))}
+                  </div>
+                ) : !hitsBusy && (
+                  <p className={s.quiet}>Steam found nothing else for “{query.trim()}”.</p>
+                )}
+              </section>
+            )}
           </>
         )}
       </div>

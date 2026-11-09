@@ -42,7 +42,8 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 // SMOKE_ONLY=upcoming,tray,... runs only those parts (the start and the seeded library always
 // run): after a change, test what changed, not all ~290 checks (the maker's call).
 // Parts: pages edit backups gamelist year sessions toolexe drive privacy version wishlist
-// upcoming review appearance narrow controller pick big steamcopy tray
+// upcoming review appearance narrow controller pick big steamcopy update playthrough uninstalled
+// listscroll dealsearch extras tray
 const ONLY = process.env.SMOKE_ONLY ? process.env.SMOKE_ONLY.split(',').map(x => x.trim()) : null
 const want = (part) => !ONLY || ONLY.includes(part)
 
@@ -54,7 +55,7 @@ function finish(code) {
     app.exit(code)
   }, 300)
 }
-setTimeout(() => { console.error('  FAIL  timed out after 240s'); fail++; finish(1) }, 240000).unref()
+setTimeout(() => { console.error('  FAIL  timed out after 420s'); fail++; finish(1) }, 420000).unref()   // the whole suite takes about 4 minutes here; the release machine is slower
 
 const main = require(path.join(root, 'electron', 'main.js'))
 
@@ -109,6 +110,11 @@ app.whenReady().then(async () => {
     return ids
   })()`)
   check('seed 3 games', Array.isArray(seeded) && seeded.length === 3, JSON.stringify(seeded))
+  // Test games have made-up folders, so the uninstalled card would sit in the corner of every
+  // part: it asks nothing until its own part.
+  const uninstalledSvc = require(path.join(root, 'electron', 'services', 'uninstalled.js'))
+  const realPending = uninstalledSvc.pending
+  uninstalledSvc.pending = () => []
   await ev(`location.reload(); true`); await sleep(2500)
   await escape()   // the "rate it" dialog from the Finished game
 
@@ -1379,6 +1385,375 @@ app.whenReady().then(async () => {
       try { fs.rmSync(fake, { recursive: true, force: true }) } catch {}
     }
     check('Steam copy: no errors', errorsSince(before).length === 0, errorsSince(before).join(' | '))
+  }
+
+  if (want('playthrough')) {
+  // ── A second playthrough, and XP (the maker: "if I want to play a game a second time") ──
+  {
+    const xpSvc = require(path.join(root, 'electron', 'services', 'xp.js'))
+    const db = require(path.join(root, 'electron', 'db', 'database.js')).getDb()
+    const gid = seeded[2]   // Smoke Gamma, finished in the seed
+    const xp0 = xpSvc.computeXp()
+    await go('#/game/' + gid, 2000)
+    await ev(`document.querySelector('button[title="Game options"]')?.click(); true`); await sleep(300)
+    check('playthrough: the game menu offers a new playthrough', await ev(`!!document.querySelector('[data-new-playthrough]')`))
+    await ev(`document.querySelector('[data-new-playthrough]')?.click(); true`); await sleep(400)
+    const asked = await ev(`[...document.querySelectorAll('[role=dialog] button')].map(b => b.innerText.trim()).join('|')`)
+    check('playthrough: it asks first, naming playthrough 2', /Start playthrough 2/.test(asked), asked)
+    check('playthrough: the first time it asks which time this is', await ev(`/2nd/.test(document.querySelector('[data-replay-number]')?.innerText || '')`))
+    await ev(`[...document.querySelectorAll('[role=dialog] button')].find(b => /Start playthrough 2/.test(b.innerText))?.click(); true`); await sleep(1200)
+    const g1 = db.prepare('SELECT completion_status FROM games WHERE id = ?').get(gid)
+    const pts = db.prepare('SELECT number, finished_at FROM playthroughs WHERE game_id = ? ORDER BY number').all(gid)
+    check('playthrough: the game is Playing again, with playthrough 1 kept as finished', g1.completion_status === 'playing' && pts.length === 2 && !!pts[0].finished_at && !pts[1].finished_at, JSON.stringify({ g1, pts }))
+    check('playthrough: starting one changes no XP (the first finish still counts)', xpSvc.computeXp().totalXp === xp0.totalXp, xp0.totalXp + ' vs ' + xpSvc.computeXp().totalXp)
+    check('playthrough: Undo is offered', await ev(`!!document.querySelector('[data-undo-bar]')`))
+    check('playthrough: the page lists both playthroughs', /Playthrough 2[\s\S]*Playthrough 1/.test(await ev(`document.querySelector('[data-playthroughs]')?.innerText || ''`)))
+    // A note on a run (the maker: "Shura ending").
+    await ev(`document.querySelector('[data-pt-note-add="1"]')?.click(); true`); await sleep(300)
+    await ev(`(() => { const i = document.querySelector('[data-pt-note-input="1"]'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, 'Shura ending'); i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return true })()`); await sleep(700)
+    check('playthrough: a note is saved and shown', db.prepare('SELECT note FROM playthroughs WHERE game_id = ? AND number = 1').get(gid)?.note === 'Shura ending' && /Shura ending/.test(await ev(`document.querySelector('[data-playthroughs]')?.innerText || ''`)))
+    // An hour and a half of play in it, then Finished: the Finished XP once more.
+    const st = Date.now() + 60000
+    db.prepare('INSERT INTO sessions (game_id, started_at, ended_at, duration_seconds) VALUES (?, ?, ?, 5400)').run(gid, new Date(st).toISOString(), new Date(st + 5400e3).toISOString())
+    await ev(`window.kozo.api.games.update(${gid}, { completion_status: 'finished' }).then(() => true)`); await sleep(600)
+    await escape()   // the "rate it" window
+    const xp1 = xpSvc.computeXp()
+    check('playthrough: finishing it again earns the Finished XP again', xp1.replayCount === 1 && xp1.breakdown.finished - xp0.breakdown.finished === 250, JSON.stringify({ replays: xp1.replayCount, finishedXp: [xp0.breakdown.finished, xp1.breakdown.finished] }))
+    check('playthrough: Recent XP shows it', xpSvc.xpHistory(50).some(e => e.type === 'replay' && e.detail === 2))
+    // A third by mistake: Undo puts it all back.
+    await go('#/game/' + gid, 1500)
+    await ev(`document.querySelector('button[title="Game options"]')?.click(); true`); await sleep(300)
+    await ev(`document.querySelector('[data-new-playthrough]')?.click(); true`); await sleep(400)
+    await ev(`[...document.querySelectorAll('[role=dialog] button')].find(b => /Start playthrough 3/.test(b.innerText))?.click(); true`); await sleep(1200)
+    await ev(`[...document.querySelectorAll('[data-undo-bar] button')].find(b => /Undo/.test(b.innerText))?.click(); true`); await sleep(1200)
+    const g2 = db.prepare('SELECT completion_status FROM games WHERE id = ?').get(gid)
+    check('playthrough: Undo takes a mistaken one back', g2.completion_status === 'finished' && db.prepare('SELECT COUNT(*) c FROM playthroughs WHERE game_id = ?').get(gid).c === 2 && xpSvc.computeXp().totalXp === xp1.totalXp, JSON.stringify(g2))
+    // How XP works, from the same rules.
+    await go('#/profile', 2000)
+    await ev(`document.querySelector('[data-xp-how]')?.click(); true`); await sleep(500)
+    const guide = await ev(`document.querySelector('[data-xp-guide]')?.innerText || ''`)
+    check('playthrough: Profile explains every way to earn XP', /Ultra Rare\s*500/i.test(guide) && /new playthrough/i.test(guide) && /Milestones/i.test(guide), guide.slice(0, 200))
+    await escape()
+    check('playthrough: Profile shows unlocks by rarity', await ev(`!!document.querySelector('[data-xp-rarity]')`))
+    // Played twice before KoZo, never in it (the maker's Sekiro): this is the 3rd time.
+    const sek = await ev(`window.kozo.api.games.add({ name: 'Smoke Sekiro', exe_name: 'sekiro.exe', install_path: 'C:\\\\SmokeGames\\\\Sekiro', source: 'manual' }).then(r => r.data.id)`)
+    await go('#/game/' + sek, 2000)
+    await ev(`document.querySelector('button[title="Game options"]')?.click(); true`); await sleep(300)
+    check('playthrough: offered for a game KoZo never saw played', await ev(`!!document.querySelector('[data-new-playthrough]')`), await ev(`location.hash + ' ' + (document.querySelector('.app-main')?.innerText || '').slice(0, 150)`))
+    // Menu and item in one step, again if a background refresh of the page closed the menu first.
+    for (let i = 0; i < 4 && !(await ev(`!!document.querySelector('[data-replay-number]')`)); i++) {
+      await ev(`(async () => { if (!document.querySelector('[data-new-playthrough]')) { document.querySelector('button[title="Game options"]')?.click(); await new Promise(r => setTimeout(r, 250)) } document.querySelector('[data-new-playthrough]')?.click(); return true })()`); await sleep(500)
+    }
+    await ev(`document.querySelector('[data-replay-number] button[aria-label="One more"]')?.click(); true`); await sleep(200)
+    const sekAsk = await ev(`document.querySelector('[role=dialog]')?.innerText || ''`)
+    check('playthrough: 3rd time, the earlier two kept from before KoZo', /3rd/.test(sekAsk) && /Start playthrough 3/.test(sekAsk) && /Playthroughs 1 to 2 are kept as finished before KoZo/.test(sekAsk), sekAsk.slice(0, 300))
+    await ev(`[...document.querySelectorAll('[role=dialog] button')].find(b => /Start playthrough 3/.test(b.innerText))?.click(); true`); await sleep(1200)
+    const sekRows = db.prepare('SELECT number, before_kozo, finished_at FROM playthroughs WHERE game_id = ? ORDER BY number').all(sek)
+    check('playthrough: playthroughs 1 and 2 before KoZo, 3 now', sekRows.length === 3 && sekRows[0].before_kozo === 1 && sekRows[1].before_kozo === 1 && !sekRows[2].before_kozo && !sekRows[2].finished_at, JSON.stringify(sekRows))
+    check('playthrough: the card says Before KoZo', /Before KoZo/.test(await ev(`document.querySelector('[data-playthroughs]')?.innerText || ''`)))
+    // Archived: its menu deletes it for good (asks first).
+    await ev(`window.kozo.api.games.archive([${sek}]).then(() => true)`)
+    await go('#/game/' + sek, 1800)
+    await ev(`document.querySelector('button[title="Game options"]')?.click(); true`); await sleep(300)
+    check('archived: the game menu offers Delete with history', await ev(`!!document.querySelector('[data-delete-archived]')`))
+    await ev(`document.querySelector('[data-delete-archived]')?.click(); true`); await sleep(300)
+    check('archived: it asks first', !!db.prepare('SELECT id FROM games WHERE id = ?').get(sek) && await ev(`!!document.querySelector('[data-delete-archived-yes]')`))
+    await ev(`document.querySelector('[data-delete-archived-yes]')?.click(); true`); await sleep(1200)
+    check('archived: deleted with its playthroughs', !db.prepare('SELECT id FROM games WHERE id = ?').get(sek) && db.prepare('SELECT COUNT(*) c FROM playthroughs WHERE game_id = ?').get(sek).c === 0)
+  }
+  }
+
+  if (want('update')) {
+  // ── The sidebar's Update button (the maker: show a new version on the tabs, a click updates) ──
+  {
+    const upd = require(path.join(root, 'electron', 'services', 'appUpdater.js'))
+    const btn = () => ev(`(() => { const b = document.querySelector('[data-update-btn]'); return b ? { state: b.dataset.updateBtn, text: b.innerText } : null })()`)
+    const set = async (st) => { upd.setState(st); await sleep(400) }
+    await go('#/')
+    await set({ state: 'idle' })
+    check('update: no button while KoZo is up to date', (await btn()) === null)
+    await set({ state: 'downloading', version: '9.9.9', percent: 40, wanted: false, installing: false, afterGame: false })
+    let b = await btn()
+    check('update: the button shows while it downloads, with the version and progress', !!b && b.state === 'downloading' && /9.9.9/.test(b.text) && /40%/.test(b.text), JSON.stringify(b))
+    await ev(`document.querySelector('[data-update-btn]').click(); true`); await sleep(400)
+    b = await btn()
+    check('update: a click while downloading installs it when done', upd.getState().wanted === true && /Updating/.test(b?.text || ''), JSON.stringify(b))
+    await set({ state: 'ready', wanted: false, percent: 100 })
+    b = await btn()
+    check('update: ready says Update now', !!b && b.state === 'ready' && /Update now/.test(b.text), JSON.stringify(b))
+    await ev(`document.querySelector('[data-update-btn]').click(); true`); await sleep(400)
+    b = await btn()
+    check('update: a click when ready restarts into it', upd.getState().installing === true && /Updating/.test(b?.text || ''), JSON.stringify(b))
+    await set({ state: 'failed', installing: false, wanted: false })
+    b = await btn()
+    check('update: a stopped download says try again', !!b && /Try again/i.test(b.text), JSON.stringify(b))
+    await set({ state: 'idle', version: null, installing: false, wanted: false })
+    check('update: gone again when there is nothing new', (await btn()) === null)
+    // What's new: this version's own notes (shipped in the app), laid out, not plain text.
+    await go('#/settings?tab=about', 1500)
+    await ev(`document.querySelector('[data-whatsnew-open]')?.click(); true`); await sleep(1500)
+    const wn = await ev(`(() => { const d = document.querySelector('[data-whatsnew]'); return d ? { items: d.querySelectorAll('[data-whatsnew-item]').length, text: d.innerText } : null })()`)
+    const ver = require(path.join(root, 'package.json')).version
+    check("update: What's new shows this version's notes, item by item", !!wn && wn.items >= 3 && !/Bug fixes and improvements/.test(wn.text), JSON.stringify(wn)?.slice(0, 200))
+    check("update: What's new names the version", await ev(`[...document.querySelectorAll('[role=dialog]')].some(d => d.innerText.includes(${JSON.stringify(ver)}))`))
+    check("update: What's new has no long dashes", !!wn && !/[\u2013\u2014]/.test(wn.text))
+    await ev(`document.querySelector('[data-whatsnew-ok]')?.click(); true`); await sleep(300)
+  }
+  }
+
+  if (want('uninstalled')) {
+  // ── A game was uninstalled: the corner card asks what to do (the maker: Need for Speed
+  //    stayed "Playing" after it was uninstalled) ──
+  {
+    const db = require(path.join(root, 'electron', 'db', 'database.js')).getDb()
+    uninstalledSvc.pending = realPending
+    const add = (name) => ev(`window.kozo.api.games.add({ name: ${JSON.stringify(name)}, exe_name: 'x.exe', install_path: 'C:\\\\SmokeGone\\\\' + ${JSON.stringify(name)}, source: 'manual' }).then(r => r.data.id)`)
+    const ids = [await add('Smoke Gone One'), await add('Smoke Gone Two'), await add('Smoke Gone Three')]
+    db.prepare(`UPDATE games SET is_installed = 0, completion_status = 'playing' WHERE id IN (${ids.join(',')})`).run()
+    db.prepare(`UPDATE game_list SET status = 'playing' WHERE game_id IN (${ids.join(',')})`).run()
+    await require(path.join(root, 'electron', 'services', 'installCheck.js')).reconcile()
+    // Every other test game counts as answered: only these three are asked here.
+    const othersAsked = {}
+    for (const p of realPending()) if (!ids.includes(p.id)) othersAsked[p.id] = p.install_path
+    require(path.join(root, 'electron', 'db', 'queries', 'settings.js')).setSetting('uninstall_asked', JSON.stringify(othersAsked))
+    const card = () => ev(`(() => { const c = document.querySelector('[data-uninstalled]'); return c ? { id: Number(c.dataset.uninstalled), text: c.innerText } : null })()`)
+    await go('#/')
+    await ev(`window.kozo.api.games.uninstalled().then(() => true)`)
+    // installCheck sends this when it flags games; the card loads on it.
+    for (const w of require('electron').BrowserWindow.getAllWindows()) w.webContents.send('uninstalled:changed', null)
+    await sleep(600)
+    let c = await card()
+    check('uninstalled: the card asks about a game whose folder is gone', !!c && ids.includes(c.id) && /Uninstalled/i.test(c.text) && /Playing/.test(c.text), JSON.stringify(c))
+    check('uninstalled: one game at a time, with how many are left', !!c && /1 of 3/.test(c.text), c?.text)
+    check('uninstalled: offers a status, Remove from Library, Delete from KoZo and Keep it', !!c && /Finished/.test(c.text) && /Dropped/.test(c.text) && /Remove from Library/.test(c.text) && /Delete from KoZo/.test(c.text) && /Keep it/.test(c.text), c?.text)
+    check('uninstalled: no long dashes', !!c && !/[\u2013\u2014]/.test(c.text))
+    // Dropped: the game and its Game List row say Dropped, still in the Library.
+    const first = c.id
+    await ev(`document.querySelector('[data-uninstalled-status=dropped]').click(); true`); await sleep(700)
+    const g1 = db.prepare('SELECT completion_status, is_archived FROM games WHERE id = ?').get(first)
+    const l1 = db.prepare('SELECT status FROM game_list WHERE game_id = ?').get(first)
+    check('uninstalled: Dropped sets the game and its Game List entry', g1.completion_status === 'dropped' && l1?.status === 'dropped' && g1.is_archived === 0, JSON.stringify([g1, l1]))
+    c = await card()
+    check('uninstalled: then the next game', !!c && c.id !== first && ids.includes(c.id), JSON.stringify(c))
+    // Remove from Library: archived, Playing becomes On hold on both.
+    const second = c.id
+    await ev(`document.querySelector('[data-uninstalled-remove]').click(); true`); await sleep(700)
+    const g2 = db.prepare('SELECT completion_status, is_archived FROM games WHERE id = ?').get(second)
+    const l2 = db.prepare('SELECT status FROM game_list WHERE game_id = ?').get(second)
+    check('uninstalled: Remove from Library archives it and Playing becomes On hold', g2.is_archived === 1 && g2.completion_status === 'on_hold' && l2?.status === 'on_hold', JSON.stringify([g2, l2]))
+    // Delete from KoZo asks first, then the game and its Game List entry are gone.
+    c = await card()
+    const third = c?.id
+    await ev(`document.querySelector('[data-uninstalled-delete]').click(); true`); await sleep(300)
+    c = await card()
+    check('uninstalled: Delete asks first', !!c && /can't be undone/.test(c.text) && !!db.prepare('SELECT id FROM games WHERE id = ?').get(third), c?.text)
+    await ev(`document.querySelector('[data-uninstalled-delete-yes]').click(); true`); await sleep(700)
+    check('uninstalled: Delete removes the game and its Game List entry', !db.prepare('SELECT id FROM games WHERE id = ?').get(third) && !db.prepare('SELECT id FROM game_list WHERE game_id = ? OR name = ?').get(third, 'Smoke Gone Three'))
+    check('uninstalled: no card once all are answered', (await card()) === null)
+    // Asked once: a new check doesn't ask again; back on disk and gone again does.
+    const svc = require(path.join(root, 'electron', 'services', 'uninstalled.js'))
+    check('uninstalled: answered games are not asked again', !svc.pending().some(p => p.id === first))
+    db.prepare('UPDATE games SET is_installed = 1 WHERE id = ?').run(first); svc.pending()
+    db.prepare('UPDATE games SET is_installed = 0 WHERE id = ?').run(first)
+    check('uninstalled: reinstalled and uninstalled again asks again', svc.pending().some(p => p.id === first))
+    check('uninstalled: a drive that is not plugged in is not asked', svc.pickPending([{ id: 1, install_path: 'Q:\\Games\\X' }], {}, () => true).length === 0)
+    await ev(`window.kozo.api.games.delete([${first}, ${second}]).then(() => true)`)
+    // Deleting a game whose Game List entry stays (it has a Steam id) and says Playing asks.
+    const kept = await ev(`window.kozo.api.games.add({ name: 'Smoke Kept Entry', exe_name: 'k.exe', steam_app_id: 900600, source: 'manual' }).then(r => r.data.id)`)
+    db.prepare("UPDATE game_list SET status = 'playing', steam_app_id = 900600 WHERE game_id = ?").run(kept)
+    const keptRow = db.prepare('SELECT id FROM game_list WHERE game_id = ?').get(kept)?.id
+    await go('#/', 800)
+    await ev(`window.kozo.api.games.delete([${kept}]).then(() => true)`); await sleep(800)
+    const prompt = await ev(`document.querySelector('[data-kept-prompt]')?.innerText || ''`)
+    check('delete: a Game List entry left on Playing is asked about', /Smoke Kept Entry/.test(prompt) && /Playing/.test(prompt) && /Dropped/.test(prompt), prompt.slice(0, 200))
+    await ev(`document.querySelector('[data-kept-status=dropped]')?.click(); true`); await sleep(800)
+    check('delete: the answer sets the Game List entry', db.prepare('SELECT status FROM game_list WHERE id = ?').get(keptRow)?.status === 'dropped' && await ev(`!document.querySelector('[data-kept-prompt]')`))
+    await ev(`window.kozo.api.gameList.delete(${keptRow}).then(() => true)`)
+    // A session under a minute takes back the Game List's Playing too (Need for Speed again).
+    const statusSync = require(path.join(root, 'electron', 'services', 'statusSync.js'))
+    const gid = await add('Smoke Short Play')
+    db.prepare("UPDATE game_list SET status = 'want_to_play' WHERE game_id = ?").run(gid)
+    const before = { last_played_at: null, first_played_at: null, completion_status: null, list_statuses: statusSync.listStatusesFor(gid) }
+    statusSync.onSessionStarted(gid)
+    const mid = db.prepare('SELECT status FROM game_list WHERE game_id = ?').get(gid)?.status
+    statusSync.undoSessionStart(gid, before)
+    const after = db.prepare('SELECT status FROM game_list WHERE game_id = ?').get(gid)?.status
+    check('short session: the Game List goes back from Playing too', mid === 'playing' && after === 'want_to_play', `${mid} -> ${after}`)
+    await ev(`window.kozo.api.games.delete([${gid}]).then(() => true)`)
+  }
+  }
+
+  if (want('listscroll')) {
+  // ── Game List: more games load as you scroll, no page numbers (the maker's ask) ──
+  {
+    const added = await ev(`(async () => {
+      const ids = []
+      for (let i = 0; i < 45; i++) {
+        const r = await window.kozo.api.gameList.add({ name: 'Smoke Scroll ' + String(i).padStart(2, '0'), steam_app_id: null, status: 'want_to_play', rating: null, game_id: null })
+        if (r?.ok) ids.push(r.data?.id ?? r.data)
+      }
+      return ids.length
+    })()`)
+    await go('#/plan', 300); await go('#/game-list', 1800)
+    const count = () => ev(`document.querySelectorAll('.app-main [data-gpnav]').length`)
+    const total = await ev(`window.kozo.api.gameList.list({ limit: 1 }).then(r => r.data.total)`)
+    const first = await count()
+    check('Game List scroll: starts with 20 cards', added === 45 && first === 20, `${first} of ${total}`)
+    check('Game List scroll: no page numbers', await ev(`!document.querySelector('[class*=pagination]') && !!document.querySelector('[data-gamelist-more]')`))
+    const toBottom = async () => {
+      await ev(`(() => { const m = document.querySelector('[data-gamelist-more]'); let p = m?.parentElement; while (p && !/auto|scroll/.test(getComputedStyle(p).overflowY)) p = p.parentElement; (p || document.scrollingElement).scrollTop = 1e9; return true })()`)
+      await sleep(900)
+    }
+    await toBottom()
+    const second = await count()
+    check('Game List scroll: scrolling down loads more', second > first, `${first} -> ${second}`)
+    for (let i = 0; i < 4 && (await count()) < total; i++) await toBottom()
+    const last = await count()
+    const scrollNames = await ev(`[...document.querySelectorAll('.app-main [data-gpnav]')].map(c => (c.textContent.match(/Smoke Scroll \\d+/) || [])[0]).filter(Boolean)`)
+    check('Game List scroll: reaches every game, each once', last === total && scrollNames.length === 45 && new Set(scrollNames).size === 45, `${last} of ${total}, ${scrollNames.length} test rows`)
+    check('Game List scroll: nothing left to load', await ev(`!document.querySelector('[data-gamelist-more]')`))
+    // Select all, before the rest has loaded: every game in the list.
+    await go('#/plan', 300); await go('#/game-list', 1800)
+    await ev(`[...document.querySelectorAll('button')].find(b => b.title === 'Select games')?.click(); true`); await sleep(300)
+    const selBtn = await ev(`[...document.querySelectorAll('button')].find(b => /Select all/.test(b.innerText))?.innerText || ''`)
+    check('Game List: Select all names every game, not the 20 loaded', new RegExp('Select all \\(' + total + '\\)').test(selBtn), selBtn)
+    await ev(`[...document.querySelectorAll('button')].find(b => /Select all/.test(b.innerText))?.click(); true`); await sleep(800)
+    const selText = await ev(`document.querySelector('[class*=selectionCount]')?.innerText || ''`)
+    check('Game List: Select all selects every game', selText.includes(total + ' selected') && (await count()) < total, `${selText}, ${await count()} cards loaded`)
+    await ev(`[...document.querySelectorAll('button')].find(b => /^\\s*Done/.test(b.innerText))?.click(); true`); await sleep(300)
+    // On sale: the card says so (Discounts' last answer, stubbed).
+    const dealsSvc = require(path.join(root, 'electron', 'services', 'deals.js'))
+    const realSaleMap = dealsSvc.saleMap
+    await ev(`window.kozo.api.gameList.add({ name: 'Smoke On Sale', steam_app_id: 900500, status: 'want_to_play', rating: null, game_id: null }).then(() => true)`)
+    dealsSvc.saleMap = () => ({ 900500: { pct: 40, finalText: '$11.99', originalText: '$19.99', lowest: false } })
+    await go('#/plan', 300); await go('#/game-list', 1800)
+    const chip = await ev(`(() => { const c = [...document.querySelectorAll('.app-main [data-gpnav]')].find(x => x.textContent.includes('Smoke On Sale')); return c?.querySelector('[data-sale-chip]')?.innerText || '' })()`)
+    check('Game List: a game you want that is on sale shows it on its card', /-40%/.test(chip) && /11\.99/.test(chip), chip)
+    check('Game List: other cards have no sale chip', await ev(`document.querySelectorAll('.app-main [data-sale-chip]').length`) === 1)
+    dealsSvc.saleMap = realSaleMap
+    await ev(`(async () => { const rows = (await window.kozo.api.gameList.list({ limit: 500 })).data?.items || []; for (const r of rows) if (r.name === 'Smoke On Sale') await window.kozo.api.gameList.delete(r.id); return true })()`)
+    await ev(`(async () => {
+      const rows = (await window.kozo.api.gameList.list({ limit: 500 })).data?.items || []
+      for (const r of rows) if (/^Smoke Scroll /.test(r.name)) await window.kozo.api.gameList.delete(r.id)
+      return true
+    })()`)
+  }
+  }
+
+  if (want('dealsearch')) {
+  // ── Discounts: a search box (the maker's ask). Deals and Steam's search are stubbed. ──
+  {
+    const deals = require(path.join(root, 'electron', 'services', 'deals.js'))
+    const steamApi = require(path.join(root, 'electron', 'services', 'steamApi.js'))
+    const realDeals = deals.getDeals, realMark = deals.markSeen, realSearch = steamApi.searchGames
+    const deal = (appid, name) => ({ appid, name, header: null, capsule: null, score: 70, match: 10, low: null,
+      price: { pct: 50, final: 999, finalText: '$9.99', original: 1999, originalText: '$19.99', endsAt: null }, reviews: { pct: 90, count: 1200, label: 'Very Positive' } })
+    deals.getDeals = async () => ({ at: Date.now(), cc: 'US', taste: [], wantedCount: 1,
+      yours: [deal(900001, 'Need for Speed™ Heat')],
+      alerts: [],
+      deals: [deal(900002, 'Smoke Racer Deluxe'), deal(900003, 'Quiet Farm'), deal(900004, 'Speedy Puzzle')] })
+    deals.markSeen = async () => true
+    steamApi.searchGames = async (q) => [{ steam_app_id: 900099, name: 'Need for Speed™ Most Wanted', header_image: null, capsule: null }, { steam_app_id: 900002, name: 'Smoke Racer Deluxe', header_image: null, capsule: null }]
+    await go('#/deals', 1500)
+    const type = (v) => ev(`(() => { const i = document.querySelector('[data-deals-search] input'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, ${JSON.stringify(v)}); i.dispatchEvent(new Event('input', { bubbles: true })); return true })()`)
+    const names = () => ev(`[...document.querySelectorAll('.app-main button[data-gpnav] [title]')].map(e => e.title).filter(x => !/^Deal score|reviews are|like the games/.test(x))`)
+    check('Discounts search: the box is there', await ev(`!!document.querySelector('[data-deals-search] input')`))
+    await type('speed'); await sleep(1000)
+    let n = await names()
+    check('Discounts search: filters the deals and your Game List by name', n.includes('Need for Speed™ Heat') && n.includes('Speedy Puzzle') && !n.includes('Quiet Farm') && !n.includes('Smoke Racer Deluxe'), n.join(' | '))
+    check('Discounts search: Steam finds games with no deal here, not ones already shown', await ev(`!!document.querySelector('[data-deal-steam-hit="900099"]') && !document.querySelector('[data-deal-steam-hit="900002"]')`))
+    await type('most wanted'); await sleep(1000)
+    check('Discounts search: no deal matches says so and points to Steam', await ev(`!!document.querySelector('[data-deals-nomatch]') && !!document.querySelector('[data-deal-steam-hit="900099"]')`))
+    await ev(`document.querySelector('[data-deal-steam-hit="900099"]').click(); true`); await sleep(800)
+    check('Discounts search: a Steam hit opens on its Prices tab', await ev(`[...document.querySelectorAll('[role=dialog] [role=tab]')].some(t => t.getAttribute('aria-selected') === 'true' && /Prices/.test(t.innerText))`))
+    await escape()
+    await type(''); await sleep(500)
+    n = await names()
+    check('Discounts search: clearing shows every deal again', ['Quiet Farm', 'Smoke Racer Deluxe', 'Speedy Puzzle'].every(x => n.includes(x)) && await ev(`!document.querySelector('[data-deals-steam]')`), n.join(' | '))
+    deals.getDeals = realDeals; deals.markSeen = realMark; steamApi.searchGames = realSearch
+  }
+  }
+
+  if (want('extras')) {
+  // ── Badges, quick search (Ctrl+K), achievement guides, the picked-games tray (the maker's asks) ──
+  {
+    const db = require(path.join(root, 'electron', 'db', 'database.js')).getDb()
+    const gid = seeded[0]
+    // Badges on the Profile: earned and locked with progress.
+    await go('#/profile', 2000)
+    const badges = await ev(`(() => { const c = document.querySelector('[data-badges]'); return c ? { n: c.querySelectorAll('[data-badge]').length, text: c.innerText } : null })()`)
+    check('badges: the Profile shows them, earned and locked', !!badges && badges.n >= 15 && /of \d+ earned/.test(badges.text) && /100 hours club/.test(badges.text), JSON.stringify(badges)?.slice(0, 160))
+    // A badge newly earned shows a toast once: a 4-hour session earns Marathon.
+    const settingsQ = require(path.join(root, 'electron', 'db', 'queries', 'settings.js'))
+    const xpTracker = require(path.join(root, 'electron', 'services', 'xpTracker.js'))
+    const ov = require(path.join(root, 'electron', 'overlayWindow.js'))
+    const sent = []
+    const realBadge = ov.sendBadge
+    ov.sendBadge = (d) => sent.push(d)
+    xpTracker.check({ reason: 'test' })   // records what's earned now
+    const st = Date.now() - 6 * 3600e3
+    db.prepare('INSERT INTO sessions (game_id, started_at, ended_at, duration_seconds) VALUES (?, ?, ?, ?)').run(gid, new Date(st).toISOString(), new Date(st + 4.5 * 3600e3).toISOString(), 16200)
+    xpTracker.check({ reason: 'test' })
+    check('badges: a newly earned one shows a toast', sent.some(b => b.key === 'marathon'), JSON.stringify(sent))
+    const again = sent.length
+    xpTracker.check({ reason: 'test' })
+    check('badges: and only once', sent.length === again)
+    ov.sendBadge = realBadge
+    check('badges: the Marathon badge is earned on the Profile', await ev(`window.kozo.api.stats.badges().then(r => r.data.list.find(b => b.key === 'marathon')?.earned === true)`))
+
+    // Quick search: Ctrl+K, a game from the Library, Enter opens its page.
+    await go('#/', 1200)
+    await ev(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true })); true`); await sleep(500)
+    check('quick search: Ctrl+K opens it', await ev(`!!document.querySelector('[data-quick-search] input')`))
+    await ev(`(() => { const i = document.querySelector('[data-quick-search] input'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, 'smoke alp'); i.dispatchEvent(new Event('input', { bubbles: true })); return true })()`); await sleep(700)
+    const qs = await ev(`[...document.querySelectorAll('[data-quick-search] [data-qs-kind]')].map(b => b.dataset.qsKind + ':' + b.innerText.trim()).join(' | ')`)
+    check('quick search: finds the Library game', /game:Smoke Alpha/.test(qs), qs)
+    await ev(`document.querySelector('[data-quick-search] input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); true`); await sleep(900)
+    check('quick search: Enter opens the game page and closes', (await ev('location.hash')) === '#/game/' + gid && await ev(`!document.querySelector('[data-quick-search]')`), await ev('location.hash'))
+    await ev(`document.querySelector('[data-quick-search-btn]')?.click(); true`); await sleep(400)
+    await ev(`(() => { const i = document.querySelector('[data-quick-search] input'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, 'discou'); i.dispatchEvent(new Event('input', { bubbles: true })); return true })()`); await sleep(500)
+    check('quick search: the sidebar button opens it, and pages are found', /page:Discounts/.test(await ev(`[...document.querySelectorAll('[data-quick-search] [data-qs-kind]')].map(b => b.dataset.qsKind + ':' + b.innerText.trim()).join(' | ')`)))
+    await ev(`document.querySelector('[data-quick-search] input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); true`); await sleep(300)
+    check('quick search: Esc closes it', await ev(`!document.querySelector('[data-quick-search]')`))
+
+    // Guide on a locked achievement.
+    db.prepare("INSERT OR IGNORE INTO achievements (game_id, steam_api_name, display_name, description, global_unlock_percent) VALUES (?, 'SMOKE_LOCKED', 'Smoke Locked One', 'Do the thing', 12.5)").run(gid)
+    await go('#/', 600)   // leave the page first: the same address again doesn't reload it
+    await go('#/game/' + gid, 1800)
+    await ev(`[...document.querySelectorAll('[role=tab]')].find(t => /Achievements/.test(t.innerText))?.click(); true`); await sleep(800)
+    const opened = []
+    const shell = require('electron').shell
+    const realOpen = shell.openExternal
+    shell.openExternal = async (u) => { opened.push(u) }
+    check('guide: a locked achievement has a Guide button', await ev(`!!document.querySelector('[data-ach-guide]')`))
+    await ev(`document.querySelector('[data-ach-guide]')?.click(); true`); await sleep(400)
+    const menu = await ev(`[...document.querySelectorAll('[role=menu] [role=menuitem], [role=menu] button')].map(b => b.innerText.trim()).join(' | ')`)
+    check('guide: it offers YouTube and the web', /YouTube/.test(menu) && /Search the web/.test(menu), menu || await ev(`document.querySelectorAll('[data-ach-guide]').length + ' guides, ' + document.querySelectorAll('[role=menu]').length + ' menus, hash ' + location.hash + ', dialogs ' + document.querySelectorAll('[role=dialog]').length`))
+    await ev(`[...document.querySelectorAll('[role=menu] [role=menuitem], [role=menu] button')].find(b => /YouTube/.test(b.innerText))?.click(); true`); await sleep(400)
+    shell.openExternal = realOpen
+    check('guide: YouTube searches for the game and the achievement', opened.some(u => /youtube\.com\/results/.test(u) && /Smoke%20Locked%20One/.test(u)), JSON.stringify(opened))
+    db.prepare("DELETE FROM achievements WHERE steam_api_name = 'SMOKE_LOCKED'").run()
+
+    // The picked-games tray: a long name stays on one line.
+    await go('#/game-list', 1500)
+    await ev(`[...document.querySelectorAll('button')].find(b => /Add games/.test(b.innerText))?.click(); true`); await sleep(800)
+    const chipH = await ev(`(async () => {
+      const d = document.querySelector('[role=dialog]')
+      const tab = [...d.querySelectorAll('button')].find(b => /Paste a list/i.test(b.innerText))
+      if (!tab) return 'no paste tab'
+      tab.click(); await new Promise(r => setTimeout(r, 300))
+      const ta = d.querySelector('textarea'); if (!ta) return 'no textarea'
+      const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set
+      set.call(ta, 'Need for Speed: Most Wanted - Black Edition of a Very Long Name'); ta.dispatchEvent(new Event('input', { bubbles: true }))
+      await new Promise(r => setTimeout(r, 300))
+      const b = [...d.querySelectorAll('button')].find(x => /Find|Match|Add these|Look up/i.test(x.innerText)); b?.click()
+      await new Promise(r => setTimeout(r, 2500))
+      const chip = d.querySelector('[class*=chip] [class*=chipName]')?.parentElement
+      return chip ? chip.getBoundingClientRect().height : 'no chip'
+    })()`)
+    check('Add to Game List: a long picked name stays on one line', typeof chipH !== 'number' || chipH <= 28, String(chipH))
+    await escape()
+  }
   }
 
   if (want('tray')) {

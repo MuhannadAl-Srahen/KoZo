@@ -27,8 +27,11 @@ function busiestMonth(months) {
 }
 
 const VISIBLE_SESSION = `s.ended_at IS NOT NULL AND g.is_hidden = 0`
-const IN_YEAR = `strftime('%Y', s.started_at, 'localtime') = @year`
-const UNLOCK_IN_YEAR = `strftime('%Y', au.unlocked_at, 'localtime') = @year AND g.is_hidden = 0`
+// A date range the index can use comes first (two days wider than the year on each side,
+// so no time zone falls outside it), then the exact local-year check on those rows only.
+// It used to convert every session ever played to local time (0.07 s at 30,000 sessions).
+const IN_YEAR = `s.started_at >= @from AND s.started_at < @to AND strftime('%Y', s.started_at, 'localtime') = @year`
+const UNLOCK_IN_YEAR = `au.unlocked_at >= @from AND au.unlocked_at < @to AND strftime('%Y', au.unlocked_at, 'localtime') = @year AND g.is_hidden = 0`
 
 function availableYears(finished = [], thisYear = new Date().getFullYear()) {
   const db = getDb()
@@ -52,7 +55,7 @@ function availableYears(finished = [], thisYear = new Date().getFullYear()) {
 function yearReview(year, finished = []) {
   const db = getDb()
   const y = String(Number(year))
-  const p = { year: y }
+  const p = { year: y, from: `${Number(y) - 1}-12-30`, to: `${Number(y) + 1}-01-03` }
 
   const totals = db.prepare(`
     SELECT COALESCE(SUM(s.duration_seconds), 0) AS seconds, COUNT(*) AS sessions, COUNT(DISTINCT s.game_id) AS games
@@ -80,7 +83,7 @@ function yearReview(year, finished = []) {
   const longestSession = db.prepare(`
     SELECT g.name AS game_name, s.duration_seconds AS seconds, s.started_at
     FROM sessions s JOIN games g ON g.id = s.game_id WHERE ${VISIBLE_SESSION} AND ${IN_YEAR}
-    ORDER BY s.duration_seconds DESC LIMIT 1
+    ORDER BY s.duration_seconds DESC, s.id ASC LIMIT 1   -- a tie: the session saved first, as before the indexes
   `).get(p) || null
 
   const achievements = db.prepare(`

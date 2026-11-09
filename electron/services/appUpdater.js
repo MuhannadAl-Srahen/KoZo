@@ -11,6 +11,9 @@ let _wired = false
 
 // Last known update state, pushed to every window as `app:update` and readable
 // on demand (app:updateState) so a window opened later still shows the banner.
+// state: idle | downloading | ready | failed. wanted = Update was pressed (install the
+// moment the download is done), afterGame = waiting for the running game to close,
+// installing = KoZo is quitting to install. The sidebar's Update button shows all of it.
 let _state = { state: 'idle' }
 function setState(patch) {
   _state = { ..._state, ...patch }
@@ -38,7 +41,11 @@ function getAutoUpdater() {
     _wired = true
     autoUpdater.autoDownload = true
     autoUpdater.autoInstallOnAppQuit = true
-    autoUpdater.on('error', (e) => logger.warn('appUpdater:', { message: e?.message }))
+    autoUpdater.on('error', (e) => {
+      logger.warn('appUpdater:', { message: e?.message })
+      // A download that broke off: the button says so and tries again on a click.
+      if (_state.state === 'downloading') setState({ state: 'failed', wanted: false, afterGame: false })
+    })
     autoUpdater.on('update-available', (info) => {
       setState({ state: 'downloading', version: info?.version || null, notes: notesText(info?.releaseNotes), percent: 0 })
     })
@@ -51,6 +58,8 @@ function getAutoUpdater() {
     })
     autoUpdater.on('update-downloaded', (info) => {
       setState({ state: 'ready', version: info?.version || _state.version, notes: notesText(info?.releaseNotes) || _state.notes, percent: 100 })
+      // Update was pressed while it downloaded: install now (after the game, if one runs).
+      if (_state.wanted) { installNow(); return }
       // Never over a game: the download can finish mid-game (KoZo starts with Windows, a game
       // starts right after), and a box popping up can pull a full-screen game out of focus. The
       // in-app bar says it's ready meanwhile; the question waits until no game is running.
@@ -78,10 +87,18 @@ async function askToRestart(info) {
   }
 }
 
-// Startup check — fire-and-forget, never throws outward.
+// Startup check, then every 4 hours (KoZo can sit in the tray for days, and the sidebar's
+// Update button should still appear). Never while a game runs. Fire-and-forget.
+const RECHECK_MS = 4 * 60 * 60 * 1000
 function setupAutoUpdate() {
   const { app } = require('electron')
   if (!app.isPackaged) return
+  setInterval(() => {
+    try {
+      if (_state.state !== 'idle' || require('./processWatcher').isSessionActive()) return
+      getAutoUpdater().checkForUpdates().catch((e) => logger.warn('appUpdater: check failed', { message: e?.message }))
+    } catch {}
+  }, RECHECK_MS).unref?.()
   setTimeout(() => {
     try {
       // checkForUpdates, NOT checkForUpdatesAndNotify — the latter fires a
@@ -187,13 +204,51 @@ async function checkForUpdates() {
   }
 }
 
+// Quit and install. Never while a game runs: the installer's window would pull a full-screen
+// game out of focus and KoZo would stop counting the session, so it waits for the game.
+function installNow() {
+  if (require('./processWatcher').isSessionActive()) {
+    setState({ afterGame: true })
+    require('./processWatcher').runWhenIdle('updateInstall', () => installNow())
+    return { afterGame: true }
+  }
+  setState({ installing: true, afterGame: false })
+  const { app } = require('electron')
+  if (app.isPackaged) setTimeout(() => getAutoUpdater().quitAndInstall(), 400)
+  return { installing: true }
+}
+
+// The Update button (sidebar, the bar at the top, Settings > About): ready = restart into
+// the new version now; still downloading = install the moment it's done; a download that
+// failed = try again, then install.
 function installUpdate() {
-  if (_state.state !== 'ready') return false
-  getAutoUpdater().quitAndInstall()
-  return true
+  const st = _state.state
+  if (st === 'ready') return installNow()
+  if (st === 'downloading') { setState({ wanted: true }); return { whenReady: true } }
+  if (st === 'failed') {
+    setState({ state: 'downloading', wanted: true, percent: 0 })
+    getAutoUpdater().checkForUpdates().catch((e) => {
+      logger.warn('appUpdater: retry failed', { message: e?.message })
+      setState({ state: 'failed', wanted: false })
+    })
+    return { whenReady: true }
+  }
+  return false
 }
 
 // Notes for one released version — the "What's new" card after an update.
+// The notes shipped inside this build (build/release-notes.md, in build.files), when they are
+// this version's: What's new works with no internet, and the moment the update starts.
+function localReleaseNotes(version) {
+  try {
+    // Beside electron/ in the app (inside app.asar when installed), also when a script starts it.
+    const text = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'build', 'release-notes.md'), 'utf8')
+    const first = text.replace(/\r/g, '').split('\n')[0].trim()
+    if (first !== `KoZo ${version}`) return null
+    return { version, notes: text.trim(), url: null }
+  } catch { return null }
+}
+
 async function fetchReleaseNotes(version) {
   const pkg = require('../../package.json')
   const pub = Array.isArray(pkg.build?.publish) ? pkg.build.publish[0] : pkg.build?.publish
@@ -208,4 +263,14 @@ async function fetchReleaseNotes(version) {
   return { version, notes: String(r.data?.body || '').trim(), url: r.data?.html_url || null }
 }
 
-module.exports = { setupAutoUpdate, checkForUpdates, fetchLatestRelease, isNewer, getState, installUpdate, fetchReleaseNotes, getAutoUpdater }
+// This version's notes: the ones in the build, else the GitHub release's.
+async function notesFor(version) {
+  const local = localReleaseNotes(version)
+  if (local) {
+    const web = await fetchReleaseNotes(version).catch(() => null)
+    return { ...local, url: web?.url || null }
+  }
+  return (await fetchReleaseNotes(version).catch(() => null)) || { version, notes: '' }
+}
+
+module.exports = { setupAutoUpdate, checkForUpdates, fetchLatestRelease, isNewer, getState, setState, installUpdate, fetchReleaseNotes, localReleaseNotes, notesFor, getAutoUpdater }

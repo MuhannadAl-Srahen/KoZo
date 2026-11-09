@@ -251,8 +251,8 @@ export default function AddGameToListModal({ onClose, onSaved }) {
           </div>
           <div className={a.chips}>
             {basket.map(b => (
-              <span key={b.key} className={a.chip}>
-                {b.name}
+              <span key={b.key} className={a.chip} title={b.name}>
+                <span className={a.chipName}>{b.name}</span>
                 <button type="button" onClick={() => toggle(b)} aria-label={`Remove ${b.name}`}><IconX size={12} stroke={2.4} /></button>
               </span>
             ))}

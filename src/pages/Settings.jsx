@@ -23,6 +23,7 @@ import SaveManagerModal from '../components/modals/SaveManagerModal'
 import BackupsTab from '../components/BackupsTab'
 import StorageTab from '../components/StorageTab'
 import DriveSetupModal, { DriveBlockedHint } from '../components/DriveSetupModal'
+import WhatsNewModal from '../components/WhatsNewModal'
 import s from './Settings.module.css'
 
 // ── Shared bits ──────────────────────────────────────────────────────────────
@@ -412,6 +413,7 @@ const KEYBOARD_GROUPS = [
     ['Alt + K', 'While playing: show your session time and achievements over the game'],
   ] },
   { title: 'Inside KoZo', rows: [
+    ['Ctrl + K', 'Search everything: your games, Game List, pages and Steam'],
     ['Ctrl + mouse wheel', 'Over a card grid: card size. Anywhere else: the size of the whole app'],
     ['Esc', 'Close the open menu or dialog; in Big Picture, leave it'],
     ['Right click', 'The options menu for a game, a row or a card'],
@@ -1953,6 +1955,12 @@ function AboutTab() {
   const [version, setVersion] = useState('')
   const [updState, setUpdState] = useState('idle')     // idle | checking | done
   const [updResult, setUpdResult] = useState(null)
+  const [updPressed, setUpdPressed] = useState(false)
+  const [notes, setNotes] = useState(null)   // this version's What's new, opened from here
+  async function openNotes() {
+    const r = await window.kozo?.api?.app?.releaseNotes?.()
+    setNotes(r?.ok && r.data ? r.data : { version, notes: '' })
+  }
 
   useEffect(() => {
     window.kozo?.api?.app?.getVersion?.().then(res => {
@@ -1987,7 +1995,7 @@ function AboutTab() {
     if (r.notConfigured) return ['info', 'Update source not configured yet (set build.publish in package.json).']
     if (r.noReleases) return ['info', `No releases published on ${r.repo} yet. Build the app and publish a GitHub release to enable updates.`]
     if (r.updateAvailable) {
-      return ['success', `Update ${r.latest} available (you have ${r.current})${r.dev || r.manualOnly ? '' : '. Downloading in the background.'}`]
+      return ['success', `Update ${r.latest} available (you have ${r.current})${r.dev || r.manualOnly ? '' : updPressed ? '. KoZo restarts by itself when it is downloaded.' : '. Downloading in the background.'}`]
     }
     return ['success', `You're up to date${r.latest ? `. ${r.latest} is the latest release` : ''}${r.dev ? ' (dev build, checked against GitHub)' : ''}.`]
   }
@@ -2012,13 +2020,27 @@ function AboutTab() {
               ? <><IconLoader2 size={13} stroke={1.8} className="spin" /> Checking…</>
               : <><IconRefresh size={13} stroke={1.8} /> Check for updates</>}
           </button>
+          <button type="button" className={s.testBtn} onClick={openNotes} data-whatsnew-open="">
+            <IconSparkles size={13} stroke={1.8} /> What's new in {version || 'this version'}
+          </button>
         </div>
+        {notes && <WhatsNewModal version={notes.version || version} notes={notes.notes} url={notes.url} onClose={() => setNotes(null)} />}
         {updState === 'done' && updResult && (() => {
           const [type, text] = updateLine(updResult)
           const showLink = updResult.updateAvailable && (updResult.dev || updResult.manualOnly) && updResult.releaseUrl
+          const canInstall = updResult.updateAvailable && !updResult.dev && !updResult.manualOnly && !updPressed
           return (
             <StatusLine type={type}>
               {text}
+              {canInstall && (
+                <>
+                  {' '}
+                  <button type="button" className={s.linkBtn} data-update-now=""
+                    onClick={() => { setUpdPressed(true); window.kozo?.api?.app?.installUpdate?.() }}>
+                    Update now
+                  </button>
+                </>
+              )}
               {showLink && (
                 <>
                   {' '}

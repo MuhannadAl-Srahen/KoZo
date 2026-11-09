@@ -3,7 +3,7 @@ import {
   IconPlus, IconLayoutGrid, IconList, IconLayoutColumns,
   IconDeviceGamepad2, IconPencil, IconSearch,
   IconCheckbox, IconSquare, IconTrash, IconX, IconCheck, IconStar, IconLoader2,
-  IconBooks, IconCalendarEvent, IconDice5, IconBrandSteam,
+  IconBooks, IconCalendarEvent, IconDice5, IconBrandSteam, IconDiscount2,
 } from '@tabler/icons-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { getBannerBg, parseGenres, formatMonthKey, fileUrl } from '../lib/utils'
@@ -60,7 +60,33 @@ function bannerOnError(e) {
 
 // ── Card components ─────────────────────────────────────────────────────────
 
-function GridCard({ item, onClick, selectionMode, selected, onToggle, onToggleFav, onContextMenu }) {
+// "-50% $9.99" on a game you want that's on sale (deals:saleMap, from Discounts' last check).
+// On a card it sits on the cover, top right, big, in Steam's own sale colors: the small chip
+// in the stats strip was hard to see (the maker). List rows keep the chip beside the status.
+function saleTitle(sale) {
+  return `On sale on Steam: ${sale.finalText || ''}${sale.originalText ? `, was ${sale.originalText}` : ''}${sale.lowest ? '. Its lowest price ever' : ''}`
+}
+function SaleBadge({ sale }) {
+  if (!sale) return null
+  return (
+    <span className={s.saleBadge} title={saleTitle(sale)} data-sale-chip="">
+      <span className={s.saleBadgePct}>-{sale.pct}%</span>
+      {sale.finalText && <span className={s.saleBadgePrice}>{sale.originalText && <s>{sale.originalText}</s>}{sale.finalText}</span>}
+      {sale.lowest && <span className={s.saleBadgeLow}>Lowest ever</span>}
+    </span>
+  )
+}
+function SaleChip({ sale }) {
+  if (!sale) return null
+  const title = saleTitle(sale)
+  return (
+    <span className={`${s.saleChip} ${sale.lowest ? s.saleChipLow : ''}`} title={title} data-sale-chip="">
+      <IconDiscount2 size={12} stroke={2} /> -{sale.pct}%{sale.finalText ? <b>{sale.finalText}</b> : null}
+    </span>
+  )
+}
+
+function GridCard({ item, sale, onClick, selectionMode, selected, onToggle, onToggleFav, onContextMenu }) {
   const cfg = STATUS_CONFIG[item.status] || { label: item.status, color: 'var(--text-muted)' }
   const bg  = getBannerBg(item.id)
   const src = withBust(item.banner_url, item.banner_rev) || fileUrl(item.game_banner_local_path)
@@ -89,6 +115,7 @@ function GridCard({ item, onClick, selectionMode, selected, onToggle, onToggleFa
           </div>
         )}
 
+        {!selectionMode && <SaleBadge sale={sale} />}
         {/* Status LED + name/genres overlaid on the cover — mirrors GameCard. */}
         {!selectionMode && (
           <span className={s.cardStatusLed} style={{ '--state-color': cfg.color }} title={cfg.label} />
@@ -130,7 +157,7 @@ function GridCard({ item, onClick, selectionMode, selected, onToggle, onToggleFa
   )
 }
 
-function ListRow({ item, onClick, selectionMode, selected, onToggle, onToggleFav, onContextMenu }) {
+function ListRow({ item, sale, onClick, selectionMode, selected, onToggle, onToggleFav, onContextMenu }) {
   const cfg = STATUS_CONFIG[item.status] || { label: item.status, color: 'var(--text-muted)' }
   const bg  = getBannerBg(item.id)
   const src = withBust(item.banner_url, item.banner_rev) || fileUrl(item.game_banner_local_path)
@@ -187,6 +214,7 @@ function ListRow({ item, onClick, selectionMode, selected, onToggle, onToggleFav
           {item.planned_month && (
             <span className={s.planChip} title="Planned to play this month">{formatMonthKey(item.planned_month)}</span>
           )}
+          <SaleChip sale={sale} />
           <div
             className={s.listStatusBadge}
             style={{ color: cfg.color, borderColor: `color-mix(in srgb, ${cfg.color} 33%, transparent)`, background: `color-mix(in srgb, ${cfg.color} 9%, transparent)` }}
@@ -217,7 +245,11 @@ export default function GameList() {
   // it for the "All" chip and the page title made both shrink to the size of
   // the active filter — the All chip literally disagreeing with itself.
   const [allTotal, setAllTotal] = useState(0)
+  // How many chunks of PAGE_SIZE are on screen. Scrolling near the end loads the next one
+  // (the maker asked for that over page numbers); every reload asks for all of them at once.
   const [page, setPage]         = useState(1)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const moreRef = useRef(null)          // the sentinel under the cards
   const [statusFilter, setStatusFilter] = useState('')
   const [genreFilter, setGenreFilter]   = useState('')
   // The month filter moved to its own tab (Play Plan); the Game List no longer filters by month.
@@ -237,12 +269,27 @@ export default function GameList() {
   const [switching, setSwitching] = useState(false)   // filter change with grid kept on screen
   const itemsRef = useRef([])
   useEffect(() => { itemsRef.current = items }, [items])
+  // Games on sale (by Steam id), refreshed when Discounts gets a new answer.
+  const [sales, setSales] = useState({})
+  useEffect(() => {
+    const load = () => window.kozo?.api?.deals?.saleMap?.().then(r => { if (r?.ok) setSales(r.data || {}) })
+    load()
+    const off = window.kozo?.events?.onDealsUpdated?.(load)
+    return () => { try { off?.() } catch {} }
+  }, [])
 
   const [showAdd, setShowAdd]   = useState(false)
   const [picking, setPicking]   = useState(false)   // Pick for me
   const [wishlist, setWishlist] = useState(false)   // Steam wishlist import
   const location = useLocation()
   const navigate = useNavigate()
+  // ?open=<row id>: quick search opens that entry's window.
+  useEffect(() => {
+    const id = Number(new URLSearchParams(location.search).get('open'))
+    if (!id) return
+    window.kozo?.api?.gameList?.get?.(id).then(r => { if (r?.ok && r.data) setEditItem(r.data) })
+    navigate('/game-list', { replace: true })
+  }, [location.search])
   // ?wishlist=1: Settings > Features > Steam wishlist
   useEffect(() => {
     if (new URLSearchParams(location.search).get('wishlist') === '1') {
@@ -255,9 +302,8 @@ export default function GameList() {
   const [dragOverId, setDragOverId] = useState(null) // drop-target highlight
   const dragIdRef = useRef(null)
 
-  // Drag-reorder within the current page/filter view. The main process splices
-  // this page's new order into the whole list (gameList:reorderPage), so a drop
-  // on page 2 stays on page 2 and favorites keep leading.
+  // Drag-reorder within the cards shown. The main process splices their new order
+  // into the whole list (gameList:reorderPage, from row 0), so favorites keep leading.
   async function handleCardDrop(targetId) {
     const dragId = dragIdRef.current
     dragIdRef.current = null
@@ -276,7 +322,7 @@ export default function GameList() {
     if (monthFilter)  filters.month = monthFilter
     if (activeListId) filters.listId = activeListId
     if (searchText?.trim()) filters.search = searchText.trim()
-    await window.kozo?.api?.gameList?.reorderPage?.(filters, (page - 1) * PAGE_SIZE, pageItems.map(i => i.id))
+    await window.kozo?.api?.gameList?.reorderPage?.(filters, 0, pageItems.map(i => i.id))
     pageCache.clear()
     loadItems(page, { silent: true })
   }
@@ -300,9 +346,17 @@ export default function GameList() {
     })
   }
 
-  function selectAll() { setSelectedIds(new Set(items.map(i => i.id))) }
+  // Every game in the current filter, also the ones further down that haven't loaded yet.
+  const [selectingAll, setSelectingAll] = useState(false)
+  async function selectAll() {
+    if (items.length >= total) { setSelectedIds(new Set(items.map(i => i.id))); return }
+    setSelectingAll(true)
+    const res = await window.kozo?.api?.gameList?.list({ ...currentFilters(), limit: total + 50, offset: 0 })
+    setSelectingAll(false)
+    setSelectedIds(new Set((res?.ok ? res.data?.items ?? [] : items).map(i => i.id)))
+  }
   function deselectAll() { setSelectedIds(new Set()) }
-  const allSelected = items.length > 0 && selectedIds.size === items.length
+  const allSelected = total > 0 && selectedIds.size >= total
 
   // Toggle favorite (pins to top). Optimistic: flip local state immediately so
   // the star fills with no reload flash, then persist + silently re-fetch.
@@ -387,7 +441,7 @@ export default function GameList() {
       // spinner unmounted every card and made covers re-request + jump around.
       setSwitching(true)
     }
-    const filters = { limit: PAGE_SIZE, offset: (pg - 1) * PAGE_SIZE }
+    const filters = { limit: pg * PAGE_SIZE, offset: 0 }
     if (status) filters.status = status
     if (genre)  filters.genre = genre
     if (month)  filters.month = month
@@ -404,6 +458,58 @@ export default function GameList() {
     setLoading(false)
     setSwitching(false)
   }, [statusFilter, genreFilter, monthFilter, activeListId, searchText])
+
+  function currentFilters() {
+    const f = {}
+    if (statusFilter) f.status = statusFilter
+    if (genreFilter)  f.genre = genreFilter
+    if (monthFilter)  f.month = monthFilter
+    if (activeListId) f.listId = activeListId
+    if (searchText?.trim()) f.search = searchText.trim()
+    return f
+  }
+
+  const moreBusy = useRef(false)
+  const loadMore = useCallback(async () => {
+    if (moreBusy.current || loading || switching) return
+    const have = itemsRef.current.length
+    if (have >= total) return
+    moreBusy.current = true
+    setLoadingMore(true)
+    const res = await window.kozo?.api?.gameList?.list({ ...currentFilters(), limit: PAGE_SIZE, offset: have })
+    if (res?.ok) {
+      const seen = new Set(itemsRef.current.map(i => i.id))
+      const next = [...itemsRef.current, ...(res.data?.items ?? []).filter(i => !seen.has(i.id))]
+      const pg = Math.ceil(next.length / PAGE_SIZE)
+      itemsRef.current = next
+      setItems(next)
+      setTotal(res.data?.total ?? total)
+      setPage(pg)
+      pageCache.set(JSON.stringify([pg, statusFilter, genreFilter, monthFilter, activeListId, (searchText || '').trim()]), { items: next, total: res.data?.total ?? total })
+    }
+    setLoadingMore(false)
+    moreBusy.current = false
+  }, [loading, switching, total, statusFilter, genreFilter, monthFilter, activeListId, searchText])
+
+  // The sentinel under the cards: near the bottom of the scroll panel, load more. Watched
+  // against the panel itself, so the 600 px head start isn't cut off by its edges.
+  const loadMoreRef = useRef(loadMore)
+  useEffect(() => { loadMoreRef.current = loadMore }, [loadMore])
+  const hasMore = !loading && items.length > 0 && items.length < total
+  useEffect(() => {
+    const el = moreRef.current
+    if (!el || !hasMore) return
+    let root = el.parentElement
+    while (root && root !== document.body) {
+      const oy = getComputedStyle(root).overflowY
+      if (oy === 'auto' || oy === 'scroll') break
+      root = root.parentElement
+    }
+    const io = new IntersectionObserver((ents) => { if (ents.some(e => e.isIntersecting)) loadMoreRef.current?.() },
+      { root: root && root !== document.body ? root : null, rootMargin: '0px 0px 600px 0px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [hasMore, items.length])
 
   useEffect(() => {
     loadLists()
@@ -447,11 +553,6 @@ export default function GameList() {
     loadItems(1, { listId })
   }
 
-  function handlePage(p) {
-    setPage(p)
-    loadItems(p)
-  }
-
   function afterSave() {
     setShowAdd(false)
     setEditItem(null)
@@ -461,20 +562,15 @@ export default function GameList() {
     loadAllTotal()
   }
 
-  // Removing the last card on a later page would refetch an empty page and show
-  // "No games here yet" — step back a page instead.
   async function afterDelete() {
     setEditItem(null)
-    const target = items.length <= 1 && page > 1 ? page - 1 : page
-    if (target !== page) setPage(target)
     pageCache.clear()
-    await loadItems(target)
+    await loadItems(page, { silent: true })
     loadLists()
     loadGenres()
     loadAllTotal()
   }
 
-  const totalPages = Math.ceil(total / PAGE_SIZE)
   const activeList = customLists.find(l => l.id === activeListId)
 
   return (
@@ -570,7 +666,9 @@ export default function GameList() {
           <button className={s.btnSecondary} onClick={allSelected ? deselectAll : selectAll}>
             {allSelected
               ? <><IconCheckbox size={14} stroke={1.8} /> Deselect all</>
-              : <><IconSquare size={14} stroke={1.8} /> Select all ({items.length})</>
+              : selectingAll
+                ? <><IconLoader2 size={14} stroke={1.8} className="spin" /> Selecting…</>
+                : <><IconSquare size={14} stroke={1.8} /> Select all ({total})</>
             }
           </button>
 
@@ -678,6 +776,7 @@ export default function GameList() {
                 >
                   <GridCard
                     item={item}
+                    sale={item.steam_app_id ? sales[item.steam_app_id] : null}
                     onClick={setEditItem}
                     selectionMode={selectionMode}
                     selected={selectedIds.has(item.id)}
@@ -697,6 +796,7 @@ export default function GameList() {
               <ListRow
                 key={item.id}
                 item={item}
+                sale={item.steam_app_id ? sales[item.steam_app_id] : null}
                 onClick={setEditItem}
                 selectionMode={selectionMode}
                 selected={selectedIds.has(item.id)}
@@ -708,29 +808,10 @@ export default function GameList() {
           </div>
         )}
 
-        {!loading && totalPages > 1 && (
-          <div className={s.pagination}>
-            <button className={s.pageBtn} onClick={() => handlePage(page - 1)} disabled={page <= 1}>‹</button>
-
-            {Array.from({ length: totalPages }, (_, i) => i + 1)
-              .filter(p => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
-              .reduce((acc, p, i, arr) => {
-                if (i > 0 && p - arr[i - 1] > 1) acc.push('…')
-                acc.push(p)
-                return acc
-              }, [])
-              .map((p, i) =>
-                p === '…'
-                  ? <span key={`e${i}`} className={s.pageInfo}>…</span>
-                  : <button
-                      key={p}
-                      className={`${s.pageBtn} ${p === page ? s.pageBtnActive : ''}`}
-                      onClick={() => handlePage(p)}
-                    >{p}</button>
-              )
-            }
-
-            <button className={s.pageBtn} onClick={() => handlePage(page + 1)} disabled={page >= totalPages}>›</button>
+        {/* More cards load as this comes into view (scroll), never page numbers. */}
+        {hasMore && (
+          <div ref={moreRef} className={s.loadMore} data-gamelist-more aria-hidden={!loadingMore}>
+            {loadingMore && <><IconLoader2 size={14} stroke={1.8} className="spin" /> Loading more games…</>}
           </div>
         )}
       </div>

@@ -24,7 +24,7 @@ function toggleFavorite(e, game, onFavorite) {
 
 // ── Portrait card (big / small) ───────────────────────────────────────────────
 
-function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavorite, onContextMenu }) {
+function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavorite, onContextMenu, cardCover }) {
   const navigate = useNavigate()
   const Icon     = getBannerIcon(game.name)
   const bg       = getBannerBg(game.id)
@@ -56,7 +56,7 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
     >
       <div className={s.banner} style={{ background: bg }}>
         {(() => {
-          const localSrc = game.banner_local_path ? fileUrl(game.banner_local_path, game.banner_rev) : null
+          const localSrc = game.banner_local_path ? fileUrl(game.banner_local_path, game.banner_rev, { card: !!cardCover }) : null
           const imgSrc = localSrc || game.banner_url
           // No art, or every source failed: a generated cover instead of a blank tile.
           if (!imgSrc || imgFailed === imgSrc) return <GeneratedCover name={game.name} Icon={src?.Icon || Icon} />
@@ -235,7 +235,7 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite, onConte
       <div className={s.listThumb} style={{ background: bg }}>
         <Icon size={20} stroke={1.2} style={{ color: 'rgba(255,255,255,0.15)', position: 'relative', zIndex: 0 }} />
         {(() => {
-          const localSrc = game.banner_local_path ? fileUrl(game.banner_local_path, game.banner_rev) : null
+          const localSrc = game.banner_local_path ? fileUrl(game.banner_local_path, game.banner_rev, { card: true }) : null
           const src = localSrc || game.banner_url
           if (!src) return null
           function handleError(e) {
@@ -358,8 +358,12 @@ function ListCard({ game, selectionMode, selected, onToggle, onFavorite, onConte
 
 // ── Exports ───────────────────────────────────────────────────────────────────
 
-export default function GameCard({ game, view = 'big', selectionMode = false, selected = false, onToggle, onFavorite, onContextMenu }) {
+// memo: a card redraws only when its own game or props change. Without it, opening a menu or
+// dragging over one card redrew every card (500 in a big Library).
+// cardCover: the Library draws this card small enough for the card-size cover copy.
+function GameCard({ game, view = 'big', selectionMode = false, selected = false, onToggle, onFavorite, onContextMenu, cardCover = false }) {
   if (view === 'list') return <ListCard game={game} selectionMode={selectionMode} selected={selected} onToggle={onToggle} onFavorite={onFavorite} onContextMenu={onContextMenu} />
   const variant = view === 'small' ? 'small' : 'big'
-  return <PortraitCard game={game} variant={variant} selectionMode={selectionMode} selected={selected} onToggle={onToggle} onFavorite={onFavorite} onContextMenu={onContextMenu} />
+  return <PortraitCard game={game} variant={variant} selectionMode={selectionMode} selected={selected} onToggle={onToggle} onFavorite={onFavorite} onContextMenu={onContextMenu} cardCover={cardCover} />
 }
+export default React.memo(GameCard)

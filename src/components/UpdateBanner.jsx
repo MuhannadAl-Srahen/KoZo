@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { IconDownload, IconRefresh, IconX, IconSparkles } from '@tabler/icons-react'
-import InfoModal from './ui/InfoModal'
+import WhatsNewModal from './WhatsNewModal'
 import s from './UpdateBanner.module.css'
 
 // Tells the user about app updates as soon as KoZo opens:
@@ -8,7 +8,7 @@ import s from './UpdateBanner.module.css'
 //   • a one-time "What's new" card the first launch after an update installed.
 // State comes from electron/services/appUpdater.js (app:update / app:updateState).
 // Must match `rev` in electron/preload.js.
-const PRELOAD_REV = 31
+const PRELOAD_REV = 38
 
 export default function UpdateBanner() {
   // The UI reloaded with new code but the main process is still the old one.
@@ -68,21 +68,7 @@ export default function UpdateBanner() {
       )}
 
       {whatsNew && (
-        <InfoModal
-          variant="info"
-          title={whatsNew.upcoming ? `What's new in KoZo ${whatsNew.version}` : `KoZo updated to ${whatsNew.version}`}
-          message={whatsNew.upcoming ? 'This update is downloading in the background.' : 'Here is what changed in this version.'}
-          onClose={() => setWhatsNew(null)}
-        >
-          <div className={s.notes}>
-            {(whatsNew.notes || 'Bug fixes and improvements.').trim()}
-          </div>
-          {whatsNew.url && (
-            <button className={s.link} onClick={() => window.kozo.api.shell?.openExternal?.(whatsNew.url)}>
-              <IconSparkles size={13} /> Full release notes on GitHub
-            </button>
-          )}
-        </InfoModal>
+        <WhatsNewModal version={whatsNew.version} notes={whatsNew.notes} url={whatsNew.url} upcoming={!!whatsNew.upcoming} onClose={() => setWhatsNew(null)} />
       )}
     </>
   )

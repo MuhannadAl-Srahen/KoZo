@@ -7,11 +7,13 @@ import {
   IconCircleCheck, IconCircleOff, IconEye, IconEyeOff, IconChevronDown,
   IconChevronRight, IconAlertTriangle, IconDeviceGamepad2,
   IconLayoutDashboard, IconSparkles, IconLayoutSidebarRight, IconMovie, IconTarget, IconChartBar,
-  IconInfoCircle, IconBrandSteam, IconClock,
+  IconInfoCircle, IconBrandSteam, IconClock, IconRepeat, IconTrash, IconPencil, IconBook, IconBrandYoutube, IconSearch,
 } from '@tabler/icons-react'
 import { exeLooksLikeTool, getBannerBg, getBannerIcon, formatPlaytime, formatDate, formatDateTime, fileUrl, isSteamTracked, launcherLabel, localDayKey, rarityColor, timeAgo } from '../lib/utils'
 import { STATUS_META } from '../components/GameCard'
 import AchievementModal from '../components/modals/AchievementModal'
+import ContextMenu from '../components/ui/ContextMenu'
+import { guideLinks, openGuide } from '../lib/achGuides'
 import SessionDetail from '../components/SessionDetail'
 import { clockTime } from '../lib/sessionDetail'
 import EditGameModal from '../components/modals/EditGameModal'
@@ -20,6 +22,7 @@ import InfoModal, { PrivacyHelp } from '../components/ui/InfoModal'
 import EmptyState from '../components/ui/EmptyState'
 import { HeroSkeleton, PanelSkeleton } from '../components/ui/Skeleton'
 import GeneratedCover from '../components/GeneratedCover'
+import UndoBar from '../components/ui/UndoBar'
 import SteamGameModal, { StoreSections } from '../components/SteamGameModal'
 import AchImg from '../components/ui/AchImg'
 import { GamesLikeGrid } from './GamesLike'
@@ -97,7 +100,7 @@ function isUnlocked(ach) {
 // tile, which turned a 50-achievement game into a wall of text — it now lives
 // in the row's tooltip, where it is there when you want it and silent when you
 // don't.
-function AchCard({ ach, onClick, onQuickToggle }) {
+function AchCard({ ach, onClick, onQuickToggle, onGuide }) {
   // unlock_id is the row's existence; unlocked_at can legitimately be NULL when
   // Steam reported no date (unlocktime 0). The unlocked_at half stays as a
   // safety net for any patch that forgets the id.
@@ -132,6 +135,18 @@ function AchCard({ ach, onClick, onQuickToggle }) {
         )}
       </div>
 
+      {!unlocked && onGuide && (
+        <button
+          type="button"
+          className={s.achGuide}
+          title="How to unlock it: Steam guides, YouTube or the web"
+          onClick={(e) => { e.stopPropagation(); onGuide(e, ach) }}
+          data-ach-guide={ach.id}
+        >
+          <IconBook size={13} stroke={1.8} /> Guide
+        </button>
+      )}
+
       <button
         className={`${s.achStatus} ${unlocked ? s.achStatusOn : ''}`}
         title={unlocked ? 'Mark as locked' : 'Mark as unlocked (manual)'}
@@ -147,6 +162,82 @@ function AchCard({ ach, onClick, onQuickToggle }) {
 }
 
 // ── Session row ────────────────────────────────────────────────────────────
+// Playthroughs (db/queries/playthroughs.js): a session belongs to the playthrough it started in.
+function playthroughStats(list, sessions) {
+  return list.map(p => {
+    const mine = sessions.filter(x => x.started_at >= p.started_at && (!p.ended_at || x.started_at < p.ended_at))
+    return { ...p, seconds: mine.reduce((n, x) => n + (x.duration_seconds || 0), 0), count: mine.length }
+  })
+}
+
+// 1st, 2nd, 3rd, 4th ... 11th, 12th, 13th, 21st
+function ordinal(n) {
+  const t = n % 100
+  if (t >= 11 && t <= 13) return `${n}th`
+  return `${n}${['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`
+}
+
+// "Today" and "Yesterday" read as words inside a sentence.
+const dayWord = (iso) => { const d = formatDate(iso); return /^(Today|Yesterday)$/.test(d) ? d.toLowerCase() : d }
+
+// A note on a playthrough ("Shura ending"): click to write, Enter or leaving the box saves,
+// Escape cancels.
+function PlaythroughNote({ gameId, p, onSaved }) {
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(p.note || '')
+  useEffect(() => { if (!editing) setText(p.note || '') }, [p.note, editing])
+  async function save() {
+    setEditing(false)
+    if ((text || '').trim() === (p.note || '')) return
+    const r = await window.kozo?.api?.games?.playthroughNote?.(gameId, p.number, text)
+    if (r?.ok) onSaved?.(p.number, r.data)
+  }
+  if (editing) {
+    return (
+      <input className={s.ptNoteInput} autoFocus maxLength={80} value={text} placeholder="Shura ending, no-hit run…" aria-label={`Note for playthrough ${p.number}`}
+        data-pt-note-input={p.number}
+        onChange={e => setText(e.target.value)}
+        onBlur={save}
+        onKeyDown={e => {
+          if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur() }
+          if (e.key === 'Escape') { e.stopPropagation(); setText(p.note || ''); setEditing(false) }
+        }} />
+    )
+  }
+  return p.note
+    ? <button type="button" className={s.ptNote} onClick={() => setEditing(true)} title="Edit the note" data-pt-note={p.number}><IconPencil size={11} stroke={1.8} /> {p.note}</button>
+    : <button type="button" className={s.ptNoteAdd} onClick={() => setEditing(true)} data-pt-note-add={p.number}><IconPencil size={11} stroke={1.8} /> Add a note</button>
+}
+
+function PlaythroughsCard({ gameId, list, sessions, onNote }) {
+  const rows = playthroughStats(list, sessions).reverse()
+  return (
+    <div className={s.card} data-playthroughs="">
+      <div className={s.cardHead}><IconRepeat size={14} /> Playthroughs</div>
+      <div className={s.ptList}>
+        {rows.map(p => (
+          <div key={p.number} className={s.ptRow}>
+            <div className={s.ptMain}>
+              <span className={s.ptName}>Playthrough {p.number}</span>
+              {p.current && !p.finished_at && <span className={s.ptBadge}>Now</span>}
+              {p.finished_at && <span className={`${s.ptBadge} ${s.ptDone}`}>Finished</span>}
+            </div>
+            <span className={s.ptTime}>{p.before_kozo ? '' : p.seconds ? formatPlaytime(p.seconds) : '0m'}</span>
+            <span className={s.ptMeta}>
+              {p.before_kozo ? 'Before KoZo' : <>
+                {p.ended_at ? `${dayWord(p.started_at)} to ${dayWord(p.ended_at)}` : `Since ${dayWord(p.started_at)}`}
+                {p.count ? `, ${p.count} session${p.count === 1 ? '' : 's'}` : ''}
+                {p.finished_at ? `, finished ${dayWord(p.finished_at)}` : ''}
+              </>}
+            </span>
+            <PlaythroughNote gameId={gameId} p={p} onSaved={onNote} />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function SessionRow({ session, maxDuration, open = false, onOpen }) {
   const widthPct = maxDuration > 0
     ? Math.max((session.duration_seconds / maxDuration) * 100, 2)
@@ -189,6 +280,7 @@ export default function GameDetail() {
   const [reviews, setReviews]       = useState(null)
   const [isLive, setIsLive]         = useState(false)
   const [selectedAch, setSelectedAch] = useState(null)
+  const [guideMenu, setGuideMenu] = useState(null)   // { x, y, ach }: where to find how to unlock it
   const [pickedDay, setPickedDay]   = useState(null)   // the chart bar picked: the list under the bars shows that day
   const [openSessionId, setOpenSessionId] = useState(null)
   const [copyVersion, setCopyVersion] = useState(null)
@@ -198,6 +290,11 @@ export default function GameDetail() {
   const [deleting, setDeleting]     = useState(false)
   const [showEdit, setShowEdit]     = useState(false)
   const [showSaveManager, setShowSaveManager] = useState(false)
+  // Playing it again: the list, the "start one?" question, and its Undo.
+  const [playthroughs, setPlaythroughs] = useState([])
+  const [askReplay, setAskReplay] = useState(false)
+  const [replayNumber, setReplayNumber] = useState(null)   // "which time is this", first start only
+  const [replayUndo, setReplayUndo] = useState(null)
   const [importing, setImporting]       = useState(false)
   const [refreshing, setRefreshing]     = useState(false)
   const [crackScanning, setCrackScanning] = useState(false)
@@ -289,13 +386,15 @@ export default function GameDetail() {
 
   const load = useCallback(async () => {
     if (!window.kozo?.api || !id) return
-    const [gRes, aRes, sRes, activeRes, privRes] = await Promise.all([
+    const [gRes, aRes, sRes, activeRes, privRes, ptRes] = await Promise.all([
       window.kozo.api.games.get(Number(id)),
       window.kozo.api.achievements.listForGame(Number(id)),
       window.kozo.api.sessions.getForGame(Number(id)),
       window.kozo.api.sessions.active(),
       window.kozo.api.steam?.lastSyncError?.(Number(id)),
+      window.kozo.api.games.playthroughs?.(Number(id)),
     ])
+    setPlaythroughs(ptRes?.ok ? (ptRes.data || []) : [])
     if (gRes?.ok) setGame(gRes.data)
     if (aRes?.ok) setAch(aRes.data ?? [])
     if (sRes?.ok) setSessions(sRes.data ?? [])
@@ -1039,6 +1138,12 @@ export default function GameDetail() {
               <IconDeviceFloppy size={14} stroke={1.6} />
               Save files &amp; backup
             </button>
+            {!game.is_archived && (
+              <button className={s.menuItem} onClick={() => { setMenuOpen(false); setReplayNumber(null); setAskReplay(true) }} data-new-playthrough="">
+                <IconRepeat size={14} stroke={1.6} />
+                Start a new playthrough
+              </button>
+            )}
             {!!game.install_path && (
               <button className={s.menuItem} onClick={handleOpenFolder}>
                 <IconFolderOpen size={14} stroke={1.6} />
@@ -1049,12 +1154,28 @@ export default function GameDetail() {
               {game.is_hidden ? <IconEye size={14} stroke={1.6} /> : <IconEyeOff size={14} stroke={1.6} />}
               {game.is_hidden ? 'Unhide from library' : 'Hide from library'}
             </button>
-            {game.is_archived ? (
+            {game.is_archived ? (<>
               <button className={s.menuItem} onClick={handleRestore}>
                 <IconArrowBackUp size={14} stroke={1.6} />
                 Restore to Library
               </button>
-            ) : !confirmDelete ? (
+              {!confirmDelete ? (
+                <button className={s.menuItem} onClick={() => setConfirmDelete(true)} data-delete-archived="">
+                  <IconTrash size={14} stroke={1.6} />
+                  Delete with history
+                </button>
+              ) : (
+                <div className={s.menuConfirm}>
+                  <div className={s.menuConfirmText}>Delete "{game.name}" with its hours, sessions and achievements? This can't be undone.</div>
+                  <div className={s.menuConfirmBtns}>
+                    <button className={s.menuCancelBtn} onClick={() => setConfirmDelete(false)} disabled={deleting}>Cancel</button>
+                    <button className={`${s.menuDeleteBtn} ${deleting ? s.menuItemBusy : ''}`} onClick={() => handleDelete(true)} aria-busy={deleting || undefined} data-delete-archived-yes="">
+                      {deleting ? 'Deleting…' : 'Delete'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>) : !confirmDelete ? (
               <button className={s.menuItem} onClick={() => setConfirmDelete(true)}>
                 <IconArchive size={14} stroke={1.6} />
                 Remove from Library
@@ -1175,6 +1296,7 @@ export default function GameDetail() {
             <div key={shownTab} className={`${s.main} ${s.tabView}`}>
               {shownTab === 'overview' && (
                 <div className={s.overview}>
+                  {playthroughs.length > 1 && <PlaythroughsCard gameId={game.id} list={playthroughs} sessions={sessions} onNote={(n, note) => setPlaythroughs(l => l.map(x => x.number === n ? { ...x, note } : x))} />}
                   {newNews.length > 0 && (
                     <div className={`${s.card} ${s.wide}`}>
                       <div className={s.cardHead}>
@@ -1313,7 +1435,7 @@ export default function GameDetail() {
                         <div className={s.achSection}>
                           <div className={s.achSectionHead}>{label}<span className={s.achSectionCount}>{list.length}</span></div>
                           <div className={s.achGrid}>
-                            {list.map(a => <AchCard key={a.id} ach={a} onClick={setSelectedAch} onQuickToggle={quickToggleAch} />)}
+                            {list.map(a => <AchCard key={a.id} ach={a} onClick={setSelectedAch} onQuickToggle={quickToggleAch} onGuide={(e, ach) => setGuideMenu({ x: e.clientX, y: e.clientY, ach })} />)}
                           </div>
                         </div>
                       )
@@ -1382,6 +1504,10 @@ export default function GameDetail() {
                       </div>
                     </div>
                   )}
+                  {playthroughs.length > 1 && (() => {
+                    const cur = playthroughStats(playthroughs, sessions).at(-1)
+                    return <div className={s.factRow}><span>Playthrough {cur.number}</span><span>{cur.seconds ? formatPlaytime(cur.seconds) : 'Just started'}</span></div>
+                  })()}
                   <div className={s.factRow}><span>Sessions</span><span>{sessions.length || 'None'}</span></div>
                   {avgSession > 0 && <div className={s.factRow}><span>Average session</span><span>{formatPlaytime(avgSession)}</span></div>}
                   <div className={s.factRow}><span>Last played</span><span>{game.last_played_at ? timeAgo(game.last_played_at) : 'Never'}</span></div>
@@ -1404,6 +1530,20 @@ export default function GameDetail() {
 
       {showStore && artAppId && (
         <SteamGameModal appId={artAppId} name={game.name} art={{ hero: steamArt?.hero, hero2x: steamArt?.hero2x, capsule: steamArt?.capsule, header: steamArt?.header, header2x: steamArt?.header2x }} onClose={() => setShowStore(false)} />
+      )}
+
+      {guideMenu && (
+        <ContextMenu
+          x={guideMenu.x}
+          y={guideMenu.y}
+          onClose={() => setGuideMenu(null)}
+          header={{ name: guideMenu.ach.display_name, sub: 'How to unlock it' }}
+          items={guideLinks(game, guideMenu.ach).map(g => ({
+            label: g.label,
+            Icon: g.key === 'steam' ? IconBrandSteam : g.key === 'youtube' ? IconBrandYoutube : IconSearch,
+            onClick: () => openGuide(g.url),
+          }))}
+        />
       )}
 
       {selectedAch && (
@@ -1431,6 +1571,52 @@ export default function GameDetail() {
           }}
         />
       )}
+
+      {askReplay && (() => {
+        // The first time, it can say which time this is: Sekiro played twice before KoZo, now the third.
+        const first = playthroughs.length === 0
+        const tracked = sessions.length > 0 || game.completion_status === 'finished'
+        const next = first ? (replayNumber ?? 2) : Math.max(1, ...playthroughs.map(p => p.number)) + 1
+        const earlier = first ? (tracked ? next - 2 : next - 1) : 0
+        return (
+          <InfoModal
+            variant="info"
+            title="Play it again?"
+            message={`This starts playthrough ${next} of ${game.name}.`}
+            lines={[
+              'Your hours, sessions and achievements all stay.',
+              'The game goes back to Playing, and its page shows this playthrough\'s time from now on.',
+              'Finish it to earn the Finished XP again, once you\'ve played an hour of it.',
+              ...(earlier > 0 ? [`${earlier === 1 ? 'Playthrough 1 is' : `Playthroughs 1 to ${earlier} are`} kept as finished before KoZo, with no hours.`] : []),
+            ]}
+            onClose={() => setAskReplay(false)}
+            actions={[
+              { label: 'Not now', variant: 'secondary', onClick: () => setAskReplay(false) },
+              { label: `Start playthrough ${next}`, variant: 'primary', icon: <IconRepeat size={14} />, onClick: async () => {
+                setAskReplay(false)
+                const r = await window.kozo.api.games.newPlaythrough(game.id, first ? { number: next } : {})
+                if (r?.ok) {
+                  const undo = r.data
+                  setReplayUndo({ text: `Playthrough ${undo.number} started.`, run: async () => { await window.kozo.api.games.undoPlaythrough(game.id, undo); load() } })
+                  load()
+                }
+              } },
+            ]}
+          >
+            {first && (
+              <div className={s.ptAsk} data-replay-number="">
+                <span>Which time is this?</span>
+                <div className={s.ptStepper}>
+                  <button type="button" aria-label="One less" disabled={next <= 2} onClick={() => setReplayNumber(Math.max(2, next - 1))}>−</button>
+                  <b>{ordinal(next)}</b>
+                  <button type="button" aria-label="One more" disabled={next >= 20} onClick={() => setReplayNumber(Math.min(20, next + 1))}>+</button>
+                </div>
+              </div>
+            )}
+          </InfoModal>
+        )
+      })()}
+      <UndoBar undo={replayUndo} onDone={() => setReplayUndo(null)} />
 
       {showSaveManager && (
         <SaveManagerModal game={game} onClose={() => setShowSaveManager(false)} />

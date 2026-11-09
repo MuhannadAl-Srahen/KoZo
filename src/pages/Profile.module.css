@@ -936,6 +936,43 @@
   color: var(--text-secondary);
   margin-top: 1px;
 }
+/* "How XP works" beside the total, and its window. */
+.xpHowBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: var(--sp-8);
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+  vertical-align: 1px;
+}
+.xpHowBtn:hover { color: var(--text-primary); border-color: var(--border-accent-soft); }
+.xpGuide { display: flex; flex-direction: column; gap: var(--sp-12); padding: var(--sp-4) 0; }
+.xpGuideRow { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: var(--sp-10); align-items: start; }
+.xpGuideRow > svg { margin-top: 2px; }
+.xpGuideTitle { font-size: var(--fs-md); font-weight: 700; color: var(--text-primary); }
+.xpGuideText { font-size: var(--fs-sm); color: var(--text-secondary); line-height: 1.45; }
+.xpGuideRarity { display: flex; flex-wrap: wrap; gap: var(--sp-6); margin-top: var(--sp-6); }
+.xpGuideChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-xs);
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--rar) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--rar) 40%, transparent);
+}
+.xpGuideChip b { color: var(--rar); font-variant-numeric: tabular-nums; }
+.xpGuideFoot { margin: var(--sp-4) 0 0; font-size: var(--fs-xs); color: var(--text-muted); }
+
 .xpHook {
   font-size: var(--fs-md);
   color: var(--text-secondary);
@@ -1010,6 +1047,29 @@
 }
 /* Stacked so the labels never truncate in the narrower column:
    icon + label, then the XP, then the detail line. */
+/* Unlocks by rarity: five small cards, each with its rarity's color and XP. */
+.xpRarity {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: var(--sp-6);
+  margin-top: var(--sp-8);
+}
+.xpRarityItem {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  column-gap: var(--sp-6);
+  row-gap: 1px;
+  align-items: center;
+  padding: var(--sp-6) var(--sp-10);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--rar) 9%, var(--surface-3));
+  border: 1px solid color-mix(in srgb, var(--rar) 28%, transparent);
+}
+.xpRarityDot { width: 8px; height: 8px; border-radius: 50%; background: var(--rar); box-shadow: 0 0 8px color-mix(in srgb, var(--rar) 60%, transparent); }
+.xpRarityName { font-size: var(--fs-xs); font-weight: 700; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.xpRarityCount { font-size: var(--fs-sm); font-weight: 800; color: var(--rar); font-variant-numeric: tabular-nums; }
+.xpRarityEach { grid-column: 2 / 4; font-size: var(--fs-2xs); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 .xpSource {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);

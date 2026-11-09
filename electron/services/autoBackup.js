@@ -28,7 +28,7 @@ const logger = require('../logger')
 
 const SECRET_SETTINGS = new Set(['steam_api_key', 'steamgriddb_key', 'gdrive_token', 'gdrive_folder_id', 'gdrive_email', 'gdrive_client_id', 'gdrive_client_secret', 'install_id', 'drive_news_seen', 'launch_miss_dismissed'])
 
-const TABLES = ['games', 'sessions', 'achievements', 'achievement_unlocks', 'game_list', 'categories', 'custom_lists', 'custom_list_games', 'settings']
+const TABLES = ['games', 'sessions', 'achievements', 'achievement_unlocks', 'game_list', 'categories', 'custom_lists', 'custom_list_games', 'playthroughs', 'settings']
 
 // 30s (was 8s): a burst of unlocks or a bulk import shouldn't each cost a full
 // dump. Nothing here is time-critical — this is a safety copy, not a journal.

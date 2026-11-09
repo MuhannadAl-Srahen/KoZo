@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useLayoutEffect, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   IconPlus, IconList, IconLayoutColumns,
@@ -36,6 +36,9 @@ const SORT_OPTIONS = [
   { value: 'custom',      label: 'Custom order' },
 ]
 const SORT_VALUES = new Set(SORT_OPTIONS.map(o => o.value))
+
+// electron/services/cardCovers.js CARD_W: how wide the card-size cover copies are.
+const CARD_COVER_W = 360
 
 function sortGames(games, sortBy) {
   // Custom order: exactly the user's drag order — no favorite pinning, no
@@ -220,14 +223,17 @@ export default function Library() {
     setConfirmDelete(false)
   }
 
-  function toggleGame(id) {
+  // Stable handlers (useCallback) let the memoized cards skip redrawing: with inline arrows,
+  // opening a menu or dragging over a card redrew every card in the Library.
+  const toggleGame = useCallback((id) => {
     setSelectedIds(prev => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
       return next
     })
-  }
+  }, [])
+  const openCardMenu = useCallback((e, g) => setCtxMenu({ x: e.clientX, y: e.clientY, game: g }), [])
 
   // Only ever select what is actually on screen. Hidden games and games filtered
   // out by the search/status filter have no card to untick in selection mode, so
@@ -346,7 +352,8 @@ export default function Library() {
     return () => { for (const off of offs) off?.() }
   }, [loadGames, loadActiveSessions, loadWeekPlaytime])
 
-  const allGamesWithLive = games.map(g => ({ ...g, _isLive: liveIds.has(g.id) }))
+  // Memoized: new objects on every render made every (memoized) card redraw anyway.
+  const allGamesWithLive = useMemo(() => games.map(g => ({ ...g, _isLive: liveIds.has(g.id) })), [games, liveIds])
   // Shared search/status predicate for both the main grid and the hidden section.
   const matchesFilters = g => {
     if (statusFilter && g.completion_status !== statusFilter) return false
@@ -415,6 +422,24 @@ export default function Library() {
   }
   const gridClass = view === 'list' ? s.listGrid : s.bigGrid
 
+  // Card-size covers (electron/services/cardCovers.js) only while a card is drawn no wider
+  // than the copy, in device pixels (Windows scaling and KoZo's zoom included), so a bigger
+  // card keeps the full cover and never looks softer.
+  const gridRef = useRef(null)
+  const [cardCover, setCardCover] = useState(true)
+  useLayoutEffect(() => {
+    const grid = gridRef.current
+    if (!grid) return
+    const measure = () => {
+      const w = grid.firstElementChild?.getBoundingClientRect().width
+      if (w) setCardCover(w * (window.devicePixelRatio || 1) <= CARD_COVER_W)
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(grid)
+    return () => ro.disconnect()
+  }, [view, zoomStyle?.['--card-min'], loading, games.length])
+
   // One grid card with drag-to-reorder.
   function renderCard(game) {
     const draggable = !selectionMode
@@ -441,7 +466,8 @@ export default function Library() {
           selected={selectedIds.has(game.id)}
           onToggle={toggleGame}
           onFavorite={handleFavorite}
-          onContextMenu={(e, g) => setCtxMenu({ x: e.clientX, y: e.clientY, game: g })}
+          onContextMenu={openCardMenu}
+          cardCover={cardCover}
         />
       </div>
     )
@@ -688,7 +714,7 @@ export default function Library() {
         )}
 
         {!loading && games.length > 0 && (
-          <div className={gridClass} style={zoomStyle}>
+          <div className={gridClass} style={zoomStyle} ref={gridRef}>
             {gamesWithLive.map(renderCard)}
           </div>
         )}
@@ -712,7 +738,8 @@ export default function Library() {
                     view={view}
                     selectionMode={false}
                     onFavorite={handleFavorite}
-                    onContextMenu={(e, g) => setCtxMenu({ x: e.clientX, y: e.clientY, game: g })}
+                    onContextMenu={openCardMenu}
+                    cardCover={cardCover}
                   />
                 ))}
               </div>

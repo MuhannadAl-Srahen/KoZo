@@ -245,7 +245,8 @@
   color: var(--accent-ink);
   font-size: 10px;
   font-weight: 800;
-  line-height: 16px;
+  /* 16 px tall with a 2 px border leaves 12 px inside: a 16 px line pushed "17" out of the pill's bottom. */
+  line-height: 12px;
   text-align: center;
   border: 2px solid var(--surface-1);
   font-variant-numeric: tabular-nums;
@@ -253,6 +254,48 @@
 .profileMeta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .profileName { font-size: var(--fs-md); font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .profileTier { font-size: var(--fs-xs); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Update: only there when a newer KoZo exists; a thin bar fills while it downloads. */
+.updateBtn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  width: 100%;
+  padding: var(--sp-6) var(--sp-8);
+  border-radius: var(--r-input);
+  border: 1px solid color-mix(in srgb, var(--a) 45%, transparent);
+  background: color-mix(in srgb, var(--a) 12%, var(--surface-2));
+  color: var(--text-primary);
+  text-align: left;
+  overflow: hidden;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+.updateBtn:hover { background: color-mix(in srgb, var(--a) 22%, var(--surface-2)); border-color: var(--a); }
+.updateIcon {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--a) 22%, transparent);
+  color: var(--a);
+}
+.updateReady .updateIcon { background: var(--a); color: var(--accent-ink); }
+.updateText { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.updateTitle { font-size: var(--fs-sm); font-weight: 700; line-height: 1.2; }
+.updateSub { font-size: var(--fs-xs); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; }
+.updateBar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--a);
+  transition: width 0.4s ease;
+}
 
 /* Big Picture + Settings, side by side. */
 .footRow { display: flex; gap: var(--sp-6); }
@@ -299,7 +342,8 @@
 .rail { width: 64px; min-width: 64px; }
 .rail .logoArea { flex-direction: column; gap: var(--sp-8); padding: var(--sp-14, 14px) 0 var(--sp-10); }
 .rail .collapseBtn { margin-left: 0; }
-.rail :is(.logoText, .navLabel, .groupHead, .profileMeta, .navBadge, .nowPlayingName) { display: none; }
+.rail :is(.logoText, .navLabel, .groupHead, .profileMeta, .navBadge, .nowPlayingName, .updateText) { display: none; }
+.rail .updateBtn { width: 40px; padding: var(--sp-4); justify-content: center; }
 .rail .nav { padding-left: var(--sp-8); padding-right: var(--sp-8); }
 .rail .navItem { justify-content: center; padding: 6px 0; }
 .rail .navItemActive::before { left: calc(-1 * var(--sp-8)); }
@@ -310,3 +354,37 @@
 .rail .nowPlaying { width: 48px; min-height: 0; }
 .rail .nowPlayingBody { align-items: center; padding: var(--sp-6) 0; }
 .rail .nowPlayingElapsed { font-size: 10px; }
+
+/* Quick search, under the logo. */
+.searchBtn {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  margin: 0 var(--sp-10) var(--sp-8);
+  height: 34px;
+  padding: 0 var(--sp-10);
+  border-radius: var(--r-input);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  flex-shrink: 0;
+  min-width: 0;
+}
+.searchBtn:hover { color: var(--text-primary); border-color: var(--border-accent-soft); background: var(--surface-3); }
+.searchText { flex: 1; min-width: 0; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.searchKbd {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface-3);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+}
+.rail .searchBtn { width: 40px; margin: 0 auto var(--sp-8); padding: 0; justify-content: center; }
+.rail .searchText, .rail .searchKbd { display: none; }

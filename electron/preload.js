@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 31,
+  rev: 38,
   // Settings → Appearance → UI scale.
   ui: {
     setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
@@ -18,6 +18,10 @@ contextBridge.exposeInMainWorld('kozo', {
       get: (id) => ipcRenderer.invoke('games:get', id),
       version: (id) => ipcRenderer.invoke('games:version', id),
       useCopy: (id, file) => ipcRenderer.invoke('games:useCopy', id, file),
+      playthroughs: (id) => ipcRenderer.invoke('games:playthroughs', id),
+      newPlaythrough: (id, opts) => ipcRenderer.invoke('games:newPlaythrough', id, opts),
+      undoPlaythrough: (id, undo) => ipcRenderer.invoke('games:undoPlaythrough', id, undo),
+      playthroughNote: (id, number, note) => ipcRenderer.invoke('games:playthroughNote', id, number, note),
       steamCopy: (id) => ipcRenderer.invoke('games:steamCopy', id),
       switchToSteam: (id) => ipcRenderer.invoke('games:switchToSteam', id),
       dismissSteamCopy: (id) => ipcRenderer.invoke('games:dismissSteamCopy', id),
@@ -30,6 +34,8 @@ contextBridge.exposeInMainWorld('kozo', {
       delete: (id) => ipcRenderer.invoke('games:delete', id),
       launchMiss: () => ipcRenderer.invoke('games:launchMiss'),
       dismissLaunchMiss: (id) => ipcRenderer.invoke('games:dismissLaunchMiss', id),
+      uninstalled: () => ipcRenderer.invoke('games:uninstalled'),
+      uninstalledAnswer: (id, action) => ipcRenderer.invoke('games:uninstalledAnswer', id, action),
       setWatchedExe: (id, proc) => ipcRenderer.invoke('games:setWatchedExe', id, proc),
       reorder: (orderedIds) => ipcRenderer.invoke('games:reorder', orderedIds),
       archive: (ids) => ipcRenderer.invoke('games:archive', ids),
@@ -172,6 +178,7 @@ contextBridge.exposeInMainWorld('kozo', {
       hourActivity: (hour, includeHidden) => ipcRenderer.invoke('stats:hourActivity', hour, includeHidden),
       xp: () => ipcRenderer.invoke('stats:xp'),
       xpHistory: (limit) => ipcRenderer.invoke('stats:xpHistory', limit),
+      badges: () => ipcRenderer.invoke('stats:badges'),
       years: () => ipcRenderer.invoke('stats:years'),
       year: (year) => ipcRenderer.invoke('stats:year', year),
       captureCard: (rect, action, year) => ipcRenderer.invoke('stats:captureCard', rect, action, year),
@@ -208,6 +215,7 @@ contextBridge.exposeInMainWorld('kozo', {
     deals: {
       list: (opts) => ipcRenderer.invoke('deals:list', opts),
       markSeen: () => ipcRenderer.invoke('deals:markSeen'),
+      saleMap: () => ipcRenderer.invoke('deals:saleMap'),
       unseen: () => ipcRenderer.invoke('deals:unseen'),
       gamePrices: (appid) => ipcRenderer.invoke('deals:gamePrices', appid),
       setTarget: (appid, cents, meta) => ipcRenderer.invoke('deals:setTarget', appid, cents, meta),
@@ -237,6 +245,7 @@ contextBridge.exposeInMainWorld('kozo', {
       test: () => ipcRenderer.invoke('overlay:test'),
       testBreak: () => ipcRenderer.invoke('overlay:testBreak'),
       ready: () => ipcRenderer.invoke('overlay:ready'),
+      perf: (d) => ipcRenderer.invoke('overlay:perf', d),
       setInteractive: (v) => ipcRenderer.invoke('overlay:setInteractive', v),
       applyAccent: (hex) => ipcRenderer.invoke('overlay:applyAccent', hex),
       addUnknownGame: (data) => ipcRenderer.invoke('overlay:addUnknownGame', data),
@@ -265,6 +274,7 @@ contextBridge.exposeInMainWorld('kozo', {
       updateState: () => ipcRenderer.invoke('app:updateState'),
       installUpdate: () => ipcRenderer.invoke('app:installUpdate'),
       whatsNew: () => ipcRenderer.invoke('app:whatsNew'),
+      releaseNotes: () => ipcRenderer.invoke('app:releaseNotes'),
       setFullScreen: (on) => ipcRenderer.invoke('app:setFullScreen', on),
       minimize: () => ipcRenderer.invoke('app:minimize'),
       isInFront: () => ipcRenderer.invoke('app:isInFront'),
@@ -321,6 +331,8 @@ contextBridge.exposeInMainWorld('kozo', {
       onPriceOverlay: sub('price:overlay', pass),
       onBreakOverlay: sub('break:overlay', pass),
       onXpOverlay: sub('xp:overlay', pass),
+      onBadgeOverlay: sub('badge:overlay', pass),
+      onBadgeEarned: sub('badge:earned', pass),
       onSessionEndOverlay: sub('sessionEnd:overlay', pass),
       onXpLevelUp: sub('xp:levelup', pass),
       onAppUpdate: sub('app:update', pass),
@@ -337,6 +349,8 @@ contextBridge.exposeInMainWorld('kozo', {
       onAccentChanged: sub('accent:changed', pass),
       onUnknownProcessAdd: sub('unknown-process:add', pass),
       onLaunchMiss: sub('launch:miss', pass),
+      onUninstalledChanged: sub('uninstalled:changed', pass),
+      onKeptPlaying: sub('gameList:keptPlaying', pass),
       removeAll: (channel) => {
         ipcRenderer.removeAllListeners(channel)
       },

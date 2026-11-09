@@ -137,6 +137,7 @@ function raise() {
 
 function _send(channel, data) {
   try {
+    if (channel !== 'status:overlay') logger.info(`overlay: ${channel.split(':')[0]} toast${_win && !_win.isDestroyed() ? '' : ' (overlay window starting)'}`)
     clearTimeout(_idleTimer)   // activity — cancel any pending idle teardown
     getOrCreate()
     _pending.push({ channel, data })
@@ -222,6 +223,7 @@ function sendReleaseFlash(data)   { _send('release:overlay',          data) }
 function sendPriceFlash(data)     { _send('price:overlay',            data) }
 // Settings > Tracking > Break reminder.
 function sendBreakReminder(data)  { _send('break:overlay',            data) }
+function sendBadge(data)          { _send('badge:overlay',            data) }
 
 // Toggle whether the overlay captures mouse clicks. The window is click-through
 // by default (events pass to the game). When the cursor is over a toast the
@@ -288,4 +290,4 @@ function applyAccent(hex) {
 
 // getWindow lets ipc.js tell the overlay apart from the main window (e.g. to
 // focus the main window when an overlay notification is clicked).
-module.exports = { getOrCreate, warm, getWindow: () => _win, sendAchievements, sendSessionStarted, sendStatusFlash, sendLevelUp, sendSessionEnded, sendUnknownGame, sendLaunchMiss, sendReleaseFlash, sendPriceFlash, sendBreakReminder, hideOverlay, markReady, setInteractive, applyAccent }
+module.exports = { getOrCreate, warm, getWindow: () => _win, sendAchievements, sendSessionStarted, sendStatusFlash, sendLevelUp, sendSessionEnded, sendUnknownGame, sendLaunchMiss, sendReleaseFlash, sendPriceFlash, sendBreakReminder, sendBadge, hideOverlay, markReady, setInteractive, applyAccent }

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import {
+  IconSearch,
   IconLayoutGrid,
   IconList,
   IconCalendar,
@@ -10,6 +11,7 @@ import {
   IconFlag,
   IconChartBar,
   IconSettings, IconDeviceTv, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand,
+  IconDownload, IconLoader2, IconRefresh,
 } from '@tabler/icons-react'
 import HoneycombLogo from './HoneycombLogo'
 import { fileUrl } from '../lib/utils'
@@ -20,6 +22,54 @@ function initials(name) {
   const parts = (name || '').trim().split(/\s+/).filter(Boolean)
   if (!parts.length) return 'P'
   return (parts[0][0] + (parts[1]?.[0] || '')).toUpperCase()
+}
+
+// What the Update button says, from appUpdater's state (pure, so the words stay in one place).
+// Null = no button: KoZo is up to date (or the check hasn't found anything).
+export function updateLabel(u) {
+  if (!u || !['downloading', 'ready', 'failed'].includes(u.state)) return null
+  const v = u.version ? `KoZo ${u.version}` : 'The new version'
+  const pct = u.state === 'downloading' && u.percent ? `${u.percent}%` : ''
+  if (u.installing) return { title: 'Updating', sub: 'KoZo restarts by itself', busy: true }
+  if (u.afterGame) return { title: 'Update waiting', sub: 'Starts when your game closes', busy: true }
+  if (u.state === 'ready') return { title: 'Update now', sub: `${v} is ready` }
+  if (u.state === 'failed') return { title: 'Update KoZo', sub: 'Download stopped. Try again' }
+  if (u.wanted) return { title: 'Updating', sub: pct ? `Downloading ${pct}` : 'Downloading', busy: true, percent: u.percent || 0 }
+  return { title: u.version ? `Update to ${u.version}` : 'Update KoZo', sub: pct ? `Downloading ${pct}` : 'Downloading', percent: u.percent || 0 }
+}
+
+// Shown only when a newer KoZo exists. One click updates: restart now when it's downloaded,
+// or the moment the download is done (after the game, if one is running).
+function UpdateButton() {
+  const [u, setU] = useState(null)
+  useEffect(() => {
+    const api = window.kozo?.api?.app
+    if (!api) return
+    let alive = true
+    api.updateState?.().then(r => { if (alive && r?.ok) setU(r.data) })
+    const off = window.kozo.events.onAppUpdate?.((st) => setU(st))
+    return () => { alive = false; off?.() }
+  }, [])
+  const label = updateLabel(u)
+  if (!label) return null
+  const Icon = label.busy ? IconLoader2 : u.state === 'ready' ? IconRefresh : IconDownload
+  return (
+    <button
+      type="button"
+      data-gpnav=""
+      data-update-btn={u.state}
+      className={`${s.updateBtn} ${u.state === 'ready' ? s.updateReady : ''}`}
+      title={`${label.title}: ${label.sub}`}
+      onClick={() => { if (!u.installing && !u.afterGame) window.kozo.api.app.installUpdate?.() }}
+    >
+      <span className={s.updateIcon}><Icon size={16} stroke={1.9} className={label.busy ? 'spin' : undefined} /></span>
+      <span className={s.updateText}>
+        <span className={s.updateTitle}>{label.title}</span>
+        <span className={s.updateSub}>{label.sub}</span>
+      </span>
+      {u.state === 'downloading' && <span className={s.updateBar} style={{ width: `${Math.max(3, u.percent || 0)}%` }} />}
+    </button>
+  )
 }
 
 export const NAV_ITEMS = [
@@ -53,6 +103,21 @@ function formatSessionTime(startedAt, idleSeconds = 0) {
   return `${m}:${String(sec).padStart(2, '0')}`
 }
 
+// The Now Playing timer ticks on its own, so only these few characters redraw each second
+// instead of the whole sidebar. Every second while the window is in front, nothing while
+// it's hidden or behind a game (html[data-inactive], App.jsx), and still while away.
+function LiveElapsed({ startedAt, idleSeconds, idle }) {
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    if (idle) return
+    const id = setInterval(() => {
+      if (!document.documentElement.hasAttribute('data-inactive')) setTick(t => t + 1)
+    }, 1000)
+    return () => clearInterval(id)
+  }, [idle, startedAt])
+  return formatSessionTime(startedAt, idleSeconds)
+}
+
 export default function Sidebar() {
   // Tab order and hidden tabs come from Settings → Appearance.
   const { prefs, setPrefs } = useAppearance()
@@ -62,7 +127,6 @@ export default function Sidebar() {
     .filter(Boolean))
   const rail = prefs.sidebar === 'rail'
   const [activeSession, setActiveSession] = useState(null)
-  const [sessionTick, setSessionTick] = useState(0)
   const [profile, setProfile] = useState({ name: 'Player', avatar: '' })
   // Tracked games released but not yet acknowledged → badge on "Upcoming".
   const [newReleases, setNewReleases] = useState(0)
@@ -168,15 +232,6 @@ export default function Sidebar() {
     }
   }, [])
 
-  // Live timer: every second while the window is in front, nothing while
-  // it's hidden or behind a game (html[data-inactive], App.jsx).
-  useEffect(() => {
-    if (!activeSession || activeSession.idle) return
-    const id = setInterval(() => {
-      if (!document.documentElement.hasAttribute('data-inactive')) setSessionTick(t => t + 1)
-    }, 1000)
-    return () => clearInterval(id)
-  }, [activeSession])
 
   // The running game's art for the Now Playing card.
   const [playingArt, setPlayingArt] = useState(null)
@@ -213,6 +268,21 @@ export default function Sidebar() {
         </button>
       </div>
 
+      {/* Quick search (components/QuickSearch.jsx), also Ctrl+K anywhere. */}
+      <button
+        type="button"
+        className={s.searchBtn}
+        data-gpnav=""
+        data-quick-search-btn=""
+        title="Search your games, Game List, pages and Steam (Ctrl+K)"
+        aria-label="Search everything"
+        onClick={() => window.dispatchEvent(new CustomEvent('kozo:quick-search'))}
+      >
+        <IconSearch size={15} stroke={1.8} />
+        <span className={s.searchText}>Search</span>
+        <kbd className={s.searchKbd}>Ctrl K</kbd>
+      </button>
+
       {/* Navigation */}
       <nav className={s.nav}>
         {navItems.map(({ path, label, Icon, head }) => (
@@ -243,6 +313,7 @@ export default function Sidebar() {
 
       {/* Bottom */}
       <div className={s.bottomArea}>
+        <UpdateButton />
         {activeSession && (
           <NavLink
             to={`/game/${activeSession.gameId}`}
@@ -259,7 +330,7 @@ export default function Sidebar() {
               </span>
               <span className={s.nowPlayingName}>{activeSession.game_name}</span>
               <span className={s.nowPlayingElapsed}>
-                {formatSessionTime(activeSession.started_at, activeSession.idle_seconds)}
+                <LiveElapsed startedAt={activeSession.started_at} idleSeconds={activeSession.idle_seconds} idle={!!activeSession.idle} />
               </span>
             </span>
           </NavLink>

@@ -843,3 +843,90 @@ button.monthPicked { background: color-mix(in srgb, var(--a) 12%, transparent); 
 .page[data-layout="cinematic"] .frame { max-width: none; }
 .aboutTab { display: flex; flex-direction: column; gap: var(--sp-12); align-items: flex-start; }
 .aboutTab > section { width: 100%; }
+
+/* Playthroughs: one row each, newest first (PlaythroughsCard). */
+.ptList { display: flex; flex-direction: column; gap: var(--sp-8); }
+.ptRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  row-gap: 2px;
+  padding: var(--sp-8) var(--sp-10);
+  border-radius: var(--r-md);
+  background: var(--surface-3);
+}
+.ptMain { display: flex; align-items: center; gap: var(--sp-6); min-width: 0; }
+.ptName { font-weight: 700; color: var(--text-primary); white-space: nowrap; }
+.ptBadge {
+  padding: 0 7px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  line-height: 17px;
+  color: var(--a);
+  background: color-mix(in srgb, var(--a) 14%, transparent);
+}
+.ptDone { color: var(--status-finished, var(--green)); background: color-mix(in srgb, var(--status-finished, var(--green)) 14%, transparent); }
+.ptTime { font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.ptMeta { grid-column: 1 / -1; font-size: var(--fs-xs); color: var(--text-muted); }
+
+/* "Which time is this?" in the Play it again window (first start only). */
+.ptAsk { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-12); margin-top: var(--sp-12); padding: var(--sp-10) var(--sp-12); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-1); font-size: var(--fs-sm); color: var(--text-secondary); }
+.ptStepper { display: inline-flex; align-items: center; gap: var(--sp-8); }
+.ptStepper b { min-width: 40px; text-align: center; font-size: var(--fs-md); color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.ptStepper button { width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--border); background: var(--surface-3); color: var(--text-primary); font: inherit; font-size: var(--fs-md); font-weight: 700; line-height: 1; cursor: pointer; }
+.ptStepper button:hover:not(:disabled) { border-color: var(--ab); color: var(--a); }
+.ptStepper button:disabled { opacity: 0.4; cursor: default; }
+
+/* A playthrough's note: its own line under the row, the whole width. */
+.ptNote, .ptNoteAdd {
+  grid-column: 1 / -1;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-xs);
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.ptNote { color: var(--text-primary); font-style: italic; }
+.ptNote svg { flex-shrink: 0; color: var(--text-muted); opacity: 0; }
+.ptNote:hover svg, .ptNote:focus-visible svg { opacity: 1; }
+.ptNoteAdd { color: var(--text-muted); }
+.ptNoteAdd:hover { color: var(--a); }
+.ptNoteInput {
+  grid-column: 1 / -1;
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--ab);
+  border-radius: var(--r-input);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-xs);
+  outline: none;
+}
+
+/* Guide on a locked achievement: where to find how to unlock it. */
+.achGuide {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.achGuide:hover { border-color: var(--ab); color: var(--a); background: var(--ad); }

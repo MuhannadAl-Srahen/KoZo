@@ -69,6 +69,9 @@ export default function CardContextMenu({
       Icon: game.is_hidden ? IconEye : IconEyeOff, onClick: () => onToggleHidden(game),
     },
     onRestore && { label: 'Restore to library', Icon: IconArrowBackUp, onClick: () => onRestore(game) },
+    // An archived game (Restore, no Remove): deleting it for good was only in select mode.
+    onRestore && !onDelete && onDeleteForever && { divider: true },
+    onRestore && !onDelete && onDeleteForever && { label: 'Delete with history', confirm: 'Click again to delete for good', Icon: IconTrash, danger: true, onClick: () => onDeleteForever(game) },
     onDelete && { divider: true },
     onDelete && (deleteIsArchive && onDeleteForever
       // Remove from library: keep the history (archive) or delete it too.
