@@ -165,7 +165,7 @@ function PortraitCard({ game, variant, selectionMode, selected, onToggle, onFavo
             {game._total ? `${game._unlocked ?? 0}/${game._total}` : '0/0'}
           </span>
           <span className={s.lastPlayed} title={game.last_played_at ? 'Last played' : 'Never played'}>
-            {formatDate(game.last_played_at) || 'Never'}
+            <span>{formatDate(game.last_played_at) || 'Never'}</span>
           </span>
           <span className={`${s.playtime} ${!game.total_playtime_seconds ? s.metaEmpty : ''}`}>
             <IconClock size={12} stroke={1.6} />

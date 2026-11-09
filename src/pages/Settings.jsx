@@ -12,7 +12,7 @@ import {
   IconPlugConnected, IconBrandGoogleDrive,
 } from '@tabler/icons-react'
 import { useAccentColor } from '../context/AccentColorContext'
-import { useAppearance, DEFAULT_APPEARANCE, FONTS, bgTone, bgToneHex } from '../context/AppearanceContext'
+import { useAppearance, DEFAULT_APPEARANCE, FONTS, bgTone, bgToneHex, windowsIsLight } from '../context/AppearanceContext'
 import ColorPicker from '../components/ui/ColorPicker'
 import GameCard from '../components/GameCard'
 import { NAV_ITEMS } from '../components/Sidebar'
@@ -913,7 +913,6 @@ function SteamTab() {
               {signingIn ? <><IconLoader2 size={13} className="spin" /> Waiting…</> : (steamUserId ? 'Change account' : 'Sign in')}
             </button>
           </ConnRow>
-          <SteamStoreRow />
           <ConnRow icon={<IconBrandDiscord size={20} />} name="Discord"
             tone={discord.on && discord.msg?.type === 'success' ? 'ok' : discord.on && discord.msg ? 'warn' : 'muted'}
             status={discord.on ? (discord.msg?.text || 'On. Shows your game while you play.') : 'Off. Turn on to show the game you play on Discord.'}>
@@ -1080,31 +1079,6 @@ function useSgdb() {
     } else { setState('error'); setMsg(d?.message || res?.error || 'Could not check the key.') }
   }
   return { builtIn, key, setKey, saved, savedBad, state, msg, save, working: !savedBad && (builtIn || !!saved) }
-}
-
-// Steam's own picks on Upcoming: a sign-in to the Steam store on Steam's own page, in a
-// KoZo window (services/steamStore.js). Separate from the Steam account above, which only
-// reads your profile.
-function SteamStoreRow() {
-  const [state, setState] = useState(null)   // null = not known yet
-  const [busy, setBusy] = useState(false)
-  useEffect(() => { window.kozo?.api?.steamStore?.isSignedIn?.().then(r => setState(!!(r?.ok && r.data))) }, [])
-  async function signIn() {
-    setBusy(true)
-    try { const r = await window.kozo?.api?.steamStore?.signIn?.(); if (r?.ok) setState(!!r.data) } finally { setBusy(false) }
-  }
-  async function signOut() { await window.kozo?.api?.steamStore?.signOut?.(); setState(false) }
-  return (
-    <ConnRow icon={<IconBrandSteam size={20} />} name="Steam's picks for you"
-      tone={state ? 'ok' : 'muted'}
-      status={state ? 'Signed in to the Steam store. Upcoming shows the games Steam picks for you.' : "Sign in on Steam's own page to see the games Steam picks for you on Upcoming. KoZo never sees your password."}>
-      {state
-        ? <button type="button" className={s.testBtn} onClick={signOut}>Sign out</button>
-        : <button type="button" className={s.testBtn} disabled={busy || state === null} onClick={signIn}>
-            {busy ? <><IconLoader2 size={13} className="spin" /> Waiting…</> : 'Sign in'}
-          </button>}
-    </ConnRow>
-  )
 }
 
 function ConnRow({ icon, name, status, tone = 'muted', children }) {
@@ -1407,7 +1381,7 @@ const THEMES = [
   { value: 'midnight', label: 'Midnight', bg: '#10101a', s2: '#161624' },
   // Light: white surfaces, dark text. Match Windows: Light or Midnight with Windows' app mode.
   { value: 'light',    label: 'Light', bg: '#f1f2f6', s2: '#ffffff' },
-  { value: 'system',   label: 'Match Windows', bg: '#10101a', s2: '#f1f2f6' },
+  { value: 'system',   label: 'Match Windows', windows: true },
   { value: 'tint',     label: 'Accent tint', tint: true },
   { value: 'custom',   label: 'Custom', custom: true },
   { value: 'oled',     label: 'OLED black', bg: '#000000', s2: '#0b0b0f' },
@@ -1439,8 +1413,43 @@ function useSampleGame() {
   return game
 }
 
+// Windows' app mode right now, followed live (Match Windows' swatch shows what it gives).
+function useWindowsLight() {
+  const [light, setLight] = useState(windowsIsLight())
+  useEffect(() => {
+    const q = window.matchMedia?.('(prefers-color-scheme: light)')
+    const on = () => setLight(!!q?.matches)
+    q?.addEventListener?.('change', on)
+    return () => q?.removeEventListener?.('change', on)
+  }, [])
+  return light
+}
+
+// Contrast of two hex colors (WCAG), for the text color's warning.
+function contrastOf(a, b) {
+  const lum = (hex) => {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex || ''); if (!m) return null
+    const c = [0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16) / 255).map(x => (x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4))
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+  }
+  const x = lum(a), y = lum(b)
+  if (x == null || y == null) return 21
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)
+}
+// The page background as hex, read from what is drawn now.
+function currentBgHex() {
+  const v = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()
+  const probe = document.createElement('span'); probe.style.color = v; document.body.appendChild(probe)
+  const rgb = getComputedStyle(probe).color.match(/d+(.d+)?/g) || []; probe.remove()
+  return '#' + rgb.slice(0, 3).map(n => Math.round(+n).toString(16).padStart(2, '0')).join('')
+}
+
 function LookCustomize() {
   const { prefs, setPrefs } = useAppearance()
+  const winLight = useWindowsLight()
+  const [bgNow, setBgNow] = useState('#10101a')
+  useEffect(() => { const id = requestAnimationFrame(() => setBgNow(currentBgHex())); return () => cancelAnimationFrame(id) }, [prefs.theme, prefs.bgColor, winLight])
+  const textHard = prefs.textColor && contrastOf(prefs.textColor, bgNow) < 4.5
   const { accent, setAccent, presets } = useAccentColor()
   const sample = useSampleGame()
   const art = sample ? (sample.banner_local_path ? fileUrl(sample.banner_local_path) : sample.banner_url) : null
@@ -1502,10 +1511,17 @@ function LookCustomize() {
               style={t.tint
                 ? { '--tbg': `color-mix(in srgb, ${accent} 12%, #0b0b10)`, '--ts2': `color-mix(in srgb, ${accent} 22%, #121218)` }
                 : t.custom
-                  ? (() => { const c = bgTone(prefs.bgColor); return { '--tbg': `hsl(${c.h} ${c.s}% ${c.l}%)`, '--ts2': `hsl(${c.h} ${c.s}% ${c.l + 3.2}%)` } })()
-                  : { '--tbg': t.bg, '--ts2': t.s2 }}>
+                  ? (() => {
+                      const c = bgTone(prefs.bgColor)
+                      return c.light
+                        ? { '--tbg': `hsl(${c.h} ${c.s}% ${c.l}%)`, '--ts2': `hsl(${c.h} ${c.s / 2}% ${Math.min(100, c.l + 4)}%)`, '--tline': '1px solid rgba(15, 18, 30, 0.14)' }
+                        : { '--tbg': `hsl(${c.h} ${c.s}% ${c.l}%)`, '--ts2': `hsl(${c.h} ${c.s}% ${c.l + 3.2}%)` }
+                    })()
+                  : t.windows
+                    ? (winLight ? { '--tbg': '#f3f3f3', '--ts2': '#ffffff', '--tline': '1px solid rgba(15, 18, 30, 0.14)' } : { '--tbg': '#202020', '--ts2': '#2b2b2b' })
+                    : { '--tbg': t.bg, '--ts2': t.s2, ...(t.value === 'light' ? { '--tline': '1px solid rgba(15, 18, 30, 0.14)' } : {}) }}>
               <span className={s.themeSwatch}><span /><span /></span>
-              {t.label}
+              {t.label}{t.windows && <small className={s.themeNow}>{winLight ? 'Light now' : 'Dark now'}</small>}
             </button>
           ))}
         </div>
@@ -1513,10 +1529,10 @@ function LookCustomize() {
           <div className={s.colorRow}>
             <span className={s.segLabel}>Background color</span>
             <ColorPicker value={prefs.bgColor} onChange={v => v && setPrefs({ bgColor: v, theme: 'custom' })} presets={presets} label="Background color" resultOf={bgToneHex} />
-            <span className={s.sectionDescQuiet}>Any color, made dark so text and cards stay readable. The box shows the color you get. Picking one switches to Custom.</span>
+            <span className={s.sectionDescQuiet}>Any color. A very light one, like white, gives a light KoZo; other colors are made dark so text stays readable. The box shows the color you get. Picking one switches to Custom.</span>
           </div>
         </div>
-        <p className={s.sectionDescQuiet}>Accent tint colors the background with your accent color. Match Windows uses Light or Midnight, the same as your Windows apps.</p>
+        <p className={s.sectionDescQuiet}>Accent tint colors the background with your accent color. Match Windows uses Windows' own light or dark colors, and changes when Windows does.</p>
       </section>
 
       <section className={s.section}>
@@ -1531,6 +1547,16 @@ function LookCustomize() {
               <span className={s.fontName}>{f.label}{f.note ? <em> · {f.note}</em> : null}</span>
             </button>
           ))}
+        </div>
+        <div className={s.colorRows}>
+          <div className={s.colorRow}>
+            <span className={s.segLabel}>Text color</span>
+            <ColorPicker value={prefs.textColor} onChange={v => setPrefs({ textColor: v || null })} presets={presets} label="Text color"
+              allowClear clearLabel="The theme's own" />
+            <span className={s.sectionDescQuiet} data-text-color-note={textHard ? 'hard' : ''}>
+              {textHard ? 'Hard to read on this background. Pick a lighter or darker color.' : 'Names, titles and every line of text. Quieter text uses a softer shade of it.'}
+            </span>
+          </div>
         </div>
         <div className={s.segList}>
           <Segmented label={`Text size ${Math.round((prefs.textScale || 1) * 100)}%`} value={prefs.textScale} onChange={v => setPrefs({ textScale: v })}
@@ -1567,6 +1593,23 @@ function LookCustomize() {
               className={`${s.cardStyleTile} ${prefs.gameListEdit === c.value ? s.cardStyleOn : ''}`} onClick={() => setPrefs({ gameListEdit: c.value })}>
               <span className={s.cardStyleText}><strong>{c.label}</strong><small>{c.desc}</small></span>
               {prefs.gameListEdit === c.value && <IconCheck size={14} stroke={2.6} className={s.cardStyleCheck} />}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className={s.section}>
+        <div className={s.sectionHeader}><IconLayoutCards size={15} stroke={1.6} /><span>Upcoming calendar</span></div>
+        <p className={s.sectionDesc}>How Upcoming's Steam view lays out the release days.</p>
+        <div className={s.cardStyles} role="radiogroup" aria-label="Upcoming calendar">
+          {[
+            { value: 'weeks', label: 'Steam weeks', desc: "Like Steam's own calendar: Monday to Friday, one row per week" },
+            { value: 'classic', label: 'Classic', desc: 'The look before: days with releases in a grid, with the match % and why on every game' },
+          ].map(c => (
+            <button key={c.value} type="button" role="radio" aria-checked={prefs.upcomingLayout === c.value} data-upcoming-layout={c.value}
+              className={`${s.cardStyleTile} ${prefs.upcomingLayout === c.value ? s.cardStyleOn : ''}`} onClick={() => setPrefs({ upcomingLayout: c.value })}>
+              <span className={s.cardStyleText}><strong>{c.label}</strong><small>{c.desc}</small></span>
+              {prefs.upcomingLayout === c.value && <IconCheck size={14} stroke={2.6} className={s.cardStyleCheck} />}
             </button>
           ))}
         </div>

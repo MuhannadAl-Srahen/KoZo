@@ -1026,7 +1026,8 @@
 }
 .themeBtn:hover { border-color: var(--ab); color: var(--text-primary); }
 .themeOn { border-color: var(--a); color: var(--a); box-shadow: 0 0 0 1px var(--a); }
-.themeSwatch { display: flex; width: 100%; height: 34px; border-radius: var(--r-md); overflow: hidden; background: var(--tbg); padding: 6px; gap: 5px; }
+.themeNow { margin-top: -6px; font-size: var(--fs-2xs); font-weight: 600; color: var(--text-muted); }
+.themeSwatch { display: flex; width: 100%; height: 34px; border-radius: var(--r-md); overflow: hidden; background: var(--tbg); padding: 6px; gap: 5px; border: var(--tline, none); box-sizing: border-box; }
 .themeSwatch span { flex: 1; border-radius: 4px; background: var(--ts2); }
 .themeSwatch span:last-child { flex: 0 0 22%; background: var(--a); }
 .colorInput { width: 44px; height: 30px; padding: 0; border: 1px solid var(--neutral-border); border-radius: var(--r-md); background: none; cursor: pointer; }

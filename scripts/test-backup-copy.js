@@ -226,6 +226,35 @@ async function main() {
     process.env.APPDATA = savedEnv
   }
 
+  // The same for any emulator: CODEX before the update, OnlineFix after (the maker: "for all
+  // games"). The folders are made up in a throwaway Public Documents.
+  console.log('\nAny game, any emulator: CODEX to OnlineFix')
+  {
+    const cs = require(path.join(root, 'services', 'crackSaves.js'))
+    const pub = path.join(tmp, 'crack-public'), savedPub = process.env.PUBLIC
+    process.env.PUBLIC = pub
+    const gameDir = path.join(tmp, 'games', 'Some Game')
+    const game = { id: 78, name: 'Some Game', steam_app_id: 480, install_path: gameDir, is_cracked: 1 }
+    const codex = path.join(pub, 'Documents', 'Steam', 'CODEX', '480', 'remote')
+    const progress = 'S'.repeat(50000)
+    write(path.join(gameDir, 'steam_emu.ini'), '[Settings]\n; CODEX\nAppId=480\n')
+    write(path.join(codex, 'save.sav'), progress)
+    check('CODEX: its save folder is found', cs.currentCloudFolder(game) === codex, cs.currentCloudFolder(game))
+    const snap = vault.snapshot(game, [codex], 'after-play')
+    // The update: OnlineFix, whose first run makes a fresh save in its own folder.
+    fs.rmSync(path.join(gameDir, 'steam_emu.ini'))
+    write(path.join(gameDir, 'OnlineFix.ini'), '[Main]\nRealAppId=480\n')
+    const ofix = path.join(pub, 'Documents', 'OnlineFix', '480', 'Saves')
+    check('OnlineFix: before its first run nothing is guessed', cs.currentCloudFolder(game) !== ofix)
+    write(path.join(ofix, 'save.sav'), 'new')
+    check('OnlineFix: after it, its Saves folder is the one', cs.currentCloudFolder(game) === ofix, cs.currentCloudFolder(game))
+    const offer = cs.progressOffer(game)
+    check('the CODEX progress is offered', offer && offer.id === snap.id, JSON.stringify(offer))
+    vault.restore(game, offer.id)
+    check('it lands where OnlineFix reads', fs.readFileSync(path.join(ofix, 'save.sav'), 'utf8') === progress)
+    process.env.PUBLIC = savedPub
+  }
+
   console.log('\nFinding cloud folders')
   const fakeHome = path.join(tmp, 'home')
   const appData = path.join(tmp, 'appdata')

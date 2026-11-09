@@ -192,9 +192,32 @@
     ['Tangerine', '#fb923c'], ['Indigo', '#818cf8'], ['Sky', '#38bdf8'], ['Rose', '#fda4af'],
   ]
   var current = (saved.accent || '#9fff02').toLowerCase()
+  // Every screenshot exists in all 12 colors (scripts/site-shots.js): Lime in assets/shots,
+  // the others in assets/shots/<color>/. Picking a color swaps them, so the app on the page
+  // is always in the color the page is (the maker's call). The looks keep their own picture.
+  var SHOT_DIRS = {
+    '#9fff02': '', '#a78bfa': 'purple', '#60a5fa': 'blue', '#f87171': 'red', '#4ade80': 'green', '#fbbf24': 'amber',
+    '#f472b6': 'pink', '#2dd4bf': 'teal', '#fb923c': 'tangerine', '#818cf8': 'indigo', '#38bdf8': 'sky', '#fda4af': 'rose',
+  }
+  function shotsFor(hex) {
+    var dir = SHOT_DIRS[hex]
+    if (dir === undefined) return
+    document.querySelectorAll('img[src*="assets/shots/"]:not([data-own-look])').forEach(function (img) {
+      if (!img.dataset.shot) {
+        var m = img.getAttribute('src').match(/assets\/shots\/(?:[a-z]+\/)?(?:sm\/)?([a-z0-9-]+)\.webp$/)
+        if (!m || /^look-/.test(m[1])) { img.dataset.ownLook = ''; return }
+        img.dataset.shot = m[1]
+      }
+      var base = 'assets/shots/' + (dir ? dir + '/' : '')
+      var name = img.dataset.shot
+      img.srcset = base + 'sm/' + name + '.webp 1200w, ' + base + name + '.webp 2000w'
+      img.src = base + name + '.webp'
+    })
+  }
   function applyAccent(hex, byHand) {
     current = hex
     root.style.setProperty('--a', hex)
+    shotsFor(hex)
     if (window.kozoHive) window.kozoHive.setAccent(hex)
     document.querySelectorAll('.swatch').forEach(function (s) { s.setAttribute('aria-pressed', String(s.dataset.color === hex)) })
     if (byHand) {

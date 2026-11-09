@@ -1,6 +1,11 @@
 'use strict'
 // Real screenshots for the landing page: the real app from renderer-dist, on a throwaway profile
 // with a sample library, off screen, at double resolution. Nothing from the real library is used.
+// Every app screenshot is taken in all 12 accent colors (the site swaps them when a visitor
+// picks a color): Lime in site/assets/shots, the others in site/assets/shots/<color>/. A
+// screenshot is only saved once nothing on it is still loading (no skeleton, every picture
+// drawn); one that never finishes fails the run instead of going on the site half loaded.
+//   SHOTS_COLORS=lime,pink   only those colors     SHOTS_ONLY=library,big   only those shots
 // Rerun it when the app's look changes:
 //   npx vite build
 //   KOZO_STEAM_KEY=<optional, for real achievement names> env -u ELECTRON_RUN_AS_NODE ./node_modules/electron/dist/electron.exe scripts/site-shots.js
@@ -13,6 +18,15 @@ const root = path.join(__dirname, '..')
 const OUT = path.join(root, 'site', 'assets', 'shots')
 fs.mkdirSync(OUT, { recursive: true })
 const ONLY = process.env.SHOTS_ONLY ? process.env.SHOTS_ONLY.split(',') : null
+// The site's 12 colors (site/js/game.js COLORS and SHOT_DIRS), folder '' = Lime.
+const COLORS = [
+  ['lime', '#9fff02', ''], ['purple', '#a78bfa', 'purple'], ['blue', '#60a5fa', 'blue'], ['red', '#f87171', 'red'],
+  ['green', '#4ade80', 'green'], ['amber', '#fbbf24', 'amber'], ['pink', '#f472b6', 'pink'], ['teal', '#2dd4bf', 'teal'],
+  ['tangerine', '#fb923c', 'tangerine'], ['indigo', '#818cf8', 'indigo'], ['sky', '#38bdf8', 'sky'], ['rose', '#fda4af', 'rose'],
+].filter(c => !process.env.SHOTS_COLORS || process.env.SHOTS_COLORS.split(',').includes(c[0]))
+let failedShots = []
+// Taken in Lime only: the site doesn't show these (12 colors of them only added weight).
+const LIME_ONLY = new Set(['activity', 'achievements', 'plan-board', 'gamelist', 'appearance'])
 
 {
   const realTop = BrowserWindow.prototype.setAlwaysOnTop
@@ -41,6 +55,9 @@ for (const f of ['crackWatcher', 'desktopProbe']) {
 require(path.join(root, 'electron', 'services', 'installCheck.js')).reconcile = async () => ({ checked: 0 })
 const sync = require(path.join(root, 'electron', 'services', 'achievementSync.js'))
 if (sync.sweepSteamGames) sync.sweepSteamGames = async () => {}
+// Never the maker's own Steam account on the site: the sample profile can pick up the Steam
+// account on this PC, and For you on Steam would show its real wishlist.
+require(path.join(root, 'electron', 'services', 'steamForYou.js')).forYou = async () => null
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 const main = require(path.join(root, 'electron', 'main.js'))
@@ -177,9 +194,35 @@ app.whenReady().then(async () => {
   await encoder.loadURL('data:text/html,<canvas id=c></canvas>')
   const taken = []
   // Each screenshot is saved twice: 2000 px for sharp screens, 1200 px (shots/sm) for the rest.
+  // Nothing still loading: no skeleton or shimmer, every picture on screen drawn.
+  const loadedNow = () => ev(`(() => {
+    const busy = document.querySelector('[class*="_sk_"], [class*="coverPending"], [class*="shimmer"], [aria-busy="true"]')
+    const visible = (el) => { const r = el.getBoundingClientRect(); return r.width > 2 && r.height > 2 && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth }
+    const pending = [...document.images].filter(i => visible(i) && !i.complete).length   // a picture that failed counts as done: the page shows its fallback
+    return { busy: !!busy && visible(busy), pending }
+  })()`)
+  async function waitLoaded(name, max = 30000) {
+    const t0 = Date.now()
+    let st = null
+    while (Date.now() - t0 < max) {
+      st = await loadedNow().catch(() => ({ busy: true, pending: 1 }))
+      if (!st.busy && !st.pending) { await sleep(500); return true }
+      await sleep(400)
+    }
+    console.log(`NOT LOADED: ${name} ${JSON.stringify(st)}`)
+    return false
+  }
+  let dir = ''   // the color being taken ('' = Lime)
   async function save(name, width = 2000, quality = 0.82) {
     if (ONLY && !ONLY.includes(name)) return
+    if (dir && LIME_ONLY.has(name)) return
     await focus()
+    if (!(await waitLoaded(name))) {
+      // One more chance after a reload, then the shot fails (the old one stays).
+      const hash = await ev('location.hash')
+      wc.reload(); await sleep(2500); await ev(`location.hash = ${JSON.stringify(hash)}; true`); await focus()
+      if (!(await waitLoaded(name))) { failedShots.push(`${dir || 'lime'}/${name}`); return }
+    }
     const banned = await ev(`/cracked/i.test(document.body.innerText)`)
     if (banned) console.log(`WARNING: ${name} says "cracked" somewhere`)
     const png = (await wc.capturePage()).toDataURL()
@@ -192,11 +235,12 @@ app.whenReady().then(async () => {
     })()`)
     const data = await encode(width, quality)
     const buf = Buffer.from(data.split(',')[1], 'base64')
-    fs.writeFileSync(path.join(OUT, `${name}.webp`), buf)
-    fs.mkdirSync(path.join(OUT, 'sm'), { recursive: true })
-    fs.writeFileSync(path.join(OUT, 'sm', `${name}.webp`), Buffer.from((await encode(1200, 0.8)).split(',')[1], 'base64'))
-    taken.push(`${name} ${Math.round(buf.length / 1024)}KB`)
-    console.log('shot', name, Math.round(buf.length / 1024) + 'KB')
+    const out = /^look-/.test(name) ? OUT : path.join(OUT, dir)
+    fs.mkdirSync(path.join(out, 'sm'), { recursive: true })
+    fs.writeFileSync(path.join(out, `${name}.webp`), buf)
+    fs.writeFileSync(path.join(out, 'sm', `${name}.webp`), Buffer.from((await encode(1200, 0.8)).split(',')[1], 'base64'))
+    taken.push(`${dir || 'lime'}/${name} ${Math.round(buf.length / 1024)}KB`)
+    console.log('shot', dir || 'lime', name, Math.round(buf.length / 1024) + 'KB')
   }
   const go = async (hash, wait = 2200) => { await ev(`location.hash = ${JSON.stringify(hash)}; true`); await focus(); await sleep(ONLY ? Math.min(wait, 1500) : wait) }
   const clickText = (sel, re) => ev(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(sel)})].find(x => ${re}.test(x.innerText)); if (b) b.click(); return !!b })()`)
@@ -211,56 +255,65 @@ app.whenReady().then(async () => {
 
   const star = ids[0]   // the sample game with the most recent play
 
-  await go('#/', 3200)
-  await save('library')
+  for (const [label, hex, folder] of COLORS) {
+    dir = folder
+    console.log('color', label)
+    await setLook({ accent: hex })
+    await go('#/', 3200)
+    await save('library')
 
-  await go(`#/game/${star.id}`, 3600)
-  await save('game')
+    await go(`#/game/${star.id}`, 3600)
+    await save('game')
 
-  await ev(`[...document.querySelectorAll('button')].find(b => b.innerText.trim() === 'Cinematic')?.click(); true`); await sleep(1400)
-  await save('game-cinematic')
-  await ev(`[...document.querySelectorAll('button')].find(b => b.innerText.trim() === 'Store')?.click(); true`); await sleep(900)
+    await ev(`[...document.querySelectorAll('button')].find(b => b.innerText.trim() === 'Cinematic')?.click(); true`); await sleep(1400)
+    await save('game-cinematic')
+    await ev(`[...document.querySelectorAll('button')].find(b => b.innerText.trim() === 'Store')?.click(); true`); await sleep(900)
 
-  await clickText('[role=tab]', '/Sessions/'); await sleep(900)
-  // A session opened under its row, as in the app.
-  await ev(`(() => { const rows = [...document.querySelectorAll('[data-session-row]')]; const best = rows.find(r => /\\d/.test(r.querySelector('[title*="achievements"]')?.innerText || '')) || rows[0]; best?.click(); return rows.length })()`)
-  await sleep(800)
-  await ev(`document.querySelector('[data-session-detail]')?.scrollIntoView({ block: 'center' }); true`); await sleep(500)
-  await save('sessions')
+    await clickText('[role=tab]', '/Sessions/'); await sleep(900)
+    // A session opened under its row, as in the app.
+    await ev(`(() => { const rows = [...document.querySelectorAll('[data-session-row]')]; const best = rows.find(r => /\\d/.test(r.querySelector('[title*="achievements"]')?.innerText || '')) || rows[0]; best?.click(); return rows.length })()`)
+    await sleep(800)
+    await ev(`document.querySelector('[data-session-detail]')?.scrollIntoView({ block: 'center' }); true`); await sleep(500)
+    await save('sessions')
 
-  await go('#/activity?tab=overview', 2600)
-  await save('activity')
-  await go('#/activity?tab=year', 2600)
-  await save('year')
-  await go('#/activity?tab=achievements', 2200)
-  await save('achievements')
+    await go('#/activity?tab=overview', 2600)
+    await save('activity')
+    await go('#/activity?tab=year', 2600)
+    await save('year')
+    await go('#/activity?tab=achievements', 2200)
+    await save('achievements')
 
-  await go('#/upcoming', 11000)
-  await save('upcoming')
+    await go('#/upcoming', 11000)
+    await save('upcoming')
 
-  await go('#/deals', 12000)
-  await save('discounts')
+    await go('#/deals', 12000)
+    await save('discounts')
 
-  await go(`#/like?app=${star.appid}`, 11000)
-  await save('like')
+    await go(`#/like?app=${star.appid}`, 11000)
+    await save('like')
 
-  await ev(`localStorage.setItem('kozo:plan:view', 'focus'); true`)
-  await go('#/plan', 3200)
-  await save('plan-focus')
-  await ev(`localStorage.setItem('kozo:plan:view', 'board'); location.hash = '#/'; true`); await sleep(400)
-  await go('#/plan', 3000)
-  await save('plan-board')
+    await ev(`localStorage.setItem('kozo:plan:view', 'focus'); true`)
+    await go('#/plan', 3200)
+    await save('plan-focus')
+    await ev(`localStorage.setItem('kozo:plan:view', 'board'); location.hash = '#/'; true`); await sleep(400)
+    await go('#/plan', 3000)
+    await save('plan-board')
 
-  await go('#/finished', 2800)
-  await save('finished')
-  await go('#/game-list', 3000)
-  await save('gamelist')
-  await go('#/profile', 3000)
-  await save('profile')
-  await go('#/settings?tab=appearance', 2400)
-  await save('appearance')
-  await go('#/settings?tab=data', 2400)
-  await save('backups')
+    await go('#/finished', 2800)
+    await save('finished')
+    await go('#/game-list', 3000)
+    await save('gamelist')
+    await go('#/profile', 3000)
+    await save('profile')
+    await go('#/settings?tab=appearance', 2400)
+    await save('appearance')
+
+    await go('#/big', 3600)
+    await save('big')
+
+
+  }
+  dir = ''
 
   // The same app in other looks, all real settings.
   await setLook({ accent: '#f472b6', cardStyle: 'poster', sidebar: 'rail' })
@@ -272,12 +325,17 @@ app.whenReady().then(async () => {
   await setLook({ accent: '#fbbf24', cardStyle: 'minimal', sidebar: 'full', theme: 'custom', bgColor: '#1a1206' })
   await go('#/', 2800)
   await save('look-amber', 1400, 0.78)
-  await setLook({ accent: '#9fff02', cardStyle: 'classic', bgColor: '#000000' })
+  await setLook({ accent: '#9fff02', cardStyle: 'classic', theme: 'midnight', bgColor: '#000000' })
+  await go('#/', 2800)
+  await save('look-lime', 1400, 0.78)
+  // The Light theme (new in 1.9.3).
+  await setLook({ accent: '#9fff02', cardStyle: 'classic', theme: 'light' })
+  await go('#/', 2800)
+  await save('look-light', 1400, 0.78)
+  await setLook({ accent: '#9fff02', cardStyle: 'classic', theme: 'midnight', bgColor: '#000000' })
 
-  await go('#/big', 3600)
-  await save('big')
-
+  if (failedShots.length) console.log('FAILED (still loading, kept the old picture): ' + failedShots.join(', '))
   console.log(taken.join(' | '))
   try { fs.rmSync(tmp, { recursive: true, force: true }) } catch {}
-  app.exit(0)
+  app.exit(failedShots.length ? 1 : 0)
 }).catch(e => { console.error('SHOTS FAILED', e); app.exit(1) })

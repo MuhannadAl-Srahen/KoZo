@@ -29,6 +29,7 @@ const REASONS = {
   'after-play':     { label: 'After playing',  cls: 'tagGreen' },
   'manual':         { label: 'Manual',         cls: 'tagAccent' },
   'before-restore': { label: 'Before a restore', cls: 'tagAmber' },
+  'before-steam':   { label: 'Before Steam', cls: 'tagAmber' },
   'auto':           { label: 'Automatic',      cls: 'tagGreen' },
 }
 

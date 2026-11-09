@@ -1,12 +1,18 @@
 'use strict'
 
-// A game's own save files when its crack changes. A Steam game saves some files
-// through Steam Cloud (Halls of Torment: HoT_profile.dat), and every crack keeps
-// those same files in its own folder:
+// A game's own save files when its crack changes, for every game. Most games save in
+// Documents or AppData themselves, which no crack changes, so those backups come back
+// as they are. But a Steam game saves some files through Steam Cloud (Halls of Torment:
+// HoT_profile.dat), and every emulator keeps those same files in its own folder
+// (CRACK_FOLDERS below):
 //   Goldberg / GSE        %APPDATA%\GSE Saves\<appid>\remote   (older: "Goldberg SteamEmu Saves")
-//   CODEX, RUNE, EMPRESS  ...\<appid>\remote
+//   CODEX, RUNE, PLAZA    Public Documents\Steam\<name>\<appid>\remote
+//   EMPRESS               Public Documents (or AppData)\EMPRESS\<appid>\remote[\<appid>\remote]
+//   OnlineFix             Public Documents (or AppData)\OnlineFix\<appid>\Saves
+//   SmartSteamEmu         %APPDATA%\SmartSteamEmu\<appid>\remote
+//   SKIDROW               %LOCALAPPDATA%\SKIDROW\<appid>\Storage (or Documents\SkidRow)
 //   TENOKE                SteamData beside the game (its own steam_api64.dll says so)
-//   Steam itself          Steam\userdata\<user>\<appid>\remote
+//   Steam itself          Steam\userdata\<user>\<appid>\remote (also CreamAPI, which runs on Steam)
 // An update that switched Halls of Torment from Goldberg to TENOKE left the new copy
 // on an empty profile, and every restore went back to the old crack's folder, where
 // the new copy never looks. So: the current crack's folder is a save folder
@@ -20,13 +26,95 @@ const lower = (p) => String(p || '').replace(/[\\/]+$/, '').toLowerCase()
 const isInside = (p, dir) => !!dir && (lower(p) === lower(dir) || lower(p).startsWith(lower(dir) + path.sep) || lower(p).startsWith(lower(dir) + '/'))
 const exists = (p) => { try { fs.accessSync(p); return true } catch { return false } }
 
-// Pure: is `dir` a crack's (or Steam's) cloud-save folder for this game?
+// Pure: is `dir` a crack's (or Steam's) cloud-save folder for this game? A "remote"
+// folder under the game's app id (Goldberg, CODEX, RUNE, PLAZA, EMPRESS, SSE, Steam),
+// OnlineFix's "Saves" and SKIDROW's "Storage" under it, or TENOKE's SteamData in the game.
 function isCloudFolder(dir, { appid, installPath } = {}) {
   const parts = String(dir || '').replace(/[\\/]+$/, '').split(/[\\/]+/)
-  const last = (parts[parts.length - 1] || '').toLowerCase()
-  if (appid && last === 'remote' && parts.includes(String(appid))) return true
-  if (last === 'steamdata' && installPath && isInside(dir, installPath)) return true
+  const low = parts.map(x => x.toLowerCase())
+  const last = low[low.length - 1] || ''
+  if (appid && parts.includes(String(appid))) {
+    if (last === 'remote') return true
+    if (last === 'saves' && low.includes('onlinefix')) return true
+    if (last === 'storage' && low.includes('skidrow')) return true
+  }
+  // TENOKE's SteamData. Also outside the game's folder: after a switch to the Steam copy
+  // (steamCopy) the old copy's SteamData is elsewhere, and it held the newest progress.
+  // Only this game's own save folders are ever asked, so the name is enough.
+  if (last === 'steamdata') return true
   return false
+}
+
+// Pure: of a restore point's cloud folders (other than `current`), the one whose files are
+// newest, by the file times the restore point keeps (`files`: { s, m }). The first one won
+// before, and after Goldberg then TENOKE then Steam that brought yesterday's Goldberg
+// profile into Steam instead of this morning's TENOKE one. -1 when there is none.
+function newestCloudSource(sources, files, opts, current) {
+  let best = -1, bestAt = -1
+  ;(sources || []).forEach((src, i) => {
+    if (!isCloudFolder(src, opts) || (current && lower(src) === lower(current))) return
+    const at = Math.max(0, ...(files || []).filter(f => f.s === i).map(f => f.m || 0))
+    if (best < 0 || at > bestAt) { best = i; bestAt = at }
+  })
+  return best
+}
+
+// Pure: where each emulator keeps a game's cloud files. `sure` = KoZo may write there
+// before the game ever has (the folder is certain); for the rest only a folder that
+// already exists is used, because a restore into a guessed folder the game never reads
+// would say "done" and bring nothing. env: { appdata, local, publicDocs, docs }.
+function crackFolders(label, appid, env) {
+  const id = String(appid)
+  const j = path.win32.join
+  const { appdata, local, publicDocs, docs } = env
+  switch (label) {
+    case 'Goldberg': return { sure: true, dirs: [j(appdata, 'GSE Saves', id, 'remote'), j(appdata, 'Goldberg SteamEmu Saves', id, 'remote')] }
+    case 'CODEX': return { sure: true, dirs: [j(publicDocs, 'Steam', 'CODEX', id, 'remote'), j(appdata, 'Steam', 'CODEX', id, 'remote')] }
+    case 'RUNE': return { sure: true, dirs: [j(publicDocs, 'Steam', 'RUNE', id, 'remote')] }
+    case 'PLAZA': return { sure: false, dirs: [j(publicDocs, 'Steam', 'PLAZA', id, 'remote'), j(publicDocs, 'Steam', 'CODEX', id, 'remote')] }
+    case 'CODEX/RUNE-family (steam_emu.ini)': return { sure: false, dirs: [j(publicDocs, 'Steam', 'CODEX', id, 'remote'), j(publicDocs, 'Steam', 'RUNE', id, 'remote'), j(appdata, 'Steam', 'CODEX', id, 'remote')] }
+    case 'EMPRESS': return { sure: false, dirs: [j(publicDocs, 'EMPRESS', id, 'remote', id, 'remote'), j(publicDocs, 'EMPRESS', id, 'remote'), j(appdata, 'EMPRESS', id, 'remote', id, 'remote'), j(appdata, 'EMPRESS', id, 'remote')] }
+    case 'online-fix': return { sure: false, dirs: [j(publicDocs, 'OnlineFix', id, 'Saves'), j(appdata, 'OnlineFix', id, 'Saves')] }
+    case 'SmartSteamEmu': return { sure: false, dirs: [j(appdata, 'SmartSteamEmu', id, 'remote')] }
+    case 'SKIDROW': return { sure: false, dirs: [j(local, 'SKIDROW', id, 'Storage'), j(docs, 'SkidRow', id, 'Storage'), j(publicDocs, 'Steam', 'SKIDROW', id, 'Storage')] }
+    default: return { sure: false, dirs: [] }
+  }
+}
+const CRACK_LABELS = ['Goldberg', 'CODEX', 'RUNE', 'PLAZA', 'EMPRESS', 'online-fix', 'SmartSteamEmu', 'SKIDROW']
+
+function envDirs() {
+  const os = require('os')
+  const home = os.homedir()
+  let docs = path.join(home, 'Documents')
+  try { docs = require('./crackWatcher').myDocsDir() || docs } catch {}
+  return {
+    appdata: process.env.APPDATA || path.join(home, 'AppData', 'Roaming'),
+    local: process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'),
+    publicDocs: path.join(process.env.PUBLIC || 'C:\\Users\\Public', 'Documents'),
+    docs,
+  }
+}
+const mtime = (p) => { try { return fs.statSync(p).mtimeMs } catch { return 0 } }
+
+// Steam\userdata\<account>\<appid>\remote for the connected Steam account (steam_user_id),
+// else the one account folder that already has this game; null when it can't be told.
+function steamRemoteFolder(appid) {
+  let steam = null
+  try { steam = require('./steamStatsWatcher').getSteamPath() } catch {}
+  if (!steam) return null
+  try {
+    const id = String(require('../db/queries/settings').getSetting('steam_user_id') || '').trim()
+    if (/^\d+$/.test(id)) {
+      const acct = (BigInt(id) - 76561197960265728n).toString()
+      if (Number(acct) > 0) return path.join(steam, 'userdata', acct, String(appid), 'remote')
+    }
+  } catch {}
+  try {
+    const have = fs.readdirSync(path.join(steam, 'userdata'), { withFileTypes: true })
+      .filter(e => e.isDirectory() && exists(path.join(steam, 'userdata', e.name, String(appid))))
+    if (have.length === 1) return path.join(steam, 'userdata', have[0].name, String(appid), 'remote')
+  } catch {}
+  return null
 }
 
 // The folders in a game's install where its crack's files may sit: the install
@@ -45,34 +133,57 @@ function gameFolders(game) {
   return [...out]
 }
 
-// Which crack the game's files use now, and the folder its saves go to. Only cracks
-// whose folder is certain; null for anything else (a restore then goes back exactly
-// where it came from).
+// Which emulator the game's files use now, and the folder its cloud files go to:
+//   1. TENOKE by its tenoke.ini (SteamData beside it);
+//   2. the emulator crackWatcher.detectEmulator names from the game's files (steam_emu.ini,
+//      OnlineFix.ini, steam_settings, a patched steam_api dll, ...), at its folder: one
+//      that exists wins, else its usual folder when that is certain;
+//   3. nothing named: of every emulator's folder for this app id that exists (and Steam's
+//      own), the one written last, because a new crack makes its folder on its first run.
+// Null when nothing is known: a restore then goes back exactly where it came from.
 function currentCrack(game) {
   const appid = String(game?.steam_app_id || game?.manual_appid || '')
+  // A game now played through Steam (steamCopy.switchToSteam): Steam's own folder for
+  // this account, Steam\userdata\<account>\<appid>\remote. Certain once the account is
+  // known; Steam uploads what it finds there on the game's first start.
+  if (appid && !game.is_cracked && game.source === 'steam') {
+    const own = steamRemoteFolder(appid)
+    return own ? { crack: 'Steam', folder: own } : null
+  }
   for (const dir of gameFolders(game)) {
     if (exists(path.join(dir, 'tenoke.ini'))) return { crack: 'TENOKE', folder: path.join(dir, 'SteamData') }
   }
   if (!appid) return null
-  for (const dir of gameFolders(game)) {
-    if (exists(path.join(dir, 'steam_settings')) || exists(path.join(dir, 'ColdClientLoader.ini')) || exists(path.join(dir, 'steamclient64.ini'))) {
-      const appdata = process.env.APPDATA || path.join(require('os').homedir(), 'AppData', 'Roaming')
-      const gse = path.join(appdata, 'GSE Saves', appid, 'remote')
-      const old = path.join(appdata, 'Goldberg SteamEmu Saves', appid, 'remote')
-      return { crack: 'Goldberg', folder: !exists(gse) && exists(old) ? old : gse }
+  const env = envDirs()
+  let label = null
+  try {
+    const cw = require('./crackWatcher')
+    for (const dir of [game.install_path, game.launch_file && path.dirname(game.launch_file)].filter(Boolean)) {
+      label = cw.detectEmulator(dir)
+      if (label) break
     }
-  }
-  return null
+  } catch {}
+  if (label === 'TENOKE') return null   // a tenoke.ini deeper than KoZo looks; not guessed
+  const known = crackFolders(label, appid, env)
+  const found = known.dirs.find(exists)
+  if (found) return { crack: label, folder: found }
+  if (known.sure && known.dirs.length) return { crack: label, folder: known.dirs[0] }
+  // Nothing named (or nothing there yet): the folder written last.
+  const all = []
+  for (const l of CRACK_LABELS) for (const d of crackFolders(l, appid, env).dirs) if (exists(d)) all.push({ crack: l, folder: d, at: mtime(d) })
+  try { for (const d of require('./saveDetect').steamCloudDirs(game)) all.push({ crack: 'Steam', folder: d, at: mtime(d) }) } catch {}
+  all.sort((x, y) => y.at - x.at)
+  return all.length ? { crack: all[0].crack, folder: all[0].folder } : null
 }
 const currentCloudFolder = (game) => currentCrack(game)?.folder || null
 
 // Pure: where a restore point's folders go now. The first cloud folder that isn't the
 // current crack's goes to the current one; when the restore point already has the
 // current folder, nothing moves (both are real, separate folders).
-function retarget(sources, { appid, installPath, current }) {
+function retarget(sources, { appid, installPath, current }, files = null) {
   const list = [...(sources || [])]
   if (!current || list.some(s => lower(s) === lower(current))) return list
-  const i = list.findIndex(s => isCloudFolder(s, { appid, installPath }))
+  const i = newestCloudSource(list, files, { appid, installPath }, current)
   if (i >= 0) list[i] = current
   return list
 }
@@ -115,7 +226,7 @@ function progressOffer(game) {
   for (const s of snaps.slice(0, 30)) {
     let snap
     try { snap = vault.readSnapshotFor(game, s.id) } catch { continue }
-    const i = snap.sources.findIndex(src => isCloudFolder(src, { appid, installPath: game.install_path }) && lower(src) !== lower(cur.folder))
+    const i = newestCloudSource(snap.sources, snap.files, { appid, installPath: game.install_path }, cur.folder)
     if (i < 0) continue
     const bytes = snap.files.filter(f => f.s === i).reduce((n, f) => n + (f.n || 0), 0)
     if (!hasMoreProgress(bytes, currentBytes)) continue
@@ -134,4 +245,4 @@ function dismissOffer(game) {
   settingsQ.setSetting('crack_offer_dismissed', JSON.stringify(seen))
 }
 
-module.exports = { isCloudFolder, currentCrack, currentCloudFolder, retarget, hasMoreProgress, folderBytes, progressOffer, dismissOffer }
+module.exports = { isCloudFolder, newestCloudSource, crackFolders, CRACK_LABELS, currentCrack, currentCloudFolder, retarget, hasMoreProgress, folderBytes, progressOffer, dismissOffer }

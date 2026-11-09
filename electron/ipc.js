@@ -345,6 +345,15 @@ handle('saves:bringProgress', (gameId, id) => {
   try { require('./services/saveDetect').confirmFor(game) } catch {}
   return r
 })
+// A game with no launcher, now installed on Steam (services/steamCopy.js).
+handle('games:steamCopy', (gameId) => require('./services/steamCopy').switchOffer(gamesQ.getGame(Number(gameId))))
+handle('games:switchToSteam', async (gameId) => {
+  const r = await require('./services/steamCopy').switchToSteam(Number(gameId))
+  broadcast('game:updated', Number(gameId))
+  return r
+})
+handle('games:dismissSteamCopy', (gameId) => require('./services/steamCopy').dismissOffer(gamesQ.getGame(Number(gameId))))
+
 handle('saves:dismissOffer', (gameId) => { require('./services/crackSaves').dismissOffer(saveGame(gameId)); return true })
 handle('saves:restore', (gameId, id) => require('./services/saveVault').restore(saveGame(gameId), id))
 handle('saves:deleteBackup', (gameId, id) => require('./services/saveVault').remove(saveGame(gameId), id))
@@ -807,7 +816,13 @@ async function doLaunch(id) {
   // + cover art) and still launch the patched copy on disk instead of Steam.
   // Steam URI is only the fallback for owned-but-not-installed Steam games
   // where we have no executable to spawn directly.
+  // A game played through Steam starts through Steam (steam://run), never its file:
+  // started directly, a game like Halls of Torment says "Could not initialize the Steam
+  // API" (it needs Steam to hand it its connection). Games with no launcher, launcher
+  // files and store links keep their own way.
+  const viaSteam = !!game.steam_app_id && game.source === 'steam' && !game.is_cracked && !game.launch_file && !game.launch_uri
   const hasUsableLocalExe =
+    !viaSteam &&
     !!game.install_path &&
     !!game.exe_name &&
     !/^steam_\d+\.exe$/i.test(game.exe_name) &&   // sync placeholder
@@ -1966,11 +1981,12 @@ handle('steam:comingSoon', (feed, page) => require('./services/steamApi').getCom
 handle('steam:tasteProfile', () => require('./services/steamApi').getTasteProfile())
 handle('steam:picks', () => require('./services/steamApi').getPicks())
 // Steam's own picks for Upcoming: the store's Personal Calendar, after a sign-in on
-// Steam's own page in a KoZo window (services/steamStore.js).
-handle('steamStore:calendar', () => require('./services/steamStore').personalCalendar())
-handle('steamStore:isSignedIn', () => require('./services/steamStore').isSignedIn())
-handle('steamStore:signIn', () => require('./services/steamStore').signIn())
-handle('steamStore:signOut', () => require('./services/steamStore').signOut())
+// Upcoming's "For you on Steam", from the connected Steam account (services/steamForYou.js).
+handle('steam:forYou', () => {
+  const fy = require('./services/steamForYou')
+  fy.clearOldStoreLogin()
+  return fy.forYou()
+})
 handle('steam:reviews', (appId) => require('./services/steamApi').getReviews(Number(appId)))
 // Discount games (pages/Deals.jsx, services/deals.js).
 handle('deals:list', (opts) => require('./services/deals').getDeals(opts || {}))
