@@ -305,4 +305,4 @@ async function reconcile({ quick = false } = {}) {
   return { checked: games.length, nowMissing, nowFound, missing, moved }
 }
 
-module.exports = { reconcile, findNewLocation, hasGameFile }
+module.exports = { reconcile, findNewLocation, hasGameFile, fromSteamManifest, steamLibraries }

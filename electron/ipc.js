@@ -345,6 +345,15 @@ handle('saves:bringProgress', (gameId, id) => {
   try { require('./services/saveDetect').confirmFor(game) } catch {}
   return r
 })
+// A game with no launcher, now installed on Steam (services/steamCopy.js).
+handle('games:steamCopy', (gameId) => require('./services/steamCopy').switchOffer(gamesQ.getGame(Number(gameId))))
+handle('games:switchToSteam', async (gameId) => {
+  const r = await require('./services/steamCopy').switchToSteam(Number(gameId))
+  broadcast('game:updated', Number(gameId))
+  return r
+})
+handle('games:dismissSteamCopy', (gameId) => require('./services/steamCopy').dismissOffer(gamesQ.getGame(Number(gameId))))
+
 handle('saves:dismissOffer', (gameId) => { require('./services/crackSaves').dismissOffer(saveGame(gameId)); return true })
 handle('saves:restore', (gameId, id) => require('./services/saveVault').restore(saveGame(gameId), id))
 handle('saves:deleteBackup', (gameId, id) => require('./services/saveVault').remove(saveGame(gameId), id))

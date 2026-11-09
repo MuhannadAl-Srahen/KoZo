@@ -677,6 +677,15 @@ button.monthPicked { background: color-mix(in srgb, var(--a) 12%, transparent); 
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
+  container-type: inline-size;
+}
+/* A narrow list (the Overview's side card): the bar steps aside so the duration and the
+   trophies always show; they were cut off at the right edge ("9m" and half a trophy). */
+@container (max-width: 400px) {
+  .sessionRow { gap: var(--sp-8); }
+  .sessionDurBar { display: none; }
+  .sessionDate { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sessionDuration { min-width: 0; margin-left: auto; }
 }
 
 .sessionRow {
@@ -756,6 +765,7 @@ button.monthPicked { background: color-mix(in srgb, var(--a) 12%, transparent); 
 /* HUD number: brighter than the labels around it, tabular so the column
    stays aligned. */
 .sessionDuration {
+  flex-shrink: 0;
   font-size: var(--fs-md);
   color: var(--text-accent-bright);
   font-weight: 500;
@@ -765,6 +775,7 @@ button.monthPicked { background: color-mix(in srgb, var(--a) 12%, transparent); 
 }
 
 .sessionAchs {
+  flex-shrink: 0;
   font-size: var(--fs-sm);
   color: var(--text-secondary);
   display: flex;

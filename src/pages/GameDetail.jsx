@@ -164,12 +164,12 @@ function SessionRow({ session, maxDuration, open = false, onOpen }) {
         <span className={s.sessionDurFill} style={{ width: `${widthPct}%` }} />
       </span>
       <span className={s.sessionDuration}>{formatPlaytime(session.duration_seconds)}</span>
-      {session.achievements_unlocked > 0 && (
+      {session.achievements_unlocked > 0 ? (
         <span className={s.sessionAchs} title={`${session.achievements_unlocked} achievements unlocked this session`}>
           <IconTrophy size={11} stroke={1.5} />
           {session.achievements_unlocked}
         </span>
-      )}
+      ) : <span className={s.sessionAchs} aria-hidden="true" />}   {/* an empty one keeps the columns in line */}
     </button>
   )
 }
@@ -239,11 +239,20 @@ export default function GameDetail() {
   // Progress left in an old crack's save folder after an update (services/crackSaves.js).
   const [progressOffer, setProgressOffer] = useState(null)
   useEffect(() => {
-    if (!game?.id || !game?.is_cracked) { setProgressOffer(null); return }
+    if (!game?.id || !(game?.is_cracked || game?.source === 'steam')) { setProgressOffer(null); return }
     let alive = true
     window.kozo?.api?.saves?.progressOffer?.(game.id).then(res => { if (alive) setProgressOffer(res?.ok ? res.data || null : null) })
     return () => { alive = false }
-  }, [game?.id, game?.install_path, game?.exe_name, game?.launch_file, game?.is_cracked])
+  }, [game?.id, game?.install_path, game?.exe_name, game?.launch_file, game?.is_cracked, game?.source])
+
+  // Installed on Steam now (services/steamCopy.js): offer to make this the Steam copy.
+  const [steamCopy, setSteamCopy] = useState(null)
+  useEffect(() => {
+    if (!game?.id || !game?.is_cracked || !game?.steam_app_id) { setSteamCopy(null); return }
+    let alive = true
+    window.kozo?.api?.games?.steamCopy?.(game.id).then(res => { if (alive) setSteamCopy(res?.ok ? res.data || null : null) })
+    return () => { alive = false }
+  }, [game?.id, game?.is_cracked, game?.steam_app_id, game?.install_path])
 
   // Automatic achievement sync — fires silently once per page visit so nobody
   // ever has to press a sync button. Live sessions are already covered by the
@@ -467,7 +476,9 @@ export default function GameDetail() {
     setInfo({
       variant: 'warning',
       title: 'Bring your progress first?',
-      message: `${game?.name || 'This game'} changed its crack with an update. Your progress from ${formatDateTime(offer.createdAt)} is in the old crack's save folder, so the game would start without it.`,
+      message: offer.crack === 'Steam'
+        ? `Your progress from ${formatDateTime(offer.createdAt)} is in your old copy's save folder, so the Steam copy would start without it.`
+        : `${game?.name || 'This game'} keeps its saves in a new place since an update. Your progress from ${formatDateTime(offer.createdAt)} is in the old place, so the game would start without it.`,
       actions: [
         { label: 'Bring it over and play', variant: 'primary', onClick: async () => { setInfo(null); if (await bringProgress(true)) launchNow() } },
         { label: 'Play without it', variant: 'secondary', onClick: () => { setInfo(null); dismissProgress(); launchNow() } },
@@ -489,6 +500,19 @@ export default function GameDetail() {
         message: `Your progress from ${formatDateTime(offer.createdAt)} is in the game's new save folder. What was there before is kept as a restore point.` })
     }
     return true
+  }
+
+  async function switchToSteam() {
+    const r = await window.kozo?.api?.games?.switchToSteam?.(Number(id))
+    if (!r?.ok) { setInfo({ variant: 'error', title: 'Could not switch to Steam', message: r?.error || 'Unknown error.' }); return }
+    setSteamCopy(null)
+    await load()
+    setInfo({ variant: 'success', title: 'This is your Steam copy now',
+      message: 'Play goes through Steam, and Steam\'s achievements are read from now on. Your hours, sessions and the achievements you earned before all stay. If the game asks, bring your progress over below; if Steam asks which save to keep, pick the one on this PC.' })
+  }
+  async function dismissSteamCopy() {
+    setSteamCopy(null)
+    await window.kozo?.api?.games?.dismissSteamCopy?.(Number(id))
   }
 
   async function dismissProgress() {
@@ -753,7 +777,7 @@ export default function GameDetail() {
         setInfo({
           variant: 'warning',
           title: 'No Steam emulator found in this game\'s folder',
-          message: 'KoZo checked the install folder (configs AND dlls) and found no Steam emulator at all, so this copy doesn\'t produce unlock files anywhere (some, like this one, use their own launcher\'s stats system instead of Steam). The achievement list is loaded, but there is no automatic unlock source for this build, mark achievements manually by clicking one below. If the game DOES show achievement popups in-game, play a bit and run this check again, the deep scan will catch any file the crack writes under this game\'s AppID.',
+          message: 'KoZo checked the install folder (configs AND dlls) and found no Steam emulator at all, so this copy doesn\'t produce unlock files anywhere (some, like this one, use their own launcher\'s stats system instead of Steam). The achievement list is loaded, but there is no automatic unlock source for this build, mark achievements manually by clicking one below. If the game DOES show achievement popups in-game, play a bit and run this check again, the deep scan will catch any file the emulator writes under this game\'s AppID.',
           lines,
         })
         break
@@ -906,9 +930,19 @@ export default function GameDetail() {
   const progressNote = progressOffer && (
     <p className={s.exeNote} data-progress-note>
       <IconAlertTriangle size={14} stroke={1.8} className={s.exeNoteIcon} />
-      <span>This game changed its crack with an update. Your progress from {formatDateTime(progressOffer.createdAt)} is still in the old crack's save folder.</span>
+      <span>{progressOffer.crack === 'Steam'
+        ? <>Your progress from {formatDateTime(progressOffer.createdAt)} is in your old copy's save folder. Bring it into Steam's, before you play the Steam copy.</>
+        : <>This game keeps its saves in a new place since an update. Your progress from {formatDateTime(progressOffer.createdAt)} is still in the old place.</>}</span>
       <button type="button" className={s.exeNoteBtn} onClick={() => bringProgress()}>Bring it over</button>
       <button type="button" className={s.exeNoteBtn} onClick={dismissProgress}>Not now</button>
+    </p>
+  )
+  const steamNote = steamCopy && (
+    <p className={s.exeNote} data-steam-copy-note>
+      <IconBrandSteam size={14} stroke={1.8} className={s.exeNoteIcon} />
+      <span>You have this game on Steam now. Switch to your Steam copy: Play goes through Steam and its achievements are read, and your hours, sessions and achievements stay.</span>
+      <button type="button" className={s.exeNoteBtn} onClick={switchToSteam}>Switch to Steam</button>
+      <button type="button" className={s.exeNoteBtn} onClick={dismissSteamCopy}>Not now</button>
     </p>
   )
   const chips = (
@@ -1098,7 +1132,7 @@ export default function GameDetail() {
             <div className={`${s.frame} ${s.cineInfo}`}>
               <div className={s.gameName} title={game.name}>{game.name}</div>
               {chips}
-              {exeNote}{copyNote}{progressNote}
+              {exeNote}{steamNote}{copyNote}{progressNote}
               <div className={s.statLine}>
                 {statBits.map((b, i) => <React.Fragment key={i}>{i > 0 && <span className={s.dot} />}<span>{b}</span></React.Fragment>)}
               </div>
@@ -1117,7 +1151,7 @@ export default function GameDetail() {
             <div className={s.headText}>
               <div className={s.gameName} title={game.name}>{game.name}</div>
               {chips}
-              {exeNote}{copyNote}{progressNote}
+              {exeNote}{steamNote}{copyNote}{progressNote}
               {actions}
             </div>
           </div>

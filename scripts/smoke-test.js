@@ -42,7 +42,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 // SMOKE_ONLY=upcoming,tray,... runs only those parts (the start and the seeded library always
 // run): after a change, test what changed, not all ~290 checks (the maker's call).
 // Parts: pages edit backups gamelist year sessions toolexe drive privacy version wishlist
-// upcoming review appearance narrow controller pick big tray
+// upcoming review appearance narrow controller pick big steamcopy tray
 const ONLY = process.env.SMOKE_ONLY ? process.env.SMOKE_ONLY.split(',').map(x => x.trim()) : null
 const want = (part) => !ONLY || ONLY.includes(part)
 
@@ -1325,6 +1325,53 @@ app.whenReady().then(async () => {
     check('overlay: no errors', overlayErrors.length === 0, overlayErrors.join(' | '))
 
   }
+  }
+
+  // A game played with no launcher, then bought and installed on Steam: the same entry
+  // becomes the Steam copy, keeping its hours, sessions and achievements, and its saves
+  // are offered into Steam's own folder. Steam is a throwaway folder here.
+  if (want('steamcopy')) {
+    const before = errors.length
+    const db = require(path.join(root, 'electron', 'db', 'database.js')).getDb()
+    const ssw = require(path.join(root, 'electron', 'services', 'steamStatsWatcher.js'))
+    const settings = require(path.join(root, 'electron', 'db', 'queries', 'settings.js'))
+    const realPath = ssw.getSteamPath, wasId = settings.getSetting('steam_user_id')
+    const fake = fs.mkdtempSync(path.join(os.tmpdir(), 'kozo-steamcopy-'))
+    const steamRoot = path.join(fake, 'Steam'), oldDir = path.join(fake, 'Games', 'Smoke Bought')
+    const steamGame = path.join(steamRoot, 'steamapps', 'common', 'Smoke Bought')
+    fs.mkdirSync(path.join(steamRoot, 'steamapps'), { recursive: true })
+    fs.writeFileSync(path.join(steamRoot, 'steamapps', 'appmanifest_9200001.acf'), '"AppState"\n{\n\t"appid"\t\t"9200001"\n\t"installdir"\t\t"Smoke Bought"\n}\n')
+    for (const d of [steamGame, oldDir]) { fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'SmokeBought.exe'), 'MZ') }
+    ssw.getSteamPath = () => steamRoot
+    settings.setSetting('steam_user_id', '76561197960265729')   // account 1, made up
+    const g = db.prepare("INSERT INTO games (name, exe_name, install_path, source, is_cracked, is_installed, steam_app_id, total_playtime_seconds) VALUES ('Smoke Bought', 'SmokeBought.exe', ?, 'cracked', 1, 1, 9200001, 7200)").run(oldDir).lastInsertRowid
+    db.prepare("INSERT INTO sessions (game_id, started_at, ended_at, duration_seconds) VALUES (?, '2026-11-01T10:00:00Z', '2026-11-01T12:00:00Z', 7200)").run(g)
+    const ach = db.prepare("INSERT INTO achievements (game_id, steam_api_name, display_name) VALUES (?, 'SMOKE_EARNED', 'Smoke Earned')").run(g).lastInsertRowid
+    db.prepare("INSERT INTO achievement_unlocks (achievement_id, unlocked_at, source) VALUES (?, '2026-11-01T11:00:00Z', 'crack')").run(ach)
+    try {
+      const offer = await ev(`window.kozo.api.games.steamCopy(${g})`)
+      check('Steam copy: installed on Steam, the switch is offered', offer?.ok && offer.data?.steamDir?.toLowerCase() === steamGame.toLowerCase(), JSON.stringify(offer))
+      await go(`#/game/${g}`, 1800)
+      check('Steam copy: the game page says so', /You have this game on Steam now/.test(await ev(`document.querySelector('[data-steam-copy-note]')?.innerText || ''`)))
+      await ev(`[...document.querySelectorAll('[data-steam-copy-note] button')].find(b => /Switch to Steam/.test(b.innerText))?.click(); true`)
+      await sleep(1500)
+      const after = db.prepare('SELECT is_cracked, source, install_path, exe_name, total_playtime_seconds FROM games WHERE id = ?').get(g)
+      check('Steam copy: the same entry is the Steam copy now', after.is_cracked === 0 && after.source === 'steam' && after.install_path.toLowerCase() === steamGame.toLowerCase() && after.exe_name === 'SmokeBought.exe', JSON.stringify(after))
+      check('Steam copy: hours and sessions stay', after.total_playtime_seconds === 7200 && db.prepare('SELECT COUNT(*) c FROM sessions WHERE game_id = ?').get(g).c === 1)
+      check('Steam copy: achievements earned before stay unlocked', !!db.prepare('SELECT 1 FROM achievement_unlocks WHERE achievement_id = ?').get(ach))
+      check('Steam copy: the note is gone and it says what happened', !(await ev(`!!document.querySelector('[data-steam-copy-note]')`)) && /This is your Steam copy now/.test(await ev(`document.body.innerText`)))
+      const cs = require(path.join(root, 'electron', 'services', 'crackSaves.js'))
+      const target = cs.currentCloudFolder(db.prepare('SELECT * FROM games WHERE id = ?').get(g))
+      check("Steam copy: its saves go to Steam's own folder", target === path.join(steamRoot, 'userdata', '1', '9200001', 'remote'), target)
+      check('Steam copy: never says crack', !/\bcrack/i.test(await ev(`document.querySelector('.app-main').innerText`)))
+      await escape()
+    } finally {
+      ssw.getSteamPath = realPath
+      settings.setSetting('steam_user_id', wasId || '')
+      db.prepare('DELETE FROM games WHERE id = ?').run(g)
+      try { fs.rmSync(fake, { recursive: true, force: true }) } catch {}
+    }
+    check('Steam copy: no errors', errorsSince(before).length === 0, errorsSince(before).join(' | '))
   }
 
   if (want('tray')) {

@@ -1568,6 +1568,21 @@ function crackSaveTests() {
   check('newer copy: copies made the same day are not', gv.pickNewerCopy({ file: 'old.exe', created: 1000 * DAY }, [{ file: 'a.exe', created: 1000.5 * DAY }]) === null)
 }
 
+function steamCopyTests() {
+  const sc = require(path.join(__dirname, '..', 'electron', 'services', 'steamCopy.js'))
+  const base = { isCracked: true, appid: 480, steamDir: 'D:\\Steam\\steamapps\\common\\Some Game', installPath: 'C:\\Games\\Some Game', dismissedDir: null }
+  check('Steam copy: a game with no launcher, now installed on Steam, is offered the switch', sc.shouldOffer(base) === true)
+  check('Steam copy: already the Steam folder, nothing to offer', sc.shouldOffer({ ...base, installPath: base.steamDir + '\\Binaries' }) === false)
+  check('Steam copy: not installed on Steam, nothing to offer', sc.shouldOffer({ ...base, steamDir: null }) === false)
+  check('Steam copy: a Steam game is never offered', sc.shouldOffer({ ...base, isCracked: false }) === false)
+  check('Steam copy: "Not now" holds for that Steam folder', sc.shouldOffer({ ...base, dismissedDir: base.steamDir }) === false)
+  const helpers = { isHelperExe: (n) => /unins|crash/i.test(n), pickBestExe: (list) => list.sort((a, b) => b.size - a.size)[0].name }
+  const exes = [{ name: 'Game.exe', size: 10, dir: 'D' }, { name: 'Other.exe', size: 99, dir: 'D' }, { name: 'unins000.exe', size: 500, dir: 'D' }]
+  check('Steam copy: the same file name is kept', sc.pickSteamExe(exes, 'game.exe', 'Some Game', helpers)?.name === 'Game.exe')
+  check('Steam copy: else the best real game file', sc.pickSteamExe(exes, 'Old.exe', 'Some Game', helpers)?.name === 'Other.exe')
+  check('Steam copy: only tools, no file at all', sc.pickSteamExe([exes[2]], 'Old.exe', 'Some Game', helpers) === null)
+}
+
 function storageTests() {
   const { driveOf, group } = require(path.join(__dirname, '..', 'electron', 'services', 'gameSizes.js'))
   check('storage: the drive of a path', driveOf('d:\Games\X') === 'D:' && driveOf('') === null)
@@ -1596,6 +1611,7 @@ function gpuTrimTests() {
   gpuTrimTests()
   storageTests()
   crackSaveTests()
+  steamCopyTests()
   await installCheckTests()
   try { await updaterTests() } catch (e) { check('updater tests ran', false, e.message) }
   try { await discordTests() } catch (e) { check('discord tests ran', false, e.message) }

@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 30,
+  rev: 31,
   // Settings → Appearance → UI scale.
   ui: {
     setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
@@ -18,6 +18,9 @@ contextBridge.exposeInMainWorld('kozo', {
       get: (id) => ipcRenderer.invoke('games:get', id),
       version: (id) => ipcRenderer.invoke('games:version', id),
       useCopy: (id, file) => ipcRenderer.invoke('games:useCopy', id, file),
+      steamCopy: (id) => ipcRenderer.invoke('games:steamCopy', id),
+      switchToSteam: (id) => ipcRenderer.invoke('games:switchToSteam', id),
+      dismissSteamCopy: (id) => ipcRenderer.invoke('games:dismissSteamCopy', id),
       add: (data) => ipcRenderer.invoke('games:add', data),
       planMonth: (gameIds, month) => ipcRenderer.invoke('games:planMonth', gameIds, month),
       bulkUpdate: (ids, patch) => ipcRenderer.invoke('games:bulkUpdate', ids, patch),

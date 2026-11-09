@@ -79,6 +79,27 @@ function envDirs() {
 }
 const mtime = (p) => { try { return fs.statSync(p).mtimeMs } catch { return 0 } }
 
+// Steam\userdata\<account>\<appid>\remote for the connected Steam account (steam_user_id),
+// else the one account folder that already has this game; null when it can't be told.
+function steamRemoteFolder(appid) {
+  let steam = null
+  try { steam = require('./steamStatsWatcher').getSteamPath() } catch {}
+  if (!steam) return null
+  try {
+    const id = String(require('../db/queries/settings').getSetting('steam_user_id') || '').trim()
+    if (/^\d+$/.test(id)) {
+      const acct = (BigInt(id) - 76561197960265728n).toString()
+      if (Number(acct) > 0) return path.join(steam, 'userdata', acct, String(appid), 'remote')
+    }
+  } catch {}
+  try {
+    const have = fs.readdirSync(path.join(steam, 'userdata'), { withFileTypes: true })
+      .filter(e => e.isDirectory() && exists(path.join(steam, 'userdata', e.name, String(appid))))
+    if (have.length === 1) return path.join(steam, 'userdata', have[0].name, String(appid), 'remote')
+  } catch {}
+  return null
+}
+
 // The folders in a game's install where its crack's files may sit: the install
 // folder, the launch file's folder, and the first level below (a game in a subfolder).
 function gameFolders(game) {
@@ -105,6 +126,13 @@ function gameFolders(game) {
 // Null when nothing is known: a restore then goes back exactly where it came from.
 function currentCrack(game) {
   const appid = String(game?.steam_app_id || game?.manual_appid || '')
+  // A game now played through Steam (steamCopy.switchToSteam): Steam's own folder for
+  // this account, Steam\userdata\<account>\<appid>\remote. Certain once the account is
+  // known; Steam uploads what it finds there on the game's first start.
+  if (appid && !game.is_cracked && game.source === 'steam') {
+    const own = steamRemoteFolder(appid)
+    return own ? { crack: 'Steam', folder: own } : null
+  }
   for (const dir of gameFolders(game)) {
     if (exists(path.join(dir, 'tenoke.ini'))) return { crack: 'TENOKE', folder: path.join(dir, 'SteamData') }
   }
