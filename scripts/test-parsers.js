@@ -1517,7 +1517,7 @@ function crackSaveTests() {
   const opts = { appid: '2218750', installPath: ip }
   check('crack saves: Goldberg remote is a cloud folder', cs.isCloudFolder(gse, opts) === true)
   check('crack saves: TENOKE SteamData in the game is one', cs.isCloudFolder(tenoke, opts) === true)
-  check('crack saves: a SteamData elsewhere is not', cs.isCloudFolder('D:\\Other\\SteamData', opts) === false)
+  check("crack saves: the old copy's SteamData counts after a move", cs.isCloudFolder('D:\\Other\\SteamData', opts) === true)
   check('crack saves: another game\'s remote is not', cs.isCloudFolder('C:\\x\\GSE Saves\\999\\remote', opts) === false)
   const roaming = 'C:\\Users\\me\\AppData\\Roaming\\HallsOfTorment'
   const moved = cs.retarget([gse, roaming], { ...opts, current: tenoke })
@@ -1538,6 +1538,13 @@ function crackSaveTests() {
   check("crack saves: another game's OnlineFix Saves is not", cs.isCloudFolder('C:\\P\\OnlineFix\\999\\Saves', { appid: '480' }) === false)
   const codex = 'C:\\P\\Steam\\CODEX\\480\\remote', ofix = 'C:\\P\\OnlineFix\\480\\Saves'
   check('crack saves: CODEX to OnlineFix, a restore goes to OnlineFix', cs.retarget([codex], { appid: '480', installPath: 'C:\\G', current: ofix })[0] === ofix)
+  // Goldberg yesterday, TENOKE this morning, then Steam: this morning's comes along.
+  const steamRemote = 'C:\\Steam\\userdata\\1\\2218750\\remote'
+  const both = [gse, 'C:\\Games\\Halls of Torment\\SteamData']
+  const filesAt = [{ s: 0, m: 1000 }, { s: 1, m: 2000 }]
+  check('crack saves: the newest folder is the one brought over', cs.retarget(both, { ...opts, installPath: 'C:\\Steam\\common\\HoT', current: steamRemote }, filesAt)[1] === steamRemote
+    && cs.retarget(both, { ...opts, installPath: 'C:\\Steam\\common\\HoT', current: steamRemote }, filesAt)[0] === gse)
+  check('crack saves: without file times, the first one as before', cs.retarget(both, { ...opts, current: steamRemote })[0] === steamRemote)
   check('crack saves: 92 KB of progress beats a fresh 1.6 KB profile', cs.hasMoreProgress(91892, 1612) === true)
   check('crack saves: the same progress is not offered again', cs.hasMoreProgress(91892, 91892) === false)
   check('crack saves: a tiny backup is never offered', cs.hasMoreProgress(900, 0) === false)

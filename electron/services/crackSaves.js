@@ -38,8 +38,25 @@ function isCloudFolder(dir, { appid, installPath } = {}) {
     if (last === 'saves' && low.includes('onlinefix')) return true
     if (last === 'storage' && low.includes('skidrow')) return true
   }
-  if (last === 'steamdata' && installPath && isInside(dir, installPath)) return true
+  // TENOKE's SteamData. Also outside the game's folder: after a switch to the Steam copy
+  // (steamCopy) the old copy's SteamData is elsewhere, and it held the newest progress.
+  // Only this game's own save folders are ever asked, so the name is enough.
+  if (last === 'steamdata') return true
   return false
+}
+
+// Pure: of a restore point's cloud folders (other than `current`), the one whose files are
+// newest, by the file times the restore point keeps (`files`: { s, m }). The first one won
+// before, and after Goldberg then TENOKE then Steam that brought yesterday's Goldberg
+// profile into Steam instead of this morning's TENOKE one. -1 when there is none.
+function newestCloudSource(sources, files, opts, current) {
+  let best = -1, bestAt = -1
+  ;(sources || []).forEach((src, i) => {
+    if (!isCloudFolder(src, opts) || (current && lower(src) === lower(current))) return
+    const at = Math.max(0, ...(files || []).filter(f => f.s === i).map(f => f.m || 0))
+    if (best < 0 || at > bestAt) { best = i; bestAt = at }
+  })
+  return best
 }
 
 // Pure: where each emulator keeps a game's cloud files. `sure` = KoZo may write there
@@ -163,10 +180,10 @@ const currentCloudFolder = (game) => currentCrack(game)?.folder || null
 // Pure: where a restore point's folders go now. The first cloud folder that isn't the
 // current crack's goes to the current one; when the restore point already has the
 // current folder, nothing moves (both are real, separate folders).
-function retarget(sources, { appid, installPath, current }) {
+function retarget(sources, { appid, installPath, current }, files = null) {
   const list = [...(sources || [])]
   if (!current || list.some(s => lower(s) === lower(current))) return list
-  const i = list.findIndex(s => isCloudFolder(s, { appid, installPath }))
+  const i = newestCloudSource(list, files, { appid, installPath }, current)
   if (i >= 0) list[i] = current
   return list
 }
@@ -209,7 +226,7 @@ function progressOffer(game) {
   for (const s of snaps.slice(0, 30)) {
     let snap
     try { snap = vault.readSnapshotFor(game, s.id) } catch { continue }
-    const i = snap.sources.findIndex(src => isCloudFolder(src, { appid, installPath: game.install_path }) && lower(src) !== lower(cur.folder))
+    const i = newestCloudSource(snap.sources, snap.files, { appid, installPath: game.install_path }, cur.folder)
     if (i < 0) continue
     const bytes = snap.files.filter(f => f.s === i).reduce((n, f) => n + (f.n || 0), 0)
     if (!hasMoreProgress(bytes, currentBytes)) continue
@@ -228,4 +245,4 @@ function dismissOffer(game) {
   settingsQ.setSetting('crack_offer_dismissed', JSON.stringify(seen))
 }
 
-module.exports = { isCloudFolder, crackFolders, CRACK_LABELS, currentCrack, currentCloudFolder, retarget, hasMoreProgress, folderBytes, progressOffer, dismissOffer }
+module.exports = { isCloudFolder, newestCloudSource, crackFolders, CRACK_LABELS, currentCrack, currentCloudFolder, retarget, hasMoreProgress, folderBytes, progressOffer, dismissOffer }

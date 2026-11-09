@@ -1363,6 +1363,13 @@ app.whenReady().then(async () => {
       const cs = require(path.join(root, 'electron', 'services', 'crackSaves.js'))
       const target = cs.currentCloudFolder(db.prepare('SELECT * FROM games WHERE id = ?').get(g))
       check("Steam copy: its saves go to Steam's own folder", target === path.join(steamRoot, 'userdata', '1', '9200001', 'remote'), target)
+      // Play goes through Steam: started directly, Halls of Torment said it could not
+      // connect to Steam. Steam's opener is faked, so nothing starts.
+      const { shell } = require('electron'), realOpen = shell.openExternal
+      let opened = null
+      shell.openExternal = async (u) => { opened = u }
+      try { await ev(`window.kozo.api.games.launch(${g})`) } finally { shell.openExternal = realOpen }
+      check('Steam copy: Play starts it through Steam', opened === 'steam://run/9200001', String(opened))
       check('Steam copy: never says crack', !/\bcrack/i.test(await ev(`document.querySelector('.app-main').innerText`)))
       await escape()
     } finally {

@@ -816,7 +816,13 @@ async function doLaunch(id) {
   // + cover art) and still launch the patched copy on disk instead of Steam.
   // Steam URI is only the fallback for owned-but-not-installed Steam games
   // where we have no executable to spawn directly.
+  // A game played through Steam starts through Steam (steam://run), never its file:
+  // started directly, a game like Halls of Torment says "Could not initialize the Steam
+  // API" (it needs Steam to hand it its connection). Games with no launcher, launcher
+  // files and store links keep their own way.
+  const viaSteam = !!game.steam_app_id && game.source === 'steam' && !game.is_cracked && !game.launch_file && !game.launch_uri
   const hasUsableLocalExe =
+    !viaSteam &&
     !!game.install_path &&
     !!game.exe_name &&
     !/^steam_\d+\.exe$/i.test(game.exe_name) &&   // sync placeholder

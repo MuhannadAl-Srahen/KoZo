@@ -98,6 +98,8 @@ async function switchToSteam(gameId) {
     install_path: exe ? exe.dir : steamDir,
     exe_name: exe ? exe.name : '',
     launch_file: null,
+    launch_uri: null,
+    run_as_admin: 0,
     is_installed: 1,
   })
   logger.info('steamCopy: switched to the Steam copy', { game: game.name, exe: exe?.name || null })

@@ -25,6 +25,8 @@ const COLORS = [
   ['tangerine', '#fb923c', 'tangerine'], ['indigo', '#818cf8', 'indigo'], ['sky', '#38bdf8', 'sky'], ['rose', '#fda4af', 'rose'],
 ].filter(c => !process.env.SHOTS_COLORS || process.env.SHOTS_COLORS.split(',').includes(c[0]))
 let failedShots = []
+// Taken in Lime only: the site doesn't show these (12 colors of them only added weight).
+const LIME_ONLY = new Set(['activity', 'achievements', 'plan-board', 'gamelist', 'appearance'])
 
 {
   const realTop = BrowserWindow.prototype.setAlwaysOnTop
@@ -53,6 +55,9 @@ for (const f of ['crackWatcher', 'desktopProbe']) {
 require(path.join(root, 'electron', 'services', 'installCheck.js')).reconcile = async () => ({ checked: 0 })
 const sync = require(path.join(root, 'electron', 'services', 'achievementSync.js'))
 if (sync.sweepSteamGames) sync.sweepSteamGames = async () => {}
+// Never the maker's own Steam account on the site: the sample profile can pick up the Steam
+// account on this PC, and For you on Steam would show its real wishlist.
+require(path.join(root, 'electron', 'services', 'steamForYou.js')).forYou = async () => null
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 const main = require(path.join(root, 'electron', 'main.js'))
@@ -193,7 +198,7 @@ app.whenReady().then(async () => {
   const loadedNow = () => ev(`(() => {
     const busy = document.querySelector('[class*="_sk_"], [class*="coverPending"], [class*="shimmer"], [aria-busy="true"]')
     const visible = (el) => { const r = el.getBoundingClientRect(); return r.width > 2 && r.height > 2 && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth }
-    const pending = [...document.images].filter(i => visible(i) && !(i.complete && i.naturalWidth > 0)).length
+    const pending = [...document.images].filter(i => visible(i) && !i.complete).length   // a picture that failed counts as done: the page shows its fallback
     return { busy: !!busy && visible(busy), pending }
   })()`)
   async function waitLoaded(name, max = 30000) {
@@ -210,6 +215,7 @@ app.whenReady().then(async () => {
   let dir = ''   // the color being taken ('' = Lime)
   async function save(name, width = 2000, quality = 0.82) {
     if (ONLY && !ONLY.includes(name)) return
+    if (dir && LIME_ONLY.has(name)) return
     await focus()
     if (!(await waitLoaded(name))) {
       // One more chance after a reload, then the shot fails (the old one stays).
@@ -301,8 +307,6 @@ app.whenReady().then(async () => {
     await save('profile')
     await go('#/settings?tab=appearance', 2400)
     await save('appearance')
-    await go('#/settings?tab=data', 2400)
-    await save('backups')
 
     await go('#/big', 3600)
     await save('big')

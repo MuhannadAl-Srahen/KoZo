@@ -620,7 +620,14 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
   const classic = look.upcomingLayout === 'classic'
   const pickMode = pickChoice === 'steam' && steamKnown && !steamCal ? defaultPickMode(picks)
     : pickChoice || defaultPickMode(picks, !!steamCal && !classic)
-  const picksPending = pickMode === 'steam' ? !steamCal : (!picks && pickMode !== 'all')
+  // For you on Steam: its games only have a name and a date once their store record is in
+  // (the feeds don't carry most of them), so until then it's loading, not empty. It said
+  // "Nothing from your Steam wishlist..." for a moment before the games came in.
+  const steamArtPending = pickMode === 'steam' && !!steamCal && (() => {
+    const have = new Set(games.map(g => Number(g.appid)))
+    return steamCal.items.some(it => !have.has(Number(it.appid)) && !art[it.appid] && !artTried.has(Number(it.appid)))
+  })()
+  const picksPending = pickMode === 'steam' ? (!steamCal || steamArtPending) : (!picks && pickMode !== 'all')
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()))
   const [steamDays, setSteamDays] = useState(42)   // Steam view: how far ahead (days) it reaches
   // Ctrl + mouse wheel card size, per layout (Month has a fixed layout).

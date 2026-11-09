@@ -199,14 +199,14 @@ const readSnapshotFor = (game, id) => readSnapshot(vaultDir(game), id)
 // Where a restore point's folders go now: a crack's save folder from before an update
 // goes to the folder the game's current crack reads (crackSaves.js). Restoring to the
 // old crack's folder left an updated game on an empty profile.
-function targetsFor(game, sources) {
+function targetsFor(game, sources, files = null) {
   try {
     const cs = require('./crackSaves')
     return cs.retarget(sources, {
       appid: String(game.steam_app_id || game.manual_appid || ''),
       installPath: game.install_path,
       current: cs.currentCloudFolder(game),
-    })
+    }, files)
   } catch { return sources }
 }
 
@@ -307,7 +307,7 @@ function snapshot(game, sources, reason = 'manual', opts = {}) {
 function compare(game, id) {
   const vault = vaultDir(game)
   const snap = readSnapshot(vault, id)
-  snap.sources = targetsFor(game, snap.sources)
+  snap.sources = targetsFor(game, snap.sources, snap.files)
   const now = listSourceFiles(snap.sources)
   const cur = new Map(now.map(f => [`${f.s}|${f.p}`, f]))
   let changed = 0, missing = 0
@@ -331,7 +331,7 @@ function restore(game, id) {
   if (running) throw new Error(`Close ${game.name} first: a running game would write over the restored save. Nothing was changed`)
   const vault = vaultDir(game)
   const snap = readSnapshot(vault, id)
-  snap.sources = targetsFor(game, snap.sources)
+  snap.sources = targetsFor(game, snap.sources, snap.files)
   // A restore point from another PC can name a drive this one doesn't have.
   const away = snap.sources.find(src => !fs.existsSync(path.parse(src).root))
   if (away) throw new Error(`This restore point's save folder is on ${path.parse(away).root}, which this PC doesn't have. Nothing was changed`)
