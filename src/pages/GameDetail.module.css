@@ -843,3 +843,28 @@ button.monthPicked { background: color-mix(in srgb, var(--a) 12%, transparent); 
 .page[data-layout="cinematic"] .frame { max-width: none; }
 .aboutTab { display: flex; flex-direction: column; gap: var(--sp-12); align-items: flex-start; }
 .aboutTab > section { width: 100%; }
+
+/* Playthroughs: one row each, newest first (PlaythroughsCard). */
+.ptList { display: flex; flex-direction: column; gap: var(--sp-8); }
+.ptRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  row-gap: 2px;
+  padding: var(--sp-8) var(--sp-10);
+  border-radius: var(--r-md);
+  background: var(--surface-3);
+}
+.ptMain { display: flex; align-items: center; gap: var(--sp-6); min-width: 0; }
+.ptName { font-weight: 700; color: var(--text-primary); white-space: nowrap; }
+.ptBadge {
+  padding: 0 7px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  line-height: 17px;
+  color: var(--a);
+  background: color-mix(in srgb, var(--a) 14%, transparent);
+}
+.ptDone { color: var(--status-finished, var(--green)); background: color-mix(in srgb, var(--status-finished, var(--green)) 14%, transparent); }
+.ptTime { font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.ptMeta { grid-column: 1 / -1; font-size: var(--fs-xs); color: var(--text-muted); }

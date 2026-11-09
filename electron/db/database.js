@@ -201,6 +201,31 @@ function runMigrations() {
     relaxUnlockedAtNotNull()
     migrateCategoriesToCustomLists()
     dedupeGameList()
+
+    // Playthroughs: playing a game again from the start (db/queries/playthroughs.js).
+    try {
+      db.exec(`CREATE TABLE IF NOT EXISTS playthroughs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        game_id INTEGER NOT NULL,
+        number INTEGER NOT NULL,
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
+      )`)
+      db.exec('CREATE INDEX IF NOT EXISTS idx_playthroughs_game ON playthroughs(game_id, number)')
+    } catch (_) {}
+
+    // Indexes. There were none, so every lookup by game or by date read every session:
+    // with 500 games and 30,000 sessions the Finished page took 0.3 s and the Year review
+    // froze KoZo for 0.7 s (scripts/perf-check.js). IF NOT EXISTS makes them free on later
+    // starts; each one alone, so one that can't be made never stops the others.
+    for (const sql of [
+      'CREATE INDEX IF NOT EXISTS idx_sessions_game_start ON sessions(game_id, started_at)',
+      'CREATE INDEX IF NOT EXISTS idx_sessions_start ON sessions(started_at)',
+      'CREATE INDEX IF NOT EXISTS idx_unlocks_session ON achievement_unlocks(session_id)',
+      'CREATE INDEX IF NOT EXISTS idx_game_list_game ON game_list(game_id)',
+      'CREATE INDEX IF NOT EXISTS idx_game_list_appid ON game_list(steam_app_id)',
+    ]) { try { db.exec(sql) } catch (_) {} }
   }
 }
 

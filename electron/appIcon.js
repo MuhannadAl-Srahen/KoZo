@@ -104,22 +104,42 @@ function makeHoneycombPng(size) {
   ])
 }
 
+// Drawing the icons pixel by pixel took about 0.3 s of every start, with KoZo frozen
+// (scripts/perf-check.js). They never change, so each size is drawn once and kept in
+// <userData>/icon-cache; bump ICON_VERSION when the drawing above changes.
+const ICON_VERSION = 1
+const pngCache = new Map()
+function honeycombPng(size) {
+  if (pngCache.has(size)) return pngCache.get(size)
+  const fs = require('fs'), path = require('path')
+  let file = null
+  try { file = path.join(require('electron').app.getPath('userData'), 'icon-cache', `honeycomb-v${ICON_VERSION}-${size}.png`) } catch {}
+  let buf = null
+  if (file) { try { buf = fs.readFileSync(file) } catch {} }
+  if (!buf || buf.length < 50) {
+    buf = makeHoneycombPng(size)
+    if (file) { try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, buf) } catch {} }
+  }
+  pngCache.set(size, buf)
+  return buf
+}
+
 // Multi-resolution nativeImage for the small tray icon.
 function getTrayImage() {
-  const img = nativeImage.createFromBuffer(makeHoneycombPng(32), { scaleFactor: 1.0 })
+  const img = nativeImage.createFromBuffer(honeycombPng(32), { scaleFactor: 1.0 })
   try {
-    img.addRepresentation({ scaleFactor: 2.0, buffer: makeHoneycombPng(64) })
-    img.addRepresentation({ scaleFactor: 0.5, buffer: makeHoneycombPng(16) })
+    img.addRepresentation({ scaleFactor: 2.0, buffer: honeycombPng(64) })
+    img.addRepresentation({ scaleFactor: 0.5, buffer: honeycombPng(16) })
   } catch {}
   return img
 }
 
 // Larger nativeImage for the window / taskbar icon.
 function getWindowImage() {
-  const img = nativeImage.createFromBuffer(makeHoneycombPng(256), { scaleFactor: 1.0 })
+  const img = nativeImage.createFromBuffer(honeycombPng(256), { scaleFactor: 1.0 })
   try {
-    img.addRepresentation({ scaleFactor: 1.0, buffer: makeHoneycombPng(64) })
-    img.addRepresentation({ scaleFactor: 1.0, buffer: makeHoneycombPng(128) })
+    img.addRepresentation({ scaleFactor: 1.0, buffer: honeycombPng(64) })
+    img.addRepresentation({ scaleFactor: 1.0, buffer: honeycombPng(128) })
   } catch {}
   return img
 }

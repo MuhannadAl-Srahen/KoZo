@@ -27,7 +27,7 @@
   height: 100%;
   object-fit: cover;
   object-position: center 25%;
-  animation: bpFade 0.55s ease;
+  animation: bpFade 0.4s ease;
 }
 @keyframes bpFade { from { opacity: 0; } to { opacity: 1; } }
 /* Poster as backdrop (no wide art): soft and dim instead of stretched. */
@@ -428,17 +428,18 @@
 :global(html[data-motion="soft"]) .card[data-gpfocus] .cardArt img { transform: scale(1.04); }
 
 /* Heavy: the page zooms in, rows slide in one after another, the art drifts
-   slowly, the hero slides in, and the focused poster springs. */
-:global(html[data-motion="heavy"]) .root { animation: bpEnter 0.5s var(--ease-out) backwards; }
-:global(html[data-motion="heavy"]) .backdropImg { animation: bpFade 0.7s ease, bpArtDrift 24s ease-in-out infinite alternate; }
-:global(html[data-motion="heavy"]) .heroInfo { animation: bpInfoInHv 0.45s var(--ease-out) backwards; }
-:global(html[data-motion="heavy"]) .gameCover, :global(html[data-motion="heavy"]) .overlayCover { animation: bpCoverIn 0.5s var(--ease-spring) backwards; }
-:global(html[data-motion="heavy"]) .gameInfo { animation: bpInfoInHv 0.45s var(--ease-out) 0.05s backwards; }
-:global(html[data-motion="heavy"]) .panel { animation: bpUp 0.5s var(--ease-out) 0.12s backwards; }
-:global(html[data-motion="heavy"]) .row { animation: bpRowIn 0.6s var(--ease-out) backwards; }
-:global(html[data-motion="heavy"]) .row:nth-child(2) { animation-delay: 0.08s; }
-:global(html[data-motion="heavy"]) .row:nth-child(3) { animation-delay: 0.16s; }
-:global(html[data-motion="heavy"]) .row:nth-child(4) { animation-delay: 0.24s; }
+   slowly, the hero slides in, and the focused poster springs. Kept short (about 0.4 s in
+   all, it was about 1 s), like the other pages: the maker found slow entrances slow. */
+:global(html[data-motion="heavy"]) .root { animation: bpEnter 0.3s var(--ease-out) backwards; }
+:global(html[data-motion="heavy"]) .backdropImg { animation: bpFade 0.4s ease, bpArtDrift 24s ease-in-out infinite alternate; }
+:global(html[data-motion="heavy"]) .heroInfo { animation: bpInfoInHv 0.3s var(--ease-out) backwards; }
+:global(html[data-motion="heavy"]) .gameCover, :global(html[data-motion="heavy"]) .overlayCover { animation: bpCoverIn 0.34s var(--ease-spring) backwards; }
+:global(html[data-motion="heavy"]) .gameInfo { animation: bpInfoInHv 0.3s var(--ease-out) 0.04s backwards; }
+:global(html[data-motion="heavy"]) .panel { animation: bpUp 0.32s var(--ease-out) 0.08s backwards; }
+:global(html[data-motion="heavy"]) .row { animation: bpRowIn 0.34s var(--ease-out) backwards; }
+:global(html[data-motion="heavy"]) .row:nth-child(2) { animation-delay: 0.04s; }
+:global(html[data-motion="heavy"]) .row:nth-child(3) { animation-delay: 0.08s; }
+:global(html[data-motion="heavy"]) .row:nth-child(4) { animation-delay: 0.12s; }
 :global(html[data-motion="heavy"]) .cardArt { transition: transform 0.35s var(--ease-spring), box-shadow 0.25s ease; }
 :global(html[data-motion="heavy"]) .card[data-gpfocus] .cardArt { transform: scale(1.08); }
 :global(html[data-motion="heavy"]) .card[data-gpfocus] .cardArt img { transform: scale(1.06); }
@@ -453,21 +454,21 @@
 .view { min-width: 0; }
 :global(html[data-motion="soft"]) .view { animation: bpUp 0.32s var(--ease-out) backwards; }
 :global(html[data-motion="soft"]) .grid .card { animation: bpUp 0.35s var(--ease-out) backwards; }
-:global(html[data-motion="heavy"]) .view { animation: bpUp 0.45s var(--ease-out) backwards; }
-:global(html[data-motion="heavy"]) .gridHead { animation: bpInfoInHv 0.45s var(--ease-out) backwards; }
-:global(html[data-motion="heavy"]) .grid .card { animation: bpCoverIn 0.5s var(--ease-spring) backwards; }
-:global(html[data-motion]) .grid .card:nth-child(1) { animation-delay: 0.03s; }
-:global(html[data-motion]) .grid .card:nth-child(2) { animation-delay: 0.06s; }
-:global(html[data-motion]) .grid .card:nth-child(3) { animation-delay: 0.09s; }
-:global(html[data-motion]) .grid .card:nth-child(4) { animation-delay: 0.12s; }
-:global(html[data-motion]) .grid .card:nth-child(5) { animation-delay: 0.15s; }
-:global(html[data-motion]) .grid .card:nth-child(6) { animation-delay: 0.18s; }
-:global(html[data-motion]) .grid .card:nth-child(7) { animation-delay: 0.21s; }
-:global(html[data-motion]) .grid .card:nth-child(8) { animation-delay: 0.24s; }
-:global(html[data-motion]) .grid .card:nth-child(9) { animation-delay: 0.27s; }
-:global(html[data-motion]) .grid .card:nth-child(10) { animation-delay: 0.30s; }
-:global(html[data-motion]) .grid .card:nth-child(11) { animation-delay: 0.33s; }
-:global(html[data-motion]) .grid .card:nth-child(12) { animation-delay: 0.36s; }
+:global(html[data-motion="heavy"]) .view { animation: bpUp 0.3s var(--ease-out) backwards; }
+:global(html[data-motion="heavy"]) .gridHead { animation: bpInfoInHv 0.3s var(--ease-out) backwards; }
+:global(html[data-motion="heavy"]) .grid .card { animation: bpCoverIn 0.34s var(--ease-spring) backwards; }
+:global(html[data-motion]) .grid .card:nth-child(1) { animation-delay: 0.015s; }
+:global(html[data-motion]) .grid .card:nth-child(2) { animation-delay: 0.030s; }
+:global(html[data-motion]) .grid .card:nth-child(3) { animation-delay: 0.045s; }
+:global(html[data-motion]) .grid .card:nth-child(4) { animation-delay: 0.060s; }
+:global(html[data-motion]) .grid .card:nth-child(5) { animation-delay: 0.075s; }
+:global(html[data-motion]) .grid .card:nth-child(6) { animation-delay: 0.090s; }
+:global(html[data-motion]) .grid .card:nth-child(7) { animation-delay: 0.105s; }
+:global(html[data-motion]) .grid .card:nth-child(8) { animation-delay: 0.120s; }
+:global(html[data-motion]) .grid .card:nth-child(9) { animation-delay: 0.135s; }
+:global(html[data-motion]) .grid .card:nth-child(10) { animation-delay: 0.150s; }
+:global(html[data-motion]) .grid .card:nth-child(11) { animation-delay: 0.165s; }
+:global(html[data-motion]) .grid .card:nth-child(12) { animation-delay: 0.180s; }
 
 /* Big Picture is the TV screen: stays dark in the Light theme (customize.css .kz-dark). */
 .root { composes: kz-dark from global; }

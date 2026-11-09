@@ -198,10 +198,13 @@ export function formatDateTime(ts) {
 // (served by the custom protocol in electron/main.js). This keeps webSecurity
 // ON — we no longer load file:// images directly. Optional `bust` query param
 // defeats the renderer image cache after a refresh.
-export function fileUrl(winPath, bust) {
+// `card`: a Library card's cover, served as a card-size copy once one is made
+// (electron/services/cardCovers.js), so the graphics process doesn't hold full-size covers.
+export function fileUrl(winPath, bust, { card = false } = {}) {
   if (!winPath) return null
   const url = 'kozo://local/' + encodeURIComponent(winPath.replace(/\\/g, '/'))
-  return bust ? `${url}?v=${bust}` : url
+  const q = [bust ? `v=${bust}` : '', card ? 'card=1' : ''].filter(Boolean).join('&')
+  return q ? `${url}?${q}` : url
 }
 
 // ── Launchers / sources ─────────────────────────────────────────────────────

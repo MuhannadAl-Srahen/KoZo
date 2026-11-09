@@ -41,8 +41,9 @@
     { id: 'bar', name: 'Day by Day', desc: 'Opened a day in the session chart.', hint: 'Click a bar in the session chart.', rarity: 'uncommon', pct: 40 },
     { id: 'end', name: 'End Credits', desc: 'Saw the whole thing.', hint: 'Reach the end of the page.', rarity: 'ultra', pct: 2 },
   ]
-  // electron/services/xp.js: an unlock is 30 XP plus a rarity bonus, a level costs 50*(L-1)*L.
-  function xpFor(pct) { return 30 + Math.round((100 - pct) / 2) }
+  // electron/services/xp.js: an unlock's XP comes from its rarity (Common 55, Uncommon 80,
+  // Rare 120, Very Rare 250, Ultra Rare 500), a level costs 50*(L-1)*L.
+  function xpFor(pct) { return pct < 5 ? 500 : pct < 15 ? 250 : pct < 30 ? 120 : pct < 50 ? 80 : 55 }
   function levelFor(total) {
     var level = 1
     while (50 * level * (level + 1) <= total) level++

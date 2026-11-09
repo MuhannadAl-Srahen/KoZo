@@ -261,8 +261,15 @@ app.whenReady().then(() => {
       const fp = filePath.toLowerCase()
       const underData = fp === base || fp.startsWith(base + path.sep)
       if (!underData && !MIME[ext]) return new Response('Forbidden', { status: 403 })
-      const data = await fs.promises.readFile(filePath)
-      return new Response(data, { status: 200, headers: { 'content-type': MIME[ext] || 'application/octet-stream' } })
+      // A Library card's cover: a card-size copy once made (services/cardCovers.js). While
+      // the copy is still being made the full cover is sent marked "don't keep", or the
+      // window kept showing that full-size one for the rest of the run.
+      const wantsCard = url.searchParams.get('card') === '1' && MIME[ext]
+      const serve = wantsCard ? await require('./services/cardCovers').pick(filePath) : filePath
+      const headers = { 'content-type': MIME[path.extname(serve).toLowerCase()] || 'application/octet-stream' }
+      if (wantsCard && serve === filePath) headers['cache-control'] = 'no-store'
+      const data = await fs.promises.readFile(serve)
+      return new Response(data, { status: 200, headers })
     } catch {
       return new Response('Not found', { status: 404 })
     }
@@ -283,6 +290,16 @@ Close any program that may be using it and start KoZo again.`)
     app.exit(1)
     return
   }
+
+  // New XP rules (services/xp.js XP_RULES): move the level baseline once, quietly.
+  try {
+    const settingsQ = require('./db/queries/settings')
+    const { XP_RULES } = require('./services/xp')
+    if (settingsQ.getSetting('xp_rules') !== XP_RULES) {
+      require('./services/xpTracker').rebase()
+      settingsQ.setSetting('xp_rules', XP_RULES)
+    }
+  } catch {}
 
   // One-time: put every existing library game on the Game List (new adds are
   // synced as they happen — see addLibraryGame in ipc.js).
@@ -349,10 +366,11 @@ Close any program that may be using it and start KoZo again.`)
   // game is already running, resolveOrphanSessions/first tick would otherwise
   // pay their cold execSync reg-query spawns mid-gameplay — the one window the
   // perf invariant exists to protect. One spawn each at app boot is fine.
-  try { require('./services/steamStatsWatcher').getSteamPath?.() } catch {}
+  // Asked without blocking now (the window loads meanwhile); the watcher starts once they're in.
   try { require('./services/crackWatcher').myDocsDir?.() } catch {}
+  const steamPathReady = Promise.resolve().then(() => require('./services/steamStatsWatcher').warmSteamPath?.()).catch(() => null)
 
-  watcher.start()
+  steamPathReady.finally(() => watcher.start())
   // Discord Rich Presence (off unless enabled in Settings; idle costs nothing).
   try { require('./services/discordPresence').start() } catch {}
 
@@ -457,7 +475,9 @@ Close any program that may be using it and start KoZo again.`)
   // copy if it was offline. All disk work, so only while no game is running.
   setTimeout(() => {
     watcher.runWhenIdle('saveVaultStartup', async () => {
-      // Backups live somewhere safe (never Temp), automatic backups on once.
+      // Backups live somewhere safe (never Temp), automatic backups on once. The drive list
+      // first, without blocking, so ensure() finds it ready instead of waiting on PowerShell.
+      try { await require('./services/backupHome').fixedDrivesAsync() } catch {}
       try { require('./services/backupHome').ensure() } catch (e) { require('./logger').warn('backupHome failed', { message: e.message }) }
       try { await require('./services/saveManifest').refresh() } catch (e) { require('./logger').warn('saveManifest refresh failed', { message: e.message }) }
       try { require('./services/saveVault').cleanEmpty() } catch {}
@@ -478,6 +498,9 @@ Close any program that may be using it and start KoZo again.`)
       try { require('./services/googleDrive').syncSoon(5000) } catch {}
     })
   }, 45000)
+
+  // Card-size cover copies whose cover is gone (services/cardCovers.js).
+  setTimeout(() => { watcher.runWhenIdle('cardCoversCleanup', () => require('./services/cardCovers').cleanup()) }, 90000)
 
   // Upcoming's data, ready before the first visit (network only, and nothing at
   // all while its cache is fresh).

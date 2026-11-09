@@ -60,8 +60,8 @@ function emitNewUnlocks(game, newUnlocks) {
   // system visible day to day, instead of only at a level-up tens of hours apart.
   let withXp = newUnlocks
   try {
-    const { xpForUnlock } = require('./xp')
-    withXp = newUnlocks.map(a => ({ ...a, xp: xpForUnlock(a.global_unlock_percent) }))
+    const { xpForUnlock, rarityOf } = require('./xp')
+    withXp = newUnlocks.map(a => ({ ...a, xp: xpForUnlock(a.global_unlock_percent), rarity: rarityOf(a.global_unlock_percent)?.name || null }))
   } catch {}
   const payload = { gameId: game.id, achievements: withXp, gameName: game.name, artPath, artUrl }
   broadcastToRenderers('achievement:unlocked', payload)

@@ -39,22 +39,23 @@ function group(drives, games) {
   return out.filter(d => !d.missing || d.games.length)
 }
 
-function drives() {
+async function drives() {
   let list = []
-  try { list = require('./backupHome').fixedDrives() } catch {}
-  // Free space now, not when KoZo started (fixedDrives is read once per run).
-  return list.map(d => {
+  try { list = await require('./backupHome').fixedDrivesAsync() } catch {}
+  // Free space now, not when KoZo started (fixedDrives is read once per run). Asked without
+  // blocking: a sleeping hard drive took up to 0.35 s to answer, and KoZo froze meanwhile.
+  return Promise.all(list.map(async d => {
     try {
-      const st = fs.statfsSync(d.drive + '\\')
+      const st = await fs.promises.statfs(d.drive + '\\')
       return { drive: d.drive, free: st.bavail * st.bsize, size: st.blocks * st.bsize }
     } catch { return { drive: d.drive, free: d.free, size: d.size } }
-  })
+  }))
 }
 
-function overview() {
+async function overview() {
   const games = db().prepare(`SELECT id, name, install_path, size_bytes AS size, size_at FROM games
     WHERE COALESCE(is_archived, 0) = 0 AND install_path IS NOT NULL AND install_path != '' AND COALESCE(is_installed, 1) = 1`).all()
-  return { drives: group(drives(), games), counting: !!running }
+  return { drives: group(await drives(), games), counting: !!running }
 }
 
 async function folderBytes(dir, stop) {

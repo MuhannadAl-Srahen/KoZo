@@ -7,7 +7,7 @@ import {
   IconCircleCheck, IconCircleOff, IconEye, IconEyeOff, IconChevronDown,
   IconChevronRight, IconAlertTriangle, IconDeviceGamepad2,
   IconLayoutDashboard, IconSparkles, IconLayoutSidebarRight, IconMovie, IconTarget, IconChartBar,
-  IconInfoCircle, IconBrandSteam, IconClock,
+  IconInfoCircle, IconBrandSteam, IconClock, IconRepeat,
 } from '@tabler/icons-react'
 import { exeLooksLikeTool, getBannerBg, getBannerIcon, formatPlaytime, formatDate, formatDateTime, fileUrl, isSteamTracked, launcherLabel, localDayKey, rarityColor, timeAgo } from '../lib/utils'
 import { STATUS_META } from '../components/GameCard'
@@ -20,6 +20,7 @@ import InfoModal, { PrivacyHelp } from '../components/ui/InfoModal'
 import EmptyState from '../components/ui/EmptyState'
 import { HeroSkeleton, PanelSkeleton } from '../components/ui/Skeleton'
 import GeneratedCover from '../components/GeneratedCover'
+import UndoBar from '../components/ui/UndoBar'
 import SteamGameModal, { StoreSections } from '../components/SteamGameModal'
 import AchImg from '../components/ui/AchImg'
 import { GamesLikeGrid } from './GamesLike'
@@ -147,6 +148,43 @@ function AchCard({ ach, onClick, onQuickToggle }) {
 }
 
 // ── Session row ────────────────────────────────────────────────────────────
+// Playthroughs (db/queries/playthroughs.js): a session belongs to the playthrough it started in.
+function playthroughStats(list, sessions) {
+  return list.map(p => {
+    const mine = sessions.filter(x => x.started_at >= p.started_at && (!p.ended_at || x.started_at < p.ended_at))
+    return { ...p, seconds: mine.reduce((n, x) => n + (x.duration_seconds || 0), 0), count: mine.length }
+  })
+}
+
+// "Today" and "Yesterday" read as words inside a sentence.
+const dayWord = (iso) => { const d = formatDate(iso); return /^(Today|Yesterday)$/.test(d) ? d.toLowerCase() : d }
+
+function PlaythroughsCard({ list, sessions }) {
+  const rows = playthroughStats(list, sessions).reverse()
+  return (
+    <div className={s.card} data-playthroughs="">
+      <div className={s.cardHead}><IconRepeat size={14} /> Playthroughs</div>
+      <div className={s.ptList}>
+        {rows.map(p => (
+          <div key={p.number} className={s.ptRow}>
+            <div className={s.ptMain}>
+              <span className={s.ptName}>Playthrough {p.number}</span>
+              {p.current && !p.finished_at && <span className={s.ptBadge}>Now</span>}
+              {p.finished_at && <span className={`${s.ptBadge} ${s.ptDone}`}>Finished</span>}
+            </div>
+            <span className={s.ptTime}>{p.seconds ? formatPlaytime(p.seconds) : '0m'}</span>
+            <span className={s.ptMeta}>
+              {p.ended_at ? `${dayWord(p.started_at)} to ${dayWord(p.ended_at)}` : `Since ${dayWord(p.started_at)}`}
+              {p.count ? `, ${p.count} session${p.count === 1 ? '' : 's'}` : ''}
+              {p.finished_at ? `, finished ${dayWord(p.finished_at)}` : ''}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function SessionRow({ session, maxDuration, open = false, onOpen }) {
   const widthPct = maxDuration > 0
     ? Math.max((session.duration_seconds / maxDuration) * 100, 2)
@@ -198,6 +236,10 @@ export default function GameDetail() {
   const [deleting, setDeleting]     = useState(false)
   const [showEdit, setShowEdit]     = useState(false)
   const [showSaveManager, setShowSaveManager] = useState(false)
+  // Playing it again: the list, the "start one?" question, and its Undo.
+  const [playthroughs, setPlaythroughs] = useState([])
+  const [askReplay, setAskReplay] = useState(false)
+  const [replayUndo, setReplayUndo] = useState(null)
   const [importing, setImporting]       = useState(false)
   const [refreshing, setRefreshing]     = useState(false)
   const [crackScanning, setCrackScanning] = useState(false)
@@ -289,13 +331,15 @@ export default function GameDetail() {
 
   const load = useCallback(async () => {
     if (!window.kozo?.api || !id) return
-    const [gRes, aRes, sRes, activeRes, privRes] = await Promise.all([
+    const [gRes, aRes, sRes, activeRes, privRes, ptRes] = await Promise.all([
       window.kozo.api.games.get(Number(id)),
       window.kozo.api.achievements.listForGame(Number(id)),
       window.kozo.api.sessions.getForGame(Number(id)),
       window.kozo.api.sessions.active(),
       window.kozo.api.steam?.lastSyncError?.(Number(id)),
+      window.kozo.api.games.playthroughs?.(Number(id)),
     ])
+    setPlaythroughs(ptRes?.ok ? (ptRes.data || []) : [])
     if (gRes?.ok) setGame(gRes.data)
     if (aRes?.ok) setAch(aRes.data ?? [])
     if (sRes?.ok) setSessions(sRes.data ?? [])
@@ -1039,6 +1083,12 @@ export default function GameDetail() {
               <IconDeviceFloppy size={14} stroke={1.6} />
               Save files &amp; backup
             </button>
+            {(sessions.length > 0 || game.completion_status === 'finished') && (
+              <button className={s.menuItem} onClick={() => { setMenuOpen(false); setAskReplay(true) }} data-new-playthrough="">
+                <IconRepeat size={14} stroke={1.6} />
+                Start a new playthrough
+              </button>
+            )}
             {!!game.install_path && (
               <button className={s.menuItem} onClick={handleOpenFolder}>
                 <IconFolderOpen size={14} stroke={1.6} />
@@ -1175,6 +1225,7 @@ export default function GameDetail() {
             <div key={shownTab} className={`${s.main} ${s.tabView}`}>
               {shownTab === 'overview' && (
                 <div className={s.overview}>
+                  {playthroughs.length > 1 && <PlaythroughsCard list={playthroughs} sessions={sessions} />}
                   {newNews.length > 0 && (
                     <div className={`${s.card} ${s.wide}`}>
                       <div className={s.cardHead}>
@@ -1382,6 +1433,10 @@ export default function GameDetail() {
                       </div>
                     </div>
                   )}
+                  {playthroughs.length > 1 && (() => {
+                    const cur = playthroughStats(playthroughs, sessions).at(-1)
+                    return <div className={s.factRow}><span>Playthrough {cur.number}</span><span>{cur.seconds ? formatPlaytime(cur.seconds) : 'Just started'}</span></div>
+                  })()}
                   <div className={s.factRow}><span>Sessions</span><span>{sessions.length || 'None'}</span></div>
                   {avgSession > 0 && <div className={s.factRow}><span>Average session</span><span>{formatPlaytime(avgSession)}</span></div>}
                   <div className={s.factRow}><span>Last played</span><span>{game.last_played_at ? timeAgo(game.last_played_at) : 'Never'}</span></div>
@@ -1431,6 +1486,36 @@ export default function GameDetail() {
           }}
         />
       )}
+
+      {askReplay && (() => {
+        const next = Math.max(1, ...playthroughs.map(p => p.number)) + 1
+        return (
+          <InfoModal
+            variant="info"
+            title="Play it again?"
+            message={`This starts playthrough ${next} of ${game.name}.`}
+            lines={[
+              'Your hours, sessions and achievements all stay.',
+              'The game goes back to Playing, and its page shows this playthrough\'s time from now on.',
+              'Finish it to earn the Finished XP again, once you\'ve played an hour of it.',
+            ]}
+            onClose={() => setAskReplay(false)}
+            actions={[
+              { label: 'Not now', variant: 'secondary', onClick: () => setAskReplay(false) },
+              { label: `Start playthrough ${next}`, variant: 'primary', icon: <IconRepeat size={14} />, onClick: async () => {
+                setAskReplay(false)
+                const r = await window.kozo.api.games.newPlaythrough(game.id)
+                if (r?.ok) {
+                  const undo = r.data
+                  setReplayUndo({ text: `Playthrough ${undo.number} started.`, run: async () => { await window.kozo.api.games.undoPlaythrough(game.id, undo); load() } })
+                  load()
+                }
+              } },
+            ]}
+          />
+        )
+      })()}
+      <UndoBar undo={replayUndo} onDone={() => setReplayUndo(null)} />
 
       {showSaveManager && (
         <SaveManagerModal game={game} onClose={() => setShowSaveManager(false)} />

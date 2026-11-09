@@ -50,6 +50,29 @@ function getSteamPath() {
   return cachedSteamPath
 }
 
+// The same lookup without blocking, for the start (main.js): as execSync it held KoZo's
+// start for about 50 ms. Fills the same answer getSteamPath returns.
+function steamPathFromReg(out, valueName) {
+  const m = String(out || '').match(new RegExp(`${valueName}\\s+REG_SZ\\s+(.+)`, 'i'))
+  if (!m) return null
+  const p = m[1].trim().replace(/\//g, '\\')
+  return fs.existsSync(p) ? p : null
+}
+function regQuery(args) {
+  return new Promise((resolve) => {
+    require('child_process').execFile('reg', args, { encoding: 'utf8', timeout: 3000, windowsHide: true }, (err, out) => resolve(err ? null : out))
+  })
+}
+async function warmSteamPath() {
+  if (cachedSteamPath !== undefined) return cachedSteamPath
+  const found =
+    steamPathFromReg(await regQuery(['query', 'HKCU\\Software\\Valve\\Steam', '/v', 'SteamPath']), 'SteamPath') ||
+    steamPathFromReg(await regQuery(['query', 'HKLM\\SOFTWARE\\WOW6432Node\\Valve\\Steam', '/v', 'InstallPath']), 'InstallPath') ||
+    (fs.existsSync('C:\\Program Files (x86)\\Steam') ? 'C:\\Program Files (x86)\\Steam' : null)
+  if (cachedSteamPath === undefined) cachedSteamPath = found
+  return cachedSteamPath
+}
+
 // SteamID64 (stored in settings) → account id used in the stats filename.
 function getAccountId() {
   try {
@@ -329,5 +352,5 @@ function isWatching(gameId) { return watchers.has(gameId) }
 module.exports = {
   isWatching,
   watchGame, unwatchGame, unwatchAll, scanGame, scanGameOnce, scanAllSteamGames,
-  getSteamPath, detectLoggedInUser,
+  getSteamPath, warmSteamPath, detectLoggedInUser,
 }

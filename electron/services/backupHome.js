@@ -35,21 +35,43 @@ function isVolatile(p) {
 
 // Fixed drives with free space (PowerShell CIM, once per run).
 let drivesCache = null
+let drivesPending = null
+const DRIVES_ARGS = ['-NoProfile', '-NonInteractive', '-Command',
+  'Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object { "$($_.DeviceID)|$($_.FreeSpace)|$($_.Size)" }']
+function parseDrives(out) {
+  return String(out || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(l => {
+    const [id, free, size] = l.split('|')
+    return { drive: id.toUpperCase(), free: Number(free) || 0, size: Number(size) || 0 }
+  })
+}
 function fixedDrives() {
   if (drivesCache) return drivesCache
   try {
-    const out = require('child_process').execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-      'Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object { "$($_.DeviceID)|$($_.FreeSpace)|$($_.Size)" }'],
-      { encoding: 'utf8', timeout: 15000, windowsHide: true })
-    drivesCache = out.split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(l => {
-      const [id, free, size] = l.split('|')
-      return { drive: id.toUpperCase(), free: Number(free) || 0, size: Number(size) || 0 }
-    })
+    drivesCache = parseDrives(require('child_process').execFileSync('powershell.exe', DRIVES_ARGS, { encoding: 'utf8', timeout: 15000, windowsHide: true }))
   } catch (e) {
     logger.warn('backupHome: could not list drives', { message: e.message })
     drivesCache = []
   }
   return drivesCache
+}
+// The same list without blocking: waiting for PowerShell froze KoZo for 0.3 to 0.7 s the
+// first time a run needed it (scripts/perf-check.js). Warmed at an idle start (main.js), so
+// the blocking version above finds it ready.
+function fixedDrivesAsync() {
+  if (drivesCache) return Promise.resolve(drivesCache)
+  if (!drivesPending) {
+    drivesPending = new Promise((resolve) => {
+      require('child_process').execFile('powershell.exe', DRIVES_ARGS, { encoding: 'utf8', timeout: 15000, windowsHide: true }, (err, out) => {
+        drivesPending = null
+        if (!drivesCache) {
+          if (err) logger.warn('backupHome: could not list drives', { message: err.message })
+          drivesCache = err ? [] : parseDrives(out)
+        }
+        resolve(drivesCache)
+      })
+    })
+  }
+  return drivesPending
 }
 
 function documentsDir() {
@@ -161,4 +183,4 @@ function findExisting() {
   return out
 }
 
-module.exports = { ensure, setBase, base, isVolatile, chooseBase, freeSpace, findExisting, fixedDrives }
+module.exports = { ensure, setBase, base, isVolatile, chooseBase, freeSpace, findExisting, fixedDrives, fixedDrivesAsync }

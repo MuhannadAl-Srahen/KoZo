@@ -497,7 +497,7 @@
   border: 1px solid var(--neutral-border);
   isolation: isolate;
 }
-.foBg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; animation: foBgIn 0.6s ease both; }
+.foBg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; animation: foBgIn 0.35s ease both; }
 .foBgSoft { filter: blur(26px) saturate(1.3) brightness(0.7); transform: scale(1.25); }
 @keyframes foBgIn { from { opacity: 0; } to { opacity: 1; } }
 .foShade {
@@ -526,16 +526,17 @@
   overflow: hidden;
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.12);
   cursor: pointer;
-  animation: foPop 0.45s var(--ease-out, ease) both;
+  animation: foPop 0.3s var(--ease-out, ease) both;
 }
 .foCover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 @keyframes foPop { from { opacity: 0; transform: translateY(12px) scale(0.96); } to { opacity: 1; transform: none; } }
 .foInfo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-8); color: #fff; }
-.foInfo > * { animation: foUp 0.45s var(--ease-out, ease) both; }
-.foInfo > *:nth-child(2) { animation-delay: 50ms; }
-.foInfo > *:nth-child(3) { animation-delay: 90ms; }
-.foInfo > *:nth-child(4) { animation-delay: 130ms; }
-.foInfo > *:nth-child(5) { animation-delay: 170ms; }
+/* Short, like the other pages' entrances (it kept moving 0.7 s after a switch). */
+.foInfo > * { animation: foUp 0.3s var(--ease-out, ease) both; }
+.foInfo > *:nth-child(2) { animation-delay: 30ms; }
+.foInfo > *:nth-child(3) { animation-delay: 50ms; }
+.foInfo > *:nth-child(4) { animation-delay: 70ms; }
+.foInfo > *:nth-child(5) { animation-delay: 90ms; }
 @keyframes foUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 .foKicker {
   display: inline-flex;

@@ -42,7 +42,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 // SMOKE_ONLY=upcoming,tray,... runs only those parts (the start and the seeded library always
 // run): after a change, test what changed, not all ~290 checks (the maker's call).
 // Parts: pages edit backups gamelist year sessions toolexe drive privacy version wishlist
-// upcoming review appearance narrow controller pick big steamcopy update tray
+// upcoming review appearance narrow controller pick big steamcopy update playthrough tray
 const ONLY = process.env.SMOKE_ONLY ? process.env.SMOKE_ONLY.split(',').map(x => x.trim()) : null
 const want = (part) => !ONLY || ONLY.includes(part)
 
@@ -1379,6 +1379,52 @@ app.whenReady().then(async () => {
       try { fs.rmSync(fake, { recursive: true, force: true }) } catch {}
     }
     check('Steam copy: no errors', errorsSince(before).length === 0, errorsSince(before).join(' | '))
+  }
+
+  if (want('playthrough')) {
+  // ── A second playthrough, and XP (the maker: "if I want to play a game a second time") ──
+  {
+    const xpSvc = require(path.join(root, 'electron', 'services', 'xp.js'))
+    const db = require(path.join(root, 'electron', 'db', 'database.js')).getDb()
+    const gid = seeded[2]   // Smoke Gamma, finished in the seed
+    const xp0 = xpSvc.computeXp()
+    await go('#/game/' + gid, 2000)
+    await ev(`document.querySelector('button[title="Game options"]')?.click(); true`); await sleep(300)
+    check('playthrough: the game menu offers a new playthrough', await ev(`!!document.querySelector('[data-new-playthrough]')`))
+    await ev(`document.querySelector('[data-new-playthrough]')?.click(); true`); await sleep(400)
+    const asked = await ev(`[...document.querySelectorAll('[role=dialog] button')].map(b => b.innerText.trim()).join('|')`)
+    check('playthrough: it asks first, naming playthrough 2', /Start playthrough 2/.test(asked), asked)
+    await ev(`[...document.querySelectorAll('[role=dialog] button')].find(b => /Start playthrough 2/.test(b.innerText))?.click(); true`); await sleep(1200)
+    const g1 = db.prepare('SELECT completion_status FROM games WHERE id = ?').get(gid)
+    const pts = db.prepare('SELECT number, finished_at FROM playthroughs WHERE game_id = ? ORDER BY number').all(gid)
+    check('playthrough: the game is Playing again, with playthrough 1 kept as finished', g1.completion_status === 'playing' && pts.length === 2 && !!pts[0].finished_at && !pts[1].finished_at, JSON.stringify({ g1, pts }))
+    check('playthrough: starting one changes no XP (the first finish still counts)', xpSvc.computeXp().totalXp === xp0.totalXp, xp0.totalXp + ' vs ' + xpSvc.computeXp().totalXp)
+    check('playthrough: Undo is offered', await ev(`!!document.querySelector('[data-undo-bar]')`))
+    check('playthrough: the page lists both playthroughs', /Playthrough 2[\s\S]*Playthrough 1/.test(await ev(`document.querySelector('[data-playthroughs]')?.innerText || ''`)))
+    // An hour and a half of play in it, then Finished: the Finished XP once more.
+    const st = Date.now() + 60000
+    db.prepare('INSERT INTO sessions (game_id, started_at, ended_at, duration_seconds) VALUES (?, ?, ?, 5400)').run(gid, new Date(st).toISOString(), new Date(st + 5400e3).toISOString())
+    await ev(`window.kozo.api.games.update(${gid}, { completion_status: 'finished' }).then(() => true)`); await sleep(600)
+    await escape()   // the "rate it" window
+    const xp1 = xpSvc.computeXp()
+    check('playthrough: finishing it again earns the Finished XP again', xp1.replayCount === 1 && xp1.breakdown.finished - xp0.breakdown.finished === 250, JSON.stringify({ replays: xp1.replayCount, finishedXp: [xp0.breakdown.finished, xp1.breakdown.finished] }))
+    check('playthrough: Recent XP shows it', xpSvc.xpHistory(50).some(e => e.type === 'replay' && e.detail === 2))
+    // A third by mistake: Undo puts it all back.
+    await go('#/game/' + gid, 1500)
+    await ev(`document.querySelector('button[title="Game options"]')?.click(); true`); await sleep(300)
+    await ev(`document.querySelector('[data-new-playthrough]')?.click(); true`); await sleep(400)
+    await ev(`[...document.querySelectorAll('[role=dialog] button')].find(b => /Start playthrough 3/.test(b.innerText))?.click(); true`); await sleep(1200)
+    await ev(`[...document.querySelectorAll('[data-undo-bar] button')].find(b => /Undo/.test(b.innerText))?.click(); true`); await sleep(1200)
+    const g2 = db.prepare('SELECT completion_status FROM games WHERE id = ?').get(gid)
+    check('playthrough: Undo takes a mistaken one back', g2.completion_status === 'finished' && db.prepare('SELECT COUNT(*) c FROM playthroughs WHERE game_id = ?').get(gid).c === 2 && xpSvc.computeXp().totalXp === xp1.totalXp, JSON.stringify(g2))
+    // How XP works, from the same rules.
+    await go('#/profile', 2000)
+    await ev(`document.querySelector('[data-xp-how]')?.click(); true`); await sleep(500)
+    const guide = await ev(`document.querySelector('[data-xp-guide]')?.innerText || ''`)
+    check('playthrough: Profile explains every way to earn XP', /Ultra Rare\s*500/i.test(guide) && /new playthrough/i.test(guide) && /Milestones/i.test(guide), guide.slice(0, 200))
+    await escape()
+    check('playthrough: Profile shows unlocks by rarity', await ev(`!!document.querySelector('[data-xp-rarity]')`))
+  }
   }
 
   if (want('update')) {

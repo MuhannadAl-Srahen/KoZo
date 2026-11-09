@@ -1613,7 +1613,22 @@ function gpuTrimTests() {
   check('gpuTrim: never when drawing without the graphics card', shouldTrim({ ...base, compositing: 'disabled_software' }) === false && shouldTrim({ ...base, compositing: undefined }) === false)
 }
 
+// XP by rarity (services/xp.js): the bands KoZo shows, and never less than the old rule.
+function xpRuleTests() {
+  const xp = require(path.join(__dirname, '..', 'electron', 'services', 'xp.js'))
+  check('xp: rarer unlocks are worth more', [90, 40, 20, 10, 2].map(xp.xpForUnlock).join() === '55,80,120,250,500', [90, 40, 20, 10, 2].map(xp.xpForUnlock).join())
+  check('xp: band edges match the rarity names (50 Common, 5 Very Rare)', xp.xpForUnlock(50) === 55 && xp.xpForUnlock(49.9) === 80 && xp.xpForUnlock(5) === 250 && xp.xpForUnlock(4.9) === 500)
+  check('xp: names follow lib/utils rarityLabel', xp.rarityOf(2).name === 'Ultra Rare' && xp.rarityOf(10).name === 'Very Rare' && xp.rarityOf(20).name === 'Rare' && xp.rarityOf(40).name === 'Uncommon' && xp.rarityOf(80).name === 'Common')
+  check('xp: an unknown rarity is 55 and has no name', xp.xpForUnlock(null) === 55 && xp.rarityOf(null) === null)
+  let lower = null
+  for (let p = 0; p <= 100; p += 0.25) { const old = 30 + Math.round((100 - p) / 2); if (xp.xpForUnlock(p) < old) { lower = p; break } }
+  check('xp: no unlock is worth less than under the old rule (no level goes down)', lower === null, 'at ' + lower + '%')
+  check('xp: 100% a game is 10 per achievement, 100 to 1,000', xp.perfectBonus(3) === 100 && xp.perfectBonus(40) === 400 && xp.perfectBonus(666) === 1000 && xp.perfectBonus(0) === 0)
+  check('xp: the guide gets every rule', xp.RULES.rarity.length === 5 && xp.RULES.hourMilestones.length === 4 && xp.RULES.finish === 250 && xp.RULES.replayMinHours === 1)
+}
+
 ;(async () => {
+  xpRuleTests()
   settingsPathTests()
   gpuTrimTests()
   storageTests()

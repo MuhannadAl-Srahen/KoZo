@@ -261,7 +261,7 @@ function OverlayToast({ toast, onDismiss }) {
       <div className={s.toastHeader}>
         <IconTrophy size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
         <span className={s.toastHeaderText}>{title}</span>
-        {gainedXp > 0 && <span className={s.toastXp}>+{gainedXp} XP</span>}
+        {gainedXp > 0 && <span className={s.toastXp}>{!summary && ach?.rarity ? `${ach.rarity} · ` : ''}+{gainedXp} XP</span>}
       </div>
 
       {/* Body — game cover first (all toasts lead with the cover), the

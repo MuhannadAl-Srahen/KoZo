@@ -5,6 +5,8 @@ import {
   IconTrophy, IconHistory, IconFlame, IconCalendar, IconPhoto, IconStar,
   IconLoader2, IconTrash, IconCircleCheckFilled, IconChevronRight,
   IconUser, IconFlag, IconChartBar, IconCategory, IconPlus,
+  IconAward,
+  IconRepeat, IconTargetArrow, IconInfoCircle,
 } from '@tabler/icons-react'
 import { fileUrl, formatPlaytime, getBannerBg, timeAgo, localDayKey } from '../lib/utils'
 import { useAccentColor } from '../context/AccentColorContext'
@@ -41,6 +43,16 @@ const TINT_GAMES = 'var(--green)'
 const TINT_ACH   = 'var(--amber)'
 const TINT_SESS  = 'var(--blue)'
 const TINT_FIRE  = 'var(--orange)'
+
+// XP per unlock by rarity: the same bands and numbers as electron/services/xp.js RARITY_XP.
+const RARITY_ROWS = [
+  { key: 'ultra',    name: 'Ultra Rare', xp: 500, color: 'var(--rarity-ultra)' },
+  { key: 'very',     name: 'Very Rare',  xp: 250, color: 'var(--rarity-very)' },
+  { key: 'rare',     name: 'Rare',       xp: 120, color: 'var(--rarity-rare)' },
+  { key: 'uncommon', name: 'Uncommon',   xp: 80,  color: 'var(--rarity-uncommon)' },
+  { key: 'common',   name: 'Common',     xp: 55,  color: 'var(--rarity-common)' },
+]
+const RARITY_BY_KEY = Object.fromEntries(RARITY_ROWS.map(r => [r.key, r]))
 
 // A token colour can't be string-concatenated into an alpha hex, so the soft
 // fill/border are mixed at paint time instead.
@@ -199,13 +211,62 @@ const XP_EVENT_META = {
   session: { Icon: IconClock, color: TINT_PLAY, verb: 'Played' },
   achievement: { Icon: IconTrophy, color: TINT_ACH, verb: 'Unlocked' },
   finished: { Icon: IconCircleCheckFilled, color: TINT_GAMES, verb: 'Finished' },
+  replay: { Icon: IconRepeat, color: TINT_GAMES, verb: 'Finished again' },
+}
+
+// "3 reached": hour milestones, games played an hour or more, games finished on plan.
+function milestoneSub(m) {
+  const n = (m?.hours || 0) + (m?.explored || 0) + (m?.onPlan || 0)
+  return n ? `${n} reached` : 'none yet'
+}
+
+// Every way to earn XP, from electron/services/xp.js RULES, so it can't drift from the math.
+function XpGuide({ rules, onClose }) {
+  const rows = [
+    { Icon: IconClock, color: TINT_PLAY, title: 'Play', text: `${rules.perHour} XP for every hour you play.` },
+    { Icon: IconTrophy, color: TINT_ACH, title: 'Unlock achievements', text: 'Worth more the rarer they are:', rarity: true },
+    { Icon: IconAward, color: 'var(--rarity-ultra)', title: '100% a game', text: `Unlock every achievement in a game: ${rules.perfect.perAchievement} XP for each one it has (${rules.perfect.min} to ${rules.perfect.max.toLocaleString()}).` },
+    { Icon: IconCircleCheckFilled, color: TINT_GAMES, title: 'Finish a game', text: `${rules.finish} XP when you mark a game Finished.` },
+    { Icon: IconRepeat, color: TINT_GAMES, title: 'Play it again', text: `Start a new playthrough from the game's page and finish it: another ${rules.finish} XP, once you've played at least ${rules.replayMinHours} hour${rules.replayMinHours === 1 ? '' : 's'} of it.` },
+    { Icon: IconTargetArrow, color: TINT_SESS, title: 'Milestones', text: `Hours in one game: ${rules.hourMilestones.map(m => `${m.hours}h +${m.xp}`).join(', ')}. Every game you play for an hour: +${rules.explored}. A game finished in the month Play Plan had it for: +${rules.onPlan}.` },
+    { Icon: IconFlame, color: TINT_FIRE, title: 'Streaks', text: `${rules.streakDay} XP for each day of your longest run of days played in a row.` },
+  ]
+  return (
+    <Modal title="How XP works" icon={<IconInfoCircle size={17} stroke={1.6} />} width={560} onClose={onClose}>
+      <div className={s.xpGuide} data-xp-guide="">
+        {rows.map(r => (
+          <div key={r.title} className={s.xpGuideRow}>
+            <r.Icon size={17} stroke={1.7} style={{ color: r.color }} />
+            <div>
+              <div className={s.xpGuideTitle}>{r.title}</div>
+              <div className={s.xpGuideText}>{r.text}</div>
+              {r.rarity && (
+                <div className={s.xpGuideRarity}>
+                  {rules.rarity.map(b => (
+                    <span key={b.key} className={s.xpGuideChip} style={{ '--rar': (RARITY_BY_KEY[b.key] || {}).color }}>
+                      {b.name} <b>{b.xp}</b>
+                    </span>
+                  ))}
+                  <span className={s.xpGuideChip} style={{ '--rar': 'var(--text-muted)' }}>Rarity unknown <b>{rules.unknownRarity}</b></span>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+        <p className={s.xpGuideFoot}>Each level needs 100 XP more than the one before.</p>
+      </div>
+    </Modal>
+  )
 }
 
 // One compact Recent-XP entry card — shared by the profile grid and the
 // full-history modal so they always look identical.
 function XpEntryCard({ entry }) {
   const meta = XP_EVENT_META[entry.type] || XP_EVENT_META.session
+  const rarity = entry.type === 'achievement' ? RARITY_BY_KEY[entry.detail] : null
   const sub = [timeAgo(entry.ts)]
+  if (rarity) sub.unshift(rarity.name)
+  if (entry.type === 'replay' && entry.detail) sub.unshift(`Playthrough ${entry.detail}`)
   if (entry.type === 'session') {
     if (entry.count > 1) sub.push(`${entry.count} sessions`)
     if (entry.totalSeconds) sub.push(formatPlaytime(entry.totalSeconds))
@@ -214,7 +275,7 @@ function XpEntryCard({ entry }) {
   const subText = sub.join(' · ')
   return (
     <div className={s.xpEntry}>
-      <meta.Icon size={15} stroke={1.8} style={{ color: meta.color, flexShrink: 0 }} />
+      <meta.Icon size={15} stroke={1.8} style={{ color: rarity ? rarity.color : meta.color, flexShrink: 0 }} />
       <div className={s.xpEntryInfo}>
         <div className={s.xpEntryTitle} title={title}>{title}</div>
         <div className={s.xpEntrySub} title={subText}>{subText}</div>
@@ -277,6 +338,7 @@ export default function Profile() {
   const [xp, setXp] = useState(profileCache?.xp ?? null)
   const [xpHistory, setXpHistory] = useState(profileCache?.xpHistory ?? [])
   const [xpModalOpen, setXpModalOpen] = useState(false)
+  const [xpHowOpen, setXpHowOpen] = useState(false)
   const [dayOpen, setDayOpen] = useState(null)   // Date of the heatmap day being shown
 
   const load = useCallback(async () => {
@@ -710,7 +772,14 @@ export default function Profile() {
 
                       <div className={s.xpHeroInfo}>
                         <div className={s.xpTier}>{xp.tier}</div>
-                        <div className={s.xpTotal}>{xp.totalXp.toLocaleString()} XP earned</div>
+                        <div className={s.xpTotal}>
+                          {xp.totalXp.toLocaleString()} XP earned
+                          {xp.rules && (
+                            <button type="button" className={s.xpHowBtn} onClick={() => setXpHowOpen(true)} data-xp-how="">
+                              <IconInfoCircle size={13} stroke={1.8} /> How XP works
+                            </button>
+                          )}
+                        </div>
                         <div className={s.xpHook}>
                           <strong>{(xp.toNextLevel ?? 0).toLocaleString()} XP</strong> to Level {xp.level + 1}
                           {xp.nextTier && (
@@ -737,7 +806,9 @@ export default function Profile() {
                       {[
                         { Icon: IconClock, label: 'Playtime', value: xp.breakdown.playtime, color: TINT_PLAY, sub: `${xp.playDays} days played` },
                         { Icon: IconTrophy, label: 'Achievements', value: xp.breakdown.achievements, color: TINT_ACH, sub: `${xp.unlockCount} unlocked` },
-                        { Icon: IconCircleCheckFilled, label: 'Finished', value: xp.breakdown.finished, color: TINT_GAMES, sub: `${xp.finishedCount} game${xp.finishedCount === 1 ? '' : 's'}` },
+                        { Icon: IconAward, label: '100% games', value: xp.breakdown.perfect || 0, color: 'var(--rarity-ultra)', sub: xp.perfectCount ? `${xp.perfectCount} game${xp.perfectCount === 1 ? '' : 's'}` : 'none yet' },
+                        { Icon: IconCircleCheckFilled, label: 'Finished', value: xp.breakdown.finished, color: TINT_GAMES, sub: `${xp.finishedCount} game${xp.finishedCount === 1 ? '' : 's'}${xp.replayCount ? `, ${xp.replayCount} again` : ''}` },
+                        { Icon: IconTargetArrow, label: 'Milestones', value: xp.breakdown.milestones || 0, color: TINT_SESS, sub: milestoneSub(xp.milestones) },
                         { Icon: IconFlame, label: 'Streaks', value: xp.breakdown.streak, color: TINT_FIRE, sub: `best ${xp.longestStreak}d` },
                       ].map(b => (
                         <div key={b.label} className={s.xpSource}>
@@ -748,6 +819,21 @@ export default function Profile() {
                         </div>
                       ))}
                     </div>
+
+                    {/* Unlocks by rarity, and what each is worth: rarer is worth much more. */}
+                    {xp.byRarity && (
+                      <div className={s.xpRarity} data-xp-rarity="">
+                        {RARITY_ROWS.map(row => ({ ...row, xp: xp.rules?.rarity?.find(b => b.key === row.key)?.xp ?? row.xp })).map(r => (
+                          <div key={r.key} className={s.xpRarityItem} style={{ '--rar': r.color }}
+                            title={`${r.name}: ${r.xp} XP each`}>
+                            <span className={s.xpRarityDot} />
+                            <span className={s.xpRarityName}>{r.name}</span>
+                            <span className={s.xpRarityCount}>{(xp.byRarity[r.key] || 0).toLocaleString()}</span>
+                            <span className={s.xpRarityEach}>{r.xp} XP each</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )
               })()}
@@ -900,6 +986,8 @@ export default function Profile() {
           onDone={(path) => { crop.setter(path); setImgBust(Date.now()); setCrop(null) }}
         />
       )}
+
+      {xpHowOpen && xp?.rules && <XpGuide rules={xp.rules} onClose={() => setXpHowOpen(false)} />}
 
       {xpModalOpen && (
         <Modal title="Recent XP" icon={<IconHistory size={17} stroke={1.6} />} width={640} onClose={() => setXpModalOpen(false)}>

@@ -45,6 +45,29 @@ function handle(channel, fn) {
 handle('games:list', () => gamesQ.listGamesWithStats())
 handle('games:get', (id) => gamesQ.getGame(id))
 handle('games:version', (id) => require('./services/gameVersion').getVersion(id))
+// Playthroughs (db/queries/playthroughs.js): playing a game again from the start. Starting
+// one puts the game back to Playing; hours, sessions and achievements stay as they are.
+// XP doesn't move when one starts (the first finish still counts), so no level-up check.
+handle('games:playthroughs', (id) => require('./db/queries/playthroughs').listForGame(id))
+handle('games:newPlaythrough', (id) => {
+  const r = require('./db/queries/playthroughs').startNew(id)
+  try { require('./services/statusSync').setGameStatus(Number(id), 'playing', { announce: false }) } catch {}
+  try { require('./services/autoBackup').markDirty() } catch {}
+  broadcast('game:updated', Number(id))
+  return r
+})
+handle('games:undoPlaythrough', (id, undo) => {
+  const pt = require('./db/queries/playthroughs')
+  pt.undoLast(id, { createdFirst: !!undo?.createdFirst })
+  const db = require('./db/database').getDb()
+  try { require('./services/statusSync').setGameStatus(Number(id), undo?.prevStatus || null, { announce: false }) } catch {}
+  // The status and its date exactly as they were (the date says when it was finished).
+  db.prepare('UPDATE games SET completion_status = ?, completion_status_at = ? WHERE id = ?').run(undo?.prevStatus || null, undo?.prevStatusAt || null, Number(id))
+  try { require('./services/xpTracker').rebase() } catch {}
+  try { require('./services/autoBackup').markDirty() } catch {}
+  broadcast('game:updated', Number(id))
+  return true
+})
 // "Use the new copy": an update installed beside the old copy. Play starts the new file
 // from now on; only an exe inside the game's own folder is accepted.
 handle('games:useCopy', (id, file) => {
@@ -2332,12 +2355,19 @@ const RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
 // happily reported success while the entry sat there and the app kept starting.
 // Names differ between dev and packaged builds too (electron.app.* forms), so
 // matching on a fixed list can never be reliable — read what's actually there.
-function findRunEntries() {
+// Both lookups run without blocking: as execSync they froze KoZo about 0.1 s every time
+// Settings > General opened (scripts/perf-check.js).
+function runQuiet(file, args) {
+  return new Promise((resolve, reject) => {
+    require('child_process').execFile(file, args, { encoding: 'utf8', windowsHide: true, timeout: 10000 }, (err, stdout) => err ? reject(err) : resolve(String(stdout || '')))
+  })
+}
+
+async function findRunEntries() {
   const { app } = require('electron')
-  const { execSync } = require('child_process')
   const out = []
   let raw = ''
-  try { raw = execSync(`reg query "${RUN_KEY}"`, { encoding: 'utf8', stdio: 'pipe' }) } catch { return out }
+  try { raw = await runQuiet('reg', ['query', RUN_KEY]) } catch { return out }
 
   const selfExe  = String(process.execPath || '').toLowerCase()
   const selfPath = String(app.getAppPath?.() || '').toLowerCase()
@@ -2363,18 +2393,17 @@ function findRunEntries() {
   return out
 }
 
-function hasScheduledTask() {
+async function hasScheduledTask() {
   try {
-    require('child_process').execSync(`schtasks /query /tn "${TASK_NAME}"`, { stdio: 'ignore' })
+    await runQuiet('schtasks', ['/query', '/tn', TASK_NAME])
     return true
   } catch { return false }
 }
 
-handle('app:getStartup', () => {
+handle('app:getStartup', async () => {
   // Report the union of both mechanisms. Checking only one is how the toggle
   // ended up disagreeing with what Windows actually does at boot.
-  const task = hasScheduledTask()
-  const runValues = findRunEntries()
+  const [task, runValues] = await Promise.all([hasScheduledTask(), findRunEntries()])
   return {
     openAtLogin: task || runValues.length > 0,
     method: task ? 'task_scheduler' : (runValues.length ? 'registry' : 'none'),
@@ -2426,7 +2455,7 @@ function startupTaskXml({ execPath, args }, runLevel = 'HighestAvailable') {
 
 // Task Scheduler first (works even when KoZo runs as administrator, no UAC at
 // boot), the Run key as a fallback. Both start KoZo with --startup.
-function registerStartup(taskName = TASK_NAME) {
+async function registerStartup(taskName = TASK_NAME) {
   const { app } = require('electron')
   const { execSync } = require('child_process')
   const fs = require('fs')
@@ -2448,7 +2477,7 @@ function registerStartup(taskName = TASK_NAME) {
       }
     }
     // An older Run value would start a second copy next to the task.
-    for (const name of findRunEntries()) {
+    for (const name of await findRunEntries()) {
       try { execSync(`reg delete "${RUN_KEY}" /v "${name}" /f`, { stdio: 'pipe' }) } catch {}
     }
     return { ok: true, method: 'task_scheduler' }
@@ -2464,7 +2493,7 @@ function registerStartup(taskName = TASK_NAME) {
   }
 }
 
-handle('app:setStartup', (enable) => {
+handle('app:setStartup', async (enable) => {
   const { app } = require('electron')
   const { execSync } = require('child_process')
   const { execPath, args: launchArgs } = startupCommand()
@@ -2478,12 +2507,11 @@ handle('app:setStartup', (enable) => {
     for (const args of [launchArgs, launchArgs.filter(a => a !== '--startup')]) {
       try { app.setLoginItemSettings({ openAtLogin: false, path: execPath, args }) } catch {}
     }
-    for (const name of findRunEntries()) {
+    for (const name of await findRunEntries()) {
       try { execSync(`reg delete "${RUN_KEY}" /v "${name}" /f`, { stdio: 'pipe' }) } catch {}
     }
 
-    const stillTask = hasScheduledTask()
-    const stillRun  = findRunEntries()
+    const [stillTask, stillRun] = await Promise.all([hasScheduledTask(), findRunEntries()])
     const stillOn   = stillTask || stillRun.length > 0
     if (stillOn) {
       logger.warn('app:setStartup(false): entries survived removal', { task: stillTask, run: stillRun })
@@ -2508,14 +2536,14 @@ handle('app:setStartup', (enable) => {
 // One-time: startup entries made before --startup and the XML task existed
 // are re-registered, so they gain the argument and the battery/time-limit fix.
 setTimeout(() => {
-  require('./services/processWatcher').runWhenIdle('startupUpgrade', () => {
+  require('./services/processWatcher').runWhenIdle('startupUpgrade', async () => {
     try {
       // Only the installed app: a dev or smoke-test run must never point
       // Windows startup at electron.exe.
       if (!require('electron').app.isPackaged) return
       if (settingsQ.getSetting('startup_v2') === '1') return
-      if (hasScheduledTask() || findRunEntries().length) {
-        const r = registerStartup()
+      if (await hasScheduledTask() || (await findRunEntries()).length) {
+        const r = await registerStartup()
         logger.info('startup entry upgraded', r)
       }
       settingsQ.setSetting('startup_v2', '1')
@@ -2816,7 +2844,7 @@ async function importBackupFile(filePath) {
     return n
   }
 
-  const TABLES = ['categories', 'games', 'game_list', 'custom_lists', 'custom_list_games', 'sessions', 'achievements', 'achievement_unlocks', 'settings']
+  const TABLES = ['categories', 'games', 'game_list', 'custom_lists', 'custom_list_games', 'sessions', 'achievements', 'achievement_unlocks', 'playthroughs', 'settings']
   const rowsFor = (t) => t === 'settings' && Array.isArray(data[t])
     ? data[t].filter(r => !LOCAL_SETTINGS.has(r?.key))
     : data[t]
@@ -2977,16 +3005,16 @@ handle('stats:get', (period, includeHidden = false) => {
     SELECT CAST(strftime('%H', started_at, 'localtime') AS INTEGER) AS hour,
            SUM(duration_seconds) AS seconds
     FROM sessions
-    WHERE ended_at IS NOT NULL AND DATE(started_at, 'localtime') = DATE('now', 'localtime') ${vis}
+    WHERE ended_at IS NOT NULL AND started_at >= ? AND DATE(started_at, 'localtime') = DATE('now', 'localtime') ${vis}
     GROUP BY hour
-  `).all()
+  `).all(new Date(now - 2 * 86400000).toISOString())   // the index finds the last two days first; every session converted to local time was 0.1 s at 30,000
 
   const longestSessions = db.prepare(`
     SELECT s.id, s.duration_seconds, g.name AS game_name, g.banner_local_path, s.started_at
     FROM sessions s JOIN games g ON g.id = s.game_id
     WHERE s.ended_at IS NOT NULL AND s.started_at >= ?
       ${includeHidden ? '' : 'AND g.is_hidden = 0'}
-    ORDER BY s.duration_seconds DESC LIMIT 5
+    ORDER BY s.duration_seconds DESC, s.id ASC LIMIT 5
   `).all(since)
 
   const sessionCount = db.prepare(`
@@ -3035,6 +3063,14 @@ handle('stats:get', (period, includeHidden = false) => {
   }
 })
 
+// A local day's sessions lie inside the UTC dates one day either side of it, so the index can
+// find them first and only those few are converted to local time.
+function dayWindow(day) {
+  const d = new Date(String(day) + 'T00:00:00Z')
+  if (isNaN(d)) return ['0000-01-01', '9999-12-31']   // dates as text: a bare '9999' turns into a number here
+  return [new Date(d - 2 * 86400000).toISOString().slice(0, 10), new Date(+d + 3 * 86400000).toISOString().slice(0, 10)]
+}
+
 // Drill-down for one calendar day (clicked in the Daily Activity chart).
 // `day` is a LOCAL YYYY-MM-DD key (same basis as dailyActivity above).
 handle('stats:dayActivity', (day, includeHidden = false) => {
@@ -3046,9 +3082,9 @@ handle('stats:dayActivity', (day, includeHidden = false) => {
     SELECT g.id, g.name, g.banner_local_path, g.source, g.is_cracked,
            SUM(s.duration_seconds) AS seconds, COUNT(*) AS sessions
     FROM sessions s JOIN games g ON g.id = s.game_id
-    WHERE s.ended_at IS NOT NULL AND DATE(s.started_at, 'localtime') = ? ${hide}
+    WHERE s.ended_at IS NOT NULL AND s.started_at >= ? AND s.started_at < ? AND DATE(s.started_at, 'localtime') = ? ${hide}
     GROUP BY g.id ORDER BY seconds DESC
-  `).all(day)
+  `).all(...dayWindow(day), day)
 
   const totalSeconds = games.reduce((a, g) => a + (g.seconds || 0), 0)
 
@@ -3058,17 +3094,17 @@ handle('stats:dayActivity', (day, includeHidden = false) => {
     FROM achievement_unlocks au
     JOIN achievements a ON a.id = au.achievement_id
     JOIN games g ON g.id = a.game_id
-    WHERE au.unlocked_at IS NOT NULL AND DATE(au.unlocked_at, 'localtime') = ? ${hide}
+    WHERE au.unlocked_at IS NOT NULL AND au.unlocked_at >= ? AND au.unlocked_at < ? AND DATE(au.unlocked_at, 'localtime') = ? ${hide}
     ORDER BY au.unlocked_at DESC
-  `).all(day)
+  `).all(...dayWindow(day), day)
 
   // Individual sessions that day, longest first (for the Longest Sessions panel).
   const sessions = db.prepare(`
     SELECT s.id, s.duration_seconds, g.name AS game_name, s.started_at
     FROM sessions s JOIN games g ON g.id = s.game_id
-    WHERE s.ended_at IS NOT NULL AND DATE(s.started_at, 'localtime') = ? ${hide}
-    ORDER BY s.duration_seconds DESC LIMIT 8
-  `).all(day)
+    WHERE s.ended_at IS NOT NULL AND s.started_at >= ? AND s.started_at < ? AND DATE(s.started_at, 'localtime') = ? ${hide}
+    ORDER BY s.duration_seconds DESC, s.id ASC LIMIT 8
+  `).all(...dayWindow(day), day)
 
   return { day, totalSeconds, games, achievements, sessions }
 })
@@ -3111,7 +3147,7 @@ handle('stats:hourActivity', (hour, includeHidden = false) => {
     WHERE s.ended_at IS NOT NULL
       AND DATE(s.started_at, 'localtime') = DATE('now', 'localtime')
       AND strftime('%H', s.started_at, 'localtime') = ? ${hide}
-    ORDER BY s.duration_seconds DESC LIMIT 8
+    ORDER BY s.duration_seconds DESC, s.id ASC LIMIT 8
   `).all(h)
 
   return { hour, totalSeconds, games, achievements, sessions }

@@ -102,6 +102,21 @@ function formatSessionTime(startedAt, idleSeconds = 0) {
   return `${m}:${String(sec).padStart(2, '0')}`
 }
 
+// The Now Playing timer ticks on its own, so only these few characters redraw each second
+// instead of the whole sidebar. Every second while the window is in front, nothing while
+// it's hidden or behind a game (html[data-inactive], App.jsx), and still while away.
+function LiveElapsed({ startedAt, idleSeconds, idle }) {
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    if (idle) return
+    const id = setInterval(() => {
+      if (!document.documentElement.hasAttribute('data-inactive')) setTick(t => t + 1)
+    }, 1000)
+    return () => clearInterval(id)
+  }, [idle, startedAt])
+  return formatSessionTime(startedAt, idleSeconds)
+}
+
 export default function Sidebar() {
   // Tab order and hidden tabs come from Settings → Appearance.
   const { prefs, setPrefs } = useAppearance()
@@ -111,7 +126,6 @@ export default function Sidebar() {
     .filter(Boolean))
   const rail = prefs.sidebar === 'rail'
   const [activeSession, setActiveSession] = useState(null)
-  const [sessionTick, setSessionTick] = useState(0)
   const [profile, setProfile] = useState({ name: 'Player', avatar: '' })
   // Tracked games released but not yet acknowledged → badge on "Upcoming".
   const [newReleases, setNewReleases] = useState(0)
@@ -217,15 +231,6 @@ export default function Sidebar() {
     }
   }, [])
 
-  // Live timer: every second while the window is in front, nothing while
-  // it's hidden or behind a game (html[data-inactive], App.jsx).
-  useEffect(() => {
-    if (!activeSession || activeSession.idle) return
-    const id = setInterval(() => {
-      if (!document.documentElement.hasAttribute('data-inactive')) setSessionTick(t => t + 1)
-    }, 1000)
-    return () => clearInterval(id)
-  }, [activeSession])
 
   // The running game's art for the Now Playing card.
   const [playingArt, setPlayingArt] = useState(null)
@@ -309,7 +314,7 @@ export default function Sidebar() {
               </span>
               <span className={s.nowPlayingName}>{activeSession.game_name}</span>
               <span className={s.nowPlayingElapsed}>
-                {formatSessionTime(activeSession.started_at, activeSession.idle_seconds)}
+                <LiveElapsed startedAt={activeSession.started_at} idleSeconds={activeSession.idle_seconds} idle={!!activeSession.idle} />
               </span>
             </span>
           </NavLink>
