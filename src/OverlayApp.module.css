@@ -382,3 +382,34 @@
   from { transform: scaleX(1); }
   to   { transform: scaleX(0); }
 }
+
+/* ── Colored toasts (toneProps in OverlayApp.jsx) ─────────────────────────────
+   A stripe down the left, a tinted header and border, and a soft glow in the toast's color.
+   Ultra Rare gets the strongest header. Static: painted once, safe over a game. */
+.toast[data-tone] {
+  border-color: color-mix(in srgb, var(--tone) 45%, transparent);
+  box-shadow: 0 10px 30px -12px color-mix(in srgb, var(--tone) 45%, transparent);
+}
+.toast[data-tone]:hover { border-color: color-mix(in srgb, var(--tone) 70%, transparent); }
+.toast[data-tone]::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--tone);
+  z-index: 1;
+}
+.toast[data-tone] .toastHeader {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--tone) 22%, transparent), color-mix(in srgb, var(--tone) 6%, transparent));
+  border-bottom-color: color-mix(in srgb, var(--tone) 25%, transparent);
+}
+.toast[data-tone] .toastHeaderText { color: color-mix(in srgb, var(--tone) 75%, #ffffff); }
+.toast[data-tone="ultra"] {
+  border-color: color-mix(in srgb, var(--tone) 70%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--tone) 25%, transparent), 0 12px 36px -10px color-mix(in srgb, var(--tone) 65%, transparent);
+}
+.toast[data-tone="ultra"] .toastHeader {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--tone) 38%, transparent), color-mix(in srgb, #f472b6 14%, transparent));
+}

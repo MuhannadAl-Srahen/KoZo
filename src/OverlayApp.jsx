@@ -105,13 +105,49 @@ function toastInteractions(close, leaving = false, hoverId = null) {
   }
 }
 
+// ── Colors: each kind of notification has its own (the maker: "each achievement with a
+// color, a start game..."). An achievement takes its rarity's color, the same five KoZo
+// uses everywhere (--rarity-* in variables.css; the overlay is always dark, so fixed here).
+// The color replaces the accent inside that one toast, so its icon, header, glow, XP pill
+// and buttons all follow. Static only: nothing animates over a running game.
+const TONES = {
+  ultra: '#c084fc', very: '#60a5fa', rare: '#34d399', uncommon: '#fbbf24', common: '#cbd5e1',
+  start: '#4ade80', end: '#2dd4bf', level: '#facc15', release: '#f472b6', price: '#a3e635',
+  rest: '#fb923c', ask: '#38bdf8',
+}
+// The rarity of an unlock rate, the same bands as lib/utils rarityLabel and services/xp.js.
+function rarityTone(pct) {
+  if (pct == null || !Number.isFinite(Number(pct))) return null
+  const p = Number(pct)
+  return p < 5 ? 'ultra' : p < 15 ? 'very' : p < 30 ? 'rare' : p < 50 ? 'uncommon' : 'common'
+}
+function toneProps(key) {
+  const c = TONES[key]
+  if (!c) return {}
+  const mix = (n, other = 'transparent') => `color-mix(in srgb, ${c} ${n}%, ${other})`
+  return {
+    'data-tone': key,
+    style: {
+      '--tone': c,
+      '--a': c,
+      '--ad': mix(16),
+      '--ab': mix(32),
+      '--border-accent-soft': mix(45),
+      '--text-accent-bright': mix(70, '#ffffff'),
+      '--glow-1': `0 0 20px -6px ${mix(55)}`,
+      '--glow-2': `0 0 26px -4px ${mix(65)}`,
+      '--glow-live': `0 0 18px -4px ${mix(55)}`,
+    },
+  }
+}
+
 // ── Session-start toast ───────────────────────────────────────────────────────
 
 function SessionToast({ toast, onDismiss }) {
   const { leaving, close, hoverId } = useAutoClose(onDismiss, 4000)
   return (
     <div className={`${s.toast} ${s.sessionToast} ${leaving ? s.toastOut : s.toastIn}`}
-      {...toastInteractions(close, leaving, hoverId)}>
+      {...toneProps('start')} {...toastInteractions(close, leaving, hoverId)}>
       <div className={s.toastHeader}>
         <span className={s.liveDot} />
         <span className={s.toastHeaderText}>Now Playing</span>
@@ -182,7 +218,7 @@ function LevelUpToast({ toast, onDismiss }) {
   const { level, tier, totalXp } = toast
   return (
     <div className={`${s.toast} ${s.levelUpToast} ${leaving ? s.toastOut : s.toastIn}`}
-      {...toastInteractions(close, leaving, hoverId)}>
+      {...toneProps('level')} {...toastInteractions(close, leaving, hoverId)}>
       <div className={s.toastHeader}>
         <IconArrowBigUpLines size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
         <span className={s.toastHeaderText}>Level Up!</span>
@@ -211,7 +247,7 @@ function SessionEndToast({ toast, onDismiss }) {
   const { gameName, durationSeconds, gainedXp, toNextLevel } = toast
   return (
     <div className={`${s.toast} ${s.sessionToast} ${leaving ? s.toastOut : s.toastIn}`}
-      {...toastInteractions(close, leaving, hoverId)}>
+      {...toneProps('end')} {...toastInteractions(close, leaving, hoverId)}>
       <div className={s.toastHeader}>
         <IconSparkles size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
         <span className={s.toastHeaderText}>Session Complete</span>
@@ -256,7 +292,7 @@ function OverlayToast({ toast, onDismiss }) {
 
   return (
     <div className={`${s.toast} ${leaving ? s.toastOut : s.toastIn}`}
-      {...toastInteractions(close, leaving, hoverId)}>
+      {...toneProps(rarityTone(summary ? summary.rarestPct : ach?.global_unlock_percent))} {...toastInteractions(close, leaving, hoverId)}>
       {/* Header bar */}
       <div className={s.toastHeader}>
         <IconTrophy size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
@@ -343,7 +379,7 @@ function UnknownGameToast({ toast, onDismiss }) {
 
   return (
     <div className={`${s.toast} ${leaving ? s.toastOut : s.toastIn}`}
-      {...toastInteractions(close, leaving, hoverId)}>
+      {...toneProps('ask')} {...toastInteractions(close, leaving, hoverId)}>
       <div className={s.toastHeader}>
         <IconDeviceGamepad2 size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
         <span className={s.toastHeaderText}>New Game Detected</span>
@@ -379,7 +415,7 @@ function LaunchMissToast({ toast, onDismiss }) {
     close()
   }
   return (
-    <div className={`${s.toast} ${leaving ? s.toastOut : s.toastIn}`} {...toastInteractions(close, leaving, hoverId)}>
+    <div className={`${s.toast} ${leaving ? s.toastOut : s.toastIn}`} {...toneProps('ask')} {...toastInteractions(close, leaving, hoverId)}>
       <div className={s.toastHeader}>
         <IconDeviceGamepad2 size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
         <span className={s.toastHeaderText}>Not being counted</span>
@@ -411,7 +447,7 @@ function ReleaseToast({ toast, onDismiss }) {
   const one = games.length === 1 ? games[0] : null
   return (
     <div className={`${s.toast} ${s.releaseToast} ${leaving ? s.toastOut : s.toastIn}`}
-      {...toastInteractions(close, leaving, hoverId)}>
+      {...toneProps('release')} {...toastInteractions(close, leaving, hoverId)}>
       <div className={s.toastHeader}>
         <IconCalendarEvent size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
         <span className={s.toastHeaderText}>Out Now</span>
@@ -451,7 +487,7 @@ function PriceToast({ toast, onDismiss }) {
   const art = games.find(g => g.artUrl)
   return (
     <div className={`${s.toast} ${s.releaseToast} ${leaving ? s.toastOut : s.toastIn}`}
-      {...toastInteractions(close, leaving, hoverId)}>
+      {...toneProps('price')} {...toastInteractions(close, leaving, hoverId)}>
       <div className={s.toastHeader}>
         <IconTag size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
         <span className={s.toastHeaderText}>At your price</span>
@@ -483,7 +519,7 @@ function BreakToast({ toast, onDismiss }) {
   const hasArt = toast.artPath || toast.artUrl
   return (
     <div className={`${s.toast} ${s.releaseToast} ${leaving ? s.toastOut : s.toastIn}`}
-      {...toastInteractions(close, leaving, hoverId)}>
+      {...toneProps('rest')} {...toastInteractions(close, leaving, hoverId)}>
       <div className={s.toastHeader}>
         <IconCoffee size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
         <span className={s.toastHeaderText}>Time for a break?</span>
@@ -577,6 +613,7 @@ export default function OverlayApp() {
               count: list.length,
               first: list[0],
               totalXp: list.reduce((n, a) => n + (a.xp || 0), 0),
+              rarestPct: list.reduce((m, a) => (a.global_unlock_percent != null && (m == null || a.global_unlock_percent < m) ? a.global_unlock_percent : m), null),
             },
             gameName, artPath, artUrl,
           }]
