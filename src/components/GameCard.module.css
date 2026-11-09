@@ -260,22 +260,35 @@
    keeps the same height. */
 .achTrackNone { opacity: 0.6; }
 
-/* Three fixed zones — trophies | last-played date | playtime — so the date
-   sits dead-centre on every card. Tabular figures stop number jitter. */
+/* Trophies | last-played date | playtime. Trophies and playtime are never cut: the
+   date takes the room left between them and, when it doesn't fit, it leaves whole
+   (a 3-zone grid cut "14h 27m" to "14h27r" on a 210 px card in Nunito). The trick:
+   the date box is one line high and wraps, with an empty first item, so a date wider
+   than the room wraps onto the hidden second line. Tabular figures stop number jitter. */
 .meta {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  display: flex;
   align-items: center;
   gap: var(--sp-6);
   width: 100%;
   font-variant-numeric: tabular-nums;
 }
+.meta > .trophies, .meta > .playtime { flex: none; }
 
 .lastPlayed {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-content: flex-start;
+  height: calc(var(--fs-xs) * 1.5);
+  line-height: 1.5;
+  overflow: hidden;
   font-size: var(--fs-xs);
   color: var(--text-muted);
   white-space: nowrap;
 }
+.lastPlayed::before { content: ''; height: 100%; }   /* full height, or the first line is 0 tall and the date shows on the second */
 
 .playtime {
   display: flex; align-items: center; gap: 4px;
@@ -677,8 +690,8 @@
     -webkit-box-orient: vertical;
   }
   .bannerGenres { display: none; }
-  .lastPlayed { display: none; }
-  .meta { grid-template-columns: 1fr auto; gap: var(--sp-4); }
+  .lastPlayed { visibility: hidden; }
+  .meta { gap: var(--sp-4); }
 }
 
 /* Play plan month ("Nov 2026"), same chip as the Game List cards */

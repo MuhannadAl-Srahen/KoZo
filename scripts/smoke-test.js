@@ -39,6 +39,12 @@ function check(name, cond, detail = '') {
   else { fail++; console.error(`  FAIL  ${name}${detail ? `: ${detail}` : ''}`) }
 }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+// SMOKE_ONLY=upcoming,tray,... runs only those parts (the start and the seeded library always
+// run): after a change, test what changed, not all ~290 checks (the maker's call).
+// Parts: pages edit backups gamelist year sessions toolexe drive privacy version wishlist
+// upcoming review appearance narrow controller pick big tray
+const ONLY = process.env.SMOKE_ONLY ? process.env.SMOKE_ONLY.split(',').map(x => x.trim()) : null
+const want = (part) => !ONLY || ONLY.includes(part)
 
 function finish(code) {
   console.log(`\n${pass} passed, ${fail} failed`)
@@ -106,6 +112,7 @@ app.whenReady().then(async () => {
   await ev(`location.reload(); true`); await sleep(2500)
   await escape()   // the "rate it" dialog from the Finished game
 
+  if (want('pages')) {
   // ── Every page ──
   const pages = [
     ['#/', 'Library', true], ['#/game-list', 'Game List', true], ['#/plan', 'Play Plan', true],
@@ -173,7 +180,9 @@ app.whenReady().then(async () => {
     return out
   })()`)
   check('Settings: no tab says cracked', crackTabs.length === 0, crackTabs.join(' | '))
+  }
 
+  if (want('edit')) {
   // The Edit window of a game with no launcher, More options open: its Store option said
   // "Cracked" after the rest of the app had stopped saying it.
   await go(`#/game/${seeded?.[1]}`, 1500)
@@ -195,7 +204,9 @@ app.whenReady().then(async () => {
   check('Edit: opens for a game with no launcher', /No launcher/.test(editText), editText.slice(0, 80))
   check('Edit: never says cracked', !/\bcrack(ed|s)?\b/i.test(editText), (editText.match(/.{0,30}\bcrack.{0,30}/i) || [''])[0])
   await escape()
+  }
 
+  if (want('backups')) {
   // Backups: a copy in a folder of your own (a path skips the folder dialog).
   const copyTo = fs.mkdtempSync(path.join(os.homedir(), '.kozo-smoke-copy-'))
   const copyRes = await ev(`(async () => {
@@ -253,7 +264,9 @@ app.whenReady().then(async () => {
   check('Restore: a folder with no backup is refused', refused?.ok === false && /No KoZo backup/.test(refused.error || ''), JSON.stringify(refused))
   await ev(`window.kozo.api.backup.copyOff()`)
   try { fs.rmSync(copyTo, { recursive: true, force: true }); fs.rmSync(noBackup, { recursive: true, force: true }) } catch {}
+  }
 
+  if (want('gamelist')) {
   // The Game List window: full width with the store tabs from the first frame for
   // a Steam game, the small form without one. Neither needs Steam to answer.
   {
@@ -305,7 +318,9 @@ app.whenReady().then(async () => {
       return true
     })()`)
   }
+  }
 
+  if (want('year')) {
   // Your year, on seeded sessions: the numbers on the page match the database, and
   // sharing makes a real picture. Steam isn't needed for any of it.
   {
@@ -349,7 +364,9 @@ app.whenReady().then(async () => {
     db.prepare(`DELETE FROM sessions WHERE id IN (${added.map(() => '?').join(',')})`).run(...added)
     check('Your year: no errors', errorsSince(before).length === 0, errorsSince(before).join(' | '))
   }
+  }
 
+  if (want('sessions')) {
   // The chart's bars are days. A bar narrows the rows under the bars to that day, a row
   // opens what happened in it, under itself. No popups. Seeded, so Steam isn't needed.
   {
@@ -456,7 +473,9 @@ app.whenReady().then(async () => {
     await ev(`location.hash = '#/'; true`); await sleep(600)
     check('Session window: no errors', errorsSince(before).length === 0, errorsSince(before).join(' | '))
   }
+  }
 
+  if (want('toolexe')) {
   // A tool or an installer as a game's exe: its page says so, until it has sessions.
   {
     const before = errors.length
@@ -483,7 +502,9 @@ app.whenReady().then(async () => {
     await go('#/', 400)
     check('Wrong exe: no errors', errorsSince(before).length === 0, errorsSince(before).join(' | '))
   }
+  }
 
+  if (want('drive')) {
   // Signing in with a Google account that holds another PC's backup: three questions, one
   // after another. A pretend Drive, so no account and no network. Ids collide on purpose:
   // the other PC's first game has the id of a different game here.
@@ -648,7 +669,9 @@ app.whenReady().then(async () => {
     await go('#/', 600)
     check('Google: no errors', errorsSince(before).length === 0, errorsSince(before).join(' | '))
   }
+  }
 
+  if (want('privacy')) {
   // A game that isn't on the Steam account answers "Profile is not public". That must
   // never raise the account-wide warning. Steam is stubbed, so this works offline.
   {
@@ -690,7 +713,9 @@ app.whenReady().then(async () => {
     settings.setSetting('steam_profile_private', was.flag || '')
     check('Steam privacy: no errors', errorsSince(before).length === 0, errorsSince(before).join(' | '))
   }
+  }
 
+  if (want('version')) {
   // The version tag, from files in a throwaway folder. No Steam id, so nothing goes online.
   {
     const before = errors.length
@@ -716,7 +741,9 @@ app.whenReady().then(async () => {
     await ev(`location.hash = '#/'; true`); await sleep(600)
     check('Version: no errors', errorsSince(before).length === 0, errorsSince(before).join(' | '))
   }
+  }
 
+  if (want('wishlist')) {
   // Steam wishlist, price alerts and news. These work with Steam unreachable too,
   // so the checks that need its answer only run when there is one.
   {
@@ -809,7 +836,9 @@ app.whenReady().then(async () => {
     await ev(`location.hash = '#/'; true`); await sleep(600)
     check('Wishlist, alerts, news: no errors', errorsSince(before).length === 0, errorsSince(before).join(' | '))
   }
+  }
 
+  if (want('upcoming')) {
   // Upcoming, All: a day with releases shows games, not just a count.
   const upcoming = await ev(`(async () => {
     localStorage.setItem('kozo:calendar:view', 'steam')
@@ -848,6 +877,11 @@ app.whenReady().then(async () => {
     steam.getPicks = async () => answer({ 9100001: { pct: 90, because: ['Smoke Source'] }, 9100003: { pct: 70, because: ['Smoke Source'] } })
     steam.getComingSoon = async (feed, page) => ({ items: feed === 'soon' && page === 0 ? items : [], total: items.length })
     steam.getAppAssets = async () => ({})
+    // For you on Steam: none here (this PC's own Steam account would be found otherwise);
+    // a made-up answer further down.
+    const forYouSvc = require(path.join(root, 'electron', 'services', 'steamForYou.js'))
+    const realForYou = forYouSvc.forYou
+    forYouSvc.forYou = async () => null
 
     const open = async (pick) => {
       await ev(`localStorage.setItem('kozo:calendar:view', 'steam'); ${pick ? `localStorage.setItem('kozo:calendar:pick', '${pick}')` : "localStorage.removeItem('kozo:calendar:pick')"}; location.hash = '#/upcoming'; location.reload(); true`)
@@ -889,14 +923,25 @@ app.whenReady().then(async () => {
     await press('all')
     check('Upcoming: and All still works', (await caps()).split(',').length === 4, await caps())
 
+    // A Steam account with a wishlist: For you on Steam comes first, and shows only its games.
+    steam.getPicks = async () => answer({ 9100001: { pct: 90, because: ['Smoke Source'] } })
+    forYouSvc.forYou = async () => ({ items: [{ appid: 9100002, wishlist: true, because: null, pct: null }, { appid: 9100004, wishlist: false, because: ['Smoke Played'], pct: 80 }], wishlist: 1, played: ['Smoke Played'] })
+    await open(null)
+    check('Upcoming: with a Steam account, a first visit starts on For you on Steam', (await active()) === 'steam', await active())
+    check('Upcoming: For you on Steam shows only its games', (await caps()) === 'Smoke Other A,Smoke Other B', await caps())
+    // textContent: weeks below the fold aren't drawn (content-visibility), so innerText skips them.
+    check('Upcoming: and says why', /On your Steam wishlist/.test(await ev(`document.querySelector('.app-main').textContent`)))
+    forYouSvc.forYou = realForYou
+
     Object.assign(steam, real)
     await ev(`localStorage.removeItem('kozo:calendar:pick'); location.hash = '#/'; location.reload(); true`)
     await sleep(800)
     check('Upcoming top bar: no errors', errors.length === before, errors.slice(before).join(' | '))
   }
+  }
 
   // Fixes from the review, and the Play check.
-  {
+  if (want('review')) {
     const before = errors.length
     const db = require(path.join(root, 'electron', 'db', 'database.js')).getDb()
     const clock = (d) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -1017,42 +1062,6 @@ app.whenReady().then(async () => {
     check('Edit many: two games become favorites', bulk.cards === 2 && bulk.after !== bulk.before && bulk.after.split(',').length >= 2, JSON.stringify(bulk))
     check('Edit many: Undo puts them back', bulk.undone === bulk.before && /Changed 2 games/.test(bulk.barText), JSON.stringify(bulk))
 
-    // Background color
-    const lookBefore = await ev(`window.kozo.api.settings.get('appearance').then(r => r?.data ?? null)`)
-    await go('#/settings?tab=appearance', 1800)
-    const typeHex = (hex) => ev(`(async () => {
-      const i = document.querySelector('[aria-label="Hex color"]')
-      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
-      set.call(i, ${JSON.stringify(hex)})
-      i.dispatchEvent(new Event('input', { bubbles: true }))
-      await new Promise(r => setTimeout(r, 200))
-      return { box: document.querySelector('button[aria-label="Background color"]')?.innerText.trim(), result: document.querySelector('[data-color-result]')?.innerText || '', bg: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(), theme: document.documentElement.dataset.theme }
-    })()`)
-    await ev(`document.querySelector('button[aria-label="Background color"]').click(); true`); await sleep(250)
-    const white = await typeHex('#ffffff'), gray = await typeHex('#808080'), black = await typeHex('#000000'), red = await typeHex('#ff0000')
-    check('Background: white shows the color really used', white.box === '#292929' && white.result.includes('#292929'), JSON.stringify(white))
-    check('Background: every pick is a different color', new Set([white.box, gray.box, black.box, red.box]).size === 4, [white.box, gray.box, black.box, red.box].join())
-    check('Background: picking one switches to Custom', white.theme === 'custom', white.theme)
-    await ev(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); true`)
-
-    // The Light theme: a white page (the window behind it is dark), and an accent dark
-    // enough to read on white. Match Windows follows Windows' own app mode.
-    const pickTheme = (label) => ev(`(async () => {
-      const b = [...document.querySelectorAll('button[aria-pressed]')].find(x => x.textContent.trim() === ${JSON.stringify(label)})
-      if (!b) return null
-      b.click()
-      await new Promise(r => setTimeout(r, 400))
-      const lum = (c) => { const m = c.match(/[\\d.]+/g).slice(0, 3).map(Number).map(v => v / 255).map(v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)); return 0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2] }
-      const probe = document.createElement('span'); probe.style.color = 'var(--a)'; document.body.appendChild(probe)
-      const accent = getComputedStyle(probe).color; probe.remove()
-      return { theme: document.documentElement.dataset.theme || 'midnight', page: getComputedStyle(document.documentElement).backgroundColor, pageLum: lum(getComputedStyle(document.documentElement).backgroundColor), accentOnWhite: 1.05 / (lum(accent) + 0.05), prefersLight: matchMedia('(prefers-color-scheme: light)').matches }
-    })()`)
-    const light = await pickTheme('Light')
-    check('Light theme: the page is white', !!light && light.theme === 'light' && light.pageLum > 0.8, JSON.stringify(light))
-    check('Light theme: the accent reads on white', !!light && light.accentOnWhite >= 4.5, JSON.stringify(light))
-    const sys = await pickTheme('Match Windows')
-    check('Match Windows: follows Windows', !!sys && sys.theme === (sys.prefersLight ? 'light' : 'midnight'), JSON.stringify(sys))
-    await ev(`window.kozo.api.settings.set('appearance', ${JSON.stringify(lookBefore)}); location.hash = '#/'; location.reload(); true`); await sleep(2200)
 
     // Play, and the watched file never starts. The process list is made up, so no real
     // program is involved; the toast is only recorded.
@@ -1122,6 +1131,48 @@ app.whenReady().then(async () => {
     check('Review fixes: no errors', errorsSince(before).length === 0, errorsSince(before).join(' | '))
   }
 
+  // Appearance: background color, Light, Match Windows (Settings > Appearance).
+  if (want('appearance')) {
+    // Background color
+    const lookBefore = await ev(`window.kozo.api.settings.get('appearance').then(r => r?.data ?? null)`)
+    await go('#/settings?tab=appearance', 1800)
+    const typeHex = (hex) => ev(`(async () => {
+      const i = document.querySelector('[aria-label="Hex color"]')
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+      set.call(i, ${JSON.stringify(hex)})
+      i.dispatchEvent(new Event('input', { bubbles: true }))
+      await new Promise(r => setTimeout(r, 200))
+      return { box: document.querySelector('button[aria-label="Background color"]')?.innerText.trim(), result: document.querySelector('[data-color-result]')?.innerText || '', bg: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(), theme: document.documentElement.dataset.theme }
+    })()`)
+    await ev(`document.querySelector('button[aria-label="Background color"]').click(); true`); await sleep(250)
+    const white = await typeHex('#ffffff'), gray = await typeHex('#808080'), black = await typeHex('#000000'), red = await typeHex('#ff0000')
+    // White really is white now (it used to turn dark gray): a light KoZo.
+    check('Background: white gives a white KoZo', white.box === '#FFFFFF' && white.theme === 'light' && /#FFFFFF/i.test(white.result), JSON.stringify(white))
+    check('Background: every pick is a different color', new Set([white.box, gray.box, black.box, red.box]).size === 4, [white.box, gray.box, black.box, red.box].join())
+    check('Background: picking a dark one switches to Custom', red.theme === 'custom', red.theme)
+    await ev(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); true`)
+
+    // The Light theme: a white page (the window behind it is dark), and an accent dark
+    // enough to read on white. Match Windows follows Windows' own app mode.
+    const pickTheme = (label) => ev(`(async () => {
+      const b = [...document.querySelectorAll('button[aria-pressed]')].find(x => x.textContent.trim().startsWith(${JSON.stringify(label)}))   // Match Windows also says "Dark now"
+      if (!b) return null
+      b.click()
+      await new Promise(r => setTimeout(r, 400))
+      const lum = (c) => { const m = c.match(/[\\d.]+/g).slice(0, 3).map(Number).map(v => v / 255).map(v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)); return 0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2] }
+      const probe = document.createElement('span'); probe.style.color = 'var(--a)'; document.body.appendChild(probe)
+      const accent = getComputedStyle(probe).color; probe.remove()
+      return { theme: document.documentElement.dataset.theme || 'midnight', page: getComputedStyle(document.documentElement).backgroundColor, pageLum: lum(getComputedStyle(document.documentElement).backgroundColor), accentOnWhite: 1.05 / (lum(accent) + 0.05), prefersLight: matchMedia('(prefers-color-scheme: light)').matches }
+    })()`)
+    const light = await pickTheme('Light')
+    check('Light theme: the page is white', !!light && light.theme === 'light' && light.pageLum > 0.8, JSON.stringify(light))
+    check('Light theme: the accent reads on white', !!light && light.accentOnWhite >= 4.5, JSON.stringify(light))
+    const sys = await pickTheme('Match Windows')
+    check("Match Windows: follows Windows, in Windows' own colors", !!sys && sys.theme === (sys.prefersLight ? 'light' : 'windark'), JSON.stringify(sys))
+    await ev(`window.kozo.api.settings.set('appearance', ${JSON.stringify(lookBefore)}); location.hash = '#/'; location.reload(); true`); await sleep(2200)
+  }
+
+  if (want('narrow')) {
   // Narrow window
   win.setContentSize(1000, 720); await sleep(400)
   for (const [hash, label] of [['#/', 'Library'], ['#/plan', 'Play Plan'], ['#/finished', 'Finished'], ['#/profile', 'Profile']]) {
@@ -1130,7 +1181,9 @@ app.whenReady().then(async () => {
     check(`${label} at 1000px: no sideways scroll`, !over)
   }
   win.setContentSize(1440, 900); await sleep(300)
+  }
 
+  if (want('controller')) {
   // ── Controller (the 1.5.0 bug: it stopped after a page change) ──
   win.show(); win.focus()
   await go('#/', 1200)
@@ -1176,7 +1229,9 @@ app.whenReady().then(async () => {
   check('controller: X opens the card menu', await ev(`!!document.querySelector('[role=menu]')`))
   await tap(1)    // B
   check('controller: B closes the menu', await ev(`!document.querySelector('[role=menu]')`))
+  }
 
+  if (want('pick')) {
   // ── Pick for me ──
   {
     const before = errors.length
@@ -1188,7 +1243,9 @@ app.whenReady().then(async () => {
     check('Pick for me: no errors', errorsSince(before).length === 0, errorsSince(before).join(' | '))
     await escape()
   }
+  }
 
+  if (want('big')) {
   // ── Big Picture ──
   {
     const before = errors.length
@@ -1258,7 +1315,9 @@ app.whenReady().then(async () => {
     check('overlay: no errors', overlayErrors.length === 0, overlayErrors.join(' | '))
 
   }
+  }
 
+  if (want('tray')) {
   // ── Tray: Windows' own menu (the KoZo popup was slow to open, the maker's call) ──
   {
     const watcher = require(path.join(root, 'electron', 'services', 'processWatcher.js'))
@@ -1278,6 +1337,7 @@ app.whenReady().then(async () => {
     }
     const jump = find(menu, 'Jump back in')
     if (jump) check('tray: Jump back in lists games', jump.submenu.items.length > 0 && jump.submenu.items.length <= 5, String(jump.submenu.items.length))
+  }
   }
 
   check('no renderer errors overall', errors.length === 0, errors.join(' | '))

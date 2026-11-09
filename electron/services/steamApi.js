@@ -1545,7 +1545,7 @@ async function getComingSoon(feed = 'soon', page = 0) {
 module.exports = {
   accountPrivacy, privacyFromProfileXml, privacyFromOwnedGames,
   warmUpcoming,
-  shrinkCover, getTasteProfile, clearTasteProfile, getPicks, scorePicks, pickSources, getReviews,
+  shrinkCover, getTasteProfile, clearTasteProfile, getPicks, scorePicks, pickSources, moreLikeComingSoon, getReviews,
   getBannersDir, downloadFile,
   getAppAssets, downloadHero, similarGames, scoreSimilar, baseName, getGameFacts, getTagNames, assetUrl,
   getComingSoon, parseComingSoonHtml,

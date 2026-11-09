@@ -1,6 +1,6 @@
 // The Upcoming top bar: which games the calendar shows. Pure.
-//   steam  = the games Steam's own Personal Calendar picks for you (signed in to the
-//            Steam store; electron/services/steamStore.js)
+//   steam  = For you on Steam: the Steam wishlist and games like the ones played most on
+//            Steam (electron/services/steamForYou.js)
 //   like   = games Steam rates as similar to yours (they have a match %), nothing else
 //   others = every release without a match
 //   all    = every release

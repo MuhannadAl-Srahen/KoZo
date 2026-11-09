@@ -57,7 +57,7 @@
 /* The page itself is see-through (main-root.css) over the window's dark color
    (main.js), and the moving glow makes the main area see-through too: on the dark
    themes nobody could tell, on white the pages sat on black. */
-:root[data-theme="light"] { background: var(--bg) !important; }
+:root[data-theme] { background: var(--bg) !important; }   /* every theme: Match Windows' gray sat on blue-black too */
 /* Always dark: Big Picture (the TV screen), and chips and text drawn on pictures. In
    Light they take the dark themes' colors back; CSS modules add the class with
    `composes: kz-dark from global`. In the dark themes this does nothing. Without it,
@@ -99,6 +99,28 @@
   --surface-2: hsl(var(--cbg-h, 250) var(--cbg-s, 24%) calc(var(--cbg-l, 8%) + 3.2%));
   --surface-3: hsl(var(--cbg-h, 250) calc(var(--cbg-s, 24%) * 0.9) calc(var(--cbg-l, 8%) + 5.5%));
 }
+/* Custom with a very light pick (white, pastels): the Light theme's text and status colors
+   (data-theme="light"), the picked color as the background (lib/bgTone.js, lightness 84 to
+   100%), cards a little whiter and the quiet text a step darker, because a tinted
+   background is darker than Light's own. */
+:root[data-theme="light"][data-custom-bg] {
+  --bg:        hsl(var(--cbg-h) var(--cbg-s) var(--cbg-l));
+  --surface-1: hsl(var(--cbg-h) calc(var(--cbg-s) * 0.5) min(100%, calc(var(--cbg-l) + 4%)));
+  --surface-2: hsl(var(--cbg-h) calc(var(--cbg-s) * 0.5) min(100%, calc(var(--cbg-l) + 4%)));
+  --surface-3: hsl(var(--cbg-h) var(--cbg-s) calc(var(--cbg-l) - 6%));
+  --text-secondary: #393c50;
+  --text-muted: #50536a;
+  --border: rgba(15, 18, 30, 0.14);
+}
+/* Match Windows: Windows' own colors, not Midnight's blue-black. Dark is the gray of
+   Windows' dark apps (Settings, Explorer), light is Windows' light gray with white cards.
+   AppearanceContext sets "windark" or "light" + data-windows from Windows' app mode. */
+:root[data-theme="windark"] {
+  --bg: #202020; --surface-1: #272727; --surface-2: #2b2b2b; --surface-3: #333333;
+  --text-primary: #ffffff; --text-secondary: #c8c8c8; --text-muted: #9d9d9d; --text-disabled: #5e5e5e;
+  --border: rgba(255, 255, 255, 0.09); --border-subtle: rgba(255, 255, 255, 0.055);
+}
+:root[data-theme="light"][data-windows] { --bg: #f3f3f3; --surface-3: #e9e9e9; }
 :root[data-theme="oled"] {
   --bg: #000000; --surface-1: #060608; --surface-2: #0b0b0f; --surface-3: #121217;
   --border: rgba(255, 255, 255, 0.08); --border-subtle: rgba(255, 255, 255, 0.05);

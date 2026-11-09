@@ -37,7 +37,8 @@ export const DEFAULT_APPEARANCE = {
   motion: 'soft',                 // 'heavy' | 'soft' | 'off' (styles/motion.css)
   bg: { mode: 'off', image: null, gameId: null, gameArt: null, blur: 8, dim: 55 },
   theme: 'midnight',              // midnight | light | system | tint | custom | oled | slate | nord | mocha | forest | crimson (styles/customize.css)
-  bgColor: '#1a1030',             // the Custom theme's color (any hex; made dark, see bgTone)
+  bgColor: '#1a1030',             // the Custom theme's color (any hex; a very light one gives a light KoZo, see bgTone)
+  textColor: null,                // the main text color (any hex) or null = the theme's own
   gamePage: 'store',              // Game Detail layout: store | cinematic
   gameListEdit: 'tab',            // Game List window: tab (all in an Edit tab) | overview (status and plan on the Overview)
   font: 'dm',                     // FONTS key, the whole app
@@ -131,11 +132,15 @@ export function setZoomLock(v) { zoomLock = v; applyZoom() }
 let resizeT = null
 window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(applyZoom, 150) })
 
-// 'system' (Match Windows): Light while Windows' apps are in light mode, else Midnight.
+// 'system' (Match Windows): Windows' own colors, light or dark with Windows' app mode
+// ("windark" is the gray of Windows' dark apps). Custom with a very light pick is Light
+// with the picked color (bgTone), so everything made for Light applies to it too.
 const LIGHT_QUERY = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null
-function effectiveTheme(theme) {
-  if (theme !== 'system') return theme
-  return LIGHT_QUERY?.matches ? 'light' : 'midnight'
+export function windowsIsLight() { return !!LIGHT_QUERY?.matches }
+function effectiveTheme(p) {
+  if (p.theme === 'system') return windowsIsLight() ? 'light' : 'windark'
+  if (p.theme === 'custom' && bgTone(p.bgColor).light) return 'light'
+  return p.theme
 }
 let appliedPrefs = null
 LIGHT_QUERY?.addEventListener?.('change', () => { if (appliedPrefs?.theme === 'system') apply(appliedPrefs) })
@@ -154,7 +159,7 @@ function apply(p) {
   el.dataset.motion = ['heavy', 'soft', 'off'].includes(p.motion) ? p.motion : 'soft'
   // Customization (styles/customize.css): attributes for the switches,
   // variables for the values.
-  const attrs = { theme: effectiveTheme(p.theme), cardStyle: p.cardStyle, cardBorder: p.cardBorder, cardGlow: p.cardGlow, cardShadow: p.cardShadow, glow: p.glow, sidebarSide: p.sidebarSide, pageWidth: p.pageWidth, scrollbar: p.scrollbar, ambient: p.ambient }
+  const attrs = { theme: effectiveTheme(p), cardStyle: p.cardStyle, cardBorder: p.cardBorder, cardGlow: p.cardGlow, cardShadow: p.cardShadow, glow: p.glow, sidebarSide: p.sidebarSide, pageWidth: p.pageWidth, scrollbar: p.scrollbar, ambient: p.ambient }
   for (const [k, v] of Object.entries(attrs)) {
     if (v && v !== DEFAULT_APPEARANCE[k]) el.dataset[k] = v
     else delete el.dataset[k]
@@ -172,6 +177,15 @@ function apply(p) {
   if (p.textScale && p.textScale !== 1) el.style.setProperty('--text-scale', String(p.textScale)); else el.style.removeProperty('--text-scale')
   if (p.sidebarWidth && p.sidebarWidth !== 205) el.style.setProperty('--sidebar-width', `${p.sidebarWidth}px`); else el.style.removeProperty('--sidebar-width')
   if (p.accent2) el.style.setProperty('--accent-2', p.accent2); else el.style.removeProperty('--accent-2')
+  if (p.theme === 'system') el.dataset.windows = ''; else delete el.dataset.windows
+  if (p.theme === 'custom' && bgTone(p.bgColor).light) el.dataset.customBg = ''; else delete el.dataset.customBg
+  // Text color: the main text, with the quieter ones mixed toward the background. Things
+  // on pictures and Big Picture in Light keep their own (.kz-dark sets them again).
+  if (/^#[0-9a-f]{6}$/i.test(p.textColor || '')) {
+    el.style.setProperty('--text-primary', p.textColor)
+    el.style.setProperty('--text-secondary', `color-mix(in srgb, ${p.textColor} 76%, var(--bg))`)
+    el.style.setProperty('--text-muted', `color-mix(in srgb, ${p.textColor} 58%, var(--bg))`)
+  } else for (const v of ['--text-primary', '--text-secondary', '--text-muted']) el.style.removeProperty(v)
   if (p.theme === 'custom') {
     const t = bgTone(p.bgColor)
     el.style.setProperty('--cbg-h', String(t.h)); el.style.setProperty('--cbg-s', `${t.s}%`); el.style.setProperty('--cbg-l', `${t.l}%`)

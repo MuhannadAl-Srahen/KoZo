@@ -46,7 +46,7 @@ const NO_PICKS = { picks: {}, sources: 0, failed: true }   // Steam didn't answe
 // Survives tab switches: the feeds are cached in main for 6h anyway.
 let calendarCache = null   // { games, pages, art }
 let picksCache = null      // steam:picks result (main caches it 6h too)
-let steamPicksCache = null // { cal } Steam's Personal Calendar (services/steamStore.js), null cal = not signed in
+let steamPicksCache = null // { cal } For you on Steam (services/steamForYou.js), null cal = no Steam account connected
 // The adult-games setting changes what the feeds return — start over.
 if (typeof window !== 'undefined') window.addEventListener('kozo:adult-changed', () => { calendarCache = null })
 
@@ -133,6 +133,7 @@ export function MatchBadge({ g, className = '' }) {
 // "Like Hollow Knight and Dead Cells" (Steam's More like this for those games);
 // "on your list" when they're all games you still want to play.
 export function reasonText(g) {
+  if (g.onWishlist) return 'On your Steam wishlist'
   const n = g.reason || []
   if (!n.length) return null
   const list = n.length === 1 ? n[0] : n.length === 2 ? `${n[0]} and ${n[1]}` : `${n[0]}, ${n[1]} and ${n[2]}`
@@ -552,27 +553,21 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
       .then(r => { if (r?.ok) { picksCache = r.data; setPicks(r.data) } else setPicks(p => p || NO_PICKS) })
       .catch(() => setPicks(p => p || NO_PICKS))
   }, [])
-  // Steam's own picks for you: the store's Personal Calendar, once signed in to the
-  // Steam store (services/steamStore.js). null = not signed in (or not known yet).
+  // For you on Steam: the Steam wishlist, then games like the ones played most on Steam,
+  // from the connected Steam account (services/steamForYou.js). No sign-in of its own.
+  // null = no Steam account connected (or not known yet).
   const [steamCal, setSteamCal] = useState(() => steamPicksCache?.cal ?? null)
   const [steamKnown, setSteamKnown] = useState(() => !!steamPicksCache)
-  async function loadSteamPicks() {
-    const r = await window.kozo?.api?.steamStore?.calendar?.().catch(() => null)
-    const cal = r?.ok ? r.data || null : null
-    steamPicksCache = { cal }
-    setSteamCal(cal)
-    setSteamKnown(true)
-  }
-  useEffect(() => { loadSteamPicks() }, [])
-  const [signingIn, setSigningIn] = useState(false)
-  async function signInSteam() {
-    setSigningIn(true)
-    try {
-      const r = await window.kozo?.api?.steamStore?.signIn?.()
-      if (r?.ok && r.data) { await loadSteamPicks(); setPick('steam') }
-    } finally { setSigningIn(false) }
-  }
-  const steamIds = useMemo(() => new Map((steamCal?.items || []).map((it, i) => [Number(it.appid), { ts: it.ts, rank: i }])), [steamCal])
+  useEffect(() => {
+    window.kozo?.api?.steamPicks?.forYou?.().catch(() => null).then(r => {
+      // An account with nothing to show (empty wishlist, private profile) has no Steam button.
+      const cal = r?.ok && r.data?.items?.length ? r.data : null
+      steamPicksCache = { cal }
+      setSteamCal(cal)
+      setSteamKnown(true)
+    })
+  }, [])
+  const steamIds = useMemo(() => new Map((steamCal?.items || []).map((it, i) => [Number(it.appid), { rank: i, wishlist: it.wishlist, because: it.because, pct: it.pct }])), [steamCal])
   // For you on Steam / Like my games / Other games / All. Neither can be told apart until the first answer.
   const [pickChoice, setPickChoice] = useState(() => {
     try { return readPickMode(localStorage.getItem('kozo:calendar:pick')) } catch { return null }
@@ -684,15 +679,18 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
     for (const g of allGames) {
       const a = art[g.appid] || art[String(g.appid)] || (artTried.has(Number(g.appid)) ? {} : null)
       const st = pickMode === 'steam' ? steamIds.get(Number(g.appid)) : null
-      const rel = st ? { ts: st.ts, until: st.ts, vague: false, precision: 'day', exact: true } : storeRelease(a?.release, g.release)
+      const rel = storeRelease(a?.release, g.release)
       // Out already (the feeds lag behind the store): not upcoming any more.
       if (rel.precision === 'day' && rel.ts != null && rel.ts < todayStart) continue
       const pick = picks?.picks?.[g.appid]
       const entry = {
         ...g, name: g.name || a?.name || 'Unknown', rel, art: a,
-        match: pick?.pct || 0, reason: pick?.because || null, wantedSources: picks?.wanted || null,
+        match: st ? (st.wishlist ? 0 : st.pct || 0) : pick?.pct || 0,
+        reason: st ? (st.wishlist ? null : st.because) : pick?.because || null,
+        wantedSources: st ? null : picks?.wanted || null,
+        onWishlist: !!st?.wishlist,
         steamRank: st ? st.rank : undefined,
-        showMatch: pickMode === 'like',
+        showMatch: pickMode === 'like' || (pickMode === 'steam' && !!st),
       }
       all.push(entry)
       if (rel.ts != null && rel.precision === 'day') {
@@ -715,7 +713,7 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
   const shown = useMemo(() => (pickMode === 'steam' ? onlyIds(buckets, new Set(steamIds.keys())) : filterBuckets(buckets, pickMode)), [buckets, pickMode, steamIds])
   const dayPick = (list) => pickDay(list, pickMode)
   function setPick(m) { setPickChoice(m); try { localStorage.setItem('kozo:calendar:pick', m) } catch {} }
-  const emptyText = pickMode === 'steam' ? "Steam has no picks for you in these weeks."
+  const emptyText = pickMode === 'steam' ? "Nothing from your Steam wishlist or games like the ones you play on Steam comes out in these weeks."
     : pickMode === 'like'
     ? (picks?.failed ? "Steam didn't answer, so games like yours can't be shown right now."
       : picks?.sources ? 'No games like yours in what Steam lists right now.'
@@ -851,17 +849,12 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
         </button>
         {['steam', 'strip', 'week'].includes(view) && (
           <div className={s.viewToggle} role="radiogroup" aria-label="Which games">
-            {steamCal ? (
+            {steamCal && (
               <button className={`${s.viewBtn} ${pickMode === 'steam' ? s.viewBtnActive : ''}`} onClick={() => setPick('steam')} data-pick="steam"
-                title="The games Steam's own calendar picks for you, from your playtime and wishlist">
+                title="Your Steam wishlist, and games like the ones you play most on Steam">
                 <IconBrandSteam size={14} /> For you on Steam
               </button>
-            ) : steamKnown ? (
-              <button className={s.viewBtn} onClick={signInSteam} disabled={signingIn} data-pick="steam-signin"
-                title="Sign in to the Steam store to see the games Steam picks for you. You sign in on Steam's own page; KoZo never sees your password.">
-                {signingIn ? <IconLoader2 size={14} className="spin" /> : <IconBrandSteam size={14} />} Steam's picks for you
-              </button>
-            ) : null}
+            )}
             <button className={`${s.viewBtn} ${pickMode === 'like' ? s.viewBtnActive : ''}`} onClick={() => setPick('like')} data-pick="like"
               title="Only games like the ones in your Library and Game List">
               <IconSparkles size={14} /> Like my games
@@ -914,7 +907,7 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
 
       {games.length > 0 && picksPending && ['steam', 'strip', 'week'].includes(view) && <PanelSkeleton lines={6} />}
       {games.length > 0 && !picksPending && view === 'steam' && (
-        <SteamView days={steamRun} todayKey={todayKey} lastKey={todayKey} dayPick={dayPick} picked={pickMode === 'like'} isTracked={isTracked}
+        <SteamView days={steamRun} todayKey={todayKey} lastKey={todayKey} dayPick={dayPick} picked={pickMode === 'like' || pickMode === 'steam'} isTracked={isTracked}
           renderTrack={renderTrack} onOpen={setDetail} onMenu={openMenu} onMore={openMore} empty={steamHasLater ? '' : emptyText} />
       )}
       {hasSentinel && (

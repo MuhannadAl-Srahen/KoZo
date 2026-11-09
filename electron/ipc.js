@@ -1966,11 +1966,12 @@ handle('steam:comingSoon', (feed, page) => require('./services/steamApi').getCom
 handle('steam:tasteProfile', () => require('./services/steamApi').getTasteProfile())
 handle('steam:picks', () => require('./services/steamApi').getPicks())
 // Steam's own picks for Upcoming: the store's Personal Calendar, after a sign-in on
-// Steam's own page in a KoZo window (services/steamStore.js).
-handle('steamStore:calendar', () => require('./services/steamStore').personalCalendar())
-handle('steamStore:isSignedIn', () => require('./services/steamStore').isSignedIn())
-handle('steamStore:signIn', () => require('./services/steamStore').signIn())
-handle('steamStore:signOut', () => require('./services/steamStore').signOut())
+// Upcoming's "For you on Steam", from the connected Steam account (services/steamForYou.js).
+handle('steam:forYou', () => {
+  const fy = require('./services/steamForYou')
+  fy.clearOldStoreLogin()
+  return fy.forYou()
+})
 handle('steam:reviews', (appId) => require('./services/steamApi').getReviews(Number(appId)))
 // Discount games (pages/Deals.jsx, services/deals.js).
 handle('deals:list', (opts) => require('./services/deals').getDeals(opts || {}))

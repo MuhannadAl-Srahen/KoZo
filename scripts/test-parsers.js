@@ -270,9 +270,21 @@ console.log('\nupcoming top bar')
   check('two weeks, no more', rows.length === 2, String(rows.length))
   const mid = weekRows(new Map([['2026-11-11', [{ appid: 9 }]]]), '2026-11-11', '2026-11-11')
   check('on a Wednesday the week starts on its Monday, the past days dimmed', mid[0].cells[0].key === '2026-11-09' && mid[0].cells[0].past && !mid[0].cells[2].past)
-  const cal = require(path.join(__dirname, '..', 'electron', 'services', 'steamStore.js')).calendarItems
-  check("Steam's calendar answer: id and date", JSON.stringify(cal({ arrAppInfos: [{ appid: 10, nReleaseDate: 1762700000 }, { appid: 0, nReleaseDate: 5 }, { appid: 11 }] })) === JSON.stringify([{ appid: 10, ts: 1762700000000 }]))
-  check('not signed in has no items', cal({ arrAppInfos: [], strResultMessage: 'Not logged in' }).length === 0 && cal(null).length === 0)
+  const { playedSources, forYouItems } = require(path.join(__dirname, '..', 'electron', 'services', 'steamForYou.js'))
+  const owned = [
+    { appid: 1, name: 'Old favourite', playtime_forever: 300 * 60 },
+    { appid: 2, name: 'Playing now', playtime_forever: 40 * 60, playtime_2weeks: 30 * 60 },
+    { appid: 3, name: 'Tried once', playtime_forever: 20 },
+  ]
+  const played = playedSources(owned)
+  check("for you on Steam: games played under an hour are not asked about", played.length === 2 && !played.some(x => x.appid === 3))
+  check("for you on Steam: recent play comes first", played[0].appid === 2, played.map(x => x.name).join())
+  const items = forYouItems([{ appid: 50, priority: 2 }, { appid: 51, priority: 1 }, { appid: 52, priority: 0, added: 5 }, { appid: 1, priority: 3 }],
+    { 60: { pct: 70, because: ['Old favourite'] }, 61: { pct: 95, because: ['Playing now'] }, 50: { pct: 99, because: ['x'] } }, new Set([1]))
+  check('for you on Steam: the wishlist first, in its own order', items.slice(0, 3).map(x => x.appid).join() === '51,50,52', items.map(x => x.appid).join())
+  check('for you on Steam: then games like yours, best first', items.slice(3).map(x => x.appid).join() === '61,60')
+  check('for you on Steam: a game you own never shows, a wishlisted one shows once', !items.some(x => x.appid === 1) && items.filter(x => x.appid === 50).length === 1 && items.find(x => x.appid === 50).wishlist)
+  check('for you on Steam: nothing connected, nothing shown', forYouItems(null, null).length === 0)
 }
 
 // src/lib/pickForMe.js is an ES module; load it as a plain function body.
@@ -1027,7 +1039,24 @@ console.log('\nbackground color')
   // The whole color square, for a few hues.
   const grid = []
   for (const h of [0, 120, 240, 300]) for (let s = 0; s <= 10; s++) for (let v = 0; v <= 10; v++) grid.push(hexOf(h, s / 10, v / 10))
-  check('bg: it always stays dark', grid.every(c => { const t = bgTone(c); return t.l >= 4 && t.l <= 16 && t.s <= 55 }))
+  check('bg: a dark or colorful pick stays dark', grid.filter(c => !bgTone(c).light).every(c => { const t = bgTone(c); return t.l >= 4 && t.l <= 16 && t.s <= 55 }))
+  check('bg: a light pick stays light', grid.filter(c => bgTone(c).light).every(c => { const t = bgTone(c); return t.l >= 84 && t.l <= 100 && t.s <= 70 }))
+  {
+    const L = (hex) => { const c = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(x => (x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4)); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2] }
+    const ratio = (a, b) => { const x = L(a), y = L(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05) }
+    const lights = []
+    for (let h = 0; h < 360; h += 15) for (const s of [0, 0.5, 1]) for (const l of [0.7, 0.8, 0.9, 1]) {
+      const a = s * Math.min(l, 1 - l), f = (n) => { const k = (n + h / 30) % 12; return Math.round(255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)))).toString(16).padStart(2, '0') }
+      lights.push(bgToneHex('#' + f(0) + f(8) + f(4)))
+    }
+    const worst = Math.min(...lights.map(b => ratio('#50536a', b)))
+    check('bg: on a light pick the quiet text is readable', worst >= 4, worst.toFixed(2))
+    check('bg: on a light pick the main text is easy to read', Math.min(...lights.map(b => ratio('#15161d', b))) >= 7)
+    check('bg: a pale pink stays pink', (() => { const x = bgToneHex('#ffd6e0'); return parseInt(x.slice(1, 3), 16) - parseInt(x.slice(3, 5), 16) >= 25 })(), bgToneHex('#ffd6e0'))
+  }
+  check('bg: white gives white', bgToneHex('#ffffff') === '#ffffff' && bgTone('#ffffff').light, bgToneHex('#ffffff'))
+  check('bg: light gray and pale pink give a light KoZo', bgTone('#d0d0d0').light && bgTone('#ffd6e0').light)
+  check('bg: pure red, black and mid gray stay dark', !bgTone('#ff0000').light && !bgTone('#000000').light && !bgTone('#808080').light)
   check('bg: white, gray and black all differ', new Set(['#ffffff', '#808080', '#000000'].map(bgToneHex)).size === 3, ['#ffffff', '#808080', '#000000'].map(bgToneHex).join())
   // The bug: most of the square landed on one color.
   const row = (h, v) => new Set(Array.from({ length: 11 }, (_, s) => bgToneHex(hexOf(h, s / 10, v)))).size
