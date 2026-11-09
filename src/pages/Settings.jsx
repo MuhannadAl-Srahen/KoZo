@@ -1599,6 +1599,23 @@ function LookCustomize() {
       </section>
 
       <section className={s.section}>
+        <div className={s.sectionHeader}><IconLayoutCards size={15} stroke={1.6} /><span>Upcoming calendar</span></div>
+        <p className={s.sectionDesc}>How Upcoming's Steam view lays out the release days.</p>
+        <div className={s.cardStyles} role="radiogroup" aria-label="Upcoming calendar">
+          {[
+            { value: 'weeks', label: 'Steam weeks', desc: "Like Steam's own calendar: Monday to Friday, one row per week" },
+            { value: 'classic', label: 'Classic', desc: 'The look before: days with releases in a grid, with the match % and why on every game' },
+          ].map(c => (
+            <button key={c.value} type="button" role="radio" aria-checked={prefs.upcomingLayout === c.value} data-upcoming-layout={c.value}
+              className={`${s.cardStyleTile} ${prefs.upcomingLayout === c.value ? s.cardStyleOn : ''}`} onClick={() => setPrefs({ upcomingLayout: c.value })}>
+              <span className={s.cardStyleText}><strong>{c.label}</strong><small>{c.desc}</small></span>
+              {prefs.upcomingLayout === c.value && <IconCheck size={14} stroke={2.6} className={s.cardStyleCheck} />}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className={s.section}>
         <div className={s.sectionHeader}><IconLayoutCards size={15} stroke={1.6} /><span>Game cards</span></div>
         <p className={s.sectionDesc}>How cards look in the Library and the Game List.</p>
         <div className={s.cardStudio}>

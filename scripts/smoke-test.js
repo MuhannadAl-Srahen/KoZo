@@ -932,6 +932,15 @@ app.whenReady().then(async () => {
     check('Upcoming: For you on Steam shows only its games', (await caps()) === 'Smoke Other A,Smoke Other B', await caps())
     // textContent: weeks below the fold aren't drawn (content-visibility), so innerText skips them.
     check('Upcoming: and says why', /On your Steam wishlist/.test(await ev(`document.querySelector('.app-main').textContent`)))
+    // Settings > Appearance > Upcoming calendar > Classic: the old grid of days, starting
+    // on Like my games with the match % (the maker asked for it back as a choice).
+    const lookWas = await ev(`window.kozo.api.settings.get('appearance').then(r => r?.data ?? null)`)
+    await ev(`window.kozo.api.settings.get('appearance').then(r => { const p = r?.data ? JSON.parse(r.data) : {}; p.upcomingLayout = 'classic'; return window.kozo.api.settings.set('appearance', JSON.stringify(p)) }).then(() => true)`)
+    await open(null)
+    const classic = await ev(`({ grid: !!document.querySelector('[data-upcoming-classic]'), weeks: !!document.querySelector('[class*=steamWeeks]'), pct: !!document.querySelector('.app-main [class*=matchOnCap]') })`)
+    check('Upcoming Classic: the old grid of days, not the weeks', classic.grid && !classic.weeks, JSON.stringify(classic))
+    check('Upcoming Classic: starts on Like my games, with the match %', (await active()) === 'like' && classic.pct, JSON.stringify([await active(), classic.pct]))
+    await ev(`window.kozo.api.settings.set('appearance', ${JSON.stringify(lookWas)}).then(() => true)`)
     forYouSvc.forYou = realForYou
 
     Object.assign(steam, real)

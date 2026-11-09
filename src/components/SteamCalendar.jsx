@@ -13,6 +13,7 @@ import { parseRelease, storeRelease, countdownTo, localDayKey, monthKey, formatM
 import useCardZoom from '../lib/useCardZoom'
 import UpcomingHero from './UpcomingHero'
 import { defaultPickMode, filterBuckets, onlyIds, pickDay, readPickMode, weekRows } from '../lib/upcomingPick'
+import { useAppearance } from '../context/AppearanceContext'
 import s from './SteamCalendar.module.css'
 
 // Steam-style release calendar: popular games coming soon plus the most
@@ -370,6 +371,48 @@ function SteamView({ days, todayKey, lastKey, dayPick, picked, isTracked, render
   )
 }
 
+// Settings > Appearance > Upcoming calendar > Classic: the Steam view as it was before
+// Steam's weeks (5dfbc9b), only the days with releases in a grid, every card with its
+// match % and why. The maker liked it and asked for it back as a choice.
+function ClassicSteamView({ days, todayKey, dayPick, picked, isTracked, renderTrack, onOpen, onMenu, onMore, empty }) {
+  if (!days.length) return empty ? <div className={s.muted}>{empty}</div> : null
+  return (
+    <div className={s.steamGrid} data-upcoming-classic="">
+      {days.map(([k, full]) => {
+        const list = dayPick(full)
+        const d = new Date(`${k}T00:00:00`)
+        const label = d.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })
+        return (
+          <section key={k} className={s.steamDay}>
+            <div className={`${s.steamDayHead} ${k === todayKey ? s.steamDayToday : ''}`}>
+              {k === todayKey ? `Today, ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : label}
+            </div>
+            <div className={s.steamDayList}>
+              {list.map(g => (
+                <div key={g.appid} className={`${s.steamCap} ${isTracked(g) ? s.steamCapTracked : ''}`} onContextMenu={(e) => { e.preventDefault(); onMenu(e, g) }}>
+                  <div className={s.steamCapFrame}>
+                    <button className={s.steamCapHit} onClick={() => onOpen(g)} title={g.name}>
+                      <Cover g={g} wide className={s.steamCapArt} />
+                      {picked && <MatchBadge g={g} className={s.matchOnCap} />}
+                    </button>
+                    <div className={s.capTrack}>{renderTrack(g, 'icon')}</div>
+                  </div>
+                  {picked && reasonText(g) && <div className={s.capReason} title={reasonText(g)}>{reasonText(g)}</div>}
+                </div>
+              ))}
+              {full.length > list.length && (
+                <button className={s.steamMore} onClick={() => onMore(d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }), full)}>
+                  +{full.length - list.length} more
+                </button>
+              )}
+            </div>
+          </section>
+        )
+      })}
+    </div>
+  )
+}
+
 // ── Tracked view: every release you track, grouped by when it lands ───────
 const TRACK_GROUPS = [
   { key: 'out',   label: 'Out now' },
@@ -572,8 +615,11 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
   const [pickChoice, setPickChoice] = useState(() => {
     try { return readPickMode(localStorage.getItem('kozo:calendar:pick')) } catch { return null }
   })
+  // Classic (Settings > Appearance > Upcoming calendar) starts on Like my games, as it did.
+  const { prefs: look } = useAppearance()
+  const classic = look.upcomingLayout === 'classic'
   const pickMode = pickChoice === 'steam' && steamKnown && !steamCal ? defaultPickMode(picks)
-    : pickChoice || defaultPickMode(picks, !!steamCal)
+    : pickChoice || defaultPickMode(picks, !!steamCal && !classic)
   const picksPending = pickMode === 'steam' ? !steamCal : (!picks && pickMode !== 'all')
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()))
   const [steamDays, setSteamDays] = useState(42)   // Steam view: how far ahead (days) it reaches
@@ -907,8 +953,11 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
 
       {games.length > 0 && picksPending && ['steam', 'strip', 'week'].includes(view) && <PanelSkeleton lines={6} />}
       {games.length > 0 && !picksPending && view === 'steam' && (
-        <SteamView days={steamRun} todayKey={todayKey} lastKey={todayKey} dayPick={dayPick} picked={pickMode === 'like' || pickMode === 'steam'} isTracked={isTracked}
-          renderTrack={renderTrack} onOpen={setDetail} onMenu={openMenu} onMore={openMore} empty={steamHasLater ? '' : emptyText} />
+        classic
+          ? <ClassicSteamView days={steamRun} todayKey={todayKey} dayPick={dayPick} picked={pickMode === 'like' || pickMode === 'steam'} isTracked={isTracked}
+              renderTrack={renderTrack} onOpen={setDetail} onMenu={openMenu} onMore={openMore} empty={steamHasLater ? '' : emptyText} />
+          : <SteamView days={steamRun} todayKey={todayKey} lastKey={todayKey} dayPick={dayPick} picked={pickMode === 'like' || pickMode === 'steam'} isTracked={isTracked}
+              renderTrack={renderTrack} onOpen={setDetail} onMenu={openMenu} onMore={openMore} empty={steamHasLater ? '' : emptyText} />
       )}
       {hasSentinel && (
         <div ref={sentinelRef} className={s.moreRow}>

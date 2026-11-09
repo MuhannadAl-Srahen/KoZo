@@ -41,6 +41,7 @@ export const DEFAULT_APPEARANCE = {
   textColor: null,                // the main text color (any hex) or null = the theme's own
   gamePage: 'store',              // Game Detail layout: store | cinematic
   gameListEdit: 'tab',            // Game List window: tab (all in an Edit tab) | overview (status and plan on the Overview)
+  upcomingLayout: 'weeks',        // Upcoming's Steam view: weeks (Steam's calendar, Monday to Friday) | classic (the look before, days with releases in a grid)
   font: 'dm',                     // FONTS key, the whole app
   cardStyle: 'classic',           // classic | poster | glass | minimal (GameCard / GameList css)
   textScale: 1,                   // 0.9 to 1.2, scales every --fs-* token
@@ -97,6 +98,7 @@ function normalize(saved) {
   if (!FONTS[p.font]) p.font = 'dm'
   if (!['store', 'cinematic'].includes(p.gamePage)) p.gamePage = 'store'
   if (!['tab', 'overview'].includes(p.gameListEdit)) p.gameListEdit = 'tab'
+  if (!['weeks', 'classic'].includes(p.upcomingLayout)) p.upcomingLayout = 'weeks'
   // 75% was the first default darkness and hid most of the picture.
   if (saved?.bg?.dim === 75 && !saved?.bg?.image && !saved?.bg?.gameArt) p.bg.dim = d.bg.dim
   // Saved order first; a tab added in a later version slots in right after the

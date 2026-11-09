@@ -498,6 +498,9 @@
   contain-intrinsic-size: auto 380px;
 }
 .steamWeek .steamDay { min-height: 150px; }
+/* Classic (ClassicSteamView): days off screen aren't drawn, so their covers don't sit in
+   memory as drawn pictures. */
+.steamGrid > .steamDay { content-visibility: auto; contain-intrinsic-size: auto 420px; }
 .steamDayPast { opacity: 0.45; }
 .steamDayHead {
   padding: var(--sp-8) var(--sp-10);
