@@ -42,7 +42,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 // SMOKE_ONLY=upcoming,tray,... runs only those parts (the start and the seeded library always
 // run): after a change, test what changed, not all ~290 checks (the maker's call).
 // Parts: pages edit backups gamelist year sessions toolexe drive privacy version wishlist
-// upcoming review appearance narrow controller pick big steamcopy tray
+// upcoming review appearance narrow controller pick big steamcopy update tray
 const ONLY = process.env.SMOKE_ONLY ? process.env.SMOKE_ONLY.split(',').map(x => x.trim()) : null
 const want = (part) => !ONLY || ONLY.includes(part)
 
@@ -1379,6 +1379,35 @@ app.whenReady().then(async () => {
       try { fs.rmSync(fake, { recursive: true, force: true }) } catch {}
     }
     check('Steam copy: no errors', errorsSince(before).length === 0, errorsSince(before).join(' | '))
+  }
+
+  if (want('update')) {
+  // ── The sidebar's Update button (the maker: show a new version on the tabs, a click updates) ──
+  {
+    const upd = require(path.join(root, 'electron', 'services', 'appUpdater.js'))
+    const btn = () => ev(`(() => { const b = document.querySelector('[data-update-btn]'); return b ? { state: b.dataset.updateBtn, text: b.innerText } : null })()`)
+    const set = async (st) => { upd.setState(st); await sleep(400) }
+    await go('#/')
+    await set({ state: 'idle' })
+    check('update: no button while KoZo is up to date', (await btn()) === null)
+    await set({ state: 'downloading', version: '9.9.9', percent: 40, wanted: false, installing: false, afterGame: false })
+    let b = await btn()
+    check('update: the button shows while it downloads, with the version and progress', !!b && b.state === 'downloading' && /9.9.9/.test(b.text) && /40%/.test(b.text), JSON.stringify(b))
+    await ev(`document.querySelector('[data-update-btn]').click(); true`); await sleep(400)
+    b = await btn()
+    check('update: a click while downloading installs it when done', upd.getState().wanted === true && /Updating/.test(b?.text || ''), JSON.stringify(b))
+    await set({ state: 'ready', wanted: false, percent: 100 })
+    b = await btn()
+    check('update: ready says Update now', !!b && b.state === 'ready' && /Update now/.test(b.text), JSON.stringify(b))
+    await ev(`document.querySelector('[data-update-btn]').click(); true`); await sleep(400)
+    b = await btn()
+    check('update: a click when ready restarts into it', upd.getState().installing === true && /Updating/.test(b?.text || ''), JSON.stringify(b))
+    await set({ state: 'failed', installing: false, wanted: false })
+    b = await btn()
+    check('update: a stopped download says try again', !!b && /Try again/i.test(b.text), JSON.stringify(b))
+    await set({ state: 'idle', version: null, installing: false, wanted: false })
+    check('update: gone again when there is nothing new', (await btn()) === null)
+  }
   }
 
   if (want('tray')) {

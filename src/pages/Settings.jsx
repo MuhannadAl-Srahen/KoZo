@@ -1953,6 +1953,7 @@ function AboutTab() {
   const [version, setVersion] = useState('')
   const [updState, setUpdState] = useState('idle')     // idle | checking | done
   const [updResult, setUpdResult] = useState(null)
+  const [updPressed, setUpdPressed] = useState(false)
 
   useEffect(() => {
     window.kozo?.api?.app?.getVersion?.().then(res => {
@@ -1987,7 +1988,7 @@ function AboutTab() {
     if (r.notConfigured) return ['info', 'Update source not configured yet (set build.publish in package.json).']
     if (r.noReleases) return ['info', `No releases published on ${r.repo} yet. Build the app and publish a GitHub release to enable updates.`]
     if (r.updateAvailable) {
-      return ['success', `Update ${r.latest} available (you have ${r.current})${r.dev || r.manualOnly ? '' : '. Downloading in the background.'}`]
+      return ['success', `Update ${r.latest} available (you have ${r.current})${r.dev || r.manualOnly ? '' : updPressed ? '. KoZo restarts by itself when it is downloaded.' : '. Downloading in the background.'}`]
     }
     return ['success', `You're up to date${r.latest ? `. ${r.latest} is the latest release` : ''}${r.dev ? ' (dev build, checked against GitHub)' : ''}.`]
   }
@@ -2016,9 +2017,19 @@ function AboutTab() {
         {updState === 'done' && updResult && (() => {
           const [type, text] = updateLine(updResult)
           const showLink = updResult.updateAvailable && (updResult.dev || updResult.manualOnly) && updResult.releaseUrl
+          const canInstall = updResult.updateAvailable && !updResult.dev && !updResult.manualOnly && !updPressed
           return (
             <StatusLine type={type}>
               {text}
+              {canInstall && (
+                <>
+                  {' '}
+                  <button type="button" className={s.linkBtn} data-update-now=""
+                    onClick={() => { setUpdPressed(true); window.kozo?.api?.app?.installUpdate?.() }}>
+                    Update now
+                  </button>
+                </>
+              )}
               {showLink && (
                 <>
                   {' '}
