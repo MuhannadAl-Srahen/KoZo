@@ -1524,6 +1524,20 @@ function crackSaveTests() {
   check('crack saves: a restore goes to the current crack\'s folder', moved[0] === tenoke && moved[1] === roaming, JSON.stringify(moved))
   check('crack saves: already there, nothing moves', JSON.stringify(cs.retarget([gse, tenoke], { ...opts, current: tenoke })) === JSON.stringify([gse, tenoke]))
   check('crack saves: unknown crack, nothing moves', JSON.stringify(cs.retarget([gse], { ...opts, current: null })) === JSON.stringify([gse]))
+  // Every emulator, not only Goldberg and TENOKE (the maker: "for all games").
+  const env = { appdata: 'C:\\A', local: 'C:\\L', publicDocs: 'C:\\P', docs: 'C:\\D' }
+  const f = (label) => cs.crackFolders(label, 480, env)
+  check('crack saves: CODEX keeps them in Public Documents', f('CODEX').sure && f('CODEX').dirs[0] === 'C:\\P\\Steam\\CODEX\\480\\remote', f('CODEX').dirs[0])
+  check('crack saves: RUNE too', f('RUNE').dirs[0] === 'C:\\P\\Steam\\RUNE\\480\\remote')
+  check('crack saves: OnlineFix keeps them in Saves', f('online-fix').dirs[0] === 'C:\\P\\OnlineFix\\480\\Saves' && !f('online-fix').sure)
+  check('crack saves: SKIDROW in Storage', f('SKIDROW').dirs[0] === 'C:\\L\\SKIDROW\\480\\Storage')
+  check('crack saves: EMPRESS and SSE are known', f('EMPRESS').dirs.length > 0 && f('SmartSteamEmu').dirs.length > 0)
+  check('crack saves: an unknown emulator has no folder', f('Unknown Steam emulator (steam_api64.dll present)').dirs.length === 0)
+  check('crack saves: every emulator folder counts as one', cs.CRACK_LABELS.every(l => f(l).dirs.every(d => cs.isCloudFolder(d, { appid: '480', installPath: 'C:\\G' }))),
+    cs.CRACK_LABELS.flatMap(l => f(l).dirs).filter(d => !cs.isCloudFolder(d, { appid: '480', installPath: 'C:\\G' })).join())
+  check("crack saves: another game's OnlineFix Saves is not", cs.isCloudFolder('C:\\P\\OnlineFix\\999\\Saves', { appid: '480' }) === false)
+  const codex = 'C:\\P\\Steam\\CODEX\\480\\remote', ofix = 'C:\\P\\OnlineFix\\480\\Saves'
+  check('crack saves: CODEX to OnlineFix, a restore goes to OnlineFix', cs.retarget([codex], { appid: '480', installPath: 'C:\\G', current: ofix })[0] === ofix)
   check('crack saves: 92 KB of progress beats a fresh 1.6 KB profile', cs.hasMoreProgress(91892, 1612) === true)
   check('crack saves: the same progress is not offered again', cs.hasMoreProgress(91892, 91892) === false)
   check('crack saves: a tiny backup is never offered', cs.hasMoreProgress(900, 0) === false)
