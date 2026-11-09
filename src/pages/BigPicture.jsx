@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   IconPlayerPlayFilled, IconX, IconClock, IconTrophy, IconDice5, IconCalendar, IconSearch, IconStarFilled,
   IconArrowLeft, IconLoader2, IconCheck, IconHistory, IconDeviceGamepad2, IconHeart, IconExternalLink, IconInfoCircle,
+  IconAdjustments,
 } from '@tabler/icons-react'
 import { fileUrl, formatPlaytime, timeAgo, parseGenres, formatDateTime } from '../lib/utils'
 import GeneratedCover from '../components/GeneratedCover'
@@ -14,7 +15,8 @@ import RateGameModal from '../components/modals/RateGameModal'
 import OnScreenKeyboard from '../components/OnScreenKeyboard'
 import AchImg from '../components/ui/AchImg'
 import { ratingColor } from '../components/ui/RatingPicker'
-import { setZoomLock } from '../context/AppearanceContext'
+import { setZoomLock, useAppearance, DEFAULT_BIG_PICTURE } from '../context/AppearanceContext'
+import BigPictureCustomize from '../components/BigPictureCustomize'
 import s from './BigPicture.module.css'
 
 // Big Picture: KoZo full screen for the couch and the TV.
@@ -60,9 +62,10 @@ function useHeroArt(g) {
   return { src: posterOf(g), wide: false }
 }
 
-function Poster({ g }) {
+// Customize > Covers > Wide: the game's stored wide art, else its cover.
+function Poster({ g, wide = false }) {
   const [failed, setFailed] = useState(false)
-  const src = posterOf(g)
+  const src = wide && g.hero_local_path ? fileUrl(g.hero_local_path) : posterOf(g)
   return src && !failed
     ? <img src={src} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} />
     : <GeneratedCover name={g.name} />
@@ -77,14 +80,14 @@ function Clock() {
   return <span className={s.clock}>{now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
 }
 
-function Card({ g, live, onOpen, onFocusGame, onMenu }) {
+function Card({ g, live, wide, onOpen, onFocusGame, onMenu }) {
   return (
     <div className={s.card} data-gpnav="" data-game-id={g.id}
       onMouseEnter={() => onFocusGame?.(g)}
       onContextMenu={(e) => { e.preventDefault(); onMenu(e, g) }}>
       <button type="button" className={s.cardBtn} data-gpclick="" onClick={() => onOpen(g)} onFocus={() => onFocusGame?.(g)} title={g.name}>
         <span className={s.cardArt}>
-          <Poster g={g} />
+          <Poster g={g} wide={wide} />
           {live && <span className={s.cardLive}><span className={s.liveDot} /> Playing</span>}
         </span>
         <span className={s.cardName}>{g.name}</span>
@@ -442,8 +445,12 @@ export default function BigPicture() {
     }
   }
 
+  // Customize (components/BigPictureCustomize.jsx): saved in appearance.bigPicture.
+  const { prefs: look } = useAppearance()
+  const bp = { ...DEFAULT_BIG_PICTURE, ...(look.bigPicture || {}) }
+  const [customizing, setCustomizing] = useState(false)
   const menuFor = (e, g) => setCtx({ x: e.clientX || window.innerWidth / 2, y: e.clientY || window.innerHeight / 2, g })
-  const cardProps = { onOpen: openGame, onFocusGame: setFocus, onMenu: menuFor, liveIds }
+  const cardProps = { onOpen: openGame, onFocusGame: setFocus, onMenu: menuFor, liveIds, wide: bp.shape === 'wide' }
 
   const pickTile = (
     <div className={`${s.card} ${s.pickCard}`} data-gpnav="">
@@ -469,7 +476,9 @@ export default function BigPicture() {
   const focusLive = liveOf(focus)
 
   return (
-    <div className={s.root} ref={rootRef} data-bigpicture-root="">
+    <div className={s.root} ref={rootRef} data-bigpicture-root=""
+      data-bp-layout={bp.layout} data-bp-shape={bp.shape} data-bp-size={bp.size} data-bp-corners={bp.corners} data-bp-bg={bp.bg}
+      style={{ '--bp-focus': bp.focus || undefined, '--bp-darken': String(bp.darken / 100), '--bp-blur': `${bp.blur}px` }}>
       <div className={s.backdrop} aria-hidden="true">
         {art && <img key={art} src={art} alt="" className={`${s.backdropImg} ${wide ? '' : s.backdropSoft}`} />}
         <div className={`${s.backdropShade} ${opened ? s.backdropShadeGame : ''}`} />
@@ -507,6 +516,11 @@ export default function BigPicture() {
         )}
         {level != null && <span className={s.level}>Level {level}</span>}
         <Clock />
+        {!opened && (
+          <button type="button" className={s.exitBtn} onClick={() => setCustomizing(true)} title="Customize Big Picture" data-bp-customize-btn>
+            <IconAdjustments size={20} stroke={2} /> Customize
+          </button>
+        )}
         <button type="button" className={s.exitBtn} onClick={exit} title="Leave Big Picture">
           <IconX size={20} stroke={2} /> Exit
         </button>
@@ -541,12 +555,19 @@ export default function BigPicture() {
                 <h1 className={s.heroName}>Your Library is empty</h1>
               ) : null}
             </section>
-            <div className={s.rows}>
-              <Row title="Continue playing" Icon={IconDeviceGamepad2} games={rows.recent} {...cardProps} />
-              <Row title="Up next" Icon={IconCalendar} games={rows.upNext} lead={pickTile} {...cardProps} />
-              <Row title="Favorites" Icon={IconHeart} games={rows.favorites} {...cardProps} />
-              <Row title="Recently added" Icon={IconHistory} games={rows.added} {...cardProps} />
-            </div>
+            {bp.layout === 'grid' ? (
+              <div className={s.grid}>
+                {pickTile}
+                {libraryList.map(g => <Card key={g.id} g={g} live={liveIds.has(g.id)} {...cardProps} />)}
+              </div>
+            ) : (
+              <div className={s.rows}>
+                <Row title="Continue playing" Icon={IconDeviceGamepad2} games={rows.recent} {...cardProps} />
+                <Row title="Up next" Icon={IconCalendar} games={rows.upNext} lead={pickTile} {...cardProps} />
+                {bp.layout !== 'spotlight' && <Row title="Favorites" Icon={IconHeart} games={rows.favorites} {...cardProps} />}
+                {bp.layout !== 'spotlight' && <Row title="Recently added" Icon={IconHistory} games={rows.added} {...cardProps} />}
+              </div>
+            )}
           </>
         ) : (
           <div className={s.gridPage}>
@@ -596,6 +617,7 @@ export default function BigPicture() {
       )}
       {msg && <InfoModal {...msg} onClose={() => setMsg(null)} />}
       {keyboard && <OnScreenKeyboard value={query} onChange={setQuery} onClose={() => setKeyboard(false)} />}
+      {customizing && <BigPictureCustomize onClose={() => setCustomizing(false)} />}
     </div>
   )
 }

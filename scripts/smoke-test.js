@@ -1196,6 +1196,27 @@ app.whenReady().then(async () => {
     check('Big Picture: opens without the sidebar', await ev(`!!document.querySelector('[data-bigpicture-root]') && !document.querySelector('aside')`))
     check('Big Picture: full screen', win.isFullScreen())
     check('Big Picture: shows the games', await ev(`document.querySelectorAll('[data-bigpicture-root] [data-game-id]').length >= 3`))
+    // Customize: the drawer changes the look at once, Escape closes only the drawer,
+    // and "Back to the usual look" restores it.
+    const custom = await ev(`(async () => {
+      const wait = (ms) => new Promise(r => setTimeout(r, ms))
+      const root = () => document.querySelector('[data-bigpicture-root]')
+      const pick = (t) => [...document.querySelectorAll('[data-bp-customize] button')].find(b => b.textContent.trim() === t)?.click()
+      document.querySelector('[data-bp-customize-btn]')?.click(); await wait(500)
+      const opened = !!document.querySelector('[data-bp-customize]')
+      pick('Grid'); pick('Wide'); pick('PlayStation'); await wait(400)
+      const changed = { layout: root()?.dataset.bpLayout, shape: root()?.dataset.bpShape, glyphs: document.documentElement.dataset.padGlyphs, grid: !!root()?.querySelector('[class*=grid_] [data-game-id]') }
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await wait(500)
+      const closedOnly = !document.querySelector('[data-bp-customize]') && !!root()
+      document.querySelector('[data-bp-customize-btn]')?.click(); await wait(400)
+      ;[...document.querySelectorAll('[data-bp-customize] button')].find(b => /usual look/.test(b.textContent))?.click(); await wait(400)
+      const reset = { layout: root()?.dataset.bpLayout, shape: root()?.dataset.bpShape, glyphs: document.documentElement.dataset.padGlyphs || null }
+      document.querySelector('[data-bp-customize] button[aria-label="Close"]')?.click(); await wait(300)
+      return { opened, changed, closedOnly, reset }
+    })()`)
+    check('Big Picture: Customize changes the look at once', custom.opened && custom.changed.layout === 'grid' && custom.changed.shape === 'wide' && custom.changed.glyphs === 'playstation' && custom.changed.grid, JSON.stringify(custom))
+    check('Big Picture: Escape closes only the Customize panel', custom.closedOnly, JSON.stringify(custom))
+    check('Big Picture: back to the usual look', custom.reset.layout === 'shelves' && custom.reset.shape === 'tall' && custom.reset.glyphs === null, JSON.stringify(custom))
     await escape(); await sleep(1200)
     check('Big Picture: Escape leaves', await ev(`!document.querySelector('[data-bigpicture-root]')`))
     check('Big Picture: back to a window', !win.isFullScreen())

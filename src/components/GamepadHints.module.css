@@ -35,6 +35,12 @@
 .faceB { background: #f87171; }
 .faceX { background: #60a5fa; }
 .faceY { background: #facc15; }
+/* PlayStation: dark buttons with colored shapes, like the pad. */
+.psA, .psB, .psX, .psY { background: #1d1f2b; font-size: 13px; }
+.psA { color: #7aa7ff; }
+.psB { color: #ff6b6b; }
+.psX { color: #f08bd0; }
+.psY { color: #4fd1a5; }
 .pair { display: inline-flex; gap: 3px; }
 .bumper {
   padding: 1px var(--sp-6);
