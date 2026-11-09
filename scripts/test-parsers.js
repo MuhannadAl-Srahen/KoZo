@@ -1525,6 +1525,18 @@ function crackSaveTests() {
   check('newer copy: copies made the same day are not', gv.pickNewerCopy({ file: 'old.exe', created: 1000 * DAY }, [{ file: 'a.exe', created: 1000.5 * DAY }]) === null)
 }
 
+function storageTests() {
+  const { driveOf, group } = require(path.join(__dirname, '..', 'electron', 'services', 'gameSizes.js'))
+  check('storage: the drive of a path', driveOf('d:\Games\X') === 'D:' && driveOf('') === null)
+  const drives = [{ drive: 'C:', free: 50, size: 500 }, { drive: 'D:', free: 300, size: 1000 }]
+  const games = [{ id: 1, name: 'Small', install_path: 'C:\G\A', size: 10 }, { id: 2, name: 'Big', install_path: 'C:\G\B', size: 90 }, { id: 3, name: 'Elsewhere', install_path: 'E:\G', size: 5 }]
+  const out = group(drives, games)
+  const c = out.find(d => d.drive === 'C:')
+  check('storage: games sit under their drive, biggest first', c.games.map(g => g.name).join() === 'Big,Small' && c.gamesBytes === 100, JSON.stringify(c))
+  check('storage: a drive with no games still shows', !!out.find(d => d.drive === 'D:' && d.games.length === 0))
+  check("storage: a game on a drive that isn't listed still shows", !!out.find(d => d.drive === 'E:' && d.games.length === 1))
+}
+
 function gpuTrimTests() {
   const { shouldTrim, MIN_GAP_MS } = require(path.join(__dirname, '..', 'electron', 'services', 'gpuTrim.js'))
   const base = { now: 10 * MIN_GAP_MS, lastAt: 0, windowShown: false, sessionActive: false, compositing: 'enabled', mb: 300 }
@@ -1539,6 +1551,7 @@ function gpuTrimTests() {
 ;(async () => {
   settingsPathTests()
   gpuTrimTests()
+  storageTests()
   crackSaveTests()
   await installCheckTests()
   try { await updaterTests() } catch (e) { check('updater tests ran', false, e.message) }

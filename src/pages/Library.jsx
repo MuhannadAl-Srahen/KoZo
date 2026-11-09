@@ -4,7 +4,7 @@ import {
   IconPlus, IconList, IconLayoutColumns,
   IconDeviceGamepad2, IconScan, IconLoader2, IconCheckbox, IconSquare,
   IconX, IconCheck, IconSearch, IconEyeOff, IconChevronRight, IconChevronDown,
-  IconArchive, IconFlag, IconCalendarEvent, IconTrash, IconDownload,
+  IconArchive, IconFlag, IconCalendarEvent, IconTrash, IconDownload, IconEdit,
 } from '@tabler/icons-react'
 import GameCard, { formatPlaytime, STATUS_META } from '../components/GameCard'
 import AddGameModal from '../components/modals/AddGameModal'
@@ -17,6 +17,8 @@ import CardContextMenu from '../components/ui/CardContextMenu'
 import EmptyState from '../components/ui/EmptyState'
 import ReleasedPanel from '../components/ReleasedPanel'
 import PlanMonthModal from '../components/modals/PlanMonthModal'
+import BulkEditModal from '../components/modals/BulkEditModal'
+import UndoBar from '../components/ui/UndoBar'
 import useCardZoom from '../lib/useCardZoom'
 import { CardSkeletonGrid } from '../components/ui/Skeleton'
 import s from './Library.module.css'
@@ -122,6 +124,8 @@ export default function Library() {
   }
   const [statusFilter, setStatusFilter] = useState(() => localStorage.getItem('kozo:status:library') || '')
   const [planIds, setPlanIds] = useState(null)   // game ids for the Plan-for-month modal
+  const [editIds, setEditIds] = useState(null)   // game ids for Edit (status, favorite, hidden)
+  const [undo, setUndo] = useState(null)         // { text, run }: the Undo bar after a change to many games
   const [ctxMenu, setCtxMenu]       = useState(null)  // null | { x, y, game }
   const [editGame, setEditGame]     = useState(null)  // game opened in Edit from the card menu
   const [launchMsg, setLaunchMsg]   = useState(null)  // { variant, title, message } after Play from the menu
@@ -371,10 +375,43 @@ export default function Library() {
   // not playtime/achievement totals.
   const stats = computeStats(games)
 
+  const gamesWord = (n) => `${n} game${n !== 1 ? 's' : ''}`
   async function savePlan(month) {
-    await window.kozo?.api?.games?.planMonth?.(planIds, month)
+    const ids = planIds
+    // What each game was planned for, so Undo can put every one back.
+    const before = new Map()
+    for (const id of ids) {
+      const m = allGamesWithLive.find(g => g.id === id)?.planned_month || null
+      if (!before.has(m)) before.set(m, [])
+      before.get(m).push(id)
+    }
+    await window.kozo?.api?.games?.planMonth?.(ids, month)
     setPlanIds(null)
     loadGames({ silent: true })
+    setUndo({
+      text: month ? `Planned ${gamesWord(ids.length)}` : `Cleared the plan of ${gamesWord(ids.length)}`,
+      run: async () => {
+        for (const [m, group] of before) await window.kozo?.api?.games?.planMonth?.(group, m)
+        loadGames({ silent: true })
+      },
+    })
+  }
+
+  // Edit: the same change for every selected game, then Undo for 20 seconds.
+  async function saveEdit(patch) {
+    const ids = editIds
+    const res = await window.kozo?.api?.games?.bulkUpdate?.(ids, patch)
+    setEditIds(null)
+    loadGames({ silent: true })
+    if (res?.ok) {
+      const before = res.data?.before || []
+      setUndo({
+        text: `Changed ${gamesWord(before.length)}`,
+        run: async () => { await window.kozo?.api?.games?.bulkRestore?.(before); loadGames({ silent: true }) },
+      })
+    } else {
+      setLaunchMsg({ variant: 'error', title: 'Could not change the games', message: res?.error || 'Unknown error.' })
+    }
   }
   const gridClass = view === 'list' ? s.listGrid : s.bigGrid
 
@@ -555,6 +592,12 @@ export default function Library() {
             }
           </span>
 
+          {selectedIds.size > 0 && !confirmDelete && (
+            <button className={s.btnSecondary} onClick={() => setEditIds([...selectedIds])} data-bulk-edit>
+              <IconEdit size={14} stroke={1.6} />
+              Edit
+            </button>
+          )}
           {selectedIds.size > 0 && !confirmDelete && (
             <button className={s.btnSecondary} onClick={() => setPlanIds([...selectedIds])}>
               <IconCalendarEvent size={14} stroke={1.6} />
@@ -760,6 +803,8 @@ export default function Library() {
           onSave={savePlan}
         />
       )}
+      {editIds && <BulkEditModal count={editIds.length} onClose={() => setEditIds(null)} onSave={saveEdit} />}
+      <UndoBar undo={undo} onDone={() => setUndo(null)} />
     </div>
   )
 }

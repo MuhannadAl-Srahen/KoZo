@@ -174,6 +174,50 @@ handle('games:planMonth', (gameIds, month) => {
   broadcast('game:updated', null)
   return value
 })
+// Library > Select > Edit: one change for many games (status, favorite, hidden).
+// Returns what each game had, so Undo can put it back (games:bulkRestore). A status
+// set this way never opens the rating window for every finished game.
+const BULK_FIELDS = ['completion_status', 'is_favorite', 'is_hidden']
+handle('games:bulkUpdate', (ids, patch) => {
+  const fields = Object.keys(patch || {}).filter(k => BULK_FIELDS.includes(k))
+  const before = []
+  if (!fields.length) return { before }
+  const statusSync = require('./services/statusSync')
+  for (const id of (ids || []).map(Number)) {
+    const g = gamesQ.getGame(id)
+    if (!g) continue
+    const was = { id }
+    for (const k of fields) was[k] = g[k] ?? null
+    if (fields.includes('completion_status')) was.completion_status_at = g.completion_status_at ?? null
+    before.push(was)
+    const flags = {}
+    for (const k of fields) if (k !== 'completion_status') flags[k] = patch[k] ? 1 : 0
+    if (Object.keys(flags).length) gamesQ.updateGame(id, flags)
+    if (fields.includes('completion_status')) statusSync.setGameStatus(id, patch.completion_status || null, { announce: false })
+  }
+  bk()
+  broadcast('game:updated', null)
+  return { before }
+})
+handle('games:bulkRestore', (before) => {
+  const statusSync = require('./services/statusSync')
+  const db = require('./db/database').getDb()
+  for (const b of before || []) {
+    const id = Number(b.id)
+    if (!gamesQ.getGame(id)) continue
+    const flags = {}
+    if ('is_favorite' in b) flags.is_favorite = b.is_favorite ? 1 : 0
+    if ('is_hidden' in b) flags.is_hidden = b.is_hidden ? 1 : 0
+    if (Object.keys(flags).length) gamesQ.updateGame(id, flags)
+    if ('completion_status' in b) {
+      statusSync.setGameStatus(id, b.completion_status || null, { announce: false })
+      db.prepare('UPDATE games SET completion_status_at = ? WHERE id = ?').run(b.completion_status_at ?? null, id)
+    }
+  }
+  bk()
+  broadcast('game:updated', null)
+  return true
+})
 handle('games:update', (id, data) => {
   // Status changes go through statusSync so linked Game List rows stay in step.
   const { completion_status, ...rest } = data || {}
@@ -314,6 +358,9 @@ handle('saves:export', async (gameId, id) => {
   return out
 })
 handle('saves:backupsDir', () => require('./services/saveBackup').rootPath())
+// Settings > Data > Storage: each disk, and the games on it by size (services/gameSizes.js).
+handle('storage:overview', () => require('./services/gameSizes').overview())
+handle('storage:measure', (force) => { require('./services/gameSizes').measure({ force: !!force }); return true })
 
 // Every game: where its saves are, how many restore points, newest, space used.
 // Cheap: no disk search here (saves:detect does that).

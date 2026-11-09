@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 28,
+  rev: 29,
   // Settings → Appearance → UI scale.
   ui: {
     setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld('kozo', {
       useCopy: (id, file) => ipcRenderer.invoke('games:useCopy', id, file),
       add: (data) => ipcRenderer.invoke('games:add', data),
       planMonth: (gameIds, month) => ipcRenderer.invoke('games:planMonth', gameIds, month),
+      bulkUpdate: (ids, patch) => ipcRenderer.invoke('games:bulkUpdate', ids, patch),
+      bulkRestore: (before) => ipcRenderer.invoke('games:bulkRestore', before),
       finished: () => ipcRenderer.invoke('games:finished'),
       update: (id, data) => ipcRenderer.invoke('games:update', id, data),
       delete: (id) => ipcRenderer.invoke('games:delete', id),
@@ -131,6 +133,11 @@ contextBridge.exposeInMainWorld('kozo', {
     shell: {
       openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
       openPath: (p) => ipcRenderer.invoke('shell:openPath', p),
+    },
+    // Settings > Data > Storage.
+    storage: {
+      overview: () => ipcRenderer.invoke('storage:overview'),
+      measure: (force) => ipcRenderer.invoke('storage:measure', force),
     },
     saves: {
       find: (gameId) => ipcRenderer.invoke('saves:find', gameId),
@@ -325,6 +332,7 @@ contextBridge.exposeInMainWorld('kozo', {
       onBackupCopyStatus: sub('backup:copyStatus', pass),
       onPackProgress: sub('pack:progress', pass),
       onDealsChanged: sub('deals:changed', pass),
+      onStorageProgress: sub('storage:progress', pass),
       onDealsUpdated: sub('deals:updated', pass),
       onAccentChanged: sub('accent:changed', pass),
       onUnknownProcessAdd: sub('unknown-process:add', pass),

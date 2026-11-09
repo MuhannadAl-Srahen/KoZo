@@ -21,6 +21,7 @@ import HoneycombLogo from '../components/HoneycombLogo'
 import ScanResultModal from '../components/modals/ScanResultModal'
 import SaveManagerModal from '../components/modals/SaveManagerModal'
 import BackupsTab from '../components/BackupsTab'
+import StorageTab from '../components/StorageTab'
 import DriveSetupModal, { DriveBlockedHint } from '../components/DriveSetupModal'
 import s from './Settings.module.css'
 
@@ -2078,6 +2079,7 @@ const TABS = [
   { key: 'tracking',   label: 'Tracking',   group: 'Games', Icon: IconClock,      desc: 'How playtime is counted, and where KoZo looks for your games.' },
   { key: 'accounts',   label: 'Connections', group: 'Games', Icon: IconPlugConnected, desc: 'Steam, Discord, covers and Google Drive.' },
   { key: 'data',       label: 'Backups',    group: 'Data',  Icon: IconArchive,    desc: 'Your game saves and your library, backed up on their own.' },
+  { key: 'storage',    label: 'Storage',    group: 'Data',  Icon: IconDeviceFloppy, desc: 'How much space your games use on each disk.' },
   { key: 'features',   label: 'Features',   group: 'Help',  Icon: IconLayoutGrid, desc: 'Everything KoZo can do, with a link to each.' },
   { key: 'about',      label: 'About',      group: 'Help',  Icon: IconInfoCircle, desc: 'Version, updates, diagnostics and the walkthrough.' },
 ]
@@ -2123,6 +2125,7 @@ export default function Settings() {
           {tab === 'tracking'   && <TrackingTab />}
           {tab === 'appearance' && <AppearanceTab />}
           {tab === 'data'       && <BackupsTab onManageSaves={setSaveGame} />}
+          {tab === 'storage'    && <StorageTab />}
           {tab === 'about'      && <AboutTab />}
         </div>
       </div>

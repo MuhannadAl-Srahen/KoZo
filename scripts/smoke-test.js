@@ -990,6 +990,33 @@ app.whenReady().then(async () => {
     check('Library: a slider resizes the cards', sized.there && parseInt(sized.css) === Number(sized.min) + 16 && Number(sized.saved) === Number(sized.min) + 16, JSON.stringify(sized))
     await ev(`localStorage.removeItem('kozo:cardsize:library:big'); true`)
 
+    // Edit many games at once: select two, make them favorites, then Undo.
+    const bulk = await ev(`(async () => {
+      const wait = (ms) => new Promise(r => setTimeout(r, ms))
+      const favs = async () => ((await window.kozo.api.games.list())?.data || []).filter(g => g.is_favorite).map(g => g.id).sort().join()
+      const before = await favs()
+      document.querySelector('.app-main button[aria-label="Select games"]')?.click(); await wait(300)
+      const cards = [...document.querySelectorAll('.app-main [data-gpnav] [data-gpclick]')].slice(0, 2)
+      cards.forEach(c => c.click()); await wait(200)
+      document.querySelector('[data-bulk-edit]')?.click(); await wait(400)
+      const dlg = [...document.querySelectorAll('[role=dialog]')].find(d => /Edit \\d+ game/.test(d.innerText))
+      if (!dlg) return { step: 'no edit window', cards: cards.length }
+      const field = [...dlg.querySelectorAll('label')].find(l => l.textContent.trim() === 'Favorite')?.parentElement
+      field?.querySelector('button')?.click(); await wait(250)
+      ;[...document.querySelectorAll('[role=option]')].find(o => o.textContent.trim() === 'Favorite')?.click(); await wait(200)
+      ;[...dlg.querySelectorAll('button')].find(b => /^Change \\d+ game/.test(b.textContent.trim()))?.click(); await wait(900)
+      const after = await favs()
+      const bar = document.querySelector('[data-undo-bar]')
+      const barText = bar?.innerText || ''
+      ;[...(bar?.querySelectorAll('button') || [])].find(b => /Undo/.test(b.textContent))?.click(); await wait(900)
+      const undone = await favs()
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      ;[...document.querySelectorAll('.app-main button')].find(b => /^(Done|Cancel)$/.test(b.textContent.trim()))?.click()
+      return { cards: cards.length, before, after, undone, barText }
+    })()`)
+    check('Edit many: two games become favorites', bulk.cards === 2 && bulk.after !== bulk.before && bulk.after.split(',').length >= 2, JSON.stringify(bulk))
+    check('Edit many: Undo puts them back', bulk.undone === bulk.before && /Changed 2 games/.test(bulk.barText), JSON.stringify(bulk))
+
     // Background color
     const lookBefore = await ev(`window.kozo.api.settings.get('appearance').then(r => r?.data ?? null)`)
     await go('#/settings?tab=appearance', 1800)
