@@ -1520,7 +1520,7 @@ handle('app:whatsNew', async () => {
   return require('./services/appUpdater').notesFor(current)
 })
 // Settings > About > What's new: this version's notes, any time.
-handle('app:releaseNotes', () => require('./services/appUpdater').notesFor(require('electron').app.getVersion()))
+handle('app:releaseNotes', () => require('./services/appUpdater').notesFor(require('../package.json').version))
 
 // Resolve a SteamID64 from a profile URL / custom name / raw ID. Uses the passed
 // key if given (onboarding, before it's saved), else the stored key.
@@ -2680,6 +2680,13 @@ handle('overlay:hide', () => {
 
 // The overlay renderer calls this once its listeners are attached so queued
 // messages flush safely (avoids a load-vs-listener race that dropped toasts).
+// An overlay freeze over 100 ms, with the toast it followed (OverlayApp's PerformanceObserver).
+handle('overlay:perf', (d) => {
+  let inGame = false
+  try { inGame = require('./services/processWatcher').isSessionActive() } catch {}
+  logger.info(`overlay: froze ${Number(d?.ms) || 0} ms after a "${String(d?.after || 'none').slice(0, 20)}" toast${inGame ? ' during a game' : ''}`)
+  return true
+})
 handle('overlay:ready', () => {
   try { require('./overlayWindow').markReady() } catch {}
   return true

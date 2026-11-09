@@ -137,6 +137,7 @@ function raise() {
 
 function _send(channel, data) {
   try {
+    if (channel !== 'status:overlay') logger.info(`overlay: ${channel.split(':')[0]} toast${_win && !_win.isDestroyed() ? '' : ' (overlay window starting)'}`)
     clearTimeout(_idleTimer)   // activity — cancel any pending idle teardown
     getOrCreate()
     _pending.push({ channel, data })

@@ -1439,8 +1439,11 @@ app.whenReady().then(async () => {
     const sek = await ev(`window.kozo.api.games.add({ name: 'Smoke Sekiro', exe_name: 'sekiro.exe', install_path: 'C:\\\\SmokeGames\\\\Sekiro', source: 'manual' }).then(r => r.data.id)`)
     await go('#/game/' + sek, 2000)
     await ev(`document.querySelector('button[title="Game options"]')?.click(); true`); await sleep(300)
-    check('playthrough: offered for a game KoZo never saw played', await ev(`!!document.querySelector('[data-new-playthrough]')`))
-    await ev(`document.querySelector('[data-new-playthrough]')?.click(); true`); await sleep(400)
+    check('playthrough: offered for a game KoZo never saw played', await ev(`!!document.querySelector('[data-new-playthrough]')`), await ev(`location.hash + ' ' + (document.querySelector('.app-main')?.innerText || '').slice(0, 150)`))
+    // Menu and item in one step, again if a background refresh of the page closed the menu first.
+    for (let i = 0; i < 4 && !(await ev(`!!document.querySelector('[data-replay-number]')`)); i++) {
+      await ev(`(async () => { if (!document.querySelector('[data-new-playthrough]')) { document.querySelector('button[title="Game options"]')?.click(); await new Promise(r => setTimeout(r, 250)) } document.querySelector('[data-new-playthrough]')?.click(); return true })()`); await sleep(500)
+    }
     await ev(`document.querySelector('[data-replay-number] button[aria-label="One more"]')?.click(); true`); await sleep(200)
     const sekAsk = await ev(`document.querySelector('[role=dialog]')?.innerText || ''`)
     check('playthrough: 3rd time, the earlier two kept from before KoZo', /3rd/.test(sekAsk) && /Start playthrough 3/.test(sekAsk) && /Playthroughs 1 to 2 are kept as finished before KoZo/.test(sekAsk), sekAsk.slice(0, 300))

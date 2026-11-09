@@ -78,6 +78,9 @@ export function playLevelUp() {
   } catch { /* ignore */ }
 }
 
+// Every kind of notification has its own (the maker asked for a sound on all of them), each
+// quiet, short and recognizable: a rise is good news, a fall is "done", two equal notes ask.
+
 // Session started: soft low-key "game on" blip (C5 → G5), quieter than the rest.
 export function playSessionStart() {
   try {
@@ -85,5 +88,55 @@ export function playSessionStart() {
     const t = c.currentTime
     tone(c, t, 523.3, 0.18, 0.07)
     tone(c, t + 0.10, 784.0, 0.35, 0.08)
+  } catch { /* ignore */ }
+}
+
+// Session complete: the start blip turned around (G5 → C5), soft: the game just closed.
+export function playSessionEnd() {
+  try {
+    const c = ctx(); if (!c) return
+    const t = c.currentTime
+    tone(c, t, 784.0, 0.18, 0.06)
+    tone(c, t + 0.11, 523.3, 0.40, 0.07)
+  } catch { /* ignore */ }
+}
+
+// Out now: a bright three-note sparkle (C6 E6 G6), a game you waited for.
+export function playRelease() {
+  try {
+    const c = ctx(); if (!c) return
+    const t = c.currentTime
+    tone(c, t, 1046.5, 0.16, 0.08)
+    tone(c, t + 0.08, 1318.5, 0.16, 0.08)
+    tone(c, t + 0.16, 1568.0, 0.45, 0.10)
+  } catch { /* ignore */ }
+}
+
+// Price alert: two quick high notes, like a till (B5 B6).
+export function playPrice() {
+  try {
+    const c = ctx(); if (!c) return
+    const t = c.currentTime
+    tone(c, t, 987.8, 0.12, 0.08)
+    tone(c, t + 0.09, 1975.5, 0.40, 0.07)
+  } catch { /* ignore */ }
+}
+
+// Time for a break: one low, gentle note (A4), never loud.
+export function playBreak() {
+  try {
+    const c = ctx(); if (!c) return
+    const t = c.currentTime
+    tone(c, t, 440.0, 0.70, 0.06)
+  } catch { /* ignore */ }
+}
+
+// A question (new game found, which program is it): two equal notes (E5 E5).
+export function playQuestion() {
+  try {
+    const c = ctx(); if (!c) return
+    const t = c.currentTime
+    tone(c, t, 659.3, 0.14, 0.06)
+    tone(c, t + 0.16, 659.3, 0.26, 0.07)
   } catch { /* ignore */ }
 }

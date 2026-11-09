@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { IconTrophy, IconPlayerPlay, IconClock, IconDeviceGamepad2, IconSparkles, IconArrowBigUpLines, IconPlus, IconCalendarEvent, IconTag, IconCoffee } from '@tabler/icons-react'
 import { applyAccent } from './context/AccentColorContext'
 import { fileUrl } from './lib/utils'
-import { playAchievement, playLevelUp, playSessionStart, holdAudio, releaseAudio } from './lib/sounds'
+import { playAchievement, playLevelUp, playSessionStart, playSessionEnd, playRelease, playPrice, playBreak, playQuestion, holdAudio, releaseAudio } from './lib/sounds'
 import s from './OverlayApp.module.css'
 
 // Cover-art thumb for session toasts — local cached banner first, CDN fallback,
@@ -553,6 +553,8 @@ function capToasts(list) {
 export default function OverlayApp() {
   const [toasts, setToasts] = useState([])
   const nextId = useRef(0)
+  const lastToast = useRef('none')
+  const toastsRef = useRef([])   // the toasts now, for checks outside a state update
 
   // Match the user's chosen accent (the overlay is its own window, so it doesn't
   // inherit the main app's applied accent — load it from settings here, and also
@@ -627,6 +629,7 @@ export default function OverlayApp() {
       setToasts(q => capToasts([...q, { id: ++nextId.current, type: 'levelup', ...data }]))
     })
     on(window.kozo?.events?.onSessionEndOverlay, (data) => {
+      playSessionEnd()
       setToasts(q => capToasts([...q, { id: ++nextId.current, type: 'sessionEnd', ...data }]))
     })
 
@@ -636,6 +639,8 @@ export default function OverlayApp() {
       if (!data?.exe_name) return
       const key = data.exe_name.toLowerCase()
       if (loadDismissed().has(key)) return
+      if (toastsRef.current.some(t => t.type === 'unknown' && t.exe_name?.toLowerCase() === key)) return
+      playQuestion()
       setToasts(q => q.some(t => t.type === 'unknown' && t.exe_name?.toLowerCase() === key)
         ? q
         : capToasts([...q, { id: ++nextId.current, type: 'unknown', ...data }]))
@@ -643,6 +648,8 @@ export default function OverlayApp() {
 
     on(window.kozo?.events?.onLaunchMissOverlay, (data) => {
       if (!data?.gameId) return
+      if (toastsRef.current.some(t => t.type === 'launchMiss' && t.gameId === data.gameId)) return
+      playQuestion()
       setToasts(q => q.some(t => t.type === 'launchMiss' && t.gameId === data.gameId)
         ? q
         : capToasts([...q, { id: ++nextId.current, type: 'launchMiss', ...data }]))
@@ -651,19 +658,36 @@ export default function OverlayApp() {
     // A tracked upcoming game reached its release date.
     on(window.kozo?.events?.onReleaseOverlay, (data) => {
       if (!data?.games?.length) return
+      playRelease()
       setToasts(q => capToasts([...q, { id: ++nextId.current, type: 'release', ...data }]))
     })
 
     // A game reached the price the user set.
     on(window.kozo?.events?.onPriceOverlay, (data) => {
       if (!data?.games?.length) return
+      playPrice()
       setToasts(q => capToasts([...q, { id: ++nextId.current, type: 'price', ...data }]))
     })
 
     // Break reminder. Never two at once.
     on(window.kozo?.events?.onBreakOverlay, (data) => {
+      playBreak()
       setToasts(q => capToasts([...q.filter(t => t.type !== 'break'), { id: ++nextId.current, type: 'break', ...data }]))
     })
+
+    // The maker saw the PC hitch for a second or two as some toasts showed. Measured, a toast
+    // costs the overlay nothing once the sound is open (starting the sound is 170 ms), so any
+    // freeze here goes into KoZo's log next to the toast it followed, to find the real one.
+    let po = null
+    try {
+      po = new PerformanceObserver((list) => {
+        for (const e of list.getEntries()) {
+          if (e.duration >= 100) window.kozo?.api?.overlay?.perf?.({ ms: Math.round(e.duration), after: lastToast.current })
+        }
+      })
+      po.observe({ type: 'longtask', buffered: false })
+      offs.push(() => po.disconnect())
+    } catch { /* not available: nothing to log */ }
 
     // Tell main both listeners are attached — it flushes any queued messages
     // (e.g. a "Test notification" fired before this window finished loading).
@@ -675,6 +699,13 @@ export default function OverlayApp() {
     // process-wide and would tear down other components' listeners too.
     return () => { for (const off of offs) { try { off() } catch {} } }
   }, [])
+
+  // What the newest toast was, for the freeze log above.
+  useEffect(() => {
+    toastsRef.current = toasts
+    const t = toasts[toasts.length - 1]
+    if (t) lastToast.current = t.type || (t.summary ? 'achievements' : 'achievement')
+  }, [toasts])
 
   function dismiss(id) {
     setToasts(q => {

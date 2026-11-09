@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 36,
+  rev: 37,
   // Settings → Appearance → UI scale.
   ui: {
     setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
@@ -244,6 +244,7 @@ contextBridge.exposeInMainWorld('kozo', {
       test: () => ipcRenderer.invoke('overlay:test'),
       testBreak: () => ipcRenderer.invoke('overlay:testBreak'),
       ready: () => ipcRenderer.invoke('overlay:ready'),
+      perf: (d) => ipcRenderer.invoke('overlay:perf', d),
       setInteractive: (v) => ipcRenderer.invoke('overlay:setInteractive', v),
       applyAccent: (hex) => ipcRenderer.invoke('overlay:applyAccent', hex),
       addUnknownGame: (data) => ipcRenderer.invoke('overlay:addUnknownGame', data),
