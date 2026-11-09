@@ -3,7 +3,7 @@ import {
   IconPlus, IconLayoutGrid, IconList, IconLayoutColumns,
   IconDeviceGamepad2, IconPencil, IconSearch,
   IconCheckbox, IconSquare, IconTrash, IconX, IconCheck, IconStar, IconLoader2,
-  IconBooks, IconCalendarEvent, IconDice5, IconBrandSteam,
+  IconBooks, IconCalendarEvent, IconDice5, IconBrandSteam, IconDiscount2,
 } from '@tabler/icons-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { getBannerBg, parseGenres, formatMonthKey, fileUrl } from '../lib/utils'
@@ -60,7 +60,18 @@ function bannerOnError(e) {
 
 // ── Card components ─────────────────────────────────────────────────────────
 
-function GridCard({ item, onClick, selectionMode, selected, onToggle, onToggleFav, onContextMenu }) {
+// "-50% $9.99" on a game you want that's on sale (deals:saleMap, from Discounts' last check).
+function SaleChip({ sale }) {
+  if (!sale) return null
+  const title = `On sale on Steam: ${sale.finalText || ''}${sale.originalText ? `, was ${sale.originalText}` : ''}${sale.lowest ? '. Its lowest price ever' : ''}`
+  return (
+    <span className={`${s.saleChip} ${sale.lowest ? s.saleChipLow : ''}`} title={title} data-sale-chip="">
+      <IconDiscount2 size={12} stroke={2} /> -{sale.pct}%{sale.finalText ? <b>{sale.finalText}</b> : null}
+    </span>
+  )
+}
+
+function GridCard({ item, sale, onClick, selectionMode, selected, onToggle, onToggleFav, onContextMenu }) {
   const cfg = STATUS_CONFIG[item.status] || { label: item.status, color: 'var(--text-muted)' }
   const bg  = getBannerBg(item.id)
   const src = withBust(item.banner_url, item.banner_rev) || fileUrl(item.game_banner_local_path)
@@ -124,13 +135,14 @@ function GridCard({ item, onClick, selectionMode, selected, onToggle, onToggleFa
           {item.planned_month && (
             <span className={s.planChip} title="Planned to play this month">{formatMonthKey(item.planned_month)}</span>
           )}
+          <SaleChip sale={sale} />
         </div>
       </div>
     </div>
   )
 }
 
-function ListRow({ item, onClick, selectionMode, selected, onToggle, onToggleFav, onContextMenu }) {
+function ListRow({ item, sale, onClick, selectionMode, selected, onToggle, onToggleFav, onContextMenu }) {
   const cfg = STATUS_CONFIG[item.status] || { label: item.status, color: 'var(--text-muted)' }
   const bg  = getBannerBg(item.id)
   const src = withBust(item.banner_url, item.banner_rev) || fileUrl(item.game_banner_local_path)
@@ -187,6 +199,7 @@ function ListRow({ item, onClick, selectionMode, selected, onToggle, onToggleFav
           {item.planned_month && (
             <span className={s.planChip} title="Planned to play this month">{formatMonthKey(item.planned_month)}</span>
           )}
+          <SaleChip sale={sale} />
           <div
             className={s.listStatusBadge}
             style={{ color: cfg.color, borderColor: `color-mix(in srgb, ${cfg.color} 33%, transparent)`, background: `color-mix(in srgb, ${cfg.color} 9%, transparent)` }}
@@ -241,6 +254,14 @@ export default function GameList() {
   const [switching, setSwitching] = useState(false)   // filter change with grid kept on screen
   const itemsRef = useRef([])
   useEffect(() => { itemsRef.current = items }, [items])
+  // Games on sale (by Steam id), refreshed when Discounts gets a new answer.
+  const [sales, setSales] = useState({})
+  useEffect(() => {
+    const load = () => window.kozo?.api?.deals?.saleMap?.().then(r => { if (r?.ok) setSales(r.data || {}) })
+    load()
+    const off = window.kozo?.events?.onDealsUpdated?.(load)
+    return () => { try { off?.() } catch {} }
+  }, [])
 
   const [showAdd, setShowAdd]   = useState(false)
   const [picking, setPicking]   = useState(false)   // Pick for me
@@ -303,9 +324,17 @@ export default function GameList() {
     })
   }
 
-  function selectAll() { setSelectedIds(new Set(items.map(i => i.id))) }
+  // Every game in the current filter, also the ones further down that haven't loaded yet.
+  const [selectingAll, setSelectingAll] = useState(false)
+  async function selectAll() {
+    if (items.length >= total) { setSelectedIds(new Set(items.map(i => i.id))); return }
+    setSelectingAll(true)
+    const res = await window.kozo?.api?.gameList?.list({ ...currentFilters(), limit: total + 50, offset: 0 })
+    setSelectingAll(false)
+    setSelectedIds(new Set((res?.ok ? res.data?.items ?? [] : items).map(i => i.id)))
+  }
   function deselectAll() { setSelectedIds(new Set()) }
-  const allSelected = items.length > 0 && selectedIds.size === items.length
+  const allSelected = total > 0 && selectedIds.size >= total
 
   // Toggle favorite (pins to top). Optimistic: flip local state immediately so
   // the star fills with no reload flash, then persist + silently re-fetch.
@@ -408,6 +437,16 @@ export default function GameList() {
     setSwitching(false)
   }, [statusFilter, genreFilter, monthFilter, activeListId, searchText])
 
+  function currentFilters() {
+    const f = {}
+    if (statusFilter) f.status = statusFilter
+    if (genreFilter)  f.genre = genreFilter
+    if (monthFilter)  f.month = monthFilter
+    if (activeListId) f.listId = activeListId
+    if (searchText?.trim()) f.search = searchText.trim()
+    return f
+  }
+
   const moreBusy = useRef(false)
   const loadMore = useCallback(async () => {
     if (moreBusy.current || loading || switching) return
@@ -415,13 +454,7 @@ export default function GameList() {
     if (have >= total) return
     moreBusy.current = true
     setLoadingMore(true)
-    const filters = { limit: PAGE_SIZE, offset: have }
-    if (statusFilter) filters.status = statusFilter
-    if (genreFilter)  filters.genre = genreFilter
-    if (monthFilter)  filters.month = monthFilter
-    if (activeListId) filters.listId = activeListId
-    if (searchText?.trim()) filters.search = searchText.trim()
-    const res = await window.kozo?.api?.gameList?.list(filters)
+    const res = await window.kozo?.api?.gameList?.list({ ...currentFilters(), limit: PAGE_SIZE, offset: have })
     if (res?.ok) {
       const seen = new Set(itemsRef.current.map(i => i.id))
       const next = [...itemsRef.current, ...(res.data?.items ?? []).filter(i => !seen.has(i.id))]
@@ -611,7 +644,9 @@ export default function GameList() {
           <button className={s.btnSecondary} onClick={allSelected ? deselectAll : selectAll}>
             {allSelected
               ? <><IconCheckbox size={14} stroke={1.8} /> Deselect all</>
-              : <><IconSquare size={14} stroke={1.8} /> Select all ({items.length})</>
+              : selectingAll
+                ? <><IconLoader2 size={14} stroke={1.8} className="spin" /> Selecting…</>
+                : <><IconSquare size={14} stroke={1.8} /> Select all ({total})</>
             }
           </button>
 
@@ -719,6 +754,7 @@ export default function GameList() {
                 >
                   <GridCard
                     item={item}
+                    sale={item.steam_app_id ? sales[item.steam_app_id] : null}
                     onClick={setEditItem}
                     selectionMode={selectionMode}
                     selected={selectedIds.has(item.id)}
@@ -738,6 +774,7 @@ export default function GameList() {
               <ListRow
                 key={item.id}
                 item={item}
+                sale={item.steam_app_id ? sales[item.steam_app_id] : null}
                 onClick={setEditItem}
                 selectionMode={selectionMode}
                 selected={selectedIds.has(item.id)}

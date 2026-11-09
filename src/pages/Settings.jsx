@@ -23,6 +23,7 @@ import SaveManagerModal from '../components/modals/SaveManagerModal'
 import BackupsTab from '../components/BackupsTab'
 import StorageTab from '../components/StorageTab'
 import DriveSetupModal, { DriveBlockedHint } from '../components/DriveSetupModal'
+import WhatsNewModal from '../components/WhatsNewModal'
 import s from './Settings.module.css'
 
 // ── Shared bits ──────────────────────────────────────────────────────────────
@@ -1954,6 +1955,11 @@ function AboutTab() {
   const [updState, setUpdState] = useState('idle')     // idle | checking | done
   const [updResult, setUpdResult] = useState(null)
   const [updPressed, setUpdPressed] = useState(false)
+  const [notes, setNotes] = useState(null)   // this version's What's new, opened from here
+  async function openNotes() {
+    const r = await window.kozo?.api?.app?.releaseNotes?.()
+    setNotes(r?.ok && r.data ? r.data : { version, notes: '' })
+  }
 
   useEffect(() => {
     window.kozo?.api?.app?.getVersion?.().then(res => {
@@ -2013,7 +2019,11 @@ function AboutTab() {
               ? <><IconLoader2 size={13} stroke={1.8} className="spin" /> Checking…</>
               : <><IconRefresh size={13} stroke={1.8} /> Check for updates</>}
           </button>
+          <button type="button" className={s.testBtn} onClick={openNotes} data-whatsnew-open="">
+            <IconSparkles size={13} stroke={1.8} /> What's new in {version || 'this version'}
+          </button>
         </div>
+        {notes && <WhatsNewModal version={notes.version || version} notes={notes.notes} url={notes.url} onClose={() => setNotes(null)} />}
         {updState === 'done' && updResult && (() => {
           const [type, text] = updateLine(updResult)
           const showLink = updResult.updateAvailable && (updResult.dev || updResult.manualOnly) && updResult.releaseUrl

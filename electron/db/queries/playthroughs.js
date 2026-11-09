@@ -18,7 +18,7 @@
 const { getDb } = require('../database')
 
 function rowsFor(gameId) {
-  return getDb().prepare('SELECT id, game_id, number, started_at, finished_at, COALESCE(before_kozo, 0) AS before_kozo FROM playthroughs WHERE game_id = ? ORDER BY number').all(Number(gameId))
+  return getDb().prepare('SELECT id, game_id, number, started_at, finished_at, COALESCE(before_kozo, 0) AS before_kozo, note FROM playthroughs WHERE game_id = ? ORDER BY number').all(Number(gameId))
 }
 
 // Pure: the playthroughs as shown, with the current one's finish from the game's status.
@@ -33,6 +33,7 @@ function withCurrentFinish(rows, game) {
     finished_at: i < rows.length - 1 ? r.finished_at : (finishedNow ? game.completion_status_at : null),
     current: i === rows.length - 1,
     before_kozo: !!r.before_kozo,
+    note: r.note || '',
   }))
 }
 
@@ -119,4 +120,12 @@ function allFinishes() {
   return out
 }
 
-module.exports = { listForGame, startNew, undoLast, allFinishes, withCurrentFinish }
+// A note on one playthrough (up to 80 characters; empty clears it).
+function setNote(gameId, number, note) {
+  const text = String(note || '').replace(/\s+/g, ' ').trim().slice(0, 80)
+  const r = getDb().prepare('UPDATE playthroughs SET note = ? WHERE game_id = ? AND number = ?').run(text || null, Number(gameId), Number(number))
+  if (!r.changes) throw new Error('Playthrough not found')
+  return text
+}
+
+module.exports = { listForGame, startNew, undoLast, allFinishes, withCurrentFinish, setNote }

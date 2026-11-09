@@ -1,23 +1,21 @@
-KoZo 1.9.3
+KoZo 1.10.0
 
-A white theme, a Big Picture you can make your own, and a lighter KoZo.
+XP that rewards rare achievements, playing a game again, colored notifications, and a faster KoZo for big libraries.
 
-New in 1.9.3
-• Light theme, and Match Windows, which follows Windows' own light or dark mode. Any background color works, white too, and you can pick the text color.
-• Big Picture has a Customize button: three layouts, tall or wide covers, your focus color, the background, and Xbox or PlayStation buttons. It's brighter too.
-• Edit many games at once in the Library, with Undo.
-• Storage, in Settings: how much space each game takes on every disk.
-• Upcoming looks like Steam's calendar. For you on Steam shows your Steam wishlist and games like the ones you play there, from the Steam account you connected. Prefer the old look? Settings, Appearance, Upcoming calendar, Classic.
-• Bought a game on Steam that you played without a launcher? Its page offers to switch to your Steam copy, and your hours, achievements and saves come along.
-• When an update changes where a game keeps its saves, KoZo notices and offers to bring your progress over, for every game.
-• Minimize KoZo when a game starts, in Settings, Tracking.
-• Discounts only shows games with 500 reviews or more and at least 80% positive, plus the ones on your Game List.
-• A simpler tray menu that opens at once.
-• Lighter: much less memory and processor use while KoZo is open, and pages settle twice as fast.
+New in 1.10.0
+• XP by rarity: every achievement is worth more the rarer it is, from 55 XP for a Common one to 500 for an Ultra Rare. Your level may go up after this update: that's the new rules counting what you already earned. Profile shows how XP works and what each rarity gave you.
+• More ways to earn XP: 100% a game, play 10, 25, 50 and 100 hours in one game, finish a game in the month you planned it, and keep a streak going.
+• Play a game again: on a game's page, Start a new playthrough. Finished it before KoZo? Say it's your 3rd time and the earlier ones are kept. Each playthrough shows its own time, and you can give it a note like "Shura ending".
+• Colored notifications: an achievement shows in its rarity's color, and Now playing, Level up, Session complete and the others each have their own.
+• Update button: when a new KoZo is out, an Update button shows in the sidebar. One click and it updates, after your game if one is running.
+• Uninstalled games: when a game's folder is gone, a card in the corner asks what to do with it. Mark it Finished, Dropped or On hold, remove it from the Library, or delete it.
+• Discounts has a search: find any game's price, its lowest ever, and set a price alert, even for a game that isn't on sale.
+• Game List: more games load as you scroll, Select all takes every game in the list, and games you want show their sale right on the card.
+• Faster with big libraries: KoZo starts a third faster, the Finished page and Year review open many times faster, and covers take much less memory.
+• This window: What's new shows each new thing, even without internet. Open it again from Settings, About.
 
-Fixed in 1.9.3
-• Play time on a card is never cut off.
-• Achievements no longer show twice for a game when KoZo has no Steam key.
-• A game you play through Steam always starts through Steam.
-• A game's page says when a newer copy was installed beside the old one.
-• Picking a day in a game's sessions no longer opens a session by itself.
+Fixed in 1.10.0
+• A game opened for less than a minute no longer stays Playing on the Game List.
+• Deleting a game whose Game List entry says Playing asks what it should say now.
+• An archived game can be deleted from its right-click menu.
+• The level badge on your profile picture is no longer cut off.

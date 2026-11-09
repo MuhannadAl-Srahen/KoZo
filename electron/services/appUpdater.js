@@ -237,6 +237,18 @@ function installUpdate() {
 }
 
 // Notes for one released version — the "What's new" card after an update.
+// The notes shipped inside this build (build/release-notes.md, in build.files), when they are
+// this version's: What's new works with no internet, and the moment the update starts.
+function localReleaseNotes(version) {
+  try {
+    // Beside electron/ in the app (inside app.asar when installed), also when a script starts it.
+    const text = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'build', 'release-notes.md'), 'utf8')
+    const first = text.replace(/\r/g, '').split('\n')[0].trim()
+    if (first !== `KoZo ${version}`) return null
+    return { version, notes: text.trim(), url: null }
+  } catch { return null }
+}
+
 async function fetchReleaseNotes(version) {
   const pkg = require('../../package.json')
   const pub = Array.isArray(pkg.build?.publish) ? pkg.build.publish[0] : pkg.build?.publish
@@ -251,4 +263,14 @@ async function fetchReleaseNotes(version) {
   return { version, notes: String(r.data?.body || '').trim(), url: r.data?.html_url || null }
 }
 
-module.exports = { setupAutoUpdate, checkForUpdates, fetchLatestRelease, isNewer, getState, setState, installUpdate, fetchReleaseNotes, getAutoUpdater }
+// This version's notes: the ones in the build, else the GitHub release's.
+async function notesFor(version) {
+  const local = localReleaseNotes(version)
+  if (local) {
+    const web = await fetchReleaseNotes(version).catch(() => null)
+    return { ...local, url: web?.url || null }
+  }
+  return (await fetchReleaseNotes(version).catch(() => null)) || { version, notes: '' }
+}
+
+module.exports = { setupAutoUpdate, checkForUpdates, fetchLatestRelease, isNewer, getState, setState, installUpdate, fetchReleaseNotes, localReleaseNotes, notesFor, getAutoUpdater }

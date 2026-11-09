@@ -7,7 +7,7 @@ import {
   IconCircleCheck, IconCircleOff, IconEye, IconEyeOff, IconChevronDown,
   IconChevronRight, IconAlertTriangle, IconDeviceGamepad2,
   IconLayoutDashboard, IconSparkles, IconLayoutSidebarRight, IconMovie, IconTarget, IconChartBar,
-  IconInfoCircle, IconBrandSteam, IconClock, IconRepeat, IconTrash,
+  IconInfoCircle, IconBrandSteam, IconClock, IconRepeat, IconTrash, IconPencil,
 } from '@tabler/icons-react'
 import { exeLooksLikeTool, getBannerBg, getBannerIcon, formatPlaytime, formatDate, formatDateTime, fileUrl, isSteamTracked, launcherLabel, localDayKey, rarityColor, timeAgo } from '../lib/utils'
 import { STATUS_META } from '../components/GameCard'
@@ -166,7 +166,36 @@ function ordinal(n) {
 // "Today" and "Yesterday" read as words inside a sentence.
 const dayWord = (iso) => { const d = formatDate(iso); return /^(Today|Yesterday)$/.test(d) ? d.toLowerCase() : d }
 
-function PlaythroughsCard({ list, sessions }) {
+// A note on a playthrough ("Shura ending"): click to write, Enter or leaving the box saves,
+// Escape cancels.
+function PlaythroughNote({ gameId, p, onSaved }) {
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(p.note || '')
+  useEffect(() => { if (!editing) setText(p.note || '') }, [p.note, editing])
+  async function save() {
+    setEditing(false)
+    if ((text || '').trim() === (p.note || '')) return
+    const r = await window.kozo?.api?.games?.playthroughNote?.(gameId, p.number, text)
+    if (r?.ok) onSaved?.(p.number, r.data)
+  }
+  if (editing) {
+    return (
+      <input className={s.ptNoteInput} autoFocus maxLength={80} value={text} placeholder="Shura ending, no-hit run…" aria-label={`Note for playthrough ${p.number}`}
+        data-pt-note-input={p.number}
+        onChange={e => setText(e.target.value)}
+        onBlur={save}
+        onKeyDown={e => {
+          if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur() }
+          if (e.key === 'Escape') { e.stopPropagation(); setText(p.note || ''); setEditing(false) }
+        }} />
+    )
+  }
+  return p.note
+    ? <button type="button" className={s.ptNote} onClick={() => setEditing(true)} title="Edit the note" data-pt-note={p.number}><IconPencil size={11} stroke={1.8} /> {p.note}</button>
+    : <button type="button" className={s.ptNoteAdd} onClick={() => setEditing(true)} data-pt-note-add={p.number}><IconPencil size={11} stroke={1.8} /> Add a note</button>
+}
+
+function PlaythroughsCard({ gameId, list, sessions, onNote }) {
   const rows = playthroughStats(list, sessions).reverse()
   return (
     <div className={s.card} data-playthroughs="">
@@ -187,6 +216,7 @@ function PlaythroughsCard({ list, sessions }) {
                 {p.finished_at ? `, finished ${dayWord(p.finished_at)}` : ''}
               </>}
             </span>
+            <PlaythroughNote gameId={gameId} p={p} onSaved={onNote} />
           </div>
         ))}
       </div>
@@ -1251,7 +1281,7 @@ export default function GameDetail() {
             <div key={shownTab} className={`${s.main} ${s.tabView}`}>
               {shownTab === 'overview' && (
                 <div className={s.overview}>
-                  {playthroughs.length > 1 && <PlaythroughsCard list={playthroughs} sessions={sessions} />}
+                  {playthroughs.length > 1 && <PlaythroughsCard gameId={game.id} list={playthroughs} sessions={sessions} onNote={(n, note) => setPlaythroughs(l => l.map(x => x.number === n ? { ...x, note } : x))} />}
                   {newNews.length > 0 && (
                     <div className={`${s.card} ${s.wide}`}>
                       <div className={s.cardHead}>

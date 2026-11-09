@@ -930,3 +930,22 @@
 .listsBar > * { flex-shrink: 0; }
 .listsBar .statusTabs { flex-wrap: nowrap; }
 .listsBar .statusTab { white-space: nowrap; }
+
+/* On sale (Discounts' last check): a green chip with the discount and the price. */
+.saleChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--success, #4ade80) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--success, #4ade80) 40%, transparent);
+  color: var(--success, #4ade80);
+  font-size: var(--fs-2xs);
+  font-weight: 800;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.saleChip b { font-weight: 700; color: var(--text-primary); }
+.saleChipLow { background: color-mix(in srgb, var(--success, #4ade80) 26%, transparent); }

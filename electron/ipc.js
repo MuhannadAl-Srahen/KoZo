@@ -56,6 +56,11 @@ handle('games:newPlaythrough', (id, opts) => {
   broadcast('game:updated', Number(id))
   return r
 })
+handle('games:playthroughNote', (id, number, note) => {
+  const r = require('./db/queries/playthroughs').setNote(id, number, note)
+  try { require('./services/autoBackup').markDirty() } catch {}
+  return r
+})
 handle('games:undoPlaythrough', (id, undo) => {
   const pt = require('./db/queries/playthroughs')
   pt.undoLast(id, { createdFirst: !!undo?.createdFirst })
@@ -286,9 +291,12 @@ handle('overlay:openLaunchMiss', () => {
 
 // `listRows`: the uninstalled card's "Delete from KoZo" takes the Game List entry too. The
 // Library's Delete keeps an entry that still has something to show (below).
+// A kept entry still saying Playing is asked about (components/KeptOnListPrompt.jsx): a game
+// that's gone isn't being played (Need for Speed stayed "Playing" on the Game List).
 function deleteGames(ids, { listRows = false } = {}) {
   const fsx = require('fs')
   const list = (Array.isArray(ids) ? ids : [ids]).map(Number).filter(Number.isFinite)
+  const stillPlaying = []
   for (const id of list) {
     const g = gamesQ.getGame(id)
     const db = require('./db/database').getDb()
@@ -300,7 +308,10 @@ function deleteGames(ids, { listRows = false } = {}) {
       // The row loses the game's art with it, so it takes the Steam id and the link along.
       const kept = { ...row, steam_app_id: row.steam_app_id || g?.steam_app_id || null, banner_url: row.banner_url || g?.banner_url || null }
       if (gameListQ.isBlankRow(kept)) db.prepare('DELETE FROM game_list WHERE id = ?').run(row.id)
-      else db.prepare('UPDATE game_list SET steam_app_id = ?, banner_url = ? WHERE id = ?').run(kept.steam_app_id, kept.banner_url, row.id)
+      else {
+        db.prepare('UPDATE game_list SET steam_app_id = ?, banner_url = ? WHERE id = ?').run(kept.steam_app_id, kept.banner_url, row.id)
+        if (row.status === 'playing') stillPlaying.push({ id: row.id, name: row.name || g?.name || '', banner_url: kept.banner_url || null })
+      }
     }
     for (const f of [g?.banner_local_path, g?.hero_local_path]) {
       if (f && /[\\/]banners[\\/]/i.test(f)) { try { fsx.unlinkSync(f) } catch {} }
@@ -308,6 +319,7 @@ function deleteGames(ids, { listRows = false } = {}) {
     broadcast('game:updated', id)
   }
   bk()
+  if (stillPlaying.length) broadcast('gameList:keptPlaying', stillPlaying)
   return list.length
 }
 handle('games:delete', (ids) => deleteGames(ids))
@@ -1505,8 +1517,10 @@ handle('app:whatsNew', async () => {
   if (seen === current) return null
   settingsQ.setSetting('last_seen_version', current)
   if (!seen) return null
-  return (await require('./services/appUpdater').fetchReleaseNotes(current).catch(() => null)) || { version: current, notes: '' }
+  return require('./services/appUpdater').notesFor(current)
 })
+// Settings > About > What's new: this version's notes, any time.
+handle('app:releaseNotes', () => require('./services/appUpdater').notesFor(require('electron').app.getVersion()))
 
 // Resolve a SteamID64 from a profile URL / custom name / raw ID. Uses the passed
 // key if given (onboarding, before it's saved), else the stored key.
@@ -2028,6 +2042,7 @@ handle('steam:reviews', (appId) => require('./services/steamApi').getReviews(Num
 // Discount games (pages/Deals.jsx, services/deals.js).
 handle('deals:list', (opts) => require('./services/deals').getDeals(opts || {}))
 handle('deals:markSeen', () => require('./services/deals').markSeen())
+handle('deals:saleMap', () => require('./services/deals').saleMap())
 handle('deals:unseen', () => require('./services/deals').unseen())
 handle('deals:gamePrices', (appid) => require('./services/deals').gamePrices(appid))
 handle('deals:setTarget', (appid, cents, meta) => require('./services/deals').setTarget(appid, cents, meta))

@@ -1400,6 +1400,7 @@ app.whenReady().then(async () => {
     await ev(`document.querySelector('[data-new-playthrough]')?.click(); true`); await sleep(400)
     const asked = await ev(`[...document.querySelectorAll('[role=dialog] button')].map(b => b.innerText.trim()).join('|')`)
     check('playthrough: it asks first, naming playthrough 2', /Start playthrough 2/.test(asked), asked)
+    check('playthrough: the first time it asks which time this is', await ev(`/2nd/.test(document.querySelector('[data-replay-number]')?.innerText || '')`))
     await ev(`[...document.querySelectorAll('[role=dialog] button')].find(b => /Start playthrough 2/.test(b.innerText))?.click(); true`); await sleep(1200)
     const g1 = db.prepare('SELECT completion_status FROM games WHERE id = ?').get(gid)
     const pts = db.prepare('SELECT number, finished_at FROM playthroughs WHERE game_id = ? ORDER BY number').all(gid)
@@ -1407,6 +1408,10 @@ app.whenReady().then(async () => {
     check('playthrough: starting one changes no XP (the first finish still counts)', xpSvc.computeXp().totalXp === xp0.totalXp, xp0.totalXp + ' vs ' + xpSvc.computeXp().totalXp)
     check('playthrough: Undo is offered', await ev(`!!document.querySelector('[data-undo-bar]')`))
     check('playthrough: the page lists both playthroughs', /Playthrough 2[\s\S]*Playthrough 1/.test(await ev(`document.querySelector('[data-playthroughs]')?.innerText || ''`)))
+    // A note on a run (the maker: "Shura ending").
+    await ev(`document.querySelector('[data-pt-note-add="1"]')?.click(); true`); await sleep(300)
+    await ev(`(() => { const i = document.querySelector('[data-pt-note-input="1"]'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, 'Shura ending'); i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return true })()`); await sleep(700)
+    check('playthrough: a note is saved and shown', db.prepare('SELECT note FROM playthroughs WHERE game_id = ? AND number = 1').get(gid)?.note === 'Shura ending' && /Shura ending/.test(await ev(`document.querySelector('[data-playthroughs]')?.innerText || ''`)))
     // An hour and a half of play in it, then Finished: the Finished XP once more.
     const st = Date.now() + 60000
     db.prepare('INSERT INTO sessions (game_id, started_at, ended_at, duration_seconds) VALUES (?, ?, ?, 5400)').run(gid, new Date(st).toISOString(), new Date(st + 5400e3).toISOString())
@@ -1430,6 +1435,28 @@ app.whenReady().then(async () => {
     check('playthrough: Profile explains every way to earn XP', /Ultra Rare\s*500/i.test(guide) && /new playthrough/i.test(guide) && /Milestones/i.test(guide), guide.slice(0, 200))
     await escape()
     check('playthrough: Profile shows unlocks by rarity', await ev(`!!document.querySelector('[data-xp-rarity]')`))
+    // Played twice before KoZo, never in it (the maker's Sekiro): this is the 3rd time.
+    const sek = await ev(`window.kozo.api.games.add({ name: 'Smoke Sekiro', exe_name: 'sekiro.exe', install_path: 'C:\\\\SmokeGames\\\\Sekiro', source: 'manual' }).then(r => r.data.id)`)
+    await go('#/game/' + sek, 2000)
+    await ev(`document.querySelector('button[title="Game options"]')?.click(); true`); await sleep(300)
+    check('playthrough: offered for a game KoZo never saw played', await ev(`!!document.querySelector('[data-new-playthrough]')`))
+    await ev(`document.querySelector('[data-new-playthrough]')?.click(); true`); await sleep(400)
+    await ev(`document.querySelector('[data-replay-number] button[aria-label="One more"]')?.click(); true`); await sleep(200)
+    const sekAsk = await ev(`document.querySelector('[role=dialog]')?.innerText || ''`)
+    check('playthrough: 3rd time, the earlier two kept from before KoZo', /3rd/.test(sekAsk) && /Start playthrough 3/.test(sekAsk) && /Playthroughs 1 to 2 are kept as finished before KoZo/.test(sekAsk), sekAsk.slice(0, 300))
+    await ev(`[...document.querySelectorAll('[role=dialog] button')].find(b => /Start playthrough 3/.test(b.innerText))?.click(); true`); await sleep(1200)
+    const sekRows = db.prepare('SELECT number, before_kozo, finished_at FROM playthroughs WHERE game_id = ? ORDER BY number').all(sek)
+    check('playthrough: playthroughs 1 and 2 before KoZo, 3 now', sekRows.length === 3 && sekRows[0].before_kozo === 1 && sekRows[1].before_kozo === 1 && !sekRows[2].before_kozo && !sekRows[2].finished_at, JSON.stringify(sekRows))
+    check('playthrough: the card says Before KoZo', /Before KoZo/.test(await ev(`document.querySelector('[data-playthroughs]')?.innerText || ''`)))
+    // Archived: its menu deletes it for good (asks first).
+    await ev(`window.kozo.api.games.archive([${sek}]).then(() => true)`)
+    await go('#/game/' + sek, 1800)
+    await ev(`document.querySelector('button[title="Game options"]')?.click(); true`); await sleep(300)
+    check('archived: the game menu offers Delete with history', await ev(`!!document.querySelector('[data-delete-archived]')`))
+    await ev(`document.querySelector('[data-delete-archived]')?.click(); true`); await sleep(300)
+    check('archived: it asks first', !!db.prepare('SELECT id FROM games WHERE id = ?').get(sek) && await ev(`!!document.querySelector('[data-delete-archived-yes]')`))
+    await ev(`document.querySelector('[data-delete-archived-yes]')?.click(); true`); await sleep(1200)
+    check('archived: deleted with its playthroughs', !db.prepare('SELECT id FROM games WHERE id = ?').get(sek) && db.prepare('SELECT COUNT(*) c FROM playthroughs WHERE game_id = ?').get(sek).c === 0)
   }
   }
 
@@ -1459,6 +1486,15 @@ app.whenReady().then(async () => {
     check('update: a stopped download says try again', !!b && /Try again/i.test(b.text), JSON.stringify(b))
     await set({ state: 'idle', version: null, installing: false, wanted: false })
     check('update: gone again when there is nothing new', (await btn()) === null)
+    // What's new: this version's own notes (shipped in the app), laid out, not plain text.
+    await go('#/settings?tab=about', 1500)
+    await ev(`document.querySelector('[data-whatsnew-open]')?.click(); true`); await sleep(1500)
+    const wn = await ev(`(() => { const d = document.querySelector('[data-whatsnew]'); return d ? { items: d.querySelectorAll('[data-whatsnew-item]').length, text: d.innerText } : null })()`)
+    const ver = require(path.join(root, 'package.json')).version
+    check("update: What's new shows this version's notes, item by item", !!wn && wn.items >= 3 && !/Bug fixes and improvements/.test(wn.text), JSON.stringify(wn)?.slice(0, 200))
+    check("update: What's new names the version", await ev(`[...document.querySelectorAll('[role=dialog]')].some(d => d.innerText.includes(${JSON.stringify(ver)}))`))
+    check("update: What's new has no long dashes", !!wn && !/[\u2013\u2014]/.test(wn.text))
+    await ev(`document.querySelector('[data-whatsnew-ok]')?.click(); true`); await sleep(300)
   }
   }
 
@@ -1519,6 +1555,17 @@ app.whenReady().then(async () => {
     check('uninstalled: reinstalled and uninstalled again asks again', svc.pending().some(p => p.id === first))
     check('uninstalled: a drive that is not plugged in is not asked', svc.pickPending([{ id: 1, install_path: 'Q:\\Games\\X' }], {}, () => true).length === 0)
     await ev(`window.kozo.api.games.delete([${first}, ${second}]).then(() => true)`)
+    // Deleting a game whose Game List entry stays (it has a Steam id) and says Playing asks.
+    const kept = await ev(`window.kozo.api.games.add({ name: 'Smoke Kept Entry', exe_name: 'k.exe', steam_app_id: 900600, source: 'manual' }).then(r => r.data.id)`)
+    db.prepare("UPDATE game_list SET status = 'playing', steam_app_id = 900600 WHERE game_id = ?").run(kept)
+    const keptRow = db.prepare('SELECT id FROM game_list WHERE game_id = ?').get(kept)?.id
+    await go('#/', 800)
+    await ev(`window.kozo.api.games.delete([${kept}]).then(() => true)`); await sleep(800)
+    const prompt = await ev(`document.querySelector('[data-kept-prompt]')?.innerText || ''`)
+    check('delete: a Game List entry left on Playing is asked about', /Smoke Kept Entry/.test(prompt) && /Playing/.test(prompt) && /Dropped/.test(prompt), prompt.slice(0, 200))
+    await ev(`document.querySelector('[data-kept-status=dropped]')?.click(); true`); await sleep(800)
+    check('delete: the answer sets the Game List entry', db.prepare('SELECT status FROM game_list WHERE id = ?').get(keptRow)?.status === 'dropped' && await ev(`!document.querySelector('[data-kept-prompt]')`))
+    await ev(`window.kozo.api.gameList.delete(${keptRow}).then(() => true)`)
     // A session under a minute takes back the Game List's Playing too (Need for Speed again).
     const statusSync = require(path.join(root, 'electron', 'services', 'statusSync.js'))
     const gid = await add('Smoke Short Play')
@@ -1562,6 +1609,26 @@ app.whenReady().then(async () => {
     const scrollNames = await ev(`[...document.querySelectorAll('.app-main [data-gpnav]')].map(c => (c.textContent.match(/Smoke Scroll \\d+/) || [])[0]).filter(Boolean)`)
     check('Game List scroll: reaches every game, each once', last === total && scrollNames.length === 45 && new Set(scrollNames).size === 45, `${last} of ${total}, ${scrollNames.length} test rows`)
     check('Game List scroll: nothing left to load', await ev(`!document.querySelector('[data-gamelist-more]')`))
+    // Select all, before the rest has loaded: every game in the list.
+    await go('#/plan', 300); await go('#/game-list', 1800)
+    await ev(`[...document.querySelectorAll('button')].find(b => b.title === 'Select games')?.click(); true`); await sleep(300)
+    const selBtn = await ev(`[...document.querySelectorAll('button')].find(b => /Select all/.test(b.innerText))?.innerText || ''`)
+    check('Game List: Select all names every game, not the 20 loaded', new RegExp('Select all \\(' + total + '\\)').test(selBtn), selBtn)
+    await ev(`[...document.querySelectorAll('button')].find(b => /Select all/.test(b.innerText))?.click(); true`); await sleep(800)
+    const selText = await ev(`document.querySelector('[class*=selectionCount]')?.innerText || ''`)
+    check('Game List: Select all selects every game', selText.includes(total + ' selected') && (await count()) < total, `${selText}, ${await count()} cards loaded`)
+    await ev(`[...document.querySelectorAll('button')].find(b => /^\\s*Done/.test(b.innerText))?.click(); true`); await sleep(300)
+    // On sale: the card says so (Discounts' last answer, stubbed).
+    const dealsSvc = require(path.join(root, 'electron', 'services', 'deals.js'))
+    const realSaleMap = dealsSvc.saleMap
+    await ev(`window.kozo.api.gameList.add({ name: 'Smoke On Sale', steam_app_id: 900500, status: 'want_to_play', rating: null, game_id: null }).then(() => true)`)
+    dealsSvc.saleMap = () => ({ 900500: { pct: 40, finalText: '$11.99', originalText: '$19.99', lowest: false } })
+    await go('#/plan', 300); await go('#/game-list', 1800)
+    const chip = await ev(`(() => { const c = [...document.querySelectorAll('.app-main [data-gpnav]')].find(x => x.textContent.includes('Smoke On Sale')); return c?.querySelector('[data-sale-chip]')?.innerText || '' })()`)
+    check('Game List: a game you want that is on sale shows it on its card', /-40%/.test(chip) && /11\.99/.test(chip), chip)
+    check('Game List: other cards have no sale chip', await ev(`document.querySelectorAll('.app-main [data-sale-chip]').length`) === 1)
+    dealsSvc.saleMap = realSaleMap
+    await ev(`(async () => { const rows = (await window.kozo.api.gameList.list({ limit: 500 })).data?.items || []; for (const r of rows) if (r.name === 'Smoke On Sale') await window.kozo.api.gameList.delete(r.id); return true })()`)
     await ev(`(async () => {
       const rows = (await window.kozo.api.gameList.list({ limit: 500 })).data?.items || []
       for (const r of rows) if (/^Smoke Scroll /.test(r.name)) await window.kozo.api.gameList.delete(r.id)

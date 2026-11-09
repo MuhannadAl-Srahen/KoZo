@@ -216,6 +216,8 @@ function runMigrations() {
     } catch (_) {}
     // Playthroughs finished before KoZo knew the game (the maker: Sekiro, played twice, now a third).
     try { db.exec('ALTER TABLE playthroughs ADD COLUMN before_kozo INTEGER DEFAULT 0') } catch (_) {}
+    // A short note per run ("Shura ending", "No-hit run"), the maker's ask.
+    try { db.exec('ALTER TABLE playthroughs ADD COLUMN note TEXT') } catch (_) {}
 
     // Indexes. There were none, so every lookup by game or by date read every session:
     // with 500 games and 30,000 sessions the Finished page took 0.3 s and the Year review
