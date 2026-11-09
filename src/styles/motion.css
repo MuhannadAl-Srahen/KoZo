@@ -26,22 +26,24 @@
 @keyframes kzSlideL   { from { opacity: 0; transform: translateX(-18px); } }
 
 /* ── Page changes ── */
-html[data-motion="soft"] .app-main > * { animation: kzPageIn 0.3s var(--ease-out) backwards; }
-html[data-motion="heavy"] .app-main > * { animation: kzPageInHv 0.45s var(--ease-out) backwards; }
+html[data-motion="soft"] .app-main > * { animation: kzPageIn 0.22s var(--ease-out) backwards; }
+html[data-motion="heavy"] .app-main > * { animation: kzPageInHv 0.28s var(--ease-out) backwards; }
 
-/* ── Cards and rows arrive one after another ── */
-html[data-motion="soft"] .app-main [data-gpnav] { animation: kzRiseSoft 0.32s var(--ease-out) backwards; }
-html[data-motion="heavy"] .app-main [data-gpnav] { animation: kzRise 0.55s var(--ease-spring) backwards; }
-html[data-motion="soft"] .app-main [data-gpnav]:nth-child(2),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(2)  { animation-delay: 35ms; }
-html[data-motion="soft"] .app-main [data-gpnav]:nth-child(3),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(3)  { animation-delay: 70ms; }
-html[data-motion="soft"] .app-main [data-gpnav]:nth-child(4),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(4)  { animation-delay: 105ms; }
-html[data-motion="soft"] .app-main [data-gpnav]:nth-child(5),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(5)  { animation-delay: 140ms; }
-html[data-motion="soft"] .app-main [data-gpnav]:nth-child(6),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(6)  { animation-delay: 175ms; }
-html[data-motion="soft"] .app-main [data-gpnav]:nth-child(7),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(7)  { animation-delay: 210ms; }
-html[data-motion="soft"] .app-main [data-gpnav]:nth-child(8),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(8)  { animation-delay: 245ms; }
-html[data-motion="soft"] .app-main [data-gpnav]:nth-child(9),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(9)  { animation-delay: 280ms; }
-html[data-motion="soft"] .app-main [data-gpnav]:nth-child(10), html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(10) { animation-delay: 315ms; }
-html[data-motion="soft"] .app-main [data-gpnav]:nth-child(n+11), html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(n+11) { animation-delay: 350ms; }
+/* ── Cards and rows arrive one after another ──
+   Short on purpose: each page kept moving 0.5 to 1.2 s after a switch with Heavy, and the
+   maker found switching pages slow. Now about 0.45 s, the same look. */
+html[data-motion="soft"] .app-main [data-gpnav] { animation: kzRiseSoft 0.26s var(--ease-out) backwards; }
+html[data-motion="heavy"] .app-main [data-gpnav] { animation: kzRise 0.34s var(--ease-spring) backwards; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(2),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(2)  { animation-delay: 15ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(3),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(3)  { animation-delay: 30ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(4),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(4)  { animation-delay: 45ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(5),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(5)  { animation-delay: 60ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(6),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(6)  { animation-delay: 75ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(7),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(7)  { animation-delay: 90ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(8),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(8)  { animation-delay: 105ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(9),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(9)  { animation-delay: 115ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(10), html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(10) { animation-delay: 120ms; }
+html[data-motion="soft"] .app-main [data-gpnav]:nth-child(n+11), html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(n+11) { animation-delay: 120ms; }
 
 /* ── Dialogs and menus ── */
 html[data-motion="heavy"] [role="dialog"] { animation: kzPopHv 0.38s var(--ease-spring) backwards; }

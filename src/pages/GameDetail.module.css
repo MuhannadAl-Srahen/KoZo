@@ -789,46 +789,46 @@ button.monthPicked { background: color-mix(in srgb, var(--a) 12%, transparent); 
 @keyframes gdUp { from { opacity: 0; transform: translateY(14px); } }
 @keyframes gdPop { from { opacity: 0; transform: scale(0.92); } }
 @keyframes gdCover { from { opacity: 0; transform: translateY(18px) scale(0.96); } }
-:global(html[data-motion]) .cover { animation: gdCover 0.5s var(--ease-out) backwards; }
+:global(html[data-motion]) .cover { animation: gdCover 0.32s var(--ease-out) backwards; }
 :global(html[data-motion]) .headText > *,
-:global(html[data-motion]) .cineInfo > * { animation: gdUp 0.4s var(--ease-out) backwards; }
-:global(html[data-motion]) .headText > :nth-child(2), :global(html[data-motion]) .cineInfo > :nth-child(2) { animation-delay: 0.05s; }
-:global(html[data-motion]) .headText > :nth-child(3), :global(html[data-motion]) .cineInfo > :nth-child(3) { animation-delay: 0.1s; }
-:global(html[data-motion]) .headText > :nth-child(4), :global(html[data-motion]) .cineInfo > :nth-child(4) { animation-delay: 0.15s; }
-:global(html[data-motion="heavy"]) .playBig { animation: gdPop 0.45s var(--ease-spring) 0.15s backwards; }
+:global(html[data-motion]) .cineInfo > * { animation: gdUp 0.28s var(--ease-out) backwards; }
+:global(html[data-motion]) .headText > :nth-child(2), :global(html[data-motion]) .cineInfo > :nth-child(2) { animation-delay: 0.03s; }
+:global(html[data-motion]) .headText > :nth-child(3), :global(html[data-motion]) .cineInfo > :nth-child(3) { animation-delay: 0.06s; }
+:global(html[data-motion]) .headText > :nth-child(4), :global(html[data-motion]) .cineInfo > :nth-child(4) { animation-delay: 0.09s; }
+:global(html[data-motion="heavy"]) .playBig { animation: gdPop 0.32s var(--ease-spring) 0.06s backwards; }
 :global(html[data-motion="heavy"]) .playBig:hover { transform: scale(1.04); }
-:global(html[data-motion]) .tabView { animation: gdUp 0.3s var(--ease-out) backwards; }
-:global(html[data-motion]) .side > * { animation: gdUp 0.4s var(--ease-out) backwards; }
-:global(html[data-motion]) .side > :nth-child(2) { animation-delay: 0.08s; }
-:global(html[data-motion]) .overview > * { animation: gdUp 0.4s var(--ease-out) backwards; }
-:global(html[data-motion]) .overview > :nth-child(2) { animation-delay: 0.05s; }
-:global(html[data-motion]) .overview > :nth-child(3) { animation-delay: 0.1s; }
-:global(html[data-motion]) .overview > :nth-child(4) { animation-delay: 0.15s; }
-:global(html[data-motion]) .overview > :nth-child(5) { animation-delay: 0.2s; }
+:global(html[data-motion]) .tabView { animation: gdUp 0.24s var(--ease-out) backwards; }
+:global(html[data-motion]) .side > * { animation: gdUp 0.28s var(--ease-out) backwards; }
+:global(html[data-motion]) .side > :nth-child(2) { animation-delay: 0.05s; }
+:global(html[data-motion]) .overview > * { animation: gdUp 0.28s var(--ease-out) backwards; }
+:global(html[data-motion]) .overview > :nth-child(2) { animation-delay: 0.03s; }
+:global(html[data-motion]) .overview > :nth-child(3) { animation-delay: 0.06s; }
+:global(html[data-motion]) .overview > :nth-child(4) { animation-delay: 0.09s; }
+:global(html[data-motion]) .overview > :nth-child(5) { animation-delay: 0.12s; }
 :global(html[data-motion]) .achCard { animation: gdUp 0.35s var(--ease-out) backwards; }
 :global(html[data-motion="heavy"]) .sessionRow { animation: gdUp 0.35s var(--ease-out) backwards; }
-:global(html[data-motion="heavy"]) .heroImg { animation: gdZoom 1.2s var(--ease-out) backwards; }
+:global(html[data-motion="heavy"]) .heroImg { animation: gdZoom 0.6s var(--ease-out) backwards; }
 @keyframes gdZoom { from { opacity: 0; transform: scale(1.06); } }
-:global(html[data-motion]) .achGrid > :nth-child(1) { animation-delay: 0.02s; }
-:global(html[data-motion]) .achGrid > :nth-child(2) { animation-delay: 0.04s; }
-:global(html[data-motion]) .achGrid > :nth-child(3) { animation-delay: 0.06s; }
-:global(html[data-motion]) .achGrid > :nth-child(4) { animation-delay: 0.08s; }
-:global(html[data-motion]) .achGrid > :nth-child(5) { animation-delay: 0.10s; }
-:global(html[data-motion]) .achGrid > :nth-child(6) { animation-delay: 0.12s; }
-:global(html[data-motion]) .achGrid > :nth-child(7) { animation-delay: 0.14s; }
-:global(html[data-motion]) .achGrid > :nth-child(8) { animation-delay: 0.16s; }
-:global(html[data-motion]) .achGrid > :nth-child(9) { animation-delay: 0.18s; }
-:global(html[data-motion]) .achGrid > :nth-child(10) { animation-delay: 0.20s; }
-:global(html[data-motion]) .achGrid > :nth-child(11) { animation-delay: 0.22s; }
-:global(html[data-motion]) .achGrid > :nth-child(12) { animation-delay: 0.24s; }
-:global(html[data-motion]) .achGrid > :nth-child(13) { animation-delay: 0.26s; }
-:global(html[data-motion]) .achGrid > :nth-child(14) { animation-delay: 0.28s; }
-:global(html[data-motion]) .achGrid > :nth-child(15) { animation-delay: 0.30s; }
-:global(html[data-motion]) .achGrid > :nth-child(16) { animation-delay: 0.32s; }
-:global(html[data-motion]) .achGrid > :nth-child(17) { animation-delay: 0.34s; }
-:global(html[data-motion]) .achGrid > :nth-child(18) { animation-delay: 0.36s; }
-:global(html[data-motion]) .achGrid > :nth-child(19) { animation-delay: 0.38s; }
-:global(html[data-motion]) .achGrid > :nth-child(20) { animation-delay: 0.40s; }
+:global(html[data-motion]) .achGrid > :nth-child(1) { animation-delay: 0.01s; }
+:global(html[data-motion]) .achGrid > :nth-child(2) { animation-delay: 0.02s; }
+:global(html[data-motion]) .achGrid > :nth-child(3) { animation-delay: 0.03s; }
+:global(html[data-motion]) .achGrid > :nth-child(4) { animation-delay: 0.04s; }
+:global(html[data-motion]) .achGrid > :nth-child(5) { animation-delay: 0.05s; }
+:global(html[data-motion]) .achGrid > :nth-child(6) { animation-delay: 0.06s; }
+:global(html[data-motion]) .achGrid > :nth-child(7) { animation-delay: 0.07s; }
+:global(html[data-motion]) .achGrid > :nth-child(8) { animation-delay: 0.08s; }
+:global(html[data-motion]) .achGrid > :nth-child(9) { animation-delay: 0.09s; }
+:global(html[data-motion]) .achGrid > :nth-child(10) { animation-delay: 0.10s; }
+:global(html[data-motion]) .achGrid > :nth-child(11) { animation-delay: 0.11s; }
+:global(html[data-motion]) .achGrid > :nth-child(12) { animation-delay: 0.12s; }
+:global(html[data-motion]) .achGrid > :nth-child(13) { animation-delay: 0.13s; }
+:global(html[data-motion]) .achGrid > :nth-child(14) { animation-delay: 0.14s; }
+:global(html[data-motion]) .achGrid > :nth-child(15) { animation-delay: 0.15s; }
+:global(html[data-motion]) .achGrid > :nth-child(16) { animation-delay: 0.16s; }
+:global(html[data-motion]) .achGrid > :nth-child(17) { animation-delay: 0.17s; }
+:global(html[data-motion]) .achGrid > :nth-child(18) { animation-delay: 0.18s; }
+:global(html[data-motion]) .achGrid > :nth-child(19) { animation-delay: 0.19s; }
+:global(html[data-motion]) .achGrid > :nth-child(20) { animation-delay: 0.20s; }
 
 /* Loading and "not found" states */
 .content { flex: 1; min-height: 0; padding: var(--sp-16) var(--gutter) var(--content-pb); }
