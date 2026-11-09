@@ -43,7 +43,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 // run): after a change, test what changed, not all ~290 checks (the maker's call).
 // Parts: pages edit backups gamelist year sessions toolexe drive privacy version wishlist
 // upcoming review appearance narrow controller pick big steamcopy update playthrough uninstalled
-// listscroll dealsearch tray
+// listscroll dealsearch extras tray
 const ONLY = process.env.SMOKE_ONLY ? process.env.SMOKE_ONLY.split(',').map(x => x.trim()) : null
 const want = (part) => !ONLY || ONLY.includes(part)
 
@@ -55,7 +55,7 @@ function finish(code) {
     app.exit(code)
   }, 300)
 }
-setTimeout(() => { console.error('  FAIL  timed out after 240s'); fail++; finish(1) }, 240000).unref()
+setTimeout(() => { console.error('  FAIL  timed out after 420s'); fail++; finish(1) }, 420000).unref()   // the whole suite takes about 4 minutes here; the release machine is slower
 
 const main = require(path.join(root, 'electron', 'main.js'))
 
@@ -1671,6 +1671,88 @@ app.whenReady().then(async () => {
     n = await names()
     check('Discounts search: clearing shows every deal again', ['Quiet Farm', 'Smoke Racer Deluxe', 'Speedy Puzzle'].every(x => n.includes(x)) && await ev(`!document.querySelector('[data-deals-steam]')`), n.join(' | '))
     deals.getDeals = realDeals; deals.markSeen = realMark; steamApi.searchGames = realSearch
+  }
+  }
+
+  if (want('extras')) {
+  // ── Badges, quick search (Ctrl+K), achievement guides, the picked-games tray (the maker's asks) ──
+  {
+    const db = require(path.join(root, 'electron', 'db', 'database.js')).getDb()
+    const gid = seeded[0]
+    // Badges on the Profile: earned and locked with progress.
+    await go('#/profile', 2000)
+    const badges = await ev(`(() => { const c = document.querySelector('[data-badges]'); return c ? { n: c.querySelectorAll('[data-badge]').length, text: c.innerText } : null })()`)
+    check('badges: the Profile shows them, earned and locked', !!badges && badges.n >= 15 && /of \d+ earned/.test(badges.text) && /100 hours club/.test(badges.text), JSON.stringify(badges)?.slice(0, 160))
+    // A badge newly earned shows a toast once: a 4-hour session earns Marathon.
+    const settingsQ = require(path.join(root, 'electron', 'db', 'queries', 'settings.js'))
+    const xpTracker = require(path.join(root, 'electron', 'services', 'xpTracker.js'))
+    const ov = require(path.join(root, 'electron', 'overlayWindow.js'))
+    const sent = []
+    const realBadge = ov.sendBadge
+    ov.sendBadge = (d) => sent.push(d)
+    xpTracker.check({ reason: 'test' })   // records what's earned now
+    const st = Date.now() - 6 * 3600e3
+    db.prepare('INSERT INTO sessions (game_id, started_at, ended_at, duration_seconds) VALUES (?, ?, ?, ?)').run(gid, new Date(st).toISOString(), new Date(st + 4.5 * 3600e3).toISOString(), 16200)
+    xpTracker.check({ reason: 'test' })
+    check('badges: a newly earned one shows a toast', sent.some(b => b.key === 'marathon'), JSON.stringify(sent))
+    const again = sent.length
+    xpTracker.check({ reason: 'test' })
+    check('badges: and only once', sent.length === again)
+    ov.sendBadge = realBadge
+    check('badges: the Marathon badge is earned on the Profile', await ev(`window.kozo.api.stats.badges().then(r => r.data.list.find(b => b.key === 'marathon')?.earned === true)`))
+
+    // Quick search: Ctrl+K, a game from the Library, Enter opens its page.
+    await go('#/', 1200)
+    await ev(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true })); true`); await sleep(500)
+    check('quick search: Ctrl+K opens it', await ev(`!!document.querySelector('[data-quick-search] input')`))
+    await ev(`(() => { const i = document.querySelector('[data-quick-search] input'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, 'smoke alp'); i.dispatchEvent(new Event('input', { bubbles: true })); return true })()`); await sleep(700)
+    const qs = await ev(`[...document.querySelectorAll('[data-quick-search] [data-qs-kind]')].map(b => b.dataset.qsKind + ':' + b.innerText.trim()).join(' | ')`)
+    check('quick search: finds the Library game', /game:Smoke Alpha/.test(qs), qs)
+    await ev(`document.querySelector('[data-quick-search] input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); true`); await sleep(900)
+    check('quick search: Enter opens the game page and closes', (await ev('location.hash')) === '#/game/' + gid && await ev(`!document.querySelector('[data-quick-search]')`), await ev('location.hash'))
+    await ev(`document.querySelector('[data-quick-search-btn]')?.click(); true`); await sleep(400)
+    await ev(`(() => { const i = document.querySelector('[data-quick-search] input'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, 'discou'); i.dispatchEvent(new Event('input', { bubbles: true })); return true })()`); await sleep(500)
+    check('quick search: the sidebar button opens it, and pages are found', /page:Discounts/.test(await ev(`[...document.querySelectorAll('[data-quick-search] [data-qs-kind]')].map(b => b.dataset.qsKind + ':' + b.innerText.trim()).join(' | ')`)))
+    await ev(`document.querySelector('[data-quick-search] input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); true`); await sleep(300)
+    check('quick search: Esc closes it', await ev(`!document.querySelector('[data-quick-search]')`))
+
+    // Guide on a locked achievement.
+    db.prepare("INSERT OR IGNORE INTO achievements (game_id, steam_api_name, display_name, description, global_unlock_percent) VALUES (?, 'SMOKE_LOCKED', 'Smoke Locked One', 'Do the thing', 12.5)").run(gid)
+    await go('#/', 600)   // leave the page first: the same address again doesn't reload it
+    await go('#/game/' + gid, 1800)
+    await ev(`[...document.querySelectorAll('[role=tab]')].find(t => /Achievements/.test(t.innerText))?.click(); true`); await sleep(800)
+    const opened = []
+    const shell = require('electron').shell
+    const realOpen = shell.openExternal
+    shell.openExternal = async (u) => { opened.push(u) }
+    check('guide: a locked achievement has a Guide button', await ev(`!!document.querySelector('[data-ach-guide]')`))
+    await ev(`document.querySelector('[data-ach-guide]')?.click(); true`); await sleep(400)
+    const menu = await ev(`[...document.querySelectorAll('[role=menu] [role=menuitem], [role=menu] button')].map(b => b.innerText.trim()).join(' | ')`)
+    check('guide: it offers YouTube and the web', /YouTube/.test(menu) && /Search the web/.test(menu), menu || await ev(`document.querySelectorAll('[data-ach-guide]').length + ' guides, ' + document.querySelectorAll('[role=menu]').length + ' menus, hash ' + location.hash + ', dialogs ' + document.querySelectorAll('[role=dialog]').length`))
+    await ev(`[...document.querySelectorAll('[role=menu] [role=menuitem], [role=menu] button')].find(b => /YouTube/.test(b.innerText))?.click(); true`); await sleep(400)
+    shell.openExternal = realOpen
+    check('guide: YouTube searches for the game and the achievement', opened.some(u => /youtube\.com\/results/.test(u) && /Smoke%20Locked%20One/.test(u)), JSON.stringify(opened))
+    db.prepare("DELETE FROM achievements WHERE steam_api_name = 'SMOKE_LOCKED'").run()
+
+    // The picked-games tray: a long name stays on one line.
+    await go('#/game-list', 1500)
+    await ev(`[...document.querySelectorAll('button')].find(b => /Add games/.test(b.innerText))?.click(); true`); await sleep(800)
+    const chipH = await ev(`(async () => {
+      const d = document.querySelector('[role=dialog]')
+      const tab = [...d.querySelectorAll('button')].find(b => /Paste a list/i.test(b.innerText))
+      if (!tab) return 'no paste tab'
+      tab.click(); await new Promise(r => setTimeout(r, 300))
+      const ta = d.querySelector('textarea'); if (!ta) return 'no textarea'
+      const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set
+      set.call(ta, 'Need for Speed: Most Wanted - Black Edition of a Very Long Name'); ta.dispatchEvent(new Event('input', { bubbles: true }))
+      await new Promise(r => setTimeout(r, 300))
+      const b = [...d.querySelectorAll('button')].find(x => /Find|Match|Add these|Look up/i.test(x.innerText)); b?.click()
+      await new Promise(r => setTimeout(r, 2500))
+      const chip = d.querySelector('[class*=chip] [class*=chipName]')?.parentElement
+      return chip ? chip.getBoundingClientRect().height : 'no chip'
+    })()`)
+    check('Add to Game List: a long picked name stays on one line', typeof chipH !== 'number' || chipH <= 28, String(chipH))
+    await escape()
   }
   }
 

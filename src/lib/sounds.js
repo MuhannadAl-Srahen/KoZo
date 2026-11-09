@@ -140,3 +140,15 @@ export function playQuestion() {
     tone(c, t + 0.16, 659.3, 0.26, 0.07)
   } catch { /* ignore */ }
 }
+
+// Badge earned: a short bright fanfare (G5 C6 E6 G6), lighter than a level up.
+export function playBadge() {
+  try {
+    const c = ctx(); if (!c) return
+    const t = c.currentTime
+    tone(c, t, 784.0, 0.14, 0.07)
+    tone(c, t + 0.07, 1046.5, 0.14, 0.07)
+    tone(c, t + 0.14, 1318.5, 0.14, 0.08)
+    tone(c, t + 0.21, 1568.0, 0.55, 0.10)
+  } catch { /* ignore */ }
+}

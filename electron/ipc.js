@@ -1512,7 +1512,7 @@ handle('app:installUpdate', () => require('./services/appUpdater').installUpdate
 // install just records its version (nothing to compare against).
 handle('app:whatsNew', async () => {
   const settingsQ = require('./db/queries/settings')
-  const current = require('electron').app.getVersion()
+  const current = require('../package.json').version
   const seen = settingsQ.getSetting('last_seen_version')
   if (seen === current) return null
   settingsQ.setSetting('last_seen_version', current)
@@ -3234,5 +3234,6 @@ handle('stats:captureCard', async (rect, action, year) => {
 
 handle('stats:xp', () => require('./services/xp').computeXp())
 handle('stats:xpHistory', (limit) => require('./services/xp').xpHistory(limit || 25))
+handle('stats:badges', () => require('./services/badges').computeBadges())
 
 module.exports = { launchGame }

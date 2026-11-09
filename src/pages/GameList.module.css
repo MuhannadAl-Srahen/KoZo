@@ -931,21 +931,66 @@
 .listsBar .statusTabs { flex-wrap: nowrap; }
 .listsBar .statusTab { white-space: nowrap; }
 
-/* On sale (Discounts' last check): a green chip with the discount and the price. */
+/* On sale (Discounts' last check), in Steam's own sale colors so it reads at a glance. */
 .saleChip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   flex-shrink: 0;
-  padding: 1px 7px;
+  padding: 2px 8px;
   border-radius: var(--r-pill);
-  background: color-mix(in srgb, var(--success, #4ade80) 16%, transparent);
-  border: 1px solid color-mix(in srgb, var(--success, #4ade80) 40%, transparent);
-  color: var(--success, #4ade80);
-  font-size: var(--fs-2xs);
+  background: #4c6b22;
+  color: #beee11;
+  font-size: var(--fs-xs);
   font-weight: 800;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
-.saleChip b { font-weight: 700; color: var(--text-primary); }
-.saleChipLow { background: color-mix(in srgb, var(--success, #4ade80) 26%, transparent); }
+.saleChip b { font-weight: 700; color: #fff; }
+.saleChipLow { box-shadow: 0 0 0 1px #beee11; }
+
+/* On a card: the cover's top right corner. */
+.saleBadge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.saleBadgePct {
+  padding: 3px 10px;
+  border-radius: var(--r-pill);
+  background: #4c6b22;
+  color: #beee11;
+  font-size: var(--fs-md);
+  font-weight: 900;
+  line-height: 1.2;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+.saleBadgePrice {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  background: rgba(8, 10, 16, 0.82);
+  color: #fff;
+  font-size: var(--fs-sm);
+  font-weight: 800;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+.saleBadgePrice s { color: rgba(255, 255, 255, 0.55); font-size: var(--fs-2xs); font-weight: 600; }
+.saleBadgeLow {
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: #beee11;
+  color: #1b2508;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}

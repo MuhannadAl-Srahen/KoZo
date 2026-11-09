@@ -12,7 +12,8 @@ const BULLET = /^[•\-*]\s+(.*)$/
 
 function splitItem(t) {
   const m = /^([^:]{2,60}):\s+(.+)$/.exec(t)
-  return m && !/https?$/i.test(m[1]) ? { title: m[1].trim(), text: m[2].trim() } : { title: null, text: t.trim() }
+  const cap = (x) => x.charAt(0).toUpperCase() + x.slice(1)
+  return m && !/https?$/i.test(m[1]) ? { title: m[1].trim(), text: cap(m[2].trim()) } : { title: null, text: t.trim() }
 }
 
 export function parseNotes(text) {

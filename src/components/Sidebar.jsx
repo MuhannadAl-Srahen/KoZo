@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import {
+  IconSearch,
   IconLayoutGrid,
   IconList,
   IconCalendar,
@@ -266,6 +267,21 @@ export default function Sidebar() {
           {rail ? <IconLayoutSidebarLeftExpand size={17} stroke={1.7} /> : <IconLayoutSidebarLeftCollapse size={17} stroke={1.7} />}
         </button>
       </div>
+
+      {/* Quick search (components/QuickSearch.jsx), also Ctrl+K anywhere. */}
+      <button
+        type="button"
+        className={s.searchBtn}
+        data-gpnav=""
+        data-quick-search-btn=""
+        title="Search your games, Game List, pages and Steam (Ctrl+K)"
+        aria-label="Search everything"
+        onClick={() => window.dispatchEvent(new CustomEvent('kozo:quick-search'))}
+      >
+        <IconSearch size={15} stroke={1.8} />
+        <span className={s.searchText}>Search</span>
+        <kbd className={s.searchKbd}>Ctrl K</kbd>
+      </button>
 
       {/* Navigation */}
       <nav className={s.nav}>

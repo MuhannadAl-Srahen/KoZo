@@ -911,3 +911,22 @@ button.monthPicked { background: color-mix(in srgb, var(--a) 12%, transparent); 
   font-size: var(--fs-xs);
   outline: none;
 }
+
+/* Guide on a locked achievement: where to find how to unlock it. */
+.achGuide {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.achGuide:hover { border-color: var(--ab); color: var(--a); background: var(--ad); }

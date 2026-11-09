@@ -30,6 +30,7 @@ import DriveNewsBar from './components/DriveNewsBar'
 import LaunchMissCard from './components/LaunchMissCard'
 import UninstalledCard from './components/UninstalledCard'
 import KeptOnListPrompt from './components/KeptOnListPrompt'
+import QuickSearch from './components/QuickSearch'
 import GamepadHints from './components/GamepadHints'
 
 // Controller navigation — must live under the router so useNavigate works.
@@ -282,6 +283,7 @@ export default function App() {
         <LaunchMissCard />
         <UninstalledCard />
         <KeptOnListPrompt />
+        <QuickSearch />
         <LevelUpCelebration />
         {showOnboarding && <Tour onDone={() => setShowOnboarding(false)} />}
         {restoreOffer && <RestoreOffer found={restoreOffer.found} drive={restoreOffer.drive} onOffer={showDriveOffer} onClose={() => { walkthroughAfterOffer.current = false; setRestoreOffer(null); setShowOnboarding(true) }} />}

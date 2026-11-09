@@ -354,3 +354,37 @@
 .rail .nowPlaying { width: 48px; min-height: 0; }
 .rail .nowPlayingBody { align-items: center; padding: var(--sp-6) 0; }
 .rail .nowPlayingElapsed { font-size: 10px; }
+
+/* Quick search, under the logo. */
+.searchBtn {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  margin: 0 var(--sp-10) var(--sp-8);
+  height: 34px;
+  padding: 0 var(--sp-10);
+  border-radius: var(--r-input);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  flex-shrink: 0;
+  min-width: 0;
+}
+.searchBtn:hover { color: var(--text-primary); border-color: var(--border-accent-soft); background: var(--surface-3); }
+.searchText { flex: 1; min-width: 0; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.searchKbd {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface-3);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+}
+.rail .searchBtn { width: 40px; margin: 0 auto var(--sp-8); padding: 0; justify-content: center; }
+.rail .searchText, .rail .searchKbd { display: none; }

@@ -15,6 +15,7 @@ import Modal from '../components/ui/Modal'
 import EmptyState from '../components/ui/EmptyState'
 import AchImg from '../components/ui/AchImg'
 import { Skeleton } from '../components/ui/Skeleton'
+import BadgesCard from '../components/BadgesCard'
 import s from './Profile.module.css'
 
 
@@ -837,6 +838,8 @@ export default function Profile() {
                   </div>
                 )
               })()}
+
+              <BadgesCard />
 
               {/* Play heatmap: the last 52 weeks, one square per day */}
               <div className={s.card}>

@@ -23,6 +23,7 @@
 
 .head { display: flex; align-items: center; gap: var(--sp-10); min-width: 0; }
 .art {
+  position: relative;
   flex-shrink: 0;
   width: 44px;
   height: 58px;

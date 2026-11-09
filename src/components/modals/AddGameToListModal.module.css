@@ -30,8 +30,12 @@
 .chip {
   display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 4px 0 10px; border-radius: 999px;
   background: color-mix(in srgb, var(--a) 12%, transparent); border: 1px solid color-mix(in srgb, var(--a) 35%, transparent);
-  color: var(--text-primary); font-size: var(--fs-xs); font-weight: 600; max-width: 220px;
+  color: var(--text-primary); font-size: var(--fs-xs); font-weight: 600; max-width: min(100%, 340px); min-width: 0; flex-shrink: 0;
 }
+/* One line, cut with an ellipsis: a long name ("Need for Speed: Most Wanted - Black Edition") wrapped onto a
+   second line that the 26 px pill cut in half. The whole name is in the tooltip. */
+.chipName { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip button { flex-shrink: 0; }
 .chip button { width: 18px; height: 18px; border-radius: 50%; border: 0; display: grid; place-items: center; cursor: pointer; background: transparent; color: var(--text-muted); }
 .chip button:hover { background: var(--surface-3); color: var(--text-primary); }
 

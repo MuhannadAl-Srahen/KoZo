@@ -413,6 +413,7 @@ const KEYBOARD_GROUPS = [
     ['Alt + K', 'While playing: show your session time and achievements over the game'],
   ] },
   { title: 'Inside KoZo', rows: [
+    ['Ctrl + K', 'Search everything: your games, Game List, pages and Steam'],
     ['Ctrl + mouse wheel', 'Over a card grid: card size. Anywhere else: the size of the whole app'],
     ['Esc', 'Close the open menu or dialog; in Big Picture, leave it'],
     ['Right click', 'The options menu for a game, a row or a card'],

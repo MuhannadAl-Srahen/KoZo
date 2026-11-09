@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 37,
+  rev: 38,
   // Settings → Appearance → UI scale.
   ui: {
     setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
@@ -178,6 +178,7 @@ contextBridge.exposeInMainWorld('kozo', {
       hourActivity: (hour, includeHidden) => ipcRenderer.invoke('stats:hourActivity', hour, includeHidden),
       xp: () => ipcRenderer.invoke('stats:xp'),
       xpHistory: (limit) => ipcRenderer.invoke('stats:xpHistory', limit),
+      badges: () => ipcRenderer.invoke('stats:badges'),
       years: () => ipcRenderer.invoke('stats:years'),
       year: (year) => ipcRenderer.invoke('stats:year', year),
       captureCard: (rect, action, year) => ipcRenderer.invoke('stats:captureCard', rect, action, year),
@@ -330,6 +331,8 @@ contextBridge.exposeInMainWorld('kozo', {
       onPriceOverlay: sub('price:overlay', pass),
       onBreakOverlay: sub('break:overlay', pass),
       onXpOverlay: sub('xp:overlay', pass),
+      onBadgeOverlay: sub('badge:overlay', pass),
+      onBadgeEarned: sub('badge:earned', pass),
       onSessionEndOverlay: sub('sessionEnd:overlay', pass),
       onXpLevelUp: sub('xp:levelup', pass),
       onAppUpdate: sub('app:update', pass),

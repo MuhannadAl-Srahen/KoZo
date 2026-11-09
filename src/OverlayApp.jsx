@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { IconTrophy, IconPlayerPlay, IconClock, IconDeviceGamepad2, IconSparkles, IconArrowBigUpLines, IconPlus, IconCalendarEvent, IconTag, IconCoffee } from '@tabler/icons-react'
+import { IconAward, IconTrophy, IconPlayerPlay, IconClock, IconDeviceGamepad2, IconSparkles, IconArrowBigUpLines, IconPlus, IconCalendarEvent, IconTag, IconCoffee } from '@tabler/icons-react'
 import { applyAccent } from './context/AccentColorContext'
 import { fileUrl } from './lib/utils'
-import { playAchievement, playLevelUp, playSessionStart, playSessionEnd, playRelease, playPrice, playBreak, playQuestion, holdAudio, releaseAudio } from './lib/sounds'
+import { playAchievement, playLevelUp, playSessionStart, playSessionEnd, playRelease, playPrice, playBreak, playQuestion, playBadge, holdAudio, releaseAudio } from './lib/sounds'
 import s from './OverlayApp.module.css'
 
 // Cover-art thumb for session toasts — local cached banner first, CDN fallback,
@@ -113,7 +113,7 @@ function toastInteractions(close, leaving = false, hoverId = null) {
 const TONES = {
   ultra: '#c084fc', very: '#60a5fa', rare: '#34d399', uncommon: '#fbbf24', common: '#cbd5e1',
   start: '#4ade80', end: '#2dd4bf', level: '#facc15', release: '#f472b6', price: '#a3e635',
-  rest: '#fb923c', ask: '#38bdf8',
+  rest: '#fb923c', ask: '#38bdf8', badge: '#e879f9',
 }
 // The rarity of an unlock rate, the same bands as lib/utils rarityLabel and services/xp.js.
 function rarityTone(pct) {
@@ -212,6 +212,27 @@ function StatusToast({ toast, onDismiss }) {
 }
 
 // ── Level-up toast ────────────────────────────────────────────────────────────
+
+// A Profile badge earned (services/badges.js).
+function BadgeToast({ toast, onDismiss }) {
+  const { leaving, close, hoverId } = useAutoClose(onDismiss, 7000)
+  return (
+    <div className={`${s.toast} ${leaving ? s.toastOut : s.toastIn}`}
+      {...toneProps('badge')} {...toastInteractions(close, leaving, hoverId)} data-badge-toast={toast.key}>
+      <div className={s.toastHeader}>
+        <IconAward size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
+        <span className={s.toastHeaderText}>Badge earned</span>
+      </div>
+      <div className={s.toastBody}>
+        <div className={s.toastIcon}><IconAward size={26} stroke={1.6} /></div>
+        <div className={s.toastInfo}>
+          <div className={s.toastName}>{toast.name}</div>
+          <div className={s.toastDesc}>{toast.desc}</div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function LevelUpToast({ toast, onDismiss }) {
   const { leaving, close, hoverId } = useAutoClose(onDismiss, 7000)
@@ -628,6 +649,10 @@ export default function OverlayApp() {
       playLevelUp()
       setToasts(q => capToasts([...q, { id: ++nextId.current, type: 'levelup', ...data }]))
     })
+    on(window.kozo?.events?.onBadgeOverlay, (data) => {
+      playBadge()
+      setToasts(q => capToasts([...q, { id: ++nextId.current, type: 'badge', ...data }]))
+    })
     on(window.kozo?.events?.onSessionEndOverlay, (data) => {
       playSessionEnd()
       setToasts(q => capToasts([...q, { id: ++nextId.current, type: 'sessionEnd', ...data }]))
@@ -737,6 +762,8 @@ export default function OverlayApp() {
           ? <PriceToast      key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
           : t.type === 'break'
           ? <BreakToast      key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
+          : t.type === 'badge'
+          ? <BadgeToast      key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
           : <OverlayToast    key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
       )}
     </div>

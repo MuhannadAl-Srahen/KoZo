@@ -7,11 +7,13 @@ import {
   IconCircleCheck, IconCircleOff, IconEye, IconEyeOff, IconChevronDown,
   IconChevronRight, IconAlertTriangle, IconDeviceGamepad2,
   IconLayoutDashboard, IconSparkles, IconLayoutSidebarRight, IconMovie, IconTarget, IconChartBar,
-  IconInfoCircle, IconBrandSteam, IconClock, IconRepeat, IconTrash, IconPencil,
+  IconInfoCircle, IconBrandSteam, IconClock, IconRepeat, IconTrash, IconPencil, IconBook, IconBrandYoutube, IconSearch,
 } from '@tabler/icons-react'
 import { exeLooksLikeTool, getBannerBg, getBannerIcon, formatPlaytime, formatDate, formatDateTime, fileUrl, isSteamTracked, launcherLabel, localDayKey, rarityColor, timeAgo } from '../lib/utils'
 import { STATUS_META } from '../components/GameCard'
 import AchievementModal from '../components/modals/AchievementModal'
+import ContextMenu from '../components/ui/ContextMenu'
+import { guideLinks, openGuide } from '../lib/achGuides'
 import SessionDetail from '../components/SessionDetail'
 import { clockTime } from '../lib/sessionDetail'
 import EditGameModal from '../components/modals/EditGameModal'
@@ -98,7 +100,7 @@ function isUnlocked(ach) {
 // tile, which turned a 50-achievement game into a wall of text — it now lives
 // in the row's tooltip, where it is there when you want it and silent when you
 // don't.
-function AchCard({ ach, onClick, onQuickToggle }) {
+function AchCard({ ach, onClick, onQuickToggle, onGuide }) {
   // unlock_id is the row's existence; unlocked_at can legitimately be NULL when
   // Steam reported no date (unlocktime 0). The unlocked_at half stays as a
   // safety net for any patch that forgets the id.
@@ -132,6 +134,18 @@ function AchCard({ ach, onClick, onQuickToggle }) {
           </div>
         )}
       </div>
+
+      {!unlocked && onGuide && (
+        <button
+          type="button"
+          className={s.achGuide}
+          title="How to unlock it: Steam guides, YouTube or the web"
+          onClick={(e) => { e.stopPropagation(); onGuide(e, ach) }}
+          data-ach-guide={ach.id}
+        >
+          <IconBook size={13} stroke={1.8} /> Guide
+        </button>
+      )}
 
       <button
         className={`${s.achStatus} ${unlocked ? s.achStatusOn : ''}`}
@@ -266,6 +280,7 @@ export default function GameDetail() {
   const [reviews, setReviews]       = useState(null)
   const [isLive, setIsLive]         = useState(false)
   const [selectedAch, setSelectedAch] = useState(null)
+  const [guideMenu, setGuideMenu] = useState(null)   // { x, y, ach }: where to find how to unlock it
   const [pickedDay, setPickedDay]   = useState(null)   // the chart bar picked: the list under the bars shows that day
   const [openSessionId, setOpenSessionId] = useState(null)
   const [copyVersion, setCopyVersion] = useState(null)
@@ -1420,7 +1435,7 @@ export default function GameDetail() {
                         <div className={s.achSection}>
                           <div className={s.achSectionHead}>{label}<span className={s.achSectionCount}>{list.length}</span></div>
                           <div className={s.achGrid}>
-                            {list.map(a => <AchCard key={a.id} ach={a} onClick={setSelectedAch} onQuickToggle={quickToggleAch} />)}
+                            {list.map(a => <AchCard key={a.id} ach={a} onClick={setSelectedAch} onQuickToggle={quickToggleAch} onGuide={(e, ach) => setGuideMenu({ x: e.clientX, y: e.clientY, ach })} />)}
                           </div>
                         </div>
                       )
@@ -1515,6 +1530,20 @@ export default function GameDetail() {
 
       {showStore && artAppId && (
         <SteamGameModal appId={artAppId} name={game.name} art={{ hero: steamArt?.hero, hero2x: steamArt?.hero2x, capsule: steamArt?.capsule, header: steamArt?.header, header2x: steamArt?.header2x }} onClose={() => setShowStore(false)} />
+      )}
+
+      {guideMenu && (
+        <ContextMenu
+          x={guideMenu.x}
+          y={guideMenu.y}
+          onClose={() => setGuideMenu(null)}
+          header={{ name: guideMenu.ach.display_name, sub: 'How to unlock it' }}
+          items={guideLinks(game, guideMenu.ach).map(g => ({
+            label: g.label,
+            Icon: g.key === 'steam' ? IconBrandSteam : g.key === 'youtube' ? IconBrandYoutube : IconSearch,
+            onClick: () => openGuide(g.url),
+          }))}
+        />
       )}
 
       {selectedAch && (

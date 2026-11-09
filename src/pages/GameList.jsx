@@ -61,9 +61,24 @@ function bannerOnError(e) {
 // ── Card components ─────────────────────────────────────────────────────────
 
 // "-50% $9.99" on a game you want that's on sale (deals:saleMap, from Discounts' last check).
+// On a card it sits on the cover, top right, big, in Steam's own sale colors: the small chip
+// in the stats strip was hard to see (the maker). List rows keep the chip beside the status.
+function saleTitle(sale) {
+  return `On sale on Steam: ${sale.finalText || ''}${sale.originalText ? `, was ${sale.originalText}` : ''}${sale.lowest ? '. Its lowest price ever' : ''}`
+}
+function SaleBadge({ sale }) {
+  if (!sale) return null
+  return (
+    <span className={s.saleBadge} title={saleTitle(sale)} data-sale-chip="">
+      <span className={s.saleBadgePct}>-{sale.pct}%</span>
+      {sale.finalText && <span className={s.saleBadgePrice}>{sale.originalText && <s>{sale.originalText}</s>}{sale.finalText}</span>}
+      {sale.lowest && <span className={s.saleBadgeLow}>Lowest ever</span>}
+    </span>
+  )
+}
 function SaleChip({ sale }) {
   if (!sale) return null
-  const title = `On sale on Steam: ${sale.finalText || ''}${sale.originalText ? `, was ${sale.originalText}` : ''}${sale.lowest ? '. Its lowest price ever' : ''}`
+  const title = saleTitle(sale)
   return (
     <span className={`${s.saleChip} ${sale.lowest ? s.saleChipLow : ''}`} title={title} data-sale-chip="">
       <IconDiscount2 size={12} stroke={2} /> -{sale.pct}%{sale.finalText ? <b>{sale.finalText}</b> : null}
@@ -100,6 +115,7 @@ function GridCard({ item, sale, onClick, selectionMode, selected, onToggle, onTo
           </div>
         )}
 
+        {!selectionMode && <SaleBadge sale={sale} />}
         {/* Status LED + name/genres overlaid on the cover — mirrors GameCard. */}
         {!selectionMode && (
           <span className={s.cardStatusLed} style={{ '--state-color': cfg.color }} title={cfg.label} />
@@ -135,7 +151,6 @@ function GridCard({ item, sale, onClick, selectionMode, selected, onToggle, onTo
           {item.planned_month && (
             <span className={s.planChip} title="Planned to play this month">{formatMonthKey(item.planned_month)}</span>
           )}
-          <SaleChip sale={sale} />
         </div>
       </div>
     </div>
@@ -268,6 +283,13 @@ export default function GameList() {
   const [wishlist, setWishlist] = useState(false)   // Steam wishlist import
   const location = useLocation()
   const navigate = useNavigate()
+  // ?open=<row id>: quick search opens that entry's window.
+  useEffect(() => {
+    const id = Number(new URLSearchParams(location.search).get('open'))
+    if (!id) return
+    window.kozo?.api?.gameList?.get?.(id).then(r => { if (r?.ok && r.data) setEditItem(r.data) })
+    navigate('/game-list', { replace: true })
+  }, [location.search])
   // ?wishlist=1: Settings > Features > Steam wishlist
   useEffect(() => {
     if (new URLSearchParams(location.search).get('wishlist') === '1') {

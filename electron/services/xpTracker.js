@@ -65,6 +65,16 @@ function check({ reason = 'unknown', gameName = null, artPath = null, artUrl = n
   if (consumeGain || last.total == null || last.level == null) writeLast(xp.totalXp, xp.level)
   else writeLevelOnly(xp.level)
 
+  // Badges earned since the last look (services/badges.js): one toast each, at most three.
+  try {
+    const fresh = require('./badges').newlyEarned(xp)
+    for (const b of fresh.slice(0, 3)) {
+      logger.info(`Badge earned: ${b.name}`, { reason })
+      try { require('../overlayWindow').sendBadge({ key: b.key, name: b.name, desc: b.desc, gameName, artPath, artUrl }) } catch {}
+      broadcast('badge:earned', { key: b.key, name: b.name })
+    }
+  } catch (e) { logger.warn('xpTracker: badges failed', { message: e.message }) }
+
   // First run ever — establish the baseline silently (no retroactive toasts).
   if (last.total == null || last.level == null) {
     return { gained: 0, totalXp: xp.totalXp, level: xp.level, tier: xp.tier, leveledUp: false, toNextLevel: xp.toNextLevel, nextTier: xp.nextTier }
@@ -98,6 +108,7 @@ function rebase() {
   try {
     const xp = require('./xp').computeXp()
     writeLast(xp.totalXp, xp.level)
+    require('./badges').markAllSeen(xp)
   } catch (e) {
     logger.warn('xpTracker: rebase failed', { message: e.message })
   }
