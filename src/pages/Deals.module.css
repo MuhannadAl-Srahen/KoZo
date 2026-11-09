@@ -121,3 +121,6 @@
 @keyframes dealUp { from { opacity: 0; transform: translateY(12px); } }
 :global(html[data-motion]) .card { animation: dealUp 0.35s var(--ease-out) backwards; animation-delay: calc(var(--i, 0) * 0.025s); }
 :global(html[data-motion="heavy"]) .card:hover .art img { transform: scale(1.05); }
+
+/* Discount and score chips on the cover: stays dark in the Light theme (customize.css .kz-dark). */
+.art { composes: kz-dark from global; }

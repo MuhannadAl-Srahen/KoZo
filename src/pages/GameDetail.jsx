@@ -236,6 +236,15 @@ export default function GameDetail() {
     return () => { alive = false }
   }, [game?.id, game?.install_path, game?.exe_name, game?.steam_app_id])
 
+  // Progress left in an old crack's save folder after an update (services/crackSaves.js).
+  const [progressOffer, setProgressOffer] = useState(null)
+  useEffect(() => {
+    if (!game?.id || !game?.is_cracked) { setProgressOffer(null); return }
+    let alive = true
+    window.kozo?.api?.saves?.progressOffer?.(game.id).then(res => { if (alive) setProgressOffer(res?.ok ? res.data || null : null) })
+    return () => { alive = false }
+  }, [game?.id, game?.install_path, game?.exe_name, game?.launch_file, game?.is_cracked])
+
   // Automatic achievement sync — fires silently once per page visit so nobody
   // ever has to press a sync button. Live sessions are already covered by the
   // file watchers + periodic sync; this catches unlocks earned while KoZo was
@@ -353,7 +362,7 @@ export default function GameDetail() {
     if (!artAppId) return
     let alive = true
     window.kozo?.api?.steam?.appAssets?.([artAppId]).then(res => {
-      if (alive && res?.ok) setHashedHero(res.data?.[artAppId]?.hero || null)
+      if (alive && res?.ok) setHashedHero(res.data?.[artAppId]?.hero2x || res.data?.[artAppId]?.hero || null)
     })
     return () => { alive = false }
   }, [artAppId])
@@ -449,7 +458,54 @@ export default function GameDetail() {
     await load()
   }
 
+  // An update switched this game's crack, and its progress is still in the old
+  // crack's save folder (services/crackSaves.js): ask before the game starts
+  // without it. Either answer is remembered for this folder.
   async function handleLaunch() {
+    const offer = progressOffer
+    if (!offer) return launchNow()
+    setInfo({
+      variant: 'warning',
+      title: 'Bring your progress first?',
+      message: `${game?.name || 'This game'} changed its crack with an update. Your progress from ${formatDateTime(offer.createdAt)} is in the old crack's save folder, so the game would start without it.`,
+      actions: [
+        { label: 'Bring it over and play', variant: 'primary', onClick: async () => { setInfo(null); if (await bringProgress(true)) launchNow() } },
+        { label: 'Play without it', variant: 'secondary', onClick: () => { setInfo(null); dismissProgress(); launchNow() } },
+      ],
+    })
+  }
+
+  async function bringProgress(quiet = false) {
+    const offer = progressOffer
+    if (!offer) return false
+    const r = await window.kozo?.api?.saves?.bringProgress?.(Number(id), offer.id)
+    if (!r?.ok) {
+      setInfo({ variant: 'error', title: 'Your progress was not moved', message: r?.error || 'Unknown error.' })
+      return false
+    }
+    setProgressOffer(null)
+    if (!quiet) {
+      setInfo({ variant: 'success', title: 'Progress brought over',
+        message: `Your progress from ${formatDateTime(offer.createdAt)} is in the game's new save folder. What was there before is kept as a restore point.` })
+    }
+    return true
+  }
+
+  async function dismissProgress() {
+    setProgressOffer(null)
+    await window.kozo?.api?.saves?.dismissOffer?.(Number(id))
+  }
+
+  // An update installed beside the old copy instead of over it (services/gameVersion.js).
+  async function useNewCopy() {
+    const file = copyVersion?.newerCopy?.file
+    if (!file) return
+    const r = await window.kozo?.api?.games?.useCopy?.(Number(id), file)
+    if (!r?.ok) { setInfo({ variant: 'error', title: 'Could not switch', message: r?.error || 'Unknown error.' }); return }
+    await load()
+  }
+
+  async function launchNow() {
     const res = await window.kozo?.api?.games?.launch(Number(id))
     if (!res?.ok) {
       setInfo({
@@ -840,6 +896,21 @@ export default function GameDetail() {
       <button type="button" className={s.exeNoteBtn} onClick={() => setShowEdit(true)}>Choose the exe</button>
     </p>
   )
+  const copyNote = copyVersion?.newerCopy && (
+    <p className={s.exeNote} data-copy-note>
+      <IconAlertTriangle size={14} stroke={1.8} className={s.exeNoteIcon} />
+      <span>A newer copy of this game was installed on {new Date(copyVersion.newerCopy.installedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}. Play still starts the old one.</span>
+      <button type="button" className={s.exeNoteBtn} onClick={useNewCopy}>Use the new copy</button>
+    </p>
+  )
+  const progressNote = progressOffer && (
+    <p className={s.exeNote} data-progress-note>
+      <IconAlertTriangle size={14} stroke={1.8} className={s.exeNoteIcon} />
+      <span>This game changed its crack with an update. Your progress from {formatDateTime(progressOffer.createdAt)} is still in the old crack's save folder.</span>
+      <button type="button" className={s.exeNoteBtn} onClick={() => bringProgress()}>Bring it over</button>
+      <button type="button" className={s.exeNoteBtn} onClick={dismissProgress}>Not now</button>
+    </p>
+  )
   const chips = (
     <div className={s.chipRow}>
       {genres.slice(0, 5).map(g => <span key={g} className={s.genreChip} title={g}>{g}</span>)}
@@ -1027,7 +1098,7 @@ export default function GameDetail() {
             <div className={`${s.frame} ${s.cineInfo}`}>
               <div className={s.gameName} title={game.name}>{game.name}</div>
               {chips}
-              {exeNote}
+              {exeNote}{copyNote}{progressNote}
               <div className={s.statLine}>
                 {statBits.map((b, i) => <React.Fragment key={i}>{i > 0 && <span className={s.dot} />}<span>{b}</span></React.Fragment>)}
               </div>
@@ -1046,7 +1117,7 @@ export default function GameDetail() {
             <div className={s.headText}>
               <div className={s.gameName} title={game.name}>{game.name}</div>
               {chips}
-              {exeNote}
+              {exeNote}{copyNote}{progressNote}
               {actions}
             </div>
           </div>
@@ -1298,7 +1369,7 @@ export default function GameDetail() {
       </div>
 
       {showStore && artAppId && (
-        <SteamGameModal appId={artAppId} name={game.name} art={{ hero: steamArt?.hero, capsule: steamArt?.capsule, header: steamArt?.header }} onClose={() => setShowStore(false)} />
+        <SteamGameModal appId={artAppId} name={game.name} art={{ hero: steamArt?.hero, hero2x: steamArt?.hero2x, capsule: steamArt?.capsule, header: steamArt?.header, header2x: steamArt?.header2x }} onClose={() => setShowStore(false)} />
       )}
 
       {selectedAch && (

@@ -819,13 +819,21 @@ app.whenReady().then(async () => {
       await new Promise(r => setTimeout(r, 100))
       if (document.querySelector('.app-main [class*=steamCapFrame]')) break
     }
-    const days = [...document.querySelectorAll('.app-main [class*=steamDay_]')].filter(d => d.querySelector('[class*=steamDayHead]'))
-    return { days: days.length, empty: days.filter(d => !d.querySelector('[class*=steamCapFrame]')).length, text: document.querySelector('.app-main').innerText }
+    // Steam's look: every weekday is a box, empty or not (data-games = its releases).
+    const days = [...document.querySelectorAll('.app-main [data-day]')].filter(d => Number(d.dataset.games) > 0)
+    const weeks = [...document.querySelectorAll('.app-main [class*=steamWeek_]')]
+    return {
+      days: days.length, empty: days.filter(d => !d.querySelector('[class*=steamCapFrame]')).length,
+      weeks: weeks.length, fiveEach: weeks.every(w => w.querySelectorAll('[data-day]').length === 5),
+      heads: [...document.querySelectorAll('.app-main [class*=steamWeekHead] span')].map(s => s.textContent.trim()).join(','),
+      text: document.querySelector('.app-main').innerText,
+    }
   })()`)
   // Offline there are no games at all, which isn't what this checks.
   if (upcoming.days) {
-    check('Upcoming: every day shows games', upcoming.empty === 0, `${upcoming.empty} of ${upcoming.days} days are empty`)
+    check('Upcoming: every day with releases shows games', upcoming.empty === 0, `${upcoming.empty} of ${upcoming.days} days are empty`)
     check('Upcoming: no "No picks" days', !/No picks/.test(upcoming.text))
+    check("Upcoming: Steam's Monday to Friday weeks", upcoming.weeks > 0 && upcoming.fiveEach && /^monday,tuesday,wednesday,thursday,friday$/i.test(upcoming.heads), JSON.stringify({ weeks: upcoming.weeks, fiveEach: upcoming.fiveEach, heads: upcoming.heads }))
   }
 
   // Upcoming's top bar, on made-up releases so it runs the same on GitHub's machine.
@@ -982,6 +990,33 @@ app.whenReady().then(async () => {
     check('Library: a slider resizes the cards', sized.there && parseInt(sized.css) === Number(sized.min) + 16 && Number(sized.saved) === Number(sized.min) + 16, JSON.stringify(sized))
     await ev(`localStorage.removeItem('kozo:cardsize:library:big'); true`)
 
+    // Edit many games at once: select two, make them favorites, then Undo.
+    const bulk = await ev(`(async () => {
+      const wait = (ms) => new Promise(r => setTimeout(r, ms))
+      const favs = async () => ((await window.kozo.api.games.list())?.data || []).filter(g => g.is_favorite).map(g => g.id).sort().join()
+      const before = await favs()
+      document.querySelector('.app-main button[aria-label="Select games"]')?.click(); await wait(300)
+      const cards = [...document.querySelectorAll('.app-main [data-gpnav] [data-gpclick]')].slice(0, 2)
+      cards.forEach(c => c.click()); await wait(200)
+      document.querySelector('[data-bulk-edit]')?.click(); await wait(400)
+      const dlg = [...document.querySelectorAll('[role=dialog]')].find(d => /Edit \\d+ game/.test(d.innerText))
+      if (!dlg) return { step: 'no edit window', cards: cards.length }
+      const field = [...dlg.querySelectorAll('label')].find(l => l.textContent.trim() === 'Favorite')?.parentElement
+      field?.querySelector('button')?.click(); await wait(250)
+      ;[...document.querySelectorAll('[role=option]')].find(o => o.textContent.trim() === 'Favorite')?.click(); await wait(200)
+      ;[...dlg.querySelectorAll('button')].find(b => /^Change \\d+ game/.test(b.textContent.trim()))?.click(); await wait(900)
+      const after = await favs()
+      const bar = document.querySelector('[data-undo-bar]')
+      const barText = bar?.innerText || ''
+      ;[...(bar?.querySelectorAll('button') || [])].find(b => /Undo/.test(b.textContent))?.click(); await wait(900)
+      const undone = await favs()
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      ;[...document.querySelectorAll('.app-main button')].find(b => /^(Done|Cancel)$/.test(b.textContent.trim()))?.click()
+      return { cards: cards.length, before, after, undone, barText }
+    })()`)
+    check('Edit many: two games become favorites', bulk.cards === 2 && bulk.after !== bulk.before && bulk.after.split(',').length >= 2, JSON.stringify(bulk))
+    check('Edit many: Undo puts them back', bulk.undone === bulk.before && /Changed 2 games/.test(bulk.barText), JSON.stringify(bulk))
+
     // Background color
     const lookBefore = await ev(`window.kozo.api.settings.get('appearance').then(r => r?.data ?? null)`)
     await go('#/settings?tab=appearance', 1800)
@@ -999,6 +1034,24 @@ app.whenReady().then(async () => {
     check('Background: every pick is a different color', new Set([white.box, gray.box, black.box, red.box]).size === 4, [white.box, gray.box, black.box, red.box].join())
     check('Background: picking one switches to Custom', white.theme === 'custom', white.theme)
     await ev(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); true`)
+
+    // The Light theme: a white page (the window behind it is dark), and an accent dark
+    // enough to read on white. Match Windows follows Windows' own app mode.
+    const pickTheme = (label) => ev(`(async () => {
+      const b = [...document.querySelectorAll('button[aria-pressed]')].find(x => x.textContent.trim() === ${JSON.stringify(label)})
+      if (!b) return null
+      b.click()
+      await new Promise(r => setTimeout(r, 400))
+      const lum = (c) => { const m = c.match(/[\\d.]+/g).slice(0, 3).map(Number).map(v => v / 255).map(v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)); return 0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2] }
+      const probe = document.createElement('span'); probe.style.color = 'var(--a)'; document.body.appendChild(probe)
+      const accent = getComputedStyle(probe).color; probe.remove()
+      return { theme: document.documentElement.dataset.theme || 'midnight', page: getComputedStyle(document.documentElement).backgroundColor, pageLum: lum(getComputedStyle(document.documentElement).backgroundColor), accentOnWhite: 1.05 / (lum(accent) + 0.05), prefersLight: matchMedia('(prefers-color-scheme: light)').matches }
+    })()`)
+    const light = await pickTheme('Light')
+    check('Light theme: the page is white', !!light && light.theme === 'light' && light.pageLum > 0.8, JSON.stringify(light))
+    check('Light theme: the accent reads on white', !!light && light.accentOnWhite >= 4.5, JSON.stringify(light))
+    const sys = await pickTheme('Match Windows')
+    check('Match Windows: follows Windows', !!sys && sys.theme === (sys.prefersLight ? 'light' : 'midnight'), JSON.stringify(sys))
     await ev(`window.kozo.api.settings.set('appearance', ${JSON.stringify(lookBefore)}); location.hash = '#/'; location.reload(); true`); await sleep(2200)
 
     // Play, and the watched file never starts. The process list is made up, so no real
@@ -1143,6 +1196,27 @@ app.whenReady().then(async () => {
     check('Big Picture: opens without the sidebar', await ev(`!!document.querySelector('[data-bigpicture-root]') && !document.querySelector('aside')`))
     check('Big Picture: full screen', win.isFullScreen())
     check('Big Picture: shows the games', await ev(`document.querySelectorAll('[data-bigpicture-root] [data-game-id]').length >= 3`))
+    // Customize: the drawer changes the look at once, Escape closes only the drawer,
+    // and "Back to the usual look" restores it.
+    const custom = await ev(`(async () => {
+      const wait = (ms) => new Promise(r => setTimeout(r, ms))
+      const root = () => document.querySelector('[data-bigpicture-root]')
+      const pick = (t) => [...document.querySelectorAll('[data-bp-customize] button')].find(b => b.textContent.trim() === t)?.click()
+      document.querySelector('[data-bp-customize-btn]')?.click(); await wait(500)
+      const opened = !!document.querySelector('[data-bp-customize]')
+      pick('Grid'); pick('Wide'); pick('PlayStation'); await wait(400)
+      const changed = { layout: root()?.dataset.bpLayout, shape: root()?.dataset.bpShape, glyphs: document.documentElement.dataset.padGlyphs, grid: !!root()?.querySelector('[class*=grid_] [data-game-id]') }
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await wait(500)
+      const closedOnly = !document.querySelector('[data-bp-customize]') && !!root()
+      document.querySelector('[data-bp-customize-btn]')?.click(); await wait(400)
+      ;[...document.querySelectorAll('[data-bp-customize] button')].find(b => /usual look/.test(b.textContent))?.click(); await wait(400)
+      const reset = { layout: root()?.dataset.bpLayout, shape: root()?.dataset.bpShape, glyphs: document.documentElement.dataset.padGlyphs || null }
+      document.querySelector('[data-bp-customize] button[aria-label="Close"]')?.click(); await wait(300)
+      return { opened, changed, closedOnly, reset }
+    })()`)
+    check('Big Picture: Customize changes the look at once', custom.opened && custom.changed.layout === 'grid' && custom.changed.shape === 'wide' && custom.changed.glyphs === 'playstation' && custom.changed.grid, JSON.stringify(custom))
+    check('Big Picture: Escape closes only the Customize panel', custom.closedOnly, JSON.stringify(custom))
+    check('Big Picture: back to the usual look', custom.reset.layout === 'shelves' && custom.reset.shape === 'tall' && custom.reset.glyphs === null, JSON.stringify(custom))
     await escape(); await sleep(1200)
     check('Big Picture: Escape leaves', await ev(`!document.querySelector('[data-bigpicture-root]')`))
     check('Big Picture: back to a window', !win.isFullScreen())
@@ -1185,27 +1259,25 @@ app.whenReady().then(async () => {
 
   }
 
-  // ── Tray popup: its own size, and as tall as what it shows ──
-  // It was blank in every test (it ignored KOZO_RENDERER), then zoomed to 80% by the main
-  // window's scale rule once it learned to fit its content.
+  // ── Tray: Windows' own menu (the KoZo popup was slow to open, the maker's call) ──
   {
-    const tw = require(path.join(root, 'electron', 'trayWindow.js'))
-    tw.show({ x: 900, y: 700, width: 24, height: 24 })
-    let twin = null
-    for (let i = 0; i < 60 && !twin; i++) { await sleep(150); twin = BrowserWindow.getAllWindows().find(w => /tray=1/.test(w.webContents.getURL())) || null }
-    check('tray: the popup opens', !!twin)
-    if (twin) {
-      await sleep(1500)
-      const st = await twin.webContents.executeJavaScript(`(() => {
-        const p = document.querySelector('[class*=panel]')
-        return { text: document.body.innerText.trim(), zoom: window.kozo.ui.getZoom(), w: innerWidth,
-                 gap: p ? Math.round(innerHeight - p.getBoundingClientRect().bottom) : -1, clipped: p ? p.scrollHeight > p.clientHeight + 1 : true }
-      })()`, true)
-      check('tray: shows the profile and a way into KoZo', /Open KoZo/.test(st.text) && /Lv \d/.test(st.text), st.text.slice(0, 80))
-      check('tray: keeps its own size', st.zoom === 1 && st.w === 340, JSON.stringify({ zoom: st.zoom, w: st.w }))
-      check('tray: as tall as what it shows', st.gap >= 4 && st.gap <= 8 && !st.clipped, JSON.stringify({ gap: st.gap, clipped: st.clipped }))
-      tw.hide()
+    const watcher = require(path.join(root, 'electron', 'services', 'processWatcher.js'))
+    const labels = (m) => (m ? m.items.map(i => i.label).filter(Boolean) : [])
+    const find = (m, label) => (m ? m.items.find(i => i.label === label) : null)
+    const menu = require(path.join(root, 'electron', 'tray.js')).currentMenu()
+    check('tray: the menu builds', !!menu)
+    check('tray: has a way into KoZo and out', labels(menu).includes('Open KoZo') && labels(menu).includes('Quit KoZo'), labels(menu).join(' | '))
+    const pauseItem = find(menu, 'Pause tracking')
+    check('tray: offers Pause tracking', !!pauseItem, labels(menu).join(' | '))
+    if (pauseItem) {
+      pauseItem.click()
+      const after = require(path.join(root, 'electron', 'tray.js')).currentMenu()
+      check('tray: pausing works and the menu says Resume', watcher.isPaused() === true && !!find(after, 'Resume tracking'), labels(after).join(' | '))
+      find(after, 'Resume tracking')?.click()
+      check('tray: resuming works', watcher.isPaused() === false)
     }
+    const jump = find(menu, 'Jump back in')
+    if (jump) check('tray: Jump back in lists games', jump.submenu.items.length > 0 && jump.submenu.items.length <= 5, String(jump.submenu.items.length))
   }
 
   check('no renderer errors overall', errors.length === 0, errors.join(' | '))

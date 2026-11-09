@@ -674,7 +674,7 @@
 }
 .bdCol_next { --colc: var(--a); }
 .bdCol_playing { --colc: var(--status-playing); }
-.bdCol_done { --colc: #fbbf24; }
+.bdCol_done { --colc: var(--amber); }
 .bdHead { display: flex; align-items: center; gap: var(--sp-8); min-height: 30px; color: var(--colc); font-weight: 800; font-size: var(--fs-md, 15px); }
 .bdHead .addBtn { height: 28px; }
 .bdHead .foldCount { color: var(--text-secondary); }
@@ -694,7 +694,7 @@
 .bdCard:hover { border-color: color-mix(in srgb, var(--colc) 50%, var(--neutral-border)); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3); }
 .bd_playing { --colc: var(--status-playing); background: color-mix(in srgb, var(--status-playing) 7%, var(--surface-1, var(--surface-2))); }
 .bd_next { --colc: var(--a); }
-.bd_done { --colc: #fbbf24; }
+.bd_done { --colc: var(--amber); }
 .bdDropped { filter: saturate(0.3) brightness(0.8); }
 .bdCover { position: relative; flex-shrink: 0; width: 54px; aspect-ratio: 2 / 3; border-radius: var(--r-sm); overflow: hidden; background: var(--surface-3); }
 .bdCover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
@@ -837,3 +837,8 @@
 
 /* The chosen view under "More views" looks chosen. */
 .moreOn :global(button) { border-color: var(--ab); color: var(--a); }
+
+/* Wall tiles are pictures with chips: stays dark in the Light theme (customize.css .kz-dark). */
+.wl { composes: kz-dark from global; }
+/* The Focus banner is a picture: stays dark in the Light theme (customize.css .kz-dark). */
+.foHero { composes: kz-dark from global; }

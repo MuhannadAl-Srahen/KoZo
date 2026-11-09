@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
 import { bgTone, bgToneHex } from '../lib/bgTone'
+import { reapplyAccent } from './AccentColorContext'
 
 // Settings → Appearance beyond the accent color: UI scale, spacing, corners,
 // what game cards show, sidebar order and start page, and a background
@@ -9,6 +10,21 @@ import { bgTone, bgToneHex } from '../lib/bgTone'
 // zoom factor.
 
 export const NAV_PATHS = ['/', '/game-list', '/plan', '/finished', '/upcoming', '/like', '/deals', '/activity']
+
+// Big Picture's own look (its Customize panel, components/BigPictureCustomize.jsx). The
+// defaults are the look it always had.
+export const DEFAULT_BIG_PICTURE = {
+  layout: 'shelves',   // shelves | spotlight (one big game, two rows) | grid (every game under the banner)
+  focus: null,         // ring color, null = the accent
+  shape: 'tall',       // tall (covers) | wide (the game's wide art)
+  size: 'medium',      // small | medium | large
+  corners: 'soft',     // square | soft | round
+  bg: 'art',           // art | blur | plain
+  darken: 0,           // extra darkness over the art, 0 to 80 (%)
+  blur: 0,             // extra blur on the art, 0 to 40 (px)
+  buttons: 'xbox',     // xbox | playstation: how controller buttons are drawn
+  hints: true,         // the controller hint bar
+}
 
 export const DEFAULT_APPEARANCE = {
   scale: 1,                       // 0.8 to 1.5 (Settings presets, or Ctrl + wheel in 5% steps)
@@ -20,7 +36,7 @@ export const DEFAULT_APPEARANCE = {
   sidebar: 'full',                // 'full' | 'rail' (icons only; the button by the logo switches)
   motion: 'soft',                 // 'heavy' | 'soft' | 'off' (styles/motion.css)
   bg: { mode: 'off', image: null, gameId: null, gameArt: null, blur: 8, dim: 55 },
-  theme: 'midnight',              // midnight | tint | custom | oled | slate | nord | mocha | forest | crimson (styles/customize.css)
+  theme: 'midnight',              // midnight | light | system | tint | custom | oled | slate | nord | mocha | forest | crimson (styles/customize.css)
   bgColor: '#1a1030',             // the Custom theme's color (any hex; made dark, see bgTone)
   gamePage: 'store',              // Game Detail layout: store | cinematic
   gameListEdit: 'tab',            // Game List window: tab (all in an Edit tab) | overview (status and plan on the Overview)
@@ -39,6 +55,7 @@ export const DEFAULT_APPEARANCE = {
   ambient: 'off',                 // off | on (slow accent glow behind the app)
   hideLibraryStats: false,
   hideUpcomingHero: false,
+  bigPicture: DEFAULT_BIG_PICTURE,
 }
 
 // The app's font, one for everything (bundled with @fontsource, styles/
@@ -71,6 +88,7 @@ function normalize(saved) {
   const p = { ...d, ...(saved || {}) }
   p.cards = { ...d.cards, ...(saved?.cards || {}) }
   p.bg = { ...d.bg, ...(saved?.bg || {}) }
+  p.bigPicture = { ...DEFAULT_BIG_PICTURE, ...(saved?.bigPicture || {}) }
   if (p.scrollbar === 'wide') p.scrollbar = 'thin'
   // The short-lived separate heading font: a chosen gaming face becomes the font.
   if (saved?.displayFont && saved.displayFont !== 'same' && FONTS[saved.displayFont]) p.font = saved.displayFont
@@ -100,11 +118,7 @@ function normalize(saved) {
 let zoomPref = 1
 let zoomNow = 1
 let zoomLock = null
-// The tray popup loads the same bundle (?tray=1), and at 340 px wide this rule zoomed it to
-// 80% the moment it resized to fit its content. It keeps its own size.
-const IS_TRAY = new URLSearchParams(window.location.search).get('tray') === '1'
 function applyZoom() {
-  if (IS_TRAY) return
   const current = window.kozo?.ui?.getZoom?.() || zoomNow || 1
   const physical = window.innerWidth * current
   const z = zoomLock ?? Math.min(zoomPref, Math.max(0.8, physical / 1000))
@@ -117,7 +131,17 @@ export function setZoomLock(v) { zoomLock = v; applyZoom() }
 let resizeT = null
 window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(applyZoom, 150) })
 
+// 'system' (Match Windows): Light while Windows' apps are in light mode, else Midnight.
+const LIGHT_QUERY = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null
+function effectiveTheme(theme) {
+  if (theme !== 'system') return theme
+  return LIGHT_QUERY?.matches ? 'light' : 'midnight'
+}
+let appliedPrefs = null
+LIGHT_QUERY?.addEventListener?.('change', () => { if (appliedPrefs?.theme === 'system') apply(appliedPrefs) })
+
 function apply(p) {
+  appliedPrefs = p
   const el = document.documentElement
   el.dataset.density = p.density
   el.dataset.corners = p.corners
@@ -130,11 +154,16 @@ function apply(p) {
   el.dataset.motion = ['heavy', 'soft', 'off'].includes(p.motion) ? p.motion : 'soft'
   // Customization (styles/customize.css): attributes for the switches,
   // variables for the values.
-  const attrs = { theme: p.theme, cardStyle: p.cardStyle, cardBorder: p.cardBorder, cardGlow: p.cardGlow, cardShadow: p.cardShadow, glow: p.glow, sidebarSide: p.sidebarSide, pageWidth: p.pageWidth, scrollbar: p.scrollbar, ambient: p.ambient }
+  const attrs = { theme: effectiveTheme(p.theme), cardStyle: p.cardStyle, cardBorder: p.cardBorder, cardGlow: p.cardGlow, cardShadow: p.cardShadow, glow: p.glow, sidebarSide: p.sidebarSide, pageWidth: p.pageWidth, scrollbar: p.scrollbar, ambient: p.ambient }
   for (const [k, v] of Object.entries(attrs)) {
     if (v && v !== DEFAULT_APPEARANCE[k]) el.dataset[k] = v
     else delete el.dataset[k]
   }
+  // The accent is darkened on white and brightened on dark (AccentColorContext).
+  reapplyAccent()
+  // Controller buttons drawn as PlayStation's, and Big Picture's hint bar (GamepadHints).
+  if (p.bigPicture?.buttons === 'playstation') el.dataset.padGlyphs = 'playstation'; else delete el.dataset.padGlyphs
+  if (p.bigPicture?.hints === false) el.dataset.bpHints = 'off'; else delete el.dataset.bpHints
   if (p.hideLibraryStats) el.dataset.hideLibraryStats = ''; else delete el.dataset.hideLibraryStats
   if (p.hideUpcomingHero) el.dataset.hideUpcomingHero = ''; else delete el.dataset.hideUpcomingHero
   const font = FONTS[p.font] || FONTS.dm

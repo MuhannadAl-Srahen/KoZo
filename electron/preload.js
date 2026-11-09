@@ -4,19 +4,24 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 25,
+  rev: 29,
   // Settings → Appearance → UI scale.
   ui: {
     setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
     getZoom: () => { try { return webFrame.getZoomFactor() } catch { return 1 } },
+    // Frees pictures the page no longer shows (App.jsx, after leaving a page full of them).
+    clearCache: () => { try { webFrame.clearCache() } catch {} },
   },
   api: {
     games: {
       list: () => ipcRenderer.invoke('games:list'),
       get: (id) => ipcRenderer.invoke('games:get', id),
       version: (id) => ipcRenderer.invoke('games:version', id),
+      useCopy: (id, file) => ipcRenderer.invoke('games:useCopy', id, file),
       add: (data) => ipcRenderer.invoke('games:add', data),
       planMonth: (gameIds, month) => ipcRenderer.invoke('games:planMonth', gameIds, month),
+      bulkUpdate: (ids, patch) => ipcRenderer.invoke('games:bulkUpdate', ids, patch),
+      bulkRestore: (before) => ipcRenderer.invoke('games:bulkRestore', before),
       finished: () => ipcRenderer.invoke('games:finished'),
       update: (id, data) => ipcRenderer.invoke('games:update', id, data),
       delete: (id) => ipcRenderer.invoke('games:delete', id),
@@ -81,6 +86,13 @@ contextBridge.exposeInMainWorld('kozo', {
       set: (key, value) => ipcRenderer.invoke('settings:set', key, value),
       getAll: () => ipcRenderer.invoke('settings:getAll'),
     },
+    // Steam's Personal Calendar (Upcoming), signed in to the Steam store.
+    steamStore: {
+      calendar: () => ipcRenderer.invoke('steamStore:calendar'),
+      isSignedIn: () => ipcRenderer.invoke('steamStore:isSignedIn'),
+      signIn: () => ipcRenderer.invoke('steamStore:signIn'),
+      signOut: () => ipcRenderer.invoke('steamStore:signOut'),
+    },
     steam: {
       testKey: (key) => ipcRenderer.invoke('steam:testKey', key),
       search: (query) => ipcRenderer.invoke('steam:search', query),
@@ -122,6 +134,11 @@ contextBridge.exposeInMainWorld('kozo', {
       openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
       openPath: (p) => ipcRenderer.invoke('shell:openPath', p),
     },
+    // Settings > Data > Storage.
+    storage: {
+      overview: () => ipcRenderer.invoke('storage:overview'),
+      measure: (force) => ipcRenderer.invoke('storage:measure', force),
+    },
     saves: {
       find: (gameId) => ipcRenderer.invoke('saves:find', gameId),
       backup: (gameId, sourcePath) => ipcRenderer.invoke('saves:backup', gameId, sourcePath),
@@ -133,6 +150,9 @@ contextBridge.exposeInMainWorld('kozo', {
       deleteBackup: (gameId, backupId) => ipcRenderer.invoke('saves:deleteBackup', gameId, backupId),
       setPaths: (gameId, paths) => ipcRenderer.invoke('saves:setPaths', gameId, paths),
       compare: (gameId, id) => ipcRenderer.invoke('saves:compare', gameId, id),
+      progressOffer: (gameId) => ipcRenderer.invoke('saves:progressOffer', gameId),
+      bringProgress: (gameId, id) => ipcRenderer.invoke('saves:bringProgress', gameId, id),
+      dismissOffer: (gameId) => ipcRenderer.invoke('saves:dismissOffer', gameId),
       exportSnapshot: (gameId, id) => ipcRenderer.invoke('saves:export', gameId, id),
       storage: () => ipcRenderer.invoke('saves:storage'),
       setCap: (gb) => ipcRenderer.invoke('saves:setCap', gb),
@@ -231,12 +251,6 @@ contextBridge.exposeInMainWorld('kozo', {
       heroes: (sgdbId) => ipcRenderer.invoke('sgdb:heroes', sgdbId),
       apply: (gameId, coverUrl, heroUrl) => ipcRenderer.invoke('sgdb:apply', gameId, coverUrl, heroUrl),
     },
-    tray: {
-      data: () => ipcRenderer.invoke('tray:data'),
-      action: (name, arg) => ipcRenderer.invoke('tray:action', name, arg),
-      // The popup's panel height, so the window is only as tall as what it shows.
-      fit: (height) => ipcRenderer.invoke('tray:fit', height),
-    },
     releases: {
       unseen: () => ipcRenderer.invoke('releases:unseen'),
       dismiss: (ids) => ipcRenderer.invoke('releases:dismiss', ids),
@@ -318,8 +332,8 @@ contextBridge.exposeInMainWorld('kozo', {
       onBackupCopyStatus: sub('backup:copyStatus', pass),
       onPackProgress: sub('pack:progress', pass),
       onDealsChanged: sub('deals:changed', pass),
+      onStorageProgress: sub('storage:progress', pass),
       onDealsUpdated: sub('deals:updated', pass),
-      onTrayRefresh: sub('tray:refresh', pass),
       onAccentChanged: sub('accent:changed', pass),
       onUnknownProcessAdd: sub('unknown-process:add', pass),
       onLaunchMiss: sub('launch:miss', pass),

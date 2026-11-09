@@ -21,6 +21,7 @@ import HoneycombLogo from '../components/HoneycombLogo'
 import ScanResultModal from '../components/modals/ScanResultModal'
 import SaveManagerModal from '../components/modals/SaveManagerModal'
 import BackupsTab from '../components/BackupsTab'
+import StorageTab from '../components/StorageTab'
 import DriveSetupModal, { DriveBlockedHint } from '../components/DriveSetupModal'
 import s from './Settings.module.css'
 
@@ -262,6 +263,39 @@ function GeneralTab() {
 
       <GraphicsSection />
     </div>
+  )
+}
+
+// When a game starts: KoZo can get out of the way (setting minimize_on_play,
+// processWatcher minimizes the main window when it first sees the game).
+let minimizeOnPlayCache = null
+function GameStartSection() {
+  const [on, setOn] = useState(minimizeOnPlayCache ?? false)
+  useEffect(() => {
+    window.kozo?.api?.settings?.get?.('minimize_on_play').then(r => {
+      if (r?.ok) { minimizeOnPlayCache = r.data === '1'; setOn(minimizeOnPlayCache) }
+    })
+  }, [])
+  function toggle(v) {
+    setOn(v)
+    minimizeOnPlayCache = v
+    window.kozo?.api?.settings?.set('minimize_on_play', v ? '1' : '0')
+  }
+  return (
+    <section className={s.section}>
+      <div className={s.sectionHeader}>
+        <IconRocket size={15} stroke={1.6} />
+        <span>When a game starts</span>
+      </div>
+      <div className={s.toggleList}>
+        <ToggleRow
+          label="Minimize KoZo when a game starts"
+          desc="KoZo moves to the taskbar a moment after the game opens, wherever you started it from."
+          checked={on}
+          onChange={toggle}
+        />
+      </div>
+    </section>
   )
 }
 
@@ -879,6 +913,7 @@ function SteamTab() {
               {signingIn ? <><IconLoader2 size={13} className="spin" /> Waiting…</> : (steamUserId ? 'Change account' : 'Sign in')}
             </button>
           </ConnRow>
+          <SteamStoreRow />
           <ConnRow icon={<IconBrandDiscord size={20} />} name="Discord"
             tone={discord.on && discord.msg?.type === 'success' ? 'ok' : discord.on && discord.msg ? 'warn' : 'muted'}
             status={discord.on ? (discord.msg?.text || 'On. Shows your game while you play.') : 'Off. Turn on to show the game you play on Discord.'}>
@@ -1045,6 +1080,31 @@ function useSgdb() {
     } else { setState('error'); setMsg(d?.message || res?.error || 'Could not check the key.') }
   }
   return { builtIn, key, setKey, saved, savedBad, state, msg, save, working: !savedBad && (builtIn || !!saved) }
+}
+
+// Steam's own picks on Upcoming: a sign-in to the Steam store on Steam's own page, in a
+// KoZo window (services/steamStore.js). Separate from the Steam account above, which only
+// reads your profile.
+function SteamStoreRow() {
+  const [state, setState] = useState(null)   // null = not known yet
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { window.kozo?.api?.steamStore?.isSignedIn?.().then(r => setState(!!(r?.ok && r.data))) }, [])
+  async function signIn() {
+    setBusy(true)
+    try { const r = await window.kozo?.api?.steamStore?.signIn?.(); if (r?.ok) setState(!!r.data) } finally { setBusy(false) }
+  }
+  async function signOut() { await window.kozo?.api?.steamStore?.signOut?.(); setState(false) }
+  return (
+    <ConnRow icon={<IconBrandSteam size={20} />} name="Steam's picks for you"
+      tone={state ? 'ok' : 'muted'}
+      status={state ? 'Signed in to the Steam store. Upcoming shows the games Steam picks for you.' : "Sign in on Steam's own page to see the games Steam picks for you on Upcoming. KoZo never sees your password."}>
+      {state
+        ? <button type="button" className={s.testBtn} onClick={signOut}>Sign out</button>
+        : <button type="button" className={s.testBtn} disabled={busy || state === null} onClick={signIn}>
+            {busy ? <><IconLoader2 size={13} className="spin" /> Waiting…</> : 'Sign in'}
+          </button>}
+    </ConnRow>
+  )
 }
 
 function ConnRow({ icon, name, status, tone = 'muted', children }) {
@@ -1268,6 +1328,7 @@ function ScanPCTab() {
 function TrackingTab() {
   return (
     <div className={s.tabContent}>
+      <GameStartSection />
       <IdleSection />
       <ScanPCTab />
     </div>
@@ -1344,6 +1405,9 @@ const START_PAGES = [
 // background picture (AppearanceCustomize). Every change applies at once.
 const THEMES = [
   { value: 'midnight', label: 'Midnight', bg: '#10101a', s2: '#161624' },
+  // Light: white surfaces, dark text. Match Windows: Light or Midnight with Windows' app mode.
+  { value: 'light',    label: 'Light', bg: '#f1f2f6', s2: '#ffffff' },
+  { value: 'system',   label: 'Match Windows', bg: '#10101a', s2: '#f1f2f6' },
   { value: 'tint',     label: 'Accent tint', tint: true },
   { value: 'custom',   label: 'Custom', custom: true },
   { value: 'oled',     label: 'OLED black', bg: '#000000', s2: '#0b0b0f' },
@@ -1452,7 +1516,7 @@ function LookCustomize() {
             <span className={s.sectionDescQuiet}>Any color, made dark so text and cards stay readable. The box shows the color you get. Picking one switches to Custom.</span>
           </div>
         </div>
-        <p className={s.sectionDescQuiet}>Accent tint colors the background with your accent color.</p>
+        <p className={s.sectionDescQuiet}>Accent tint colors the background with your accent color. Match Windows uses Light or Midnight, the same as your Windows apps.</p>
       </section>
 
       <section className={s.section}>
@@ -2015,6 +2079,7 @@ const TABS = [
   { key: 'tracking',   label: 'Tracking',   group: 'Games', Icon: IconClock,      desc: 'How playtime is counted, and where KoZo looks for your games.' },
   { key: 'accounts',   label: 'Connections', group: 'Games', Icon: IconPlugConnected, desc: 'Steam, Discord, covers and Google Drive.' },
   { key: 'data',       label: 'Backups',    group: 'Data',  Icon: IconArchive,    desc: 'Your game saves and your library, backed up on their own.' },
+  { key: 'storage',    label: 'Storage',    group: 'Data',  Icon: IconDeviceFloppy, desc: 'How much space your games use on each disk.' },
   { key: 'features',   label: 'Features',   group: 'Help',  Icon: IconLayoutGrid, desc: 'Everything KoZo can do, with a link to each.' },
   { key: 'about',      label: 'About',      group: 'Help',  Icon: IconInfoCircle, desc: 'Version, updates, diagnostics and the walkthrough.' },
 ]
@@ -2060,6 +2125,7 @@ export default function Settings() {
           {tab === 'tracking'   && <TrackingTab />}
           {tab === 'appearance' && <AppearanceTab />}
           {tab === 'data'       && <BackupsTab onManageSaves={setSaveGame} />}
+          {tab === 'storage'    && <StorageTab />}
           {tab === 'about'      && <AboutTab />}
         </div>
       </div>

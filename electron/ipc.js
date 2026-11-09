@@ -45,6 +45,20 @@ function handle(channel, fn) {
 handle('games:list', () => gamesQ.listGamesWithStats())
 handle('games:get', (id) => gamesQ.getGame(id))
 handle('games:version', (id) => require('./services/gameVersion').getVersion(id))
+// "Use the new copy": an update installed beside the old copy. Play starts the new file
+// from now on; only an exe inside the game's own folder is accepted.
+handle('games:useCopy', (id, file) => {
+  const game = gamesQ.getGame(id)
+  if (!game) throw new Error('Game not found')
+  const p = path.resolve(String(file || ''))
+  const root = path.resolve(String(game.install_path || ''))
+  if (!game.install_path || !p.toLowerCase().startsWith(root.toLowerCase() + path.sep) || !/\.exe$/i.test(p) || !require('fs').existsSync(p)) {
+    throw new Error("That file isn't in this game's folder")
+  }
+  gamesQ.updateGame(id, { exe_name: path.basename(p), launch_file: p })
+  broadcast('game:updated', id)
+  return gamesQ.getGame(id)
+})
 // Shared by games:add and gameList:moveToLibrary: insert, fetch Steam art +
 // genres + achievements, and make sure the game is on the Game List too.
 // `quick` (Move to Library): don't wait for the banner download; the row's own
@@ -159,6 +173,50 @@ handle('games:planMonth', (gameIds, month) => {
   bk()
   broadcast('game:updated', null)
   return value
+})
+// Library > Select > Edit: one change for many games (status, favorite, hidden).
+// Returns what each game had, so Undo can put it back (games:bulkRestore). A status
+// set this way never opens the rating window for every finished game.
+const BULK_FIELDS = ['completion_status', 'is_favorite', 'is_hidden']
+handle('games:bulkUpdate', (ids, patch) => {
+  const fields = Object.keys(patch || {}).filter(k => BULK_FIELDS.includes(k))
+  const before = []
+  if (!fields.length) return { before }
+  const statusSync = require('./services/statusSync')
+  for (const id of (ids || []).map(Number)) {
+    const g = gamesQ.getGame(id)
+    if (!g) continue
+    const was = { id }
+    for (const k of fields) was[k] = g[k] ?? null
+    if (fields.includes('completion_status')) was.completion_status_at = g.completion_status_at ?? null
+    before.push(was)
+    const flags = {}
+    for (const k of fields) if (k !== 'completion_status') flags[k] = patch[k] ? 1 : 0
+    if (Object.keys(flags).length) gamesQ.updateGame(id, flags)
+    if (fields.includes('completion_status')) statusSync.setGameStatus(id, patch.completion_status || null, { announce: false })
+  }
+  bk()
+  broadcast('game:updated', null)
+  return { before }
+})
+handle('games:bulkRestore', (before) => {
+  const statusSync = require('./services/statusSync')
+  const db = require('./db/database').getDb()
+  for (const b of before || []) {
+    const id = Number(b.id)
+    if (!gamesQ.getGame(id)) continue
+    const flags = {}
+    if ('is_favorite' in b) flags.is_favorite = b.is_favorite ? 1 : 0
+    if ('is_hidden' in b) flags.is_hidden = b.is_hidden ? 1 : 0
+    if (Object.keys(flags).length) gamesQ.updateGame(id, flags)
+    if ('completion_status' in b) {
+      statusSync.setGameStatus(id, b.completion_status || null, { announce: false })
+      db.prepare('UPDATE games SET completion_status_at = ? WHERE id = ?').run(b.completion_status_at ?? null, id)
+    }
+  }
+  bk()
+  broadcast('game:updated', null)
+  return true
 })
 handle('games:update', (id, data) => {
   // Status changes go through statusSync so linked Game List rows stay in step.
@@ -278,6 +336,16 @@ handle('saves:listBackups', (gameId) => {
   return { snapshots: vault.listSnapshots(game), bytes: vault.usage(game) }
 })
 handle('saves:compare', (gameId, id) => require('./services/saveVault').compare(saveGame(gameId), id))
+// A game whose crack changed (an update): its progress from the old crack's folder,
+// offered on its page and at Play (services/crackSaves.js).
+handle('saves:progressOffer', (gameId) => require('./services/crackSaves').progressOffer(saveGame(gameId)))
+handle('saves:bringProgress', (gameId, id) => {
+  const game = saveGame(gameId)
+  const r = require('./services/saveVault').restore(game, id)   // lands in the current crack's folder
+  try { require('./services/saveDetect').confirmFor(game) } catch {}
+  return r
+})
+handle('saves:dismissOffer', (gameId) => { require('./services/crackSaves').dismissOffer(saveGame(gameId)); return true })
 handle('saves:restore', (gameId, id) => require('./services/saveVault').restore(saveGame(gameId), id))
 handle('saves:deleteBackup', (gameId, id) => require('./services/saveVault').remove(saveGame(gameId), id))
 handle('saves:export', async (gameId, id) => {
@@ -290,6 +358,9 @@ handle('saves:export', async (gameId, id) => {
   return out
 })
 handle('saves:backupsDir', () => require('./services/saveBackup').rootPath())
+// Settings > Data > Storage: each disk, and the games on it by size (services/gameSizes.js).
+handle('storage:overview', () => require('./services/gameSizes').overview())
+handle('storage:measure', (force) => { require('./services/gameSizes').measure({ force: !!force }); return true })
 
 // Every game: where its saves are, how many restore points, newest, space used.
 // Cheap: no disk search here (saves:detect does that).
@@ -667,7 +738,8 @@ async function isExeRunning(exeName) {
 // logs show seven inside two seconds. Repeat clicks now join the first attempt.
 const launchInFlight = new Map()   // gameId → Promise
 
-handle('games:launch', async (id) => {
+// Play, from the app or the tray menu (tray.js): one launch per game at a time.
+async function launchGame(id) {
   const existing = launchInFlight.get(id)
   if (existing) return existing
   const p = (async () => doLaunch(id))()
@@ -685,7 +757,8 @@ handle('games:launch', async (id) => {
     try { require('./overlayWindow').warm() } catch {}
     return r
   } finally { launchInFlight.delete(id) }
-})
+}
+handle('games:launch', (id) => launchGame(id))
 
 // Start a program the way Explorer does (ShellExecute via Start-Process).
 // A direct spawn() from KoZo hands the game every inheritable handle KoZo has
@@ -1892,6 +1965,12 @@ handle('steam:comingSoon', (feed, page) => require('./services/steamApi').getCom
 // appIds → { [appid]: { portrait, hero, header, capsule } } real store art URLs.
 handle('steam:tasteProfile', () => require('./services/steamApi').getTasteProfile())
 handle('steam:picks', () => require('./services/steamApi').getPicks())
+// Steam's own picks for Upcoming: the store's Personal Calendar, after a sign-in on
+// Steam's own page in a KoZo window (services/steamStore.js).
+handle('steamStore:calendar', () => require('./services/steamStore').personalCalendar())
+handle('steamStore:isSignedIn', () => require('./services/steamStore').isSignedIn())
+handle('steamStore:signIn', () => require('./services/steamStore').signIn())
+handle('steamStore:signOut', () => require('./services/steamStore').signOut())
 handle('steam:reviews', (appId) => require('./services/steamApi').getReviews(Number(appId)))
 // Discount games (pages/Deals.jsx, services/deals.js).
 handle('deals:list', (opts) => require('./services/deals').getDeals(opts || {}))
@@ -3068,113 +3147,4 @@ handle('stats:captureCard', async (rect, action, year) => {
 handle('stats:xp', () => require('./services/xp').computeXp())
 handle('stats:xpHistory', (limit) => require('./services/xp').xpHistory(limit || 25))
 
-// ── Tray popup (electron/trayWindow.js → src/TrayApp.jsx) ─────────────────────
-// One snapshot of everything the popup shows: profile + level, live sessions,
-// today's playtime, recent games. Called on open and every few seconds while open.
-handle('tray:data', () => {
-  const db = require('./db/database').getDb()
-  const settingsQ = require('./db/queries/settings')
-  const watcher = require('./services/processWatcher')
-  const achievementsQ = require('./db/queries/achievements')
-
-  let xp = null
-  try { xp = require('./services/xp').computeXp() } catch {}
-
-  const live = []
-  let todaySec = 0
-  try {
-    todaySec = db.prepare(`
-      SELECT COALESCE(SUM(duration_seconds), 0) AS s FROM sessions
-      WHERE ended_at IS NOT NULL AND DATE(started_at, 'localtime') = DATE('now', 'localtime')
-    `).get().s || 0
-  } catch {}
-  for (const [gameId, sess] of watcher.getActiveSessions()) {
-    const game = gamesQ.getGame(gameId)
-    let total = 0, unlocked = 0
-    try {
-      const list = achievementsQ.listAchievementsForGame(gameId)
-      total = list.length
-      unlocked = list.filter(a => a.unlock_id != null).length
-    } catch {}
-    live.push({
-      id: gameId,
-      name: sess.game_name || game?.name || 'Game',
-      startedAt: sess.started_at,
-      idleSeconds: sess.idle_seconds || 0,
-      idle: !!sess.idle,
-      cover: game?.banner_local_path || null,
-      coverUrl: game?.banner_url || null,
-      coverRev: game?.banner_rev || 0,
-      achTotal: total,
-      achUnlocked: unlocked,
-    })
-  }
-
-  const liveIds = new Set(live.map(l => l.id))
-  const recent = db.prepare(`
-    SELECT id, name, banner_local_path, banner_url, banner_rev, last_played_at, total_playtime_seconds
-    FROM games
-    WHERE last_played_at IS NOT NULL AND COALESCE(is_archived, 0) = 0 AND COALESCE(is_hidden, 0) = 0
-    ORDER BY last_played_at DESC LIMIT 6
-  `).all().filter(g => !liveIds.has(g.id)).slice(0, 4).map(g => ({
-    id: g.id, name: g.name, cover: g.banner_local_path, coverUrl: g.banner_url, coverRev: g.banner_rev || 0,
-    lastPlayedAt: g.last_played_at, playtime: g.total_playtime_seconds || 0,
-  }))
-
-  return {
-    profile: {
-      name: settingsQ.getSetting('profile_name') || 'Player',
-      avatar: settingsQ.getSetting('profile_avatar_path') || null,
-      level: xp?.level ?? null,
-      tier: xp?.tier || null,
-      progress: xp?.progress ?? 0,
-      toNextLevel: xp?.toNextLevel ?? null,
-    },
-    accent: settingsQ.getSetting('accent_color') || null,
-    paused: watcher.isPaused?.() ?? false,
-    live,
-    todaySec,            // finished sessions only — the popup adds live time as it ticks
-    recent,
-    version: require('electron').app.getVersion(),
-  }
-})
-
-// The popup's panel height: the window is only as tall as what it shows.
-handle('tray:fit', (height) => { require('./trayWindow').fit(height); return true })
-
-handle('tray:action', async (action, arg) => {
-  const trayWindow = require('./trayWindow')
-  const watcher = require('./services/processWatcher')
-  const main = require('./main')
-  switch (action) {
-    case 'open':
-      trayWindow.hide()
-      main.getOrCreateMainWindow()
-      return true
-    case 'openAt':
-      trayWindow.hide()
-      main.getOrCreateMainWindow((win) => {
-        win.webContents.executeJavaScript(`window.location.hash = ${JSON.stringify('#' + String(arg || '/'))}`).catch(() => {})
-      })
-      return true
-    case 'launch':
-      trayWindow.hide()
-      return doLaunch(Number(arg))
-    case 'pause':
-      watcher.pause()
-      return true
-    case 'resume':
-      watcher.resume()
-      return true
-    case 'quit':
-      trayWindow.hide()
-      require('electron').app.isQuitting = true
-      require('electron').app.quit()
-      return true
-    case 'hide':
-      trayWindow.hide()
-      return true
-    default:
-      throw new Error(`Unknown tray action: ${action}`)
-  }
-})
+module.exports = { launchGame }

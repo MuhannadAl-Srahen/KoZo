@@ -474,6 +474,31 @@
   border-radius: var(--r-card);
   overflow: hidden;
 }
+/* Steam's calendar: Monday to Friday, one row per week (SteamView). */
+.steamWeeks { display: flex; flex-direction: column; gap: var(--sp-10); }
+.steamWeekHead { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--sp-10); }
+.steamWeekHead span {
+  padding: var(--sp-6) 0 var(--sp-8);
+  border-bottom: 1px solid var(--neutral-border);
+  text-align: center;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.steamWeek {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--sp-10);
+  align-items: stretch;
+  /* The weeks grow as you scroll: rows off screen aren't drawn, so their covers
+     don't sit in memory as drawn pictures. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 380px;
+}
+.steamWeek .steamDay { min-height: 150px; }
+.steamDayPast { opacity: 0.45; }
 .steamDayHead {
   padding: var(--sp-8) var(--sp-10);
   background: linear-gradient(90deg, var(--surface-3), transparent);
@@ -621,3 +646,12 @@
 
 /* Picks loading: a shimmering cap the size of a real one. */
 @keyframes capShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* The cover with its match chip and track button: stays dark in the Light theme (customize.css .kz-dark). */
+.steamCapFrame { composes: kz-dark from global; }
+/* Match chips on covers: stays dark in the Light theme (customize.css .kz-dark). */
+.match { composes: kz-dark from global; }
+/* On the poster: stays dark in the Light theme (customize.css .kz-dark). */
+.posterCountdown { composes: kz-dark from global; }
+/* On the poster: stays dark in the Light theme (customize.css .kz-dark). */
+.posterPrice { composes: kz-dark from global; }

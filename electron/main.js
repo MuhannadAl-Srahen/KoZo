@@ -163,7 +163,11 @@ function createWindow() {
   mainWindow.on('focus', checkInstalled)
   // destroy() (the unload-in-tray path below) skips 'close' but still fires
   // 'closed' — clear the module ref so getOrCreateMainWindow knows to recreate.
-  mainWindow.on('closed', () => { mainWindow = null })
+  // The graphics process keeps what this window drew; services/gpuTrim.js frees it.
+  mainWindow.on('closed', () => {
+    mainWindow = null
+    if (!app.isQuitting) { try { require('./services/gpuTrim').schedule() } catch {} }
+  })
 
   // Open external links in the OS browser, not in the app
   // (http/https only — same rule as the shell:openExternal IPC).

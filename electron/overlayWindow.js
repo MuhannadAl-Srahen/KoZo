@@ -180,6 +180,7 @@ function scheduleIdleDestroy() {
     if (_win && !_win.isDestroyed() && !_win.isVisible()) {
       logger.info('overlayWindow: tearing down idle overlay to free memory')
       _win.destroy()   // the closed handler resets state; next toast recreates
+      try { require('./services/gpuTrim').schedule() } catch {}
     }
   }, IDLE_DESTROY_MS)
 }

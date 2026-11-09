@@ -461,3 +461,31 @@
 :global(html[data-motion]) .grid .card:nth-child(10) { animation-delay: 0.30s; }
 :global(html[data-motion]) .grid .card:nth-child(11) { animation-delay: 0.33s; }
 :global(html[data-motion]) .grid .card:nth-child(12) { animation-delay: 0.36s; }
+
+/* Big Picture is the TV screen: stays dark in the Light theme (customize.css .kz-dark). */
+.root { composes: kz-dark from global; }
+
+/* ── Customize (appearance.bigPicture, components/BigPictureCustomize.jsx) ── */
+/* The defaults draw exactly the look above; each choice only adds to it. */
+.card[data-gpfocus] .cardArt {
+  box-shadow: 0 0 0 3px var(--bp-focus, var(--a)), 0 0 34px color-mix(in srgb, var(--bp-focus, var(--a)) 45%, transparent), 0 20px 46px rgba(0, 0, 0, 0.6);
+}
+.root[data-bp-size="small"] { --bp-poster: clamp(100px, min(9vw, 19vh), 200px); }
+.root[data-bp-size="large"] { --bp-poster: clamp(150px, min(14.5vw, 30vh), 320px); }
+/* Wide covers: the game's wide art, about 1.75 times as wide. */
+.root[data-bp-shape="wide"] .card { flex-basis: calc(var(--bp-poster) * 1.75); width: calc(var(--bp-poster) * 1.75); }
+.root[data-bp-shape="wide"] .cardArt { aspect-ratio: 16 / 9; }
+.root[data-bp-shape="wide"] .grid { grid-template-columns: repeat(auto-fill, minmax(calc(var(--bp-poster) * 1.75), 1fr)); }
+.root[data-bp-shape="wide"] .grid .card { width: auto; }
+.root[data-bp-corners="square"] .cardArt { border-radius: 3px; }
+.root[data-bp-corners="round"] .cardArt { border-radius: 20px; }
+/* Background: the game's art, blurred, or none. Extra blur and darkness on top. */
+.root[data-bp-bg="plain"] .backdropImg { display: none; }
+.root .backdropImg:not(.backdropSoft) { filter: blur(var(--bp-blur, 0px)); }
+.root[data-bp-bg="blur"] .backdropImg { filter: blur(max(26px, var(--bp-blur, 0px))) saturate(1.15); }
+.backdropShade::after { content: ''; position: absolute; inset: 0; background: rgba(8, 8, 14, var(--bp-darken, 0)); pointer-events: none; }
+/* Spotlight: one big game, two rows. */
+.root[data-bp-layout="spotlight"] .hero { min-height: clamp(240px, 48vh, 640px); }
+.root[data-bp-layout="spotlight"] .heroName { font-size: clamp(40px, 4.6vw, 96px); }
+/* Grid: every game under a smaller banner. */
+.root[data-bp-layout="grid"] .hero { min-height: clamp(150px, 22vh, 300px); }

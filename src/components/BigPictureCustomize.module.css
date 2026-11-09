@@ -1,0 +1,56 @@
+/* Big Picture's Customize drawer: TV-sized, dark like Big Picture itself. */
+.scrim { position: fixed; inset: 0; z-index: calc(var(--z-modal) - 1); background: rgba(6, 6, 12, 0.35); }
+.drawer {
+  composes: kz-dark from global;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(460px, 92vw);
+  display: flex;
+  flex-direction: column;
+  gap: clamp(10px, 1.6vh, 18px);
+  padding: clamp(18px, 3vh, 32px) clamp(18px, 2vw, 30px);
+  overflow-y: auto;
+  background: color-mix(in srgb, #0d0d16 94%, transparent);
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: -20px 0 50px rgba(0, 0, 0, 0.5);
+  color: #ececf8;
+  animation: drawerIn 0.22s var(--ease-out, ease) both;
+}
+@keyframes drawerIn { from { transform: translateX(30px); opacity: 0; } }
+.head { display: flex; align-items: center; justify-content: space-between; }
+.title { margin: 0; font-size: clamp(22px, 1.8vw, 30px); font-weight: 800; }
+.lead { margin: -6px 0 4px; color: rgba(255, 255, 255, 0.6); font-size: clamp(13px, 0.9vw, 16px); }
+.close {
+  display: inline-grid; place-items: center; width: 40px; height: 40px; border: none; border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08); color: #fff; cursor: pointer;
+}
+.row { display: flex; flex-direction: column; gap: 8px; }
+.label { font-size: clamp(12px, 0.8vw, 14px); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: rgba(255, 255, 255, 0.55); }
+.options { display: flex; flex-wrap: wrap; gap: 6px; }
+.opt {
+  min-height: 38px; padding: 0 16px; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.05); color: rgba(255, 255, 255, 0.85);
+  font: inherit; font-size: clamp(13px, 0.9vw, 16px); font-weight: 700; cursor: pointer;
+}
+.opt:hover, .opt[data-gpfocus] { border-color: rgba(255, 255, 255, 0.5); }
+.optOn { background: #fff; color: #0b0b12; border-color: #fff; }
+.swatches { display: flex; flex-wrap: wrap; gap: 10px; }
+.swatch {
+  width: 36px; height: 36px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.2);
+  background: var(--sw); cursor: pointer;
+}
+.swatchOn, .swatch[data-gpfocus] { box-shadow: 0 0 0 3px #0d0d16, 0 0 0 5px #fff; }
+.stepper { display: flex; align-items: center; gap: 12px; }
+.stepBtn {
+  display: inline-grid; place-items: center; width: 38px; height: 38px; border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 50%; background: rgba(255, 255, 255, 0.05); color: #fff; cursor: pointer;
+}
+.stepBtn:disabled { opacity: 0.35; cursor: default; }
+.stepValue { min-width: 64px; text-align: center; font-weight: 800; font-size: clamp(14px, 1vw, 18px); font-variant-numeric: tabular-nums; }
+.reset {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; margin-top: 6px; min-height: 38px; padding: 0 16px;
+  border: 1px solid rgba(255, 255, 255, 0.14); border-radius: var(--r-pill); background: transparent; color: rgba(255, 255, 255, 0.8);
+  font: inherit; font-weight: 700; cursor: pointer;
+}

@@ -101,21 +101,60 @@ function setupTray(processWatcher) {
       items.push({ label: paused ? 'Tracking paused' : 'No game running', enabled: false })
     }
 
-    // ── Glanceable stat, always present so the menu never feels empty ──
+    // ── Glanceable stats, always present so the menu never feels empty ──
     const today = todayPlaytimeSec(sessions)
     items.push({ label: today > 0 ? `Played today: ${fmtDur(today)}` : 'Nothing played today', enabled: false })
+    try {
+      const xp = require('./services/xp').computeXp()
+      if (xp?.level != null) items.push({ label: `Level ${xp.level}${xp.tier ? ` · ${xp.tier}` : ''}`, enabled: false })
+    } catch {}
+
+    // ── Jump back in: the last games played, one click starts one ──
+    const recent = recentGames(new Set(sessions.keys()))
+    if (recent.length) {
+      items.push({ type: 'separator' })
+      items.push({
+        label: 'Jump back in',
+        submenu: recent.map(g => ({ label: g.name.replace(/&/g, '&&'), click: () => launch(g.id) })),
+      })
+    }
 
     // ── Quick destinations ──
     items.push({ type: 'separator' })
     items.push({ label: 'Open KoZo', click: () => show() })
     items.push({ label: 'Big Picture', click: () => openAt('/big') })
     items.push({ label: 'Statistics', click: () => openAt('/statistics') })
-    items.push({ label: 'Profile', click: () => openAt('/profile') })
     items.push({ type: 'separator' })
+    items.push(paused
+      ? { label: 'Resume tracking', click: () => { processWatcher.resume(); updateTooltip() } }
+      : { label: 'Pause tracking', click: () => { processWatcher.pause(); updateTooltip() } })
     items.push({ label: 'Quit KoZo', click: () => { app.isQuitting = true; app.quit() } })
 
     return Menu.buildFromTemplate(items)
   }
+
+  // The last games played that aren't running now, newest first.
+  function recentGames(liveIds) {
+    try {
+      return require('./db/database').getDb().prepare(`
+        SELECT id, name FROM games
+        WHERE last_played_at IS NOT NULL AND COALESCE(is_archived, 0) = 0 AND COALESCE(is_hidden, 0) = 0
+        ORDER BY last_played_at DESC LIMIT 8
+      `).all().filter(g => !liveIds.has(g.id)).slice(0, 5)
+    } catch { return [] }
+  }
+
+  // Same path as Play in the app. If it can't start (a missing file, a dismissed
+  // permission prompt), the game's page opens, where Play says why.
+  function launch(gameId) {
+    Promise.resolve()
+      .then(() => require('./ipc').launchGame(gameId))
+      .catch((e) => {
+        logger.warn('tray: launch failed', { message: e.message })
+        openAt(`/game/${gameId}`)
+      })
+  }
+  _buildMenu = buildMenu
 
   // Tooltip reflects what's happening so hovering the icon is informative too.
   function updateTooltip() {
@@ -131,8 +170,9 @@ function setupTray(processWatcher) {
     } catch { tray.setToolTip('KoZo Game Tracker') }
   }
 
-  // The right-click menu is the KoZo popup (trayWindow.js); the native menu
-  // is only a fallback if that window can't be created.
+  // Right-click shows Windows' own menu, built fresh each time so it's never stale.
+  // It replaced a KoZo-styled popup window (the maker's call): that loaded the whole
+  // app on every open, so it was slow to appear and cost a page's worth of memory.
   function refreshMenu() {
     if (tray && !tray.isDestroyed()) updateTooltip()
   }
@@ -143,17 +183,16 @@ function setupTray(processWatcher) {
   // `afterShow` parameter and get called as a function.
   tray.on('click',        () => show())
   tray.on('double-click', () => show())
-  tray.on('right-click', (_e, bounds) => {
-    try {
-      require('./trayWindow').toggle(bounds || tray.getBounds())
-    } catch (e) {
-      logger.warn('tray popup failed — native menu instead', { message: e.message })
-      tray.popUpContextMenu(buildMenu())
-    }
+  tray.on('right-click', () => {
+    try { tray.popUpContextMenu(buildMenu()) } catch (e) { logger.warn('tray menu failed', { message: e.message }) }
   })
 
   logger.info('System tray initialized')
   return { refreshMenu }
 }
 
-module.exports = { setupTray }
+// The menu as it would show now (scripts/smoke-test.js reads it).
+let _buildMenu = null
+function currentMenu() { return _buildMenu ? _buildMenu() : null }
+
+module.exports = { setupTray, currentMenu }

@@ -224,11 +224,68 @@ async function findExes(root, exeName) {
   return found
 }
 
+// Pure: the program a Steam loader starts, from its ini. Two layouts:
+//   gbe ColdClientLoader.ini: [SteamClient] Exe=game.exe  ExeRunDir=.
+//   older loaders (steamclient64.ini): [Launcher] Target=game.exe  StartIn=Game
+function loaderTargetFromIni(text) {
+  const get = (key) => String(text || '').match(new RegExp(`^\\s*${key}\\s*=\\s*(.+?)\\s*$`, 'im'))?.[1] || null
+  const exe = get('Exe') || get('Target')
+  if (!exe || !/\.exe$/i.test(exe)) return null
+  return { exe, dir: get('ExeRunDir') || get('StartIn') || null }
+}
+
+// The real game file behind a loader: a small exe with a loader ini beside it that
+// names another program. Without this, a December copy started through its loader
+// read as "this copy" long after a new copy was installed beside it.
+function loaderTarget(exeFile) {
+  if (!exeFile) return null
+  const here = path.dirname(exeFile)
+  for (const name of ['ColdClientLoader.ini', 'steamclient64.ini', 'steamclient.ini']) {
+    const t = loaderTargetFromIni(readText(path.join(here, name)))
+    if (!t) continue
+    const tries = [t.dir ? path.resolve(here, t.dir, t.exe) : null, path.resolve(here, t.exe)].filter(Boolean)
+    const hit = tries.find(p => { try { return fs.statSync(p).isFile() } catch { return false } })
+    if (hit && hit.toLowerCase() !== exeFile.toLowerCase()) return hit
+  }
+  return null
+}
+
+// Pure: of other copies of the same game file, the one installed more than a day
+// after the copy Play starts (an update installed beside the old copy, not over it).
+function pickNewerCopy(current, others) {
+  if (!current?.created) return null
+  const newer = (others || []).filter(o => o.created > current.created + DAY).sort((a, b) => b.created - a.created)
+  return newer.length ? { file: newer[0].file, installedAt: newer[0].created } : null
+}
+
+async function findCopies(root, name, skip) {
+  const want = String(name).toLowerCase()
+  const out = []
+  const queue = [[root, 0]]
+  let seen = 0
+  while (queue.length && seen < MAX_ENTRIES) {
+    const [dir, depth] = queue.shift()
+    let list
+    try { list = await fs.promises.readdir(dir, { withFileTypes: true }) } catch { continue }
+    for (const e of list) {
+      seen++
+      const p = path.join(dir, e.name)
+      if (e.isDirectory()) { if (depth < MAX_DEPTH && !NOT_THE_GAME.test(e.name)) queue.push([p, depth + 1]) }
+      else if (e.name.toLowerCase() === want && p.toLowerCase() !== String(skip).toLowerCase()) out.push(p)
+    }
+  }
+  return out
+}
+const createdAt = (file) => { try { const st = fs.statSync(file); return st.birthtimeMs || st.ctimeMs || null } catch { return null } }
+
 // What this PC's copy is. Null when its folder isn't here.
 async function readLocal(game) {
   const dir = game?.install_path
   if (!dir || !fs.existsSync(dir)) return null
-  const { exact, shipping } = await findExes(dir, game.exe_name)
+  const found = await findExes(dir, game.exe_name)
+  const shipping = found.shipping
+  // Play may start a loader: the copy is the program it starts.
+  const exact = loaderTarget(found.exact) || found.exact
   // A tool or an installer says nothing about the game's version.
   const watched = exact && !require('./pcScanner').isHelperExe(path.basename(exact)) ? exact : null
   const exes = [watched, shipping].filter(Boolean)
@@ -248,7 +305,13 @@ async function readLocal(game) {
       if (st.size > biggest) { biggest = st.size; fileDate = st.mtimeMs }
     } catch {}
   }
-  return { version, build: built?.build || null, date: built?.date || fileDate || null }
+  // An update installed beside this copy instead of over it.
+  let newerCopy = null
+  if (watched) {
+    const others = (await findCopies(dir, path.basename(watched), watched)).map(file => ({ file, created: createdAt(file) })).filter(o => o.created)
+    newerCopy = pickNewerCopy({ file: watched, created: createdAt(watched) }, others)
+  }
+  return { version, build: built?.build || null, date: built?.date || fileDate || null, newerCopy }
 }
 
 // ── What Steam has ──────────────────────────────────────────────────────────
@@ -358,11 +421,14 @@ async function getVersion(gameId) {
   let latest = null
   try { latest = await latestOnSteam(game.steam_app_id) }
   catch (e) { logger.warn('gameVersion: Steam check failed', { message: e.message }) }
-  return versionSummary(local, latest)
+  const summary = versionSummary(local, latest)
+  if (!local.newerCopy) return summary
+  return { ...(summary || {}), newerCopy: local.newerCopy }
 }
 
 module.exports = {
   getVersion, readLocal, latestOnSteam, readExeVersion,
   parseVersionBlock, cleanVersion, exeVersion, buildFromBranches, buildFromManifest, versionInFolder,
   versionInTitle, newsFacts, compareVersions, versionState, versionSummary,
+  loaderTargetFromIni, loaderTarget, pickNewerCopy,
 }

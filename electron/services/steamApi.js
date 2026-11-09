@@ -483,9 +483,12 @@ async function getAppAssets(appIds, { allowStale = false } = {}) {
   const stale = []
   for (const id of ids) {
     const hit = assetCache.get(id)
-    // Entries from before release data was asked for are refetched once.
-    if (hit && hit.assets.release !== undefined && Date.now() - hit.at < ASSET_TTL_MS) out.set(id, hit.assets)
-    else if (allowStale && hit && hit.assets.release !== undefined && Date.now() - hit.at < UPCOMING_MAX_AGE_MS) { out.set(id, hit.assets); stale.push(id) }
+    // Entries from before release data was asked for are refetched once; entries from
+    // before the normal/double sizes were split (no `portrait2x`) show once and refresh.
+    const shaped = hit && hit.assets.release !== undefined
+    const current = shaped && hit.assets.portrait2x !== undefined
+    if (current && Date.now() - hit.at < ASSET_TTL_MS) out.set(id, hit.assets)
+    else if (allowStale && shaped && Date.now() - hit.at < UPCOMING_MAX_AGE_MS) { out.set(id, hit.assets); stale.push(id) }
     else missing.push(id)
   }
   if (stale.length) fetchAssets(stale, new Map()).then(saveUpcomingSoon).catch(() => {})
@@ -507,11 +510,18 @@ async function fetchAssets(missing, out) {
       const data = await getJSON('https://api.steampowered.com/IStoreBrowseService/GetItems/v1/', { input_json: JSON.stringify(input) })
       for (const item of data?.response?.store_items || []) {
         const a = item.assets
+        // Steam's normal size for lists, the calendar and banners; the double size
+        // (`*2x`, 4 times the pixels: about 19 MB of memory for one 3840 px hero) only
+        // where one picture fills a big space, and for the covers KoZo downloads.
         const assets = {
-          portrait: assetUrl(a, 'library_capsule_2x', 'library_capsule'),
-          hero:     assetUrl(a, 'library_hero_2x', 'library_hero'),
-          header:   assetUrl(a, 'header_2x', 'header'),
-          capsule:  assetUrl(a, 'main_capsule_2x', 'main_capsule'),
+          portrait:   assetUrl(a, 'library_capsule', 'library_capsule_2x'),
+          portrait2x: assetUrl(a, 'library_capsule_2x', 'library_capsule'),
+          hero:       assetUrl(a, 'library_hero', 'library_hero_2x'),
+          hero2x:     assetUrl(a, 'library_hero_2x', 'library_hero'),
+          header:     assetUrl(a, 'header', 'header_2x'),
+          header2x:   assetUrl(a, 'header_2x', 'header'),
+          capsule:    assetUrl(a, 'main_capsule', 'main_capsule_2x'),
+          capsule2x:  assetUrl(a, 'main_capsule_2x', 'main_capsule'),
           tags:     Array.isArray(item.tagids) ? item.tagids.slice(0, 12) : [],   // Steam tag ids, most voted first
           release:  releaseOf(item.release),
           name:     item.name || null,
@@ -779,9 +789,12 @@ async function getGameFacts(appIds) {
           reviews: rv ? { count: rv.review_count || 0, pct: rv.percent_positive || 0, label: rv.review_score_label || '' } : null,
           release: releaseOf(item.release),
           releasedAt: item.release?.steam_release_date ? item.release.steam_release_date * 1000 : null,
-          header: assetUrl(a, 'header_2x', 'header'),
-          capsule: assetUrl(a, 'main_capsule_2x', 'main_capsule'),
-          portrait: assetUrl(a, 'library_capsule_2x', 'library_capsule'),
+          header: assetUrl(a, 'header', 'header_2x'),
+          header2x: assetUrl(a, 'header_2x', 'header'),
+          capsule: assetUrl(a, 'main_capsule', 'main_capsule_2x'),
+          capsule2x: assetUrl(a, 'main_capsule_2x', 'main_capsule'),
+          portrait: assetUrl(a, 'library_capsule', 'library_capsule_2x'),
+          portrait2x: assetUrl(a, 'library_capsule_2x', 'library_capsule'),
           developers: (item.basic_info?.developers || []).map(d => d.name).filter(Boolean),
         }
         capSet(factsCache, item.appid, { at: Date.now(), facts }, 3000)
@@ -864,7 +877,7 @@ async function similarGames(appId) {
       const f = facts.get(o.appid)
       return {
         appid: o.appid, name: f.name, pct: o.pct, shared: o.shared.map(tagName).filter(Boolean),
-        header: f.header, capsule: f.capsule, portrait: f.portrait, reviews: f.reviews,
+        header: f.header, header2x: f.header2x, capsule: f.capsule, portrait: f.portrait, portrait2x: f.portrait2x, reviews: f.reviews,
         release: f.release, releasedAt: f.releasedAt, soon: !!f.release?.soon || (!f.reviews?.count && !f.releasedAt),
         developers: f.developers,
       }
@@ -908,7 +921,7 @@ async function downloadHero(appId, gameId, _viaParent = false) {
   const heroPath = path.join(getBannersDir(), `${gameId}_hero.jpg`)
   const urls = [`https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_hero.jpg`]
   const a = await assetsFor(appId).catch(() => null)
-  if (a?.hero) urls.push(a.hero)
+  if (a?.hero2x || a?.hero) urls.push(a.hero2x || a.hero)
   for (const url of urls) {
     try {
       await downloadFile(url, heroPath)
@@ -941,7 +954,7 @@ async function resolveBannerUrl(appId, _viaParent = false) {
     if (r.status === 200) return portrait
   } catch { /* no portrait — resolve real art below */ }
   const a = await assetsFor(appId).catch(() => null)
-  if (a?.portrait) return a.portrait
+  if (a?.portrait2x || a?.portrait) return a.portrait2x || a.portrait
   const art = await getStoreArt(appId)
   return art?.header_image || art?.capsule_image || portrait
 }
@@ -974,7 +987,7 @@ async function downloadBanner(appId, gameId, extraUrls = [], _viaParent = false)
   // The hashed portrait (one cached GetItems call) goes first: on newer titles
   // the classic paths 404 one after another before it is ever reached.
   const urls = [
-    a?.portrait,
+    a?.portrait2x || a?.portrait,
     `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_600x900_2x.jpg`,
     `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_600x900.jpg`,
     `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/header.jpg`,

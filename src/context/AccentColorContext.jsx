@@ -56,9 +56,32 @@ function ensureMinContrast(hex) {
   return `#${to2(h + 1/3)}${to2(h)}${to2(h - 1/3)}`
 }
 
+// The Light theme: darker until it has 4.5:1 against white, the same hue. A lime or
+// lavender accent as text on white was close to unreadable.
+function darkenForWhite(hex) {
+  if (!/^#[0-9A-Fa-f]{6}$/.test(hex)) return hex
+  const lum = (h) => {
+    const c = [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255).map(v => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)))
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+  }
+  let out = hex
+  for (let k = 0; k < 40 && 1.05 / (lum(out) + 0.05) < 4.5; k++) {
+    out = '#' + [1, 3, 5].map(i => Math.round(parseInt(out.slice(i, i + 2), 16) * 0.92).toString(16).padStart(2, '0')).join('')
+  }
+  return out
+}
+
+let lastAccent = null
+// After the theme changes between light and dark (AppearanceContext).
+export function reapplyAccent() { if (lastAccent) applyAccent(lastAccent) }
+
 export function applyAccent(rawHex) {
-  const hex = ensureMinContrast(rawHex)
+  lastAccent = rawHex
+  const light = document.documentElement.dataset.theme === 'light'
+  const hex = light ? darkenForWhite(rawHex) : ensureMinContrast(rawHex)
   const root = document.documentElement
+  // The dark themes' accent, for what stays dark in Light (customize.css .kz-dark).
+  root.style.setProperty('--a-bright', ensureMinContrast(rawHex))
   root.style.setProperty('--a', hex)
   root.style.setProperty('--ad', hexToRgba(hex, 0.10))
   root.style.setProperty('--ab', hexToRgba(hex, 0.22))

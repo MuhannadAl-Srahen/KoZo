@@ -38,6 +38,12 @@ let dealsCache = null   // module cache: a revisit paints at once
 
 function scoreTone(n) { return n >= 80 ? 'great' : n >= 65 ? 'good' : 'ok' }
 function scoreWord(n) { return n >= 80 ? 'Great deal' : n >= 65 ? 'Good deal' : 'Deal' }
+// "Very Positive · 12K": Steam's own words and how many people said so. A bare "98%"
+// could be 98% of a dozen people.
+function reviewText(r) {
+  const n = r.count >= 1e6 ? `${(r.count / 1e6).toFixed(1).replace(/\.0$/, '')}M` : r.count >= 1e3 ? `${Math.round(r.count / 1e3)}K` : String(r.count)
+  return `${r.label || `${r.pct}%`} · ${n}`
+}
 // "24% your taste" read like something bad, and a weak match says nothing worth a line.
 // 35 is where the "Close to your taste" filter starts.
 function tasteWord(n) { return n >= 35 ? 'Close to your taste' : n >= 20 ? 'Near your taste' : null }
@@ -72,7 +78,7 @@ function DealCard({ g, i, us, alert, onOpen }) {
           </span>
         </div>
         <div className={s.meta}>
-          {g.reviews?.count > 0 && <span className={s.reviews} title={`${g.reviews.count.toLocaleString()} reviews`}><IconThumbUp size={12} /> {g.reviews.pct}%</span>}
+          {g.reviews?.count > 0 && <span className={s.reviews} title={`${g.reviews.pct}% of ${g.reviews.count.toLocaleString()} reviews are positive`}><IconThumbUp size={12} /> {reviewText(g.reviews)}</span>}
           {taste && <span className={s.matchTxt} title={`${g.match}% like the games you play most`}><IconSparkles size={12} /> {taste}</span>}
           {ends && <span className={s.ends}><IconClock size={12} /> {ends}</span>}
         </div>
@@ -175,7 +181,7 @@ export default function Deals() {
 
   async function addToList(g) {
     setAdding(g.appid)
-    const res = await window.kozo?.api?.gameList?.add?.({ steam_app_id: g.appid, name: g.name, banner_url: g.portrait || null, status: 'want_to_play', rating: null, game_id: null })
+    const res = await window.kozo?.api?.gameList?.add?.({ steam_app_id: g.appid, name: g.name, banner_url: g.portrait2x || g.portrait || null, status: 'want_to_play', rating: null, game_id: null })
     setAdding(null)
     if (res?.ok) setAdded(a => new Set(a).add(g.appid))
   }
@@ -281,7 +287,7 @@ export default function Deals() {
         <SteamGameModal
           appId={open.appid}
           name={open.name}
-          art={{ header: open.header, capsule: open.capsule }}
+          art={{ header: open.header, header2x: open.header2x, capsule: open.capsule }}
           onClose={() => setOpen(null)}
           tab={openTab}
           onTab={setOpenTab}

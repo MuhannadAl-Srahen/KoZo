@@ -231,7 +231,7 @@ console.log('\nupcoming top bar')
 {
   const src = require('fs').readFileSync(path.join(__dirname, '..', 'src', 'lib', 'upcomingPick.js'), 'utf8')
     .replace(/export function/g, 'function')
-  const { readPickMode, defaultPickMode, filterBuckets, pickDay } = new Function(src + '; return { readPickMode, defaultPickMode, filterBuckets, pickDay }')()
+  const { readPickMode, defaultPickMode, filterBuckets, pickDay, onlyIds, weekRows } = new Function(src + '; return { readPickMode, defaultPickMode, filterBuckets, pickDay, onlyIds, weekRows }')()
   check('the old "picked" choice means Like my games', readPickMode('picked') === 'like')
   check('the three choices read back', ['like', 'others', 'all'].every(m => readPickMode(m) === m))
   check('nothing chosen stays unchosen', readPickMode(null) === null && readPickMode('nonsense') === null)
@@ -255,6 +255,24 @@ console.log('\nupcoming top bar')
   check('a same-match tie goes to the more popular', pickDay([{ appid: 1, match: 5, popRank: 9 }, { appid: 2, match: 5, popRank: 3 }], 'like')[0].appid === 2)
   check('an others day: most popular first, 8 of them', pickDay(many, 'others').length === 8 && pickDay(many, 'others')[0].appid === 11)
   check('picking a day leaves the list alone', many[0].appid === 0)
+
+  // Steam's own picks (signed in to the Steam store) and its Monday-to-Friday weeks.
+  check('signed in to the Steam store starts on its picks', defaultPickMode({ picks: { 5: { pct: 80 } } }, true) === 'steam' && readPickMode('steam') === 'steam')
+  const only = onlyIds(buckets, new Set([2, 3]))
+  check('Steam picks hold only its games', only.all.map(g => g.appid).join() === '2,3' && !only.byDay.has('z') && only.byDay.get('x').length === 1)
+  check("a Steam day keeps Steam's order", pickDay([{ appid: 1, steamRank: 4 }, { appid: 2, steamRank: 1 }], 'steam')[0].appid === 2)
+  // Sunday Nov 8 2026: Steam starts on Monday Nov 9, like the maker's screenshot.
+  const games = new Map([['2026-11-09', [{ appid: 1 }]], ['2026-11-14', [{ appid: 2 }]], ['2026-11-18', [{ appid: 3 }]]])
+  const rows = weekRows(games, '2026-11-08', '2026-11-08')
+  check('weeks start on the Monday after a weekend', rows[0].cells[0].key === '2026-11-09' && rows[0].cells.length === 5, JSON.stringify(rows.map(r => r.key)))
+  check('a Saturday release shows on the Monday after', rows[1].cells[0].key === '2026-11-16' && rows[1].cells[0].list.some(g => g.appid === 2))
+  check('every weekday is a box, empty or not', rows[1].cells[2].list[0].appid === 3 && rows[1].cells[1].list.length === 0)
+  check('two weeks, no more', rows.length === 2, String(rows.length))
+  const mid = weekRows(new Map([['2026-11-11', [{ appid: 9 }]]]), '2026-11-11', '2026-11-11')
+  check('on a Wednesday the week starts on its Monday, the past days dimmed', mid[0].cells[0].key === '2026-11-09' && mid[0].cells[0].past && !mid[0].cells[2].past)
+  const cal = require(path.join(__dirname, '..', 'electron', 'services', 'steamStore.js')).calendarItems
+  check("Steam's calendar answer: id and date", JSON.stringify(cal({ arrAppInfos: [{ appid: 10, nReleaseDate: 1762700000 }, { appid: 0, nReleaseDate: 5 }, { appid: 11 }] })) === JSON.stringify([{ appid: 10, ts: 1762700000000 }]))
+  check('not signed in has no items', cal({ arrAppInfos: [], strResultMessage: 'Not logged in' }).length === 0 && cal(null).length === 0)
 }
 
 // src/lib/pickForMe.js is an ES module; load it as a plain function body.
@@ -362,7 +380,11 @@ console.log('\ngames like')
 // Discounts: the deal score and the price-history verdict.
 console.log('\ndeals')
 {
-  const { dealScore, lowState, tasteMatch } = require(path.join(__dirname, '..', 'electron', 'services', 'deals.js'))
+  const { dealScore, lowState, tasteMatch, wellReviewed } = require(path.join(__dirname, '..', 'electron', 'services', 'deals.js'))
+  check('deals: 500+ reviews at 80%+ show', wellReviewed({ count: 500, pct: 80 }) === true)
+  check('deals: 100% of a dozen reviews is hidden', wellReviewed({ count: 12, pct: 100 }) === false)
+  check('deals: 50,000 reviews at 79% is hidden', wellReviewed({ count: 50000, pct: 79 }) === false)
+  check('deals: no reviews is hidden', wellReviewed(null) === false)
   const good = { count: 50000, pct: 95 }
   check('deeper discount scores higher', dealScore({ pct: 80, reviews: good, match: 0.5 }) > dealScore({ pct: 20, reviews: good, match: 0.5 }))
   check('few reviews do not beat many', dealScore({ pct: 50, reviews: { count: 15, pct: 100 }, match: 0.5 }) < dealScore({ pct: 50, reviews: good, match: 0.5 }))
@@ -1458,22 +1480,79 @@ function settingsPathTests() {
 }
 
 // The tray popup is as tall as what it shows, hanging from the taskbar's edge.
-function trayBoundsTests() {
-  const { boundsFor } = require(path.join(__dirname, '..', 'electron', 'trayWindow.js'))
-  const workArea = { x: 0, y: 0, width: 1920, height: 1040 }
-  const bottom = boundsFor({ workArea, x: 1500, top: false }, 300)
-  check('tray: above a bottom taskbar, its bottom stays put', bottom.y + bottom.height === 1032 && bottom.height === 300, JSON.stringify(bottom))
-  const taller = boundsFor({ workArea, x: 1500, top: false }, 420)
-  check('tray: a taller popup grows upward', taller.y + taller.height === 1032 && taller.y < bottom.y)
-  const top = boundsFor({ workArea, x: 1500, top: true }, 300)
-  check('tray: under a top taskbar, it starts at the top', top.y === 8 && top.height === 300, JSON.stringify(top))
-  const huge = boundsFor({ workArea: { x: 0, y: 0, width: 1280, height: 600 }, x: 900, top: false }, 900)
-  check('tray: never taller than the screen', huge.height === 584 && huge.y === 8, JSON.stringify(huge))
+function crackSaveTests() {
+  const cs = require(path.join(__dirname, '..', 'electron', 'services', 'crackSaves.js'))
+  const ip = 'C:\\Games\\Halls of Torment'
+  const gse = 'C:\\Users\\me\\AppData\\Roaming\\GSE Saves\\2218750\\remote'
+  const tenoke = ip + '\\SteamData'
+  const opts = { appid: '2218750', installPath: ip }
+  check('crack saves: Goldberg remote is a cloud folder', cs.isCloudFolder(gse, opts) === true)
+  check('crack saves: TENOKE SteamData in the game is one', cs.isCloudFolder(tenoke, opts) === true)
+  check('crack saves: a SteamData elsewhere is not', cs.isCloudFolder('D:\\Other\\SteamData', opts) === false)
+  check('crack saves: another game\'s remote is not', cs.isCloudFolder('C:\\x\\GSE Saves\\999\\remote', opts) === false)
+  const roaming = 'C:\\Users\\me\\AppData\\Roaming\\HallsOfTorment'
+  const moved = cs.retarget([gse, roaming], { ...opts, current: tenoke })
+  check('crack saves: a restore goes to the current crack\'s folder', moved[0] === tenoke && moved[1] === roaming, JSON.stringify(moved))
+  check('crack saves: already there, nothing moves', JSON.stringify(cs.retarget([gse, tenoke], { ...opts, current: tenoke })) === JSON.stringify([gse, tenoke]))
+  check('crack saves: unknown crack, nothing moves', JSON.stringify(cs.retarget([gse], { ...opts, current: null })) === JSON.stringify([gse]))
+  check('crack saves: 92 KB of progress beats a fresh 1.6 KB profile', cs.hasMoreProgress(91892, 1612) === true)
+  check('crack saves: the same progress is not offered again', cs.hasMoreProgress(91892, 91892) === false)
+  check('crack saves: a tiny backup is never offered', cs.hasMoreProgress(900, 0) === false)
+
+  const { parseTenokeIni } = require(path.join(__dirname, '..', 'electron', 'services', 'crackWatcher.js'))
+  const ini = [
+    '[ACHIEVEMENTS]',
+    '"q_Caverns_Boss_1" = {unlocked = true, time = 1762620000}',
+    '"q_Locked" = {unlocked = false, time = 0}',
+    'q_Bare = {unlocked = true, time = 1762620500}',
+    '[STATS]',
+    '"kills" = 12.000000',
+  ].join('\r\n')
+  const got = parseTenokeIni(ini)
+  check('TENOKE: unlocked achievements with their time', got.length === 2 && got[0].name === 'q_Caverns_Boss_1' && got[0].unlocktime === 1762620000 && got[1].name === 'q_Bare', JSON.stringify(got))
+  check('TENOKE: stats are not achievements', !got.some(a => a.name === 'kills'))
+  check('TENOKE: an empty file has none', parseTenokeIni('').length === 0)
+
+  const gv = require(path.join(__dirname, '..', 'electron', 'services', 'gameVersion.js'))
+  const oldIni = gv.loaderTargetFromIni('[Launcher]\r\nTarget=HallsOfTorment.exe\r\nStartIn=Halls of Torment\r\nCommandLine=--rendering-driver opengl3\r\n')
+  check('loader: the older layout names its game', oldIni && oldIni.exe === 'HallsOfTorment.exe' && oldIni.dir === 'Halls of Torment', JSON.stringify(oldIni))
+  const gbe = gv.loaderTargetFromIni('[SteamClient]\nExe=game.exe\nExeRunDir=.\nAppId=480\n')
+  check('loader: ColdClientLoader names its game', gbe && gbe.exe === 'game.exe' && gbe.dir === '.', JSON.stringify(gbe))
+  check('loader: no exe, no target', gv.loaderTargetFromIni('[Launcher]\nStartIn=x\n') === null)
+  const DAY = 86400000
+  const newer = gv.pickNewerCopy({ file: 'old.exe', created: 1000 * DAY }, [{ file: 'a.exe', created: 1000.5 * DAY }, { file: 'b.exe', created: 1300 * DAY }])
+  check('newer copy: one installed later is found', newer && newer.file === 'b.exe', JSON.stringify(newer))
+  check('newer copy: copies made the same day are not', gv.pickNewerCopy({ file: 'old.exe', created: 1000 * DAY }, [{ file: 'a.exe', created: 1000.5 * DAY }]) === null)
+}
+
+function storageTests() {
+  const { driveOf, group } = require(path.join(__dirname, '..', 'electron', 'services', 'gameSizes.js'))
+  check('storage: the drive of a path', driveOf('d:\Games\X') === 'D:' && driveOf('') === null)
+  const drives = [{ drive: 'C:', free: 50, size: 500 }, { drive: 'D:', free: 300, size: 1000 }]
+  const games = [{ id: 1, name: 'Small', install_path: 'C:\G\A', size: 10 }, { id: 2, name: 'Big', install_path: 'C:\G\B', size: 90 }, { id: 3, name: 'Elsewhere', install_path: 'E:\G', size: 5 }]
+  const out = group(drives, games)
+  const c = out.find(d => d.drive === 'C:')
+  check('storage: games sit under their drive, biggest first', c.games.map(g => g.name).join() === 'Big,Small' && c.gamesBytes === 100, JSON.stringify(c))
+  check('storage: a drive with no games still shows', !!out.find(d => d.drive === 'D:' && d.games.length === 0))
+  check("storage: a game on a drive that isn't listed still shows", !!out.find(d => d.drive === 'E:' && d.games.length === 1))
+}
+
+function gpuTrimTests() {
+  const { shouldTrim, MIN_GAP_MS } = require(path.join(__dirname, '..', 'electron', 'services', 'gpuTrim.js'))
+  const base = { now: 10 * MIN_GAP_MS, lastAt: 0, windowShown: false, sessionActive: false, compositing: 'enabled', mb: 300 }
+  check('gpuTrim: frees a big graphics process with nothing on screen', shouldTrim(base) === true)
+  check('gpuTrim: never with a window on screen', shouldTrim({ ...base, windowShown: true }) === false)
+  check('gpuTrim: never during a game', shouldTrim({ ...base, sessionActive: true }) === false)
+  check('gpuTrim: at most once every 2 hours', shouldTrim({ ...base, lastAt: base.now - MIN_GAP_MS + 60000 }) === false && shouldTrim({ ...base, lastAt: base.now - MIN_GAP_MS }) === true)
+  check('gpuTrim: leaves a small process alone', shouldTrim({ ...base, mb: 80 }) === false)
+  check('gpuTrim: never when drawing without the graphics card', shouldTrim({ ...base, compositing: 'disabled_software' }) === false && shouldTrim({ ...base, compositing: undefined }) === false)
 }
 
 ;(async () => {
   settingsPathTests()
-  trayBoundsTests()
+  gpuTrimTests()
+  storageTests()
+  crackSaveTests()
   await installCheckTests()
   try { await updaterTests() } catch (e) { check('updater tests ran', false, e.message) }
   try { await discordTests() } catch (e) { check('discord tests ran', false, e.message) }

@@ -151,6 +151,9 @@ function runMigrations() {
     try { db.exec('ALTER TABLE games ADD COLUMN launch_uri TEXT') } catch (_) {}
     // Confirmed save locations (JSON array of absolute paths) for save backups.
     try { db.exec('ALTER TABLE games ADD COLUMN save_paths TEXT') } catch (_) {}
+    // Settings > Data > Storage (services/gameSizes.js): the game folder's size, and when it was counted.
+    try { db.exec('ALTER TABLE games ADD COLUMN size_bytes INTEGER') } catch (_) {}
+    try { db.exec('ALTER TABLE games ADD COLUMN size_at TEXT') } catch (_) {}
     // One-time: a session that was thrown away used to leave its date behind, so a game
     // with no play said "last played 2d ago".
     try {

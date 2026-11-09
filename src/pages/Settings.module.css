@@ -940,6 +940,9 @@
   color: var(--pad);
   font-weight: 800;
 }
+/* Light theme: a dark circle, like the buttons on the pad (a yellow Y on white was
+   unreadable). */
+:global(html[data-theme="light"]) .shortcutKeys kbd.padFace { background: #1d1f2b; border-color: #1d1f2b; }
 .shortcutKeys kbd.padKey { border-radius: var(--r-pill); }
 .padStatus { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); font-weight: 500; color: var(--text-muted); }
 .padDot { width: 8px; height: 8px; border-radius: 50%; background: var(--neutral-border); }

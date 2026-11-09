@@ -632,6 +632,15 @@ async function tick() {
         // launch that never becomes a session can't leak the renderer. `show`
         // moves the window's first appearance to the loading screens too.
         try { require('../overlayWindow').warm({ show: true }) } catch {}
+        // Settings > Tracking > "Minimize KoZo when a game starts" (off by default). A Play
+        // from KoZo nudges the scan, so this lands a couple of seconds after the press; a
+        // game started anywhere else counts too. Big Picture minimizes after its own Play.
+        if (settingsQ.getSetting('minimize_on_play') === '1') {
+          try {
+            const win = require('../main').getMainWindow()
+            if (win && !win.isDestroyed() && win.isVisible() && !win.isMinimized()) win.minimize()
+          } catch {}
+        }
         // Cracked game → attach the live achievement file watcher NOW (~one poll
         // after the exe appears) instead of after the sensitivity window, so an
         // unlock in the opening seconds still surfaces instantly. Idempotent —
