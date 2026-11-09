@@ -49,8 +49,8 @@ handle('games:version', (id) => require('./services/gameVersion').getVersion(id)
 // one puts the game back to Playing; hours, sessions and achievements stay as they are.
 // XP doesn't move when one starts (the first finish still counts), so no level-up check.
 handle('games:playthroughs', (id) => require('./db/queries/playthroughs').listForGame(id))
-handle('games:newPlaythrough', (id) => {
-  const r = require('./db/queries/playthroughs').startNew(id)
+handle('games:newPlaythrough', (id, opts) => {
+  const r = require('./db/queries/playthroughs').startNew(id, opts || {})
   try { require('./services/statusSync').setGameStatus(Number(id), 'playing', { announce: false }) } catch {}
   try { require('./services/autoBackup').markDirty() } catch {}
   broadcast('game:updated', Number(id))

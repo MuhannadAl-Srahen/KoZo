@@ -8,11 +8,17 @@
 // whose start it falls after, so each playthrough's time is read from the sessions. The
 // current playthrough's finish isn't stored: it's the game's own Finished status, set after
 // that playthrough began.
+//
+// Times played before KoZo (the maker: "Sekiro, I played it 2 times and want a third"): the
+// first start can say which time this is. The earlier ones become rows marked before_kozo,
+// finished, with no time (their start is the next row's, so no session falls in them). Row 1
+// counts as the first finish like marking a game Finished does; the rest have no hour played,
+// so no replay XP.
 
 const { getDb } = require('../database')
 
 function rowsFor(gameId) {
-  return getDb().prepare('SELECT id, game_id, number, started_at, finished_at FROM playthroughs WHERE game_id = ? ORDER BY number').all(Number(gameId))
+  return getDb().prepare('SELECT id, game_id, number, started_at, finished_at, COALESCE(before_kozo, 0) AS before_kozo FROM playthroughs WHERE game_id = ? ORDER BY number').all(Number(gameId))
 }
 
 // Pure: the playthroughs as shown, with the current one's finish from the game's status.
@@ -26,6 +32,7 @@ function withCurrentFinish(rows, game) {
     ended_at: i < rows.length - 1 ? rows[i + 1].started_at : null,
     finished_at: i < rows.length - 1 ? r.finished_at : (finishedNow ? game.completion_status_at : null),
     current: i === rows.length - 1,
+    before_kozo: !!r.before_kozo,
   }))
 }
 
@@ -34,8 +41,9 @@ function listForGame(gameId) {
   return withCurrentFinish(rowsFor(gameId), game)
 }
 
-// Start the next playthrough now. Returns what undo needs.
-function startNew(gameId) {
+// Start the next playthrough now. Returns what undo needs. `number`: which time this is, only
+// on the first start (the earlier ones not in KoZo become before_kozo rows).
+function startNew(gameId, { number: wanted } = {}) {
   const db = getDb()
   const id = Number(gameId)
   const game = db.prepare('SELECT id, completion_status, completion_status_at, first_played_at, last_played_at, created_at FROM games WHERE id = ?').get(id)
@@ -46,15 +54,26 @@ function startNew(gameId) {
     let rows = rowsFor(id)
     if (!rows.length) {
       const first = db.prepare('SELECT MIN(started_at) AS s FROM sessions WHERE game_id = ?').get(id)?.s
-      db.prepare('INSERT INTO playthroughs (game_id, number, started_at) VALUES (?, 1, ?)').run(id, first || game.first_played_at || game.created_at || now)
+      // KoZo saw a playthrough of its own when it has sessions or a Finished status.
+      const tracked = !!first || game.completion_status === 'finished'
+      const base = tracked ? 2 : 1
+      const want = Math.max(base, Math.min(99, Math.floor(Number(wanted) || base)))
+      if (!tracked && want < 2) throw new Error('Nothing played yet to play again')
+      const earlier = tracked ? want - 2 : want - 1
+      const start = tracked ? (first || game.first_played_at || game.created_at || now) : now
+      const ins = db.prepare('INSERT INTO playthroughs (game_id, number, started_at, finished_at, before_kozo) VALUES (?, ?, ?, ?, ?)')
+      for (let n = 1; n <= earlier; n++) ins.run(id, n, start, start, 1)
+      if (tracked) ins.run(id, earlier + 1, start, null, 0)
       createdFirst = true
       rows = rowsFor(id)
     }
     const last = rows[rows.length - 1]
-    // A finish with no date (marked before KoZo kept one) still counts as this playthrough's.
-    const finished = game.completion_status === 'finished' && (!game.completion_status_at || game.completion_status_at >= last.started_at)
-    const finishedAt = finished ? (game.completion_status_at || game.last_played_at || now) : null
-    db.prepare('UPDATE playthroughs SET finished_at = ? WHERE id = ?').run(finishedAt, last.id)
+    if (!last.before_kozo) {
+      // A finish with no date (marked before KoZo kept one) still counts as this playthrough's.
+      const finished = game.completion_status === 'finished' && (!game.completion_status_at || game.completion_status_at >= last.started_at)
+      const finishedAt = finished ? (game.completion_status_at || game.last_played_at || now) : null
+      db.prepare('UPDATE playthroughs SET finished_at = ? WHERE id = ?').run(finishedAt, last.id)
+    }
     db.prepare('INSERT INTO playthroughs (game_id, number, started_at) VALUES (?, ?, ?)').run(id, last.number + 1, now)
     return last.number + 1
   })()
@@ -67,10 +86,11 @@ function undoLast(gameId, { createdFirst = false } = {}) {
   const id = Number(gameId)
   db.transaction(() => {
     const rows = rowsFor(id)
+    // The first start made every row (with any before KoZo): undo takes them all.
+    if (createdFirst) { db.prepare('DELETE FROM playthroughs WHERE game_id = ?').run(id); return }
     if (rows.length < 2) return
     db.prepare('DELETE FROM playthroughs WHERE id = ?').run(rows[rows.length - 1].id)
-    if (createdFirst && rows.length === 2) db.prepare('DELETE FROM playthroughs WHERE id = ?').run(rows[0].id)
-    else db.prepare('UPDATE playthroughs SET finished_at = NULL WHERE id = ?').run(rows[rows.length - 2].id)
+    db.prepare('UPDATE playthroughs SET finished_at = NULL WHERE id = ?').run(rows[rows.length - 2].id)
   })()
 }
 

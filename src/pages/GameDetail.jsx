@@ -7,7 +7,7 @@ import {
   IconCircleCheck, IconCircleOff, IconEye, IconEyeOff, IconChevronDown,
   IconChevronRight, IconAlertTriangle, IconDeviceGamepad2,
   IconLayoutDashboard, IconSparkles, IconLayoutSidebarRight, IconMovie, IconTarget, IconChartBar,
-  IconInfoCircle, IconBrandSteam, IconClock, IconRepeat,
+  IconInfoCircle, IconBrandSteam, IconClock, IconRepeat, IconTrash,
 } from '@tabler/icons-react'
 import { exeLooksLikeTool, getBannerBg, getBannerIcon, formatPlaytime, formatDate, formatDateTime, fileUrl, isSteamTracked, launcherLabel, localDayKey, rarityColor, timeAgo } from '../lib/utils'
 import { STATUS_META } from '../components/GameCard'
@@ -156,6 +156,13 @@ function playthroughStats(list, sessions) {
   })
 }
 
+// 1st, 2nd, 3rd, 4th ... 11th, 12th, 13th, 21st
+function ordinal(n) {
+  const t = n % 100
+  if (t >= 11 && t <= 13) return `${n}th`
+  return `${n}${['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`
+}
+
 // "Today" and "Yesterday" read as words inside a sentence.
 const dayWord = (iso) => { const d = formatDate(iso); return /^(Today|Yesterday)$/.test(d) ? d.toLowerCase() : d }
 
@@ -172,11 +179,13 @@ function PlaythroughsCard({ list, sessions }) {
               {p.current && !p.finished_at && <span className={s.ptBadge}>Now</span>}
               {p.finished_at && <span className={`${s.ptBadge} ${s.ptDone}`}>Finished</span>}
             </div>
-            <span className={s.ptTime}>{p.seconds ? formatPlaytime(p.seconds) : '0m'}</span>
+            <span className={s.ptTime}>{p.before_kozo ? '' : p.seconds ? formatPlaytime(p.seconds) : '0m'}</span>
             <span className={s.ptMeta}>
-              {p.ended_at ? `${dayWord(p.started_at)} to ${dayWord(p.ended_at)}` : `Since ${dayWord(p.started_at)}`}
-              {p.count ? `, ${p.count} session${p.count === 1 ? '' : 's'}` : ''}
-              {p.finished_at ? `, finished ${dayWord(p.finished_at)}` : ''}
+              {p.before_kozo ? 'Before KoZo' : <>
+                {p.ended_at ? `${dayWord(p.started_at)} to ${dayWord(p.ended_at)}` : `Since ${dayWord(p.started_at)}`}
+                {p.count ? `, ${p.count} session${p.count === 1 ? '' : 's'}` : ''}
+                {p.finished_at ? `, finished ${dayWord(p.finished_at)}` : ''}
+              </>}
             </span>
           </div>
         ))}
@@ -239,6 +248,7 @@ export default function GameDetail() {
   // Playing it again: the list, the "start one?" question, and its Undo.
   const [playthroughs, setPlaythroughs] = useState([])
   const [askReplay, setAskReplay] = useState(false)
+  const [replayNumber, setReplayNumber] = useState(null)   // "which time is this", first start only
   const [replayUndo, setReplayUndo] = useState(null)
   const [importing, setImporting]       = useState(false)
   const [refreshing, setRefreshing]     = useState(false)
@@ -1083,8 +1093,8 @@ export default function GameDetail() {
               <IconDeviceFloppy size={14} stroke={1.6} />
               Save files &amp; backup
             </button>
-            {(sessions.length > 0 || game.completion_status === 'finished') && (
-              <button className={s.menuItem} onClick={() => { setMenuOpen(false); setAskReplay(true) }} data-new-playthrough="">
+            {!game.is_archived && (
+              <button className={s.menuItem} onClick={() => { setMenuOpen(false); setReplayNumber(null); setAskReplay(true) }} data-new-playthrough="">
                 <IconRepeat size={14} stroke={1.6} />
                 Start a new playthrough
               </button>
@@ -1099,12 +1109,28 @@ export default function GameDetail() {
               {game.is_hidden ? <IconEye size={14} stroke={1.6} /> : <IconEyeOff size={14} stroke={1.6} />}
               {game.is_hidden ? 'Unhide from library' : 'Hide from library'}
             </button>
-            {game.is_archived ? (
+            {game.is_archived ? (<>
               <button className={s.menuItem} onClick={handleRestore}>
                 <IconArrowBackUp size={14} stroke={1.6} />
                 Restore to Library
               </button>
-            ) : !confirmDelete ? (
+              {!confirmDelete ? (
+                <button className={s.menuItem} onClick={() => setConfirmDelete(true)} data-delete-archived="">
+                  <IconTrash size={14} stroke={1.6} />
+                  Delete with history
+                </button>
+              ) : (
+                <div className={s.menuConfirm}>
+                  <div className={s.menuConfirmText}>Delete "{game.name}" with its hours, sessions and achievements? This can't be undone.</div>
+                  <div className={s.menuConfirmBtns}>
+                    <button className={s.menuCancelBtn} onClick={() => setConfirmDelete(false)} disabled={deleting}>Cancel</button>
+                    <button className={`${s.menuDeleteBtn} ${deleting ? s.menuItemBusy : ''}`} onClick={() => handleDelete(true)} aria-busy={deleting || undefined} data-delete-archived-yes="">
+                      {deleting ? 'Deleting…' : 'Delete'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>) : !confirmDelete ? (
               <button className={s.menuItem} onClick={() => setConfirmDelete(true)}>
                 <IconArchive size={14} stroke={1.6} />
                 Remove from Library
@@ -1488,7 +1514,11 @@ export default function GameDetail() {
       )}
 
       {askReplay && (() => {
-        const next = Math.max(1, ...playthroughs.map(p => p.number)) + 1
+        // The first time, it can say which time this is: Sekiro played twice before KoZo, now the third.
+        const first = playthroughs.length === 0
+        const tracked = sessions.length > 0 || game.completion_status === 'finished'
+        const next = first ? (replayNumber ?? 2) : Math.max(1, ...playthroughs.map(p => p.number)) + 1
+        const earlier = first ? (tracked ? next - 2 : next - 1) : 0
         return (
           <InfoModal
             variant="info"
@@ -1498,13 +1528,14 @@ export default function GameDetail() {
               'Your hours, sessions and achievements all stay.',
               'The game goes back to Playing, and its page shows this playthrough\'s time from now on.',
               'Finish it to earn the Finished XP again, once you\'ve played an hour of it.',
+              ...(earlier > 0 ? [`${earlier === 1 ? 'Playthrough 1 is' : `Playthroughs 1 to ${earlier} are`} kept as finished before KoZo, with no hours.`] : []),
             ]}
             onClose={() => setAskReplay(false)}
             actions={[
               { label: 'Not now', variant: 'secondary', onClick: () => setAskReplay(false) },
               { label: `Start playthrough ${next}`, variant: 'primary', icon: <IconRepeat size={14} />, onClick: async () => {
                 setAskReplay(false)
-                const r = await window.kozo.api.games.newPlaythrough(game.id)
+                const r = await window.kozo.api.games.newPlaythrough(game.id, first ? { number: next } : {})
                 if (r?.ok) {
                   const undo = r.data
                   setReplayUndo({ text: `Playthrough ${undo.number} started.`, run: async () => { await window.kozo.api.games.undoPlaythrough(game.id, undo); load() } })
@@ -1512,7 +1543,18 @@ export default function GameDetail() {
                 }
               } },
             ]}
-          />
+          >
+            {first && (
+              <div className={s.ptAsk} data-replay-number="">
+                <span>Which time is this?</span>
+                <div className={s.ptStepper}>
+                  <button type="button" aria-label="One less" disabled={next <= 2} onClick={() => setReplayNumber(Math.max(2, next - 1))}>−</button>
+                  <b>{ordinal(next)}</b>
+                  <button type="button" aria-label="One more" disabled={next >= 20} onClick={() => setReplayNumber(Math.min(20, next + 1))}>+</button>
+                </div>
+              </div>
+            )}
+          </InfoModal>
         )
       })()}
       <UndoBar undo={replayUndo} onDone={() => setReplayUndo(null)} />

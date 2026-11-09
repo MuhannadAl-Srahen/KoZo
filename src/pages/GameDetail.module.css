@@ -868,3 +868,11 @@ button.monthPicked { background: color-mix(in srgb, var(--a) 12%, transparent); 
 .ptDone { color: var(--status-finished, var(--green)); background: color-mix(in srgb, var(--status-finished, var(--green)) 14%, transparent); }
 .ptTime { font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .ptMeta { grid-column: 1 / -1; font-size: var(--fs-xs); color: var(--text-muted); }
+
+/* "Which time is this?" in the Play it again window (first start only). */
+.ptAsk { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-12); margin-top: var(--sp-12); padding: var(--sp-10) var(--sp-12); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-1); font-size: var(--fs-sm); color: var(--text-secondary); }
+.ptStepper { display: inline-flex; align-items: center; gap: var(--sp-8); }
+.ptStepper b { min-width: 40px; text-align: center; font-size: var(--fs-md); color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.ptStepper button { width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--border); background: var(--surface-3); color: var(--text-primary); font: inherit; font-size: var(--fs-md); font-weight: 700; line-height: 1; cursor: pointer; }
+.ptStepper button:hover:not(:disabled) { border-color: var(--ab); color: var(--a); }
+.ptStepper button:disabled { opacity: 0.4; cursor: default; }
