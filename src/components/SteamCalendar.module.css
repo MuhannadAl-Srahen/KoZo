@@ -646,3 +646,12 @@
 
 /* Picks loading: a shimmering cap the size of a real one. */
 @keyframes capShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* The cover with its match chip and track button: stays dark in the Light theme (customize.css .kz-dark). */
+.steamCapFrame { composes: kz-dark from global; }
+/* Match chips on covers: stays dark in the Light theme (customize.css .kz-dark). */
+.match { composes: kz-dark from global; }
+/* On the poster: stays dark in the Light theme (customize.css .kz-dark). */
+.posterCountdown { composes: kz-dark from global; }
+/* On the poster: stays dark in the Light theme (customize.css .kz-dark). */
+.posterPrice { composes: kz-dark from global; }

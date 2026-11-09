@@ -461,3 +461,6 @@
 :global(html[data-motion]) .grid .card:nth-child(10) { animation-delay: 0.30s; }
 :global(html[data-motion]) .grid .card:nth-child(11) { animation-delay: 0.33s; }
 :global(html[data-motion]) .grid .card:nth-child(12) { animation-delay: 0.36s; }
+
+/* Big Picture is the TV screen: stays dark in the Light theme (customize.css .kz-dark). */
+.root { composes: kz-dark from global; }

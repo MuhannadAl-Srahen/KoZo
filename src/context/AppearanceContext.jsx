@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
 import { bgTone, bgToneHex } from '../lib/bgTone'
+import { reapplyAccent } from './AccentColorContext'
 
 // Settings → Appearance beyond the accent color: UI scale, spacing, corners,
 // what game cards show, sidebar order and start page, and a background
@@ -20,7 +21,7 @@ export const DEFAULT_APPEARANCE = {
   sidebar: 'full',                // 'full' | 'rail' (icons only; the button by the logo switches)
   motion: 'soft',                 // 'heavy' | 'soft' | 'off' (styles/motion.css)
   bg: { mode: 'off', image: null, gameId: null, gameArt: null, blur: 8, dim: 55 },
-  theme: 'midnight',              // midnight | tint | custom | oled | slate | nord | mocha | forest | crimson (styles/customize.css)
+  theme: 'midnight',              // midnight | light | system | tint | custom | oled | slate | nord | mocha | forest | crimson (styles/customize.css)
   bgColor: '#1a1030',             // the Custom theme's color (any hex; made dark, see bgTone)
   gamePage: 'store',              // Game Detail layout: store | cinematic
   gameListEdit: 'tab',            // Game List window: tab (all in an Edit tab) | overview (status and plan on the Overview)
@@ -113,7 +114,17 @@ export function setZoomLock(v) { zoomLock = v; applyZoom() }
 let resizeT = null
 window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(applyZoom, 150) })
 
+// 'system' (Match Windows): Light while Windows' apps are in light mode, else Midnight.
+const LIGHT_QUERY = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null
+function effectiveTheme(theme) {
+  if (theme !== 'system') return theme
+  return LIGHT_QUERY?.matches ? 'light' : 'midnight'
+}
+let appliedPrefs = null
+LIGHT_QUERY?.addEventListener?.('change', () => { if (appliedPrefs?.theme === 'system') apply(appliedPrefs) })
+
 function apply(p) {
+  appliedPrefs = p
   const el = document.documentElement
   el.dataset.density = p.density
   el.dataset.corners = p.corners
@@ -126,11 +137,13 @@ function apply(p) {
   el.dataset.motion = ['heavy', 'soft', 'off'].includes(p.motion) ? p.motion : 'soft'
   // Customization (styles/customize.css): attributes for the switches,
   // variables for the values.
-  const attrs = { theme: p.theme, cardStyle: p.cardStyle, cardBorder: p.cardBorder, cardGlow: p.cardGlow, cardShadow: p.cardShadow, glow: p.glow, sidebarSide: p.sidebarSide, pageWidth: p.pageWidth, scrollbar: p.scrollbar, ambient: p.ambient }
+  const attrs = { theme: effectiveTheme(p.theme), cardStyle: p.cardStyle, cardBorder: p.cardBorder, cardGlow: p.cardGlow, cardShadow: p.cardShadow, glow: p.glow, sidebarSide: p.sidebarSide, pageWidth: p.pageWidth, scrollbar: p.scrollbar, ambient: p.ambient }
   for (const [k, v] of Object.entries(attrs)) {
     if (v && v !== DEFAULT_APPEARANCE[k]) el.dataset[k] = v
     else delete el.dataset[k]
   }
+  // The accent is darkened on white and brightened on dark (AccentColorContext).
+  reapplyAccent()
   if (p.hideLibraryStats) el.dataset.hideLibraryStats = ''; else delete el.dataset.hideLibraryStats
   if (p.hideUpcomingHero) el.dataset.hideUpcomingHero = ''; else delete el.dataset.hideUpcomingHero
   const font = FONTS[p.font] || FONTS.dm

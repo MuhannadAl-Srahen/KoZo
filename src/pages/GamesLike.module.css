@@ -128,3 +128,8 @@
 :global(html[data-motion]) .card { animation: likeUp 0.35s var(--ease-out) backwards; animation-delay: calc(var(--i, 0) * 0.025s); }
 :global(html[data-motion="heavy"]) .card:hover .art img { transform: scale(1.05); }
 :global(html[data-motion="off"]) .seedCard, :global(html[data-motion="off"]) .hits { animation: none; }
+
+/* The match chip on the cover: stays dark in the Light theme (customize.css .kz-dark). */
+.match { composes: kz-dark from global; }
+/* The "On Game List" chip on the cover: stays dark in the Light theme (customize.css .kz-dark). */
+.owned { composes: kz-dark from global; }

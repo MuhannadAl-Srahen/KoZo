@@ -28,7 +28,58 @@
 @import '@fontsource/oxanium/600.css';
 @import '@fontsource/oxanium/700.css';
 
-/* ── Themes (all dark) ───────────────────────────────────────────────── */
+/* ── Themes ──────────────────────────────────────────────────────────── */
+/* Light: white surfaces and dark text (the maker asked for a white theme). The accent
+   is darkened until it reads on white (AccentColorContext.applyAccent), so buttons
+   filled with it get white text. Things on pictures (--on-art, the scrims) and the
+   in-game overlay don't change. "Match Windows" (theme 'system') switches between
+   this and Midnight with Windows' own app mode (AppearanceContext). */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg:        #f1f2f6;
+  --surface-1: #ffffff;
+  --surface-2: #ffffff;
+  --surface-3: #e8eaf0;
+  --text-primary:   #15161d;
+  --text-secondary: #474a5e;
+  --text-muted:     #686b82;
+  --text-disabled:  #8c8ea2;
+  --accent-ink: #ffffff;
+  --border:        rgba(15, 18, 30, 0.12);
+  --border-subtle: rgba(15, 18, 30, 0.07);
+  --neutral-bg:       rgba(15, 18, 30, 0.05);
+  --neutral-bg-hover: rgba(15, 18, 30, 0.09);
+  --neutral-border:   rgba(15, 18, 30, 0.14);
+  /* Status and rarity colors one step darker, so they read on white. */
+  --green: #15803d; --red: #dc2626; --amber: #b45309; --blue: #2563eb; --orange: #c2410c;
+  --rarity-ultra: #9333ea; --rarity-rare: #047857;
+}
+/* The page itself is see-through (main-root.css) over the window's dark color
+   (main.js), and the moving glow makes the main area see-through too: on the dark
+   themes nobody could tell, on white the pages sat on black. */
+:root[data-theme="light"] { background: var(--bg) !important; }
+/* Always dark: Big Picture (the TV screen), and chips and text drawn on pictures. In
+   Light they take the dark themes' colors back; CSS modules add the class with
+   `composes: kz-dark from global`. In the dark themes this does nothing. Without it,
+   badges on covers turned dark green on dark chips (a score of 75/100 unreadable). */
+:root[data-theme="light"] .kz-dark {
+  color-scheme: dark;
+  --bg: #10101a; --surface-1: #141420; --surface-2: #161624; --surface-3: #1b1b2b;
+  --text-primary: #ececf8; --text-secondary: #a6a6cc; --text-muted: #7878a0; --text-disabled: #4a4a66;
+  --accent-ink: #09090f;
+  --border: rgba(255, 255, 255, 0.09); --border-subtle: rgba(255, 255, 255, 0.055);
+  --neutral-bg: rgba(255, 255, 255, 0.06); --neutral-bg-hover: rgba(255, 255, 255, 0.10); --neutral-border: rgba(255, 255, 255, 0.12);
+  --green: #4ade80; --red: #f87171; --amber: #fbbf24; --blue: #60a5fa; --orange: #fb923c;
+  --success: var(--green); --error: var(--red); --warning: var(--amber); --info: var(--blue);
+  --status-playing: var(--green); --status-finished: var(--blue); --status-dropped: var(--red);
+  --status-upcoming: var(--amber); --status-onhold: var(--orange);
+  --favorite: var(--amber); --rarity-ultra: #c084fc; --rarity-very: var(--blue); --rarity-rare: #34d399;
+  --rarity-uncommon: var(--amber); --rarity-common: var(--text-secondary);
+  --a: var(--a-bright);
+  --ad: color-mix(in srgb, var(--a-bright) 10%, transparent);
+  --ab: color-mix(in srgb, var(--a-bright) 22%, transparent);
+}
+
 /* Accent tint: the stock lightness, in the accent's hue (--tint-h, set by
    AccentColorContext). */
 :root[data-theme="tint"] {

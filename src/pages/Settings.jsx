@@ -1404,6 +1404,9 @@ const START_PAGES = [
 // background picture (AppearanceCustomize). Every change applies at once.
 const THEMES = [
   { value: 'midnight', label: 'Midnight', bg: '#10101a', s2: '#161624' },
+  // Light: white surfaces, dark text. Match Windows: Light or Midnight with Windows' app mode.
+  { value: 'light',    label: 'Light', bg: '#f1f2f6', s2: '#ffffff' },
+  { value: 'system',   label: 'Match Windows', bg: '#10101a', s2: '#f1f2f6' },
   { value: 'tint',     label: 'Accent tint', tint: true },
   { value: 'custom',   label: 'Custom', custom: true },
   { value: 'oled',     label: 'OLED black', bg: '#000000', s2: '#0b0b0f' },
@@ -1512,7 +1515,7 @@ function LookCustomize() {
             <span className={s.sectionDescQuiet}>Any color, made dark so text and cards stay readable. The box shows the color you get. Picking one switches to Custom.</span>
           </div>
         </div>
-        <p className={s.sectionDescQuiet}>Accent tint colors the background with your accent color.</p>
+        <p className={s.sectionDescQuiet}>Accent tint colors the background with your accent color. Match Windows uses Light or Midnight, the same as your Windows apps.</p>
       </section>
 
       <section className={s.section}>

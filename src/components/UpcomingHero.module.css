@@ -250,3 +250,8 @@
   .thumbs { left: var(--sp-16); right: auto; }
   .thumb { width: 54px; }
 }
+
+/* The banner is a picture: stays dark in the Light theme (customize.css .kz-dark). */
+.hero { composes: kz-dark from global; }
+/* The week row's covers with their chips: stays dark in the Light theme (customize.css .kz-dark). */
+.weekArt { composes: kz-dark from global; }

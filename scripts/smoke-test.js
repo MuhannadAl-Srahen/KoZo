@@ -1007,6 +1007,24 @@ app.whenReady().then(async () => {
     check('Background: every pick is a different color', new Set([white.box, gray.box, black.box, red.box]).size === 4, [white.box, gray.box, black.box, red.box].join())
     check('Background: picking one switches to Custom', white.theme === 'custom', white.theme)
     await ev(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); true`)
+
+    // The Light theme: a white page (the window behind it is dark), and an accent dark
+    // enough to read on white. Match Windows follows Windows' own app mode.
+    const pickTheme = (label) => ev(`(async () => {
+      const b = [...document.querySelectorAll('button[aria-pressed]')].find(x => x.textContent.trim() === ${JSON.stringify(label)})
+      if (!b) return null
+      b.click()
+      await new Promise(r => setTimeout(r, 400))
+      const lum = (c) => { const m = c.match(/[\\d.]+/g).slice(0, 3).map(Number).map(v => v / 255).map(v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)); return 0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2] }
+      const probe = document.createElement('span'); probe.style.color = 'var(--a)'; document.body.appendChild(probe)
+      const accent = getComputedStyle(probe).color; probe.remove()
+      return { theme: document.documentElement.dataset.theme || 'midnight', page: getComputedStyle(document.documentElement).backgroundColor, pageLum: lum(getComputedStyle(document.documentElement).backgroundColor), accentOnWhite: 1.05 / (lum(accent) + 0.05), prefersLight: matchMedia('(prefers-color-scheme: light)').matches }
+    })()`)
+    const light = await pickTheme('Light')
+    check('Light theme: the page is white', !!light && light.theme === 'light' && light.pageLum > 0.8, JSON.stringify(light))
+    check('Light theme: the accent reads on white', !!light && light.accentOnWhite >= 4.5, JSON.stringify(light))
+    const sys = await pickTheme('Match Windows')
+    check('Match Windows: follows Windows', !!sys && sys.theme === (sys.prefersLight ? 'light' : 'midnight'), JSON.stringify(sys))
     await ev(`window.kozo.api.settings.set('appearance', ${JSON.stringify(lookBefore)}); location.hash = '#/'; location.reload(); true`); await sleep(2200)
 
     // Play, and the watched file never starts. The process list is made up, so no real
