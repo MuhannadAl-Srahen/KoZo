@@ -101,59 +101,27 @@ function setupTray(processWatcher) {
       items.push({ label: paused ? 'Tracking paused' : 'No game running', enabled: false })
     }
 
-    // ── Glanceable stats, always present so the menu never feels empty ──
+    // ── Glanceable stats. Today's time only once there is some (the maker didn't want
+    // "Nothing played today"). ──
     const today = todayPlaytimeSec(sessions)
-    items.push({ label: today > 0 ? `Played today: ${fmtDur(today)}` : 'Nothing played today', enabled: false })
+    if (today > 0) items.push({ label: `Played today: ${fmtDur(today)}`, enabled: false })
     try {
       const xp = require('./services/xp').computeXp()
       if (xp?.level != null) items.push({ label: `Level ${xp.level}${xp.tier ? ` · ${xp.tier}` : ''}`, enabled: false })
     } catch {}
 
-    // ── Jump back in: the last games played, one click starts one ──
-    const recent = recentGames(new Set(sessions.keys()))
-    if (recent.length) {
-      items.push({ type: 'separator' })
-      items.push({
-        label: 'Jump back in',
-        submenu: recent.map(g => ({ label: g.name.replace(/&/g, '&&'), click: () => launch(g.id) })),
-      })
-    }
-
+    // Jump back in and Pause tracking were here; the maker took them out.
     // ── Quick destinations ──
     items.push({ type: 'separator' })
     items.push({ label: 'Open KoZo', click: () => show() })
     items.push({ label: 'Big Picture', click: () => openAt('/big') })
     items.push({ label: 'Statistics', click: () => openAt('/statistics') })
     items.push({ type: 'separator' })
-    items.push(paused
-      ? { label: 'Resume tracking', click: () => { processWatcher.resume(); updateTooltip() } }
-      : { label: 'Pause tracking', click: () => { processWatcher.pause(); updateTooltip() } })
     items.push({ label: 'Quit KoZo', click: () => { app.isQuitting = true; app.quit() } })
 
     return Menu.buildFromTemplate(items)
   }
 
-  // The last games played that aren't running now, newest first.
-  function recentGames(liveIds) {
-    try {
-      return require('./db/database').getDb().prepare(`
-        SELECT id, name FROM games
-        WHERE last_played_at IS NOT NULL AND COALESCE(is_archived, 0) = 0 AND COALESCE(is_hidden, 0) = 0
-        ORDER BY last_played_at DESC LIMIT 8
-      `).all().filter(g => !liveIds.has(g.id)).slice(0, 5)
-    } catch { return [] }
-  }
-
-  // Same path as Play in the app. If it can't start (a missing file, a dismissed
-  // permission prompt), the game's page opens, where Play says why.
-  function launch(gameId) {
-    Promise.resolve()
-      .then(() => require('./ipc').launchGame(gameId))
-      .catch((e) => {
-        logger.warn('tray: launch failed', { message: e.message })
-        openAt(`/game/${gameId}`)
-      })
-  }
   _buildMenu = buildMenu
 
   // Tooltip reflects what's happening so hovering the icon is informative too.

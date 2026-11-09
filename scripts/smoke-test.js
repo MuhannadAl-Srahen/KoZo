@@ -1326,17 +1326,9 @@ app.whenReady().then(async () => {
     const menu = require(path.join(root, 'electron', 'tray.js')).currentMenu()
     check('tray: the menu builds', !!menu)
     check('tray: has a way into KoZo and out', labels(menu).includes('Open KoZo') && labels(menu).includes('Quit KoZo'), labels(menu).join(' | '))
-    const pauseItem = find(menu, 'Pause tracking')
-    check('tray: offers Pause tracking', !!pauseItem, labels(menu).join(' | '))
-    if (pauseItem) {
-      pauseItem.click()
-      const after = require(path.join(root, 'electron', 'tray.js')).currentMenu()
-      check('tray: pausing works and the menu says Resume', watcher.isPaused() === true && !!find(after, 'Resume tracking'), labels(after).join(' | '))
-      find(after, 'Resume tracking')?.click()
-      check('tray: resuming works', watcher.isPaused() === false)
-    }
-    const jump = find(menu, 'Jump back in')
-    if (jump) check('tray: Jump back in lists games', jump.submenu.items.length > 0 && jump.submenu.items.length <= 5, String(jump.submenu.items.length))
+    // Pause tracking, Jump back in and "Nothing played today" were taken out (the maker's call).
+    check('tray: no Pause tracking, Jump back in or Nothing played today', !labels(menu).some(l => /Pause tracking|Resume tracking|Jump back in|Nothing played today/.test(l)), labels(menu).join(' | '))
+    check('tray: Big Picture and Statistics are there', labels(menu).includes('Big Picture') && labels(menu).includes('Statistics'), labels(menu).join(' | '))
   }
   }
 
