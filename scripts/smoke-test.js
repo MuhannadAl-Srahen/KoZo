@@ -1718,6 +1718,8 @@ app.whenReady().then(async () => {
 
     // Guide on a locked achievement.
     db.prepare("INSERT OR IGNORE INTO achievements (game_id, steam_api_name, display_name, description, global_unlock_percent) VALUES (?, 'SMOKE_LOCKED', 'Smoke Locked One', 'Do the thing', 12.5)").run(gid)
+    // Its own button: the game can have other locked achievements from earlier parts (on the release machine, ACH00 came first).
+    const lockedId = db.prepare("SELECT id FROM achievements WHERE game_id = ? AND steam_api_name = 'SMOKE_LOCKED'").get(gid)?.id
     await go('#/', 600)   // leave the page first: the same address again doesn't reload it
     await go('#/game/' + gid, 1800)
     await ev(`[...document.querySelectorAll('[role=tab]')].find(t => /Achievements/.test(t.innerText))?.click(); true`); await sleep(800)
@@ -1725,8 +1727,8 @@ app.whenReady().then(async () => {
     const shell = require('electron').shell
     const realOpen = shell.openExternal
     shell.openExternal = async (u) => { opened.push(u) }
-    check('guide: a locked achievement has a Guide button', await ev(`!!document.querySelector('[data-ach-guide]')`))
-    await ev(`document.querySelector('[data-ach-guide]')?.click(); true`); await sleep(400)
+    check('guide: a locked achievement has a Guide button', await ev(`!!document.querySelector('[data-ach-guide="${lockedId}"]')`))
+    await ev(`document.querySelector('[data-ach-guide="${lockedId}"]')?.click(); true`); await sleep(400)
     const menu = await ev(`[...document.querySelectorAll('[role=menu] [role=menuitem], [role=menu] button')].map(b => b.innerText.trim()).join(' | ')`)
     check('guide: it offers YouTube and the web', /YouTube/.test(menu) && /Search the web/.test(menu), menu || await ev(`document.querySelectorAll('[data-ach-guide]').length + ' guides, ' + document.querySelectorAll('[role=menu]').length + ' menus, hash ' + location.hash + ', dialogs ' + document.querySelectorAll('[role=dialog]').length`))
     await ev(`[...document.querySelectorAll('[role=menu] [role=menuitem], [role=menu] button')].find(b => /YouTube/.test(b.innerText))?.click(); true`); await sleep(400)
