@@ -284,7 +284,9 @@ handle('overlay:openLaunchMiss', () => {
   return true
 })
 
-handle('games:delete', (ids) => {
+// `listRows`: the uninstalled card's "Delete from KoZo" takes the Game List entry too. The
+// Library's Delete keeps an entry that still has something to show (below).
+function deleteGames(ids, { listRows = false } = {}) {
   const fsx = require('fs')
   const list = (Array.isArray(ids) ? ids : [ids]).map(Number).filter(Number.isFinite)
   for (const id of list) {
@@ -292,7 +294,9 @@ handle('games:delete', (ids) => {
     const db = require('./db/database').getDb()
     const row = db.prepare('SELECT * FROM game_list WHERE game_id = ?').get(id)
     gamesQ.deleteGame(id)
-    if (row) {
+    if (row && listRows) {
+      db.prepare('DELETE FROM game_list WHERE id = ?').run(row.id)
+    } else if (row) {
       // The row loses the game's art with it, so it takes the Steam id and the link along.
       const kept = { ...row, steam_app_id: row.steam_app_id || g?.steam_app_id || null, banner_url: row.banner_url || g?.banner_url || null }
       if (gameListQ.isBlankRow(kept)) db.prepare('DELETE FROM game_list WHERE id = ?').run(row.id)
@@ -305,6 +309,16 @@ handle('games:delete', (ids) => {
   }
   bk()
   return list.length
+}
+handle('games:delete', (ids) => deleteGames(ids))
+
+// A game that was uninstalled: the corner card's list and its answer (services/uninstalled.js).
+handle('games:uninstalled', () => require('./services/uninstalled').pending())
+handle('games:uninstalledAnswer', (id, action) => {
+  const r = require('./services/uninstalled').answer(id, action, { deleteGames })
+  broadcast('game:updated', Number(id))
+  broadcast('uninstalled:changed', null)
+  return r
 })
 
 // Archive instead of delete: the game leaves the Library grid but its sessions,

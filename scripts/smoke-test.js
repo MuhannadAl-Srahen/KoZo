@@ -42,7 +42,8 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 // SMOKE_ONLY=upcoming,tray,... runs only those parts (the start and the seeded library always
 // run): after a change, test what changed, not all ~290 checks (the maker's call).
 // Parts: pages edit backups gamelist year sessions toolexe drive privacy version wishlist
-// upcoming review appearance narrow controller pick big steamcopy update playthrough tray
+// upcoming review appearance narrow controller pick big steamcopy update playthrough uninstalled
+// listscroll dealsearch tray
 const ONLY = process.env.SMOKE_ONLY ? process.env.SMOKE_ONLY.split(',').map(x => x.trim()) : null
 const want = (part) => !ONLY || ONLY.includes(part)
 
@@ -109,6 +110,11 @@ app.whenReady().then(async () => {
     return ids
   })()`)
   check('seed 3 games', Array.isArray(seeded) && seeded.length === 3, JSON.stringify(seeded))
+  // Test games have made-up folders, so the uninstalled card would sit in the corner of every
+  // part: it asks nothing until its own part.
+  const uninstalledSvc = require(path.join(root, 'electron', 'services', 'uninstalled.js'))
+  const realPending = uninstalledSvc.pending
+  uninstalledSvc.pending = () => []
   await ev(`location.reload(); true`); await sleep(2500)
   await escape()   // the "rate it" dialog from the Finished game
 
@@ -1453,6 +1459,148 @@ app.whenReady().then(async () => {
     check('update: a stopped download says try again', !!b && /Try again/i.test(b.text), JSON.stringify(b))
     await set({ state: 'idle', version: null, installing: false, wanted: false })
     check('update: gone again when there is nothing new', (await btn()) === null)
+  }
+  }
+
+  if (want('uninstalled')) {
+  // ── A game was uninstalled: the corner card asks what to do (the maker: Need for Speed
+  //    stayed "Playing" after it was uninstalled) ──
+  {
+    const db = require(path.join(root, 'electron', 'db', 'database.js')).getDb()
+    uninstalledSvc.pending = realPending
+    const add = (name) => ev(`window.kozo.api.games.add({ name: ${JSON.stringify(name)}, exe_name: 'x.exe', install_path: 'C:\\\\SmokeGone\\\\' + ${JSON.stringify(name)}, source: 'manual' }).then(r => r.data.id)`)
+    const ids = [await add('Smoke Gone One'), await add('Smoke Gone Two'), await add('Smoke Gone Three')]
+    db.prepare(`UPDATE games SET is_installed = 0, completion_status = 'playing' WHERE id IN (${ids.join(',')})`).run()
+    db.prepare(`UPDATE game_list SET status = 'playing' WHERE game_id IN (${ids.join(',')})`).run()
+    await require(path.join(root, 'electron', 'services', 'installCheck.js')).reconcile()
+    // Every other test game counts as answered: only these three are asked here.
+    const othersAsked = {}
+    for (const p of realPending()) if (!ids.includes(p.id)) othersAsked[p.id] = p.install_path
+    require(path.join(root, 'electron', 'db', 'queries', 'settings.js')).setSetting('uninstall_asked', JSON.stringify(othersAsked))
+    const card = () => ev(`(() => { const c = document.querySelector('[data-uninstalled]'); return c ? { id: Number(c.dataset.uninstalled), text: c.innerText } : null })()`)
+    await go('#/')
+    await ev(`window.kozo.api.games.uninstalled().then(() => true)`)
+    // installCheck sends this when it flags games; the card loads on it.
+    for (const w of require('electron').BrowserWindow.getAllWindows()) w.webContents.send('uninstalled:changed', null)
+    await sleep(600)
+    let c = await card()
+    check('uninstalled: the card asks about a game whose folder is gone', !!c && ids.includes(c.id) && /Uninstalled/i.test(c.text) && /Playing/.test(c.text), JSON.stringify(c))
+    check('uninstalled: one game at a time, with how many are left', !!c && /1 of 3/.test(c.text), c?.text)
+    check('uninstalled: offers a status, Remove from Library, Delete from KoZo and Keep it', !!c && /Finished/.test(c.text) && /Dropped/.test(c.text) && /Remove from Library/.test(c.text) && /Delete from KoZo/.test(c.text) && /Keep it/.test(c.text), c?.text)
+    check('uninstalled: no long dashes', !!c && !/[\u2013\u2014]/.test(c.text))
+    // Dropped: the game and its Game List row say Dropped, still in the Library.
+    const first = c.id
+    await ev(`document.querySelector('[data-uninstalled-status=dropped]').click(); true`); await sleep(700)
+    const g1 = db.prepare('SELECT completion_status, is_archived FROM games WHERE id = ?').get(first)
+    const l1 = db.prepare('SELECT status FROM game_list WHERE game_id = ?').get(first)
+    check('uninstalled: Dropped sets the game and its Game List entry', g1.completion_status === 'dropped' && l1?.status === 'dropped' && g1.is_archived === 0, JSON.stringify([g1, l1]))
+    c = await card()
+    check('uninstalled: then the next game', !!c && c.id !== first && ids.includes(c.id), JSON.stringify(c))
+    // Remove from Library: archived, Playing becomes On hold on both.
+    const second = c.id
+    await ev(`document.querySelector('[data-uninstalled-remove]').click(); true`); await sleep(700)
+    const g2 = db.prepare('SELECT completion_status, is_archived FROM games WHERE id = ?').get(second)
+    const l2 = db.prepare('SELECT status FROM game_list WHERE game_id = ?').get(second)
+    check('uninstalled: Remove from Library archives it and Playing becomes On hold', g2.is_archived === 1 && g2.completion_status === 'on_hold' && l2?.status === 'on_hold', JSON.stringify([g2, l2]))
+    // Delete from KoZo asks first, then the game and its Game List entry are gone.
+    c = await card()
+    const third = c?.id
+    await ev(`document.querySelector('[data-uninstalled-delete]').click(); true`); await sleep(300)
+    c = await card()
+    check('uninstalled: Delete asks first', !!c && /can't be undone/.test(c.text) && !!db.prepare('SELECT id FROM games WHERE id = ?').get(third), c?.text)
+    await ev(`document.querySelector('[data-uninstalled-delete-yes]').click(); true`); await sleep(700)
+    check('uninstalled: Delete removes the game and its Game List entry', !db.prepare('SELECT id FROM games WHERE id = ?').get(third) && !db.prepare('SELECT id FROM game_list WHERE game_id = ? OR name = ?').get(third, 'Smoke Gone Three'))
+    check('uninstalled: no card once all are answered', (await card()) === null)
+    // Asked once: a new check doesn't ask again; back on disk and gone again does.
+    const svc = require(path.join(root, 'electron', 'services', 'uninstalled.js'))
+    check('uninstalled: answered games are not asked again', !svc.pending().some(p => p.id === first))
+    db.prepare('UPDATE games SET is_installed = 1 WHERE id = ?').run(first); svc.pending()
+    db.prepare('UPDATE games SET is_installed = 0 WHERE id = ?').run(first)
+    check('uninstalled: reinstalled and uninstalled again asks again', svc.pending().some(p => p.id === first))
+    check('uninstalled: a drive that is not plugged in is not asked', svc.pickPending([{ id: 1, install_path: 'Q:\\Games\\X' }], {}, () => true).length === 0)
+    await ev(`window.kozo.api.games.delete([${first}, ${second}]).then(() => true)`)
+    // A session under a minute takes back the Game List's Playing too (Need for Speed again).
+    const statusSync = require(path.join(root, 'electron', 'services', 'statusSync.js'))
+    const gid = await add('Smoke Short Play')
+    db.prepare("UPDATE game_list SET status = 'want_to_play' WHERE game_id = ?").run(gid)
+    const before = { last_played_at: null, first_played_at: null, completion_status: null, list_statuses: statusSync.listStatusesFor(gid) }
+    statusSync.onSessionStarted(gid)
+    const mid = db.prepare('SELECT status FROM game_list WHERE game_id = ?').get(gid)?.status
+    statusSync.undoSessionStart(gid, before)
+    const after = db.prepare('SELECT status FROM game_list WHERE game_id = ?').get(gid)?.status
+    check('short session: the Game List goes back from Playing too', mid === 'playing' && after === 'want_to_play', `${mid} -> ${after}`)
+    await ev(`window.kozo.api.games.delete([${gid}]).then(() => true)`)
+  }
+  }
+
+  if (want('listscroll')) {
+  // ── Game List: more games load as you scroll, no page numbers (the maker's ask) ──
+  {
+    const added = await ev(`(async () => {
+      const ids = []
+      for (let i = 0; i < 45; i++) {
+        const r = await window.kozo.api.gameList.add({ name: 'Smoke Scroll ' + String(i).padStart(2, '0'), steam_app_id: null, status: 'want_to_play', rating: null, game_id: null })
+        if (r?.ok) ids.push(r.data?.id ?? r.data)
+      }
+      return ids.length
+    })()`)
+    await go('#/plan', 300); await go('#/game-list', 1800)
+    const count = () => ev(`document.querySelectorAll('.app-main [data-gpnav]').length`)
+    const total = await ev(`window.kozo.api.gameList.list({ limit: 1 }).then(r => r.data.total)`)
+    const first = await count()
+    check('Game List scroll: starts with 20 cards', added === 45 && first === 20, `${first} of ${total}`)
+    check('Game List scroll: no page numbers', await ev(`!document.querySelector('[class*=pagination]') && !!document.querySelector('[data-gamelist-more]')`))
+    const toBottom = async () => {
+      await ev(`(() => { const m = document.querySelector('[data-gamelist-more]'); let p = m?.parentElement; while (p && !/auto|scroll/.test(getComputedStyle(p).overflowY)) p = p.parentElement; (p || document.scrollingElement).scrollTop = 1e9; return true })()`)
+      await sleep(900)
+    }
+    await toBottom()
+    const second = await count()
+    check('Game List scroll: scrolling down loads more', second > first, `${first} -> ${second}`)
+    for (let i = 0; i < 4 && (await count()) < total; i++) await toBottom()
+    const last = await count()
+    const scrollNames = await ev(`[...document.querySelectorAll('.app-main [data-gpnav]')].map(c => (c.textContent.match(/Smoke Scroll \\d+/) || [])[0]).filter(Boolean)`)
+    check('Game List scroll: reaches every game, each once', last === total && scrollNames.length === 45 && new Set(scrollNames).size === 45, `${last} of ${total}, ${scrollNames.length} test rows`)
+    check('Game List scroll: nothing left to load', await ev(`!document.querySelector('[data-gamelist-more]')`))
+    await ev(`(async () => {
+      const rows = (await window.kozo.api.gameList.list({ limit: 500 })).data?.items || []
+      for (const r of rows) if (/^Smoke Scroll /.test(r.name)) await window.kozo.api.gameList.delete(r.id)
+      return true
+    })()`)
+  }
+  }
+
+  if (want('dealsearch')) {
+  // ── Discounts: a search box (the maker's ask). Deals and Steam's search are stubbed. ──
+  {
+    const deals = require(path.join(root, 'electron', 'services', 'deals.js'))
+    const steamApi = require(path.join(root, 'electron', 'services', 'steamApi.js'))
+    const realDeals = deals.getDeals, realMark = deals.markSeen, realSearch = steamApi.searchGames
+    const deal = (appid, name) => ({ appid, name, header: null, capsule: null, score: 70, match: 10, low: null,
+      price: { pct: 50, final: 999, finalText: '$9.99', original: 1999, originalText: '$19.99', endsAt: null }, reviews: { pct: 90, count: 1200, label: 'Very Positive' } })
+    deals.getDeals = async () => ({ at: Date.now(), cc: 'US', taste: [], wantedCount: 1,
+      yours: [deal(900001, 'Need for Speed™ Heat')],
+      alerts: [],
+      deals: [deal(900002, 'Smoke Racer Deluxe'), deal(900003, 'Quiet Farm'), deal(900004, 'Speedy Puzzle')] })
+    deals.markSeen = async () => true
+    steamApi.searchGames = async (q) => [{ steam_app_id: 900099, name: 'Need for Speed™ Most Wanted', header_image: null, capsule: null }, { steam_app_id: 900002, name: 'Smoke Racer Deluxe', header_image: null, capsule: null }]
+    await go('#/deals', 1500)
+    const type = (v) => ev(`(() => { const i = document.querySelector('[data-deals-search] input'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, ${JSON.stringify(v)}); i.dispatchEvent(new Event('input', { bubbles: true })); return true })()`)
+    const names = () => ev(`[...document.querySelectorAll('.app-main button[data-gpnav] [title]')].map(e => e.title).filter(x => !/^Deal score|reviews are|like the games/.test(x))`)
+    check('Discounts search: the box is there', await ev(`!!document.querySelector('[data-deals-search] input')`))
+    await type('speed'); await sleep(1000)
+    let n = await names()
+    check('Discounts search: filters the deals and your Game List by name', n.includes('Need for Speed™ Heat') && n.includes('Speedy Puzzle') && !n.includes('Quiet Farm') && !n.includes('Smoke Racer Deluxe'), n.join(' | '))
+    check('Discounts search: Steam finds games with no deal here, not ones already shown', await ev(`!!document.querySelector('[data-deal-steam-hit="900099"]') && !document.querySelector('[data-deal-steam-hit="900002"]')`))
+    await type('most wanted'); await sleep(1000)
+    check('Discounts search: no deal matches says so and points to Steam', await ev(`!!document.querySelector('[data-deals-nomatch]') && !!document.querySelector('[data-deal-steam-hit="900099"]')`))
+    await ev(`document.querySelector('[data-deal-steam-hit="900099"]').click(); true`); await sleep(800)
+    check('Discounts search: a Steam hit opens on its Prices tab', await ev(`[...document.querySelectorAll('[role=dialog] [role=tab]')].some(t => t.getAttribute('aria-selected') === 'true' && /Prices/.test(t.innerText))`))
+    await escape()
+    await type(''); await sleep(500)
+    n = await names()
+    check('Discounts search: clearing shows every deal again', ['Quiet Farm', 'Smoke Racer Deluxe', 'Speedy Puzzle'].every(x => n.includes(x)) && await ev(`!document.querySelector('[data-deals-steam]')`), n.join(' | '))
+    deals.getDeals = realDeals; deals.markSeen = realMark; steamApi.searchGames = realSearch
   }
   }
 

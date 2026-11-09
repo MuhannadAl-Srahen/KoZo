@@ -217,7 +217,11 @@ export default function GameList() {
   // it for the "All" chip and the page title made both shrink to the size of
   // the active filter — the All chip literally disagreeing with itself.
   const [allTotal, setAllTotal] = useState(0)
+  // How many chunks of PAGE_SIZE are on screen. Scrolling near the end loads the next one
+  // (the maker asked for that over page numbers); every reload asks for all of them at once.
   const [page, setPage]         = useState(1)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const moreRef = useRef(null)          // the sentinel under the cards
   const [statusFilter, setStatusFilter] = useState('')
   const [genreFilter, setGenreFilter]   = useState('')
   // The month filter moved to its own tab (Play Plan); the Game List no longer filters by month.
@@ -255,9 +259,8 @@ export default function GameList() {
   const [dragOverId, setDragOverId] = useState(null) // drop-target highlight
   const dragIdRef = useRef(null)
 
-  // Drag-reorder within the current page/filter view. The main process splices
-  // this page's new order into the whole list (gameList:reorderPage), so a drop
-  // on page 2 stays on page 2 and favorites keep leading.
+  // Drag-reorder within the cards shown. The main process splices their new order
+  // into the whole list (gameList:reorderPage, from row 0), so favorites keep leading.
   async function handleCardDrop(targetId) {
     const dragId = dragIdRef.current
     dragIdRef.current = null
@@ -276,7 +279,7 @@ export default function GameList() {
     if (monthFilter)  filters.month = monthFilter
     if (activeListId) filters.listId = activeListId
     if (searchText?.trim()) filters.search = searchText.trim()
-    await window.kozo?.api?.gameList?.reorderPage?.(filters, (page - 1) * PAGE_SIZE, pageItems.map(i => i.id))
+    await window.kozo?.api?.gameList?.reorderPage?.(filters, 0, pageItems.map(i => i.id))
     pageCache.clear()
     loadItems(page, { silent: true })
   }
@@ -387,7 +390,7 @@ export default function GameList() {
       // spinner unmounted every card and made covers re-request + jump around.
       setSwitching(true)
     }
-    const filters = { limit: PAGE_SIZE, offset: (pg - 1) * PAGE_SIZE }
+    const filters = { limit: pg * PAGE_SIZE, offset: 0 }
     if (status) filters.status = status
     if (genre)  filters.genre = genre
     if (month)  filters.month = month
@@ -404,6 +407,54 @@ export default function GameList() {
     setLoading(false)
     setSwitching(false)
   }, [statusFilter, genreFilter, monthFilter, activeListId, searchText])
+
+  const moreBusy = useRef(false)
+  const loadMore = useCallback(async () => {
+    if (moreBusy.current || loading || switching) return
+    const have = itemsRef.current.length
+    if (have >= total) return
+    moreBusy.current = true
+    setLoadingMore(true)
+    const filters = { limit: PAGE_SIZE, offset: have }
+    if (statusFilter) filters.status = statusFilter
+    if (genreFilter)  filters.genre = genreFilter
+    if (monthFilter)  filters.month = monthFilter
+    if (activeListId) filters.listId = activeListId
+    if (searchText?.trim()) filters.search = searchText.trim()
+    const res = await window.kozo?.api?.gameList?.list(filters)
+    if (res?.ok) {
+      const seen = new Set(itemsRef.current.map(i => i.id))
+      const next = [...itemsRef.current, ...(res.data?.items ?? []).filter(i => !seen.has(i.id))]
+      const pg = Math.ceil(next.length / PAGE_SIZE)
+      itemsRef.current = next
+      setItems(next)
+      setTotal(res.data?.total ?? total)
+      setPage(pg)
+      pageCache.set(JSON.stringify([pg, statusFilter, genreFilter, monthFilter, activeListId, (searchText || '').trim()]), { items: next, total: res.data?.total ?? total })
+    }
+    setLoadingMore(false)
+    moreBusy.current = false
+  }, [loading, switching, total, statusFilter, genreFilter, monthFilter, activeListId, searchText])
+
+  // The sentinel under the cards: near the bottom of the scroll panel, load more. Watched
+  // against the panel itself, so the 600 px head start isn't cut off by its edges.
+  const loadMoreRef = useRef(loadMore)
+  useEffect(() => { loadMoreRef.current = loadMore }, [loadMore])
+  const hasMore = !loading && items.length > 0 && items.length < total
+  useEffect(() => {
+    const el = moreRef.current
+    if (!el || !hasMore) return
+    let root = el.parentElement
+    while (root && root !== document.body) {
+      const oy = getComputedStyle(root).overflowY
+      if (oy === 'auto' || oy === 'scroll') break
+      root = root.parentElement
+    }
+    const io = new IntersectionObserver((ents) => { if (ents.some(e => e.isIntersecting)) loadMoreRef.current?.() },
+      { root: root && root !== document.body ? root : null, rootMargin: '0px 0px 600px 0px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [hasMore, items.length])
 
   useEffect(() => {
     loadLists()
@@ -447,11 +498,6 @@ export default function GameList() {
     loadItems(1, { listId })
   }
 
-  function handlePage(p) {
-    setPage(p)
-    loadItems(p)
-  }
-
   function afterSave() {
     setShowAdd(false)
     setEditItem(null)
@@ -461,20 +507,15 @@ export default function GameList() {
     loadAllTotal()
   }
 
-  // Removing the last card on a later page would refetch an empty page and show
-  // "No games here yet" — step back a page instead.
   async function afterDelete() {
     setEditItem(null)
-    const target = items.length <= 1 && page > 1 ? page - 1 : page
-    if (target !== page) setPage(target)
     pageCache.clear()
-    await loadItems(target)
+    await loadItems(page, { silent: true })
     loadLists()
     loadGenres()
     loadAllTotal()
   }
 
-  const totalPages = Math.ceil(total / PAGE_SIZE)
   const activeList = customLists.find(l => l.id === activeListId)
 
   return (
@@ -708,29 +749,10 @@ export default function GameList() {
           </div>
         )}
 
-        {!loading && totalPages > 1 && (
-          <div className={s.pagination}>
-            <button className={s.pageBtn} onClick={() => handlePage(page - 1)} disabled={page <= 1}>‹</button>
-
-            {Array.from({ length: totalPages }, (_, i) => i + 1)
-              .filter(p => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
-              .reduce((acc, p, i, arr) => {
-                if (i > 0 && p - arr[i - 1] > 1) acc.push('…')
-                acc.push(p)
-                return acc
-              }, [])
-              .map((p, i) =>
-                p === '…'
-                  ? <span key={`e${i}`} className={s.pageInfo}>…</span>
-                  : <button
-                      key={p}
-                      className={`${s.pageBtn} ${p === page ? s.pageBtnActive : ''}`}
-                      onClick={() => handlePage(p)}
-                    >{p}</button>
-              )
-            }
-
-            <button className={s.pageBtn} onClick={() => handlePage(page + 1)} disabled={page >= totalPages}>›</button>
+        {/* More cards load as this comes into view (scroll), never page numbers. */}
+        {hasMore && (
+          <div ref={moreRef} className={s.loadMore} data-gamelist-more aria-hidden={!loadingMore}>
+            {loadingMore && <><IconLoader2 size={14} stroke={1.8} className="spin" /> Loading more games…</>}
           </div>
         )}
       </div>

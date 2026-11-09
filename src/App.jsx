@@ -28,6 +28,7 @@ import LevelUpCelebration from './components/LevelUpCelebration'
 import UpdateBanner from './components/UpdateBanner'
 import DriveNewsBar from './components/DriveNewsBar'
 import LaunchMissCard from './components/LaunchMissCard'
+import UninstalledCard from './components/UninstalledCard'
 import GamepadHints from './components/GamepadHints'
 
 // Controller navigation — must live under the router so useNavigate works.
@@ -278,6 +279,7 @@ export default function App() {
         <GamepadNav />
         <UnknownGamePrompt />
         <LaunchMissCard />
+        <UninstalledCard />
         <LevelUpCelebration />
         {showOnboarding && <Tour onDone={() => setShowOnboarding(false)} />}
         {restoreOffer && <RestoreOffer found={restoreOffer.found} drive={restoreOffer.drive} onOffer={showDriveOffer} onClose={() => { walkthroughAfterOffer.current = false; setRestoreOffer(null); setShowOnboarding(true) }} />}

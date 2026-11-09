@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 32,
+  rev: 33,
   // Settings → Appearance → UI scale.
   ui: {
     setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
@@ -33,6 +33,8 @@ contextBridge.exposeInMainWorld('kozo', {
       delete: (id) => ipcRenderer.invoke('games:delete', id),
       launchMiss: () => ipcRenderer.invoke('games:launchMiss'),
       dismissLaunchMiss: (id) => ipcRenderer.invoke('games:dismissLaunchMiss', id),
+      uninstalled: () => ipcRenderer.invoke('games:uninstalled'),
+      uninstalledAnswer: (id, action) => ipcRenderer.invoke('games:uninstalledAnswer', id, action),
       setWatchedExe: (id, proc) => ipcRenderer.invoke('games:setWatchedExe', id, proc),
       reorder: (orderedIds) => ipcRenderer.invoke('games:reorder', orderedIds),
       archive: (ids) => ipcRenderer.invoke('games:archive', ids),
@@ -340,6 +342,7 @@ contextBridge.exposeInMainWorld('kozo', {
       onAccentChanged: sub('accent:changed', pass),
       onUnknownProcessAdd: sub('unknown-process:add', pass),
       onLaunchMiss: sub('launch:miss', pass),
+      onUninstalledChanged: sub('uninstalled:changed', pass),
       removeAll: (channel) => {
         ipcRenderer.removeAllListeners(channel)
       },

@@ -730,52 +730,16 @@
 }
 
 /* ── Pagination ────────────────────────────────────────────── */
-.pagination {
+/* Under the cards: scrolling near it loads the next games. */
+.loadMore {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 16px 0 0;
-}
-
-.pageBtn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--r-input);
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 12.5px;
-  cursor: pointer;
-  transition:
-    background 0.1s,
-    border-color 0.1s,
-    color 0.1s;
-}
-
-.pageBtn:hover:not(:disabled) {
-  background: var(--surface-3);
-  border-color: var(--ab);
-  color: var(--text-primary);
-}
-
-.pageBtn:disabled {
-  opacity: 0.3;
-  cursor: default;
-}
-
-.pageBtnActive {
-  background: var(--ad);
-  border-color: var(--ab);
-  color: var(--a);
-}
-
-.pageInfo {
-  font-size: var(--fs-sm);
+  min-height: 48px;
+  padding: 12px 0 4px;
   color: var(--text-muted);
+  font-size: var(--fs-sm);
 }
 
 /* ── Custom lists — one slim chips row ──────────────────────── */

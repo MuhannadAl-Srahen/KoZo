@@ -293,11 +293,14 @@ async function reconcile({ quick = false } = {}) {
       `${nowFound} marked installed again`,
       { games: changed.map(c => `${c.name}${c.want ? '' : ' (missing)'}`) }
     )
-    // Refresh every window so the Library re-renders with honest state.
+    // Refresh every window so the Library re-renders with honest state, and the
+    // uninstalled card (components/UninstalledCard.jsx) asks about games that went.
     try {
       const { BrowserWindow } = require('electron')
       for (const w of BrowserWindow.getAllWindows()) {
-        if (!w.isDestroyed()) for (const c of changed) w.webContents.send('game:updated', c.id)
+        if (w.isDestroyed()) continue
+        for (const c of changed) w.webContents.send('game:updated', c.id)
+        w.webContents.send('uninstalled:changed', null)
       }
     } catch {}
   }

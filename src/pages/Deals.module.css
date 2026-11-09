@@ -3,6 +3,19 @@
 .pageTitle { composes: pageTitle from '../styles/page.module.css'; }
 .content { composes: content from '../styles/page.module.css'; display: flex; flex-direction: column; gap: var(--sp-20); }
 .spacer { flex: 1; }
+/* Search (the same box as the Library's and the Game List's). */
+.searchBox {
+  display: flex; align-items: center; gap: 6px; padding: 0 8px;
+  flex: 1 1 160px; min-width: 120px; max-width: 260px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-input);
+  transition: border-color 0.12s;
+}
+.searchBox:focus-within { border-color: var(--ab); }
+.searchIcon { color: var(--text-muted); flex-shrink: 0; }
+.searchInput { flex: 1; min-width: 0; padding: 6px 0; font-size: var(--fs-md); color: var(--text-primary); background: transparent; border: none; outline: none; }
+.searchInput::placeholder { color: var(--text-muted); }
+.searchClear { display: flex; align-items: center; padding: 2px; color: var(--text-muted); background: none; border: none; cursor: pointer; }
+.searchClear:hover { color: var(--text-secondary); }
 .updated { font-size: var(--fs-xs); color: var(--text-muted); }
 
 .ghostBtn, .buyBtn {
