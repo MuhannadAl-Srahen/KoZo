@@ -1,23 +1,23 @@
-KoZo 1.9.2
+KoZo 1.9.3
 
-Sign in with Google now works for everyone: back up your saves and library to your own Google Drive from Settings, Backups.
+A white theme, a Big Picture you can make your own, and a lighter KoZo.
 
-New in 1.9
-• Scan PC checks every file before it trusts it, so a settings tool or a map editor is never taken for your game. Epic, GOG and Xbox games come in through the same button.
-• No duplicates: the same folder, Steam id or name counts as already in your Library.
-• Games you uninstall show Not installed.
-• A game's page shows the developer's news since you last played, and a version tag that says when your copy is behind.
-• Open any session to see how long you really played and what you unlocked.
-• Discounts: a Prices tab with every store and the lowest price ever, and price alerts.
-• Upcoming: Like my games, Other games or All.
-• Import your Steam wishlist into the Game List.
-• Your Year, in Activity.
-• Two PCs on one Google account: each keeps its own library, and the other one's comes in through three questions.
-• A break reminder, a card size slider and custom background shades.
+New in 1.9.3
+• Light theme, and Match Windows, which follows Windows' own light or dark mode. Any background color works, white too, and you can pick the text color.
+• Big Picture has a Customize button: three layouts, tall or wide covers, your focus color, the background, and Xbox or PlayStation buttons. It's brighter too.
+• Edit many games at once in the Library, with Undo.
+• Storage, in Settings: how much space each game takes on every disk.
+• Upcoming looks like Steam's calendar. For you on Steam shows your Steam wishlist and games like the ones you play there, from the Steam account you connected. Prefer the old look? Settings, Appearance, Upcoming calendar, Classic.
+• Bought a game on Steam that you played without a launcher? Its page offers to switch to your Steam copy, and your hours, achievements and saves come along.
+• When an update changes where a game keeps its saves, KoZo notices and offers to bring your progress over, for every game.
+• Minimize KoZo when a game starts, in Settings, Tracking.
+• Discounts only shows games with 500 reviews or more and at least 80% positive, plus the ones on your Game List.
+• A simpler tray menu that opens at once.
+• Lighter: much less memory and processor use while KoZo is open, and pages settle twice as fast.
 
-Fixed in 1.9.2
-• The "update ready" question never pops up while you're playing.
-• Messages that sent you to a Settings tab that no longer exists now point to Connections.
-• Games that start without a launcher are labeled No launcher everywhere.
-• The tray popup is only as tall as what it shows.
-• Easier-to-read labels on discount cards and in Scan PC.
+Fixed in 1.9.3
+• Play time on a card is never cut off.
+• Achievements no longer show twice for a game when KoZo has no Steam key.
+• A game you play through Steam always starts through Steam.
+• A game's page says when a newer copy was installed beside the old one.
+• Picking a day in a game's sessions no longer opens a session by itself.
