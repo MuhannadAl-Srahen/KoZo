@@ -49,6 +49,7 @@ function initDatabase() {
     // owns that, and it can tell "game still running, resume as one session"
     // from "game closed while KoZo was off, cap at the last heartbeat".
     purgeOcrUnlocks()
+    try { mergeCaseDuplicateAchievements() } catch (_) {}   // a repair never stops KoZo from opening
     purgeForeignStatsUnlocks()
     repairExeMisattribution()
 
@@ -392,6 +393,36 @@ function migrateCategoriesToCustomLists() {
 // down with it, otherwise the user would have to re-earn the removed XP before
 // any future gain registered. Unlocks from every other source (steam_api,
 // steam_stats, crack, manual) are untouched.
+// One time: achievements stored twice because Steam wrote a name in capitals once and in
+// small letters once (see bulkUpsertAchievements). The first one stored stays; an unlock
+// on the copy moves to it (the earlier date wins), then the copy goes. XP is worked out
+// from the database, so it drops back by itself.
+function mergeCaseDuplicateAchievements() {
+  const done = db.prepare("SELECT value FROM settings WHERE key = 'ach_case_dupes_v1'").get()
+  if (done) return
+  db.transaction(() => {
+    const dupes = db.prepare(`
+      SELECT d.id AS dup, k.id AS keep FROM achievements d
+      JOIN achievements k ON k.game_id = d.game_id AND lower(k.steam_api_name) = lower(d.steam_api_name) AND k.id < d.id
+      WHERE NOT EXISTS (SELECT 1 FROM achievements k2 WHERE k2.game_id = d.game_id AND lower(k2.steam_api_name) = lower(d.steam_api_name) AND k2.id < k.id)
+    `).all()
+    const unlockOf = db.prepare('SELECT id, unlocked_at, session_id FROM achievement_unlocks WHERE achievement_id = ?')
+    const move = db.prepare('UPDATE achievement_unlocks SET achievement_id = ? WHERE id = ?')
+    const setDate = db.prepare('UPDATE achievement_unlocks SET unlocked_at = ?, session_id = COALESCE(session_id, ?) WHERE id = ?')
+    const del = db.prepare('DELETE FROM achievements WHERE id = ?')
+    for (const { dup, keep } of dupes) {
+      const u = unlockOf.get(dup)
+      if (u) {
+        const k = unlockOf.get(keep)
+        if (!k) move.run(keep, u.id)
+        else if (u.unlocked_at && (!k.unlocked_at || u.unlocked_at < k.unlocked_at)) setDate.run(u.unlocked_at, u.session_id, k.id)
+      }
+      del.run(dup)
+    }
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('ach_case_dupes_v1', ?)").run(String(dupes.length))
+  })()
+}
+
 function purgeOcrUnlocks() {
   const done = db.prepare("SELECT value FROM settings WHERE key = 'ocr_unlocks_purged_v1'").get()
   if (done) return

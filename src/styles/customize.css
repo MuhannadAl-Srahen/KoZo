@@ -168,6 +168,26 @@
   --glow-2: 0 0 48px -4px color-mix(in srgb, var(--a) 80%, transparent);
 }
 
+/* Light: glows and shadows. An accent glow made for black looked like a blurry green
+   halo on white, and black shadows like dirt (the maker: "the glowing effect"). On white
+   they are soft gray shadows with a hint of the accent; Off stays off. More specific than
+   the data-glow / data-card-* rules above, so they win in Light only. */
+:root[data-theme="light"] {
+  --elev-1: 0 1px 3px rgba(15, 18, 30, 0.10);
+  --elev-2: 0 6px 18px rgba(15, 18, 30, 0.12);
+  --elev-3: 0 12px 40px rgba(15, 18, 30, 0.22);
+}
+:root[data-theme="light"][data-card-shadow="flat"] { --elev-2: 0 1px 4px rgba(15, 18, 30, 0.10); }
+:root[data-theme="light"][data-card-shadow="deep"] { --elev-2: 0 12px 30px rgba(15, 18, 30, 0.20); }
+:root[data-theme="light"]:not([data-glow="off"]) {
+  --glow-1: 0 2px 10px -3px color-mix(in srgb, var(--a) 35%, rgba(15, 18, 30, 0.25));
+  --glow-2: 0 4px 16px -4px color-mix(in srgb, var(--a) 40%, rgba(15, 18, 30, 0.3));
+  --elev-accent: 0 3px 10px -2px color-mix(in srgb, var(--a) 35%, transparent);
+}
+:root[data-theme="light"]:not([data-card-glow="off"]) {
+  --card-hover-glow: 0 12px 26px -10px color-mix(in srgb, var(--a) 40%, rgba(15, 18, 30, 0.35));
+}
+
 /* ── Layout ─────────────────────────────────────────────────────────── */
 :root[data-sidebar-side="right"] .app-layout { flex-direction: row-reverse; }
 :root[data-page-width="centered"] .app-main { padding-inline: max(0px, calc((100% - 1400px) / 2)); }

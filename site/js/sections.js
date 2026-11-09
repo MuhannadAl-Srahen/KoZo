@@ -367,7 +367,8 @@
     { name: 'Hot Pink', color: '#f472b6', img: 'assets/shots/look-pink.webp', cap: 'Hot Pink, Poster cards, slim sidebar' },
     { name: 'Electric Blue', color: '#60a5fa', img: 'assets/shots/look-blue.webp', cap: 'Electric Blue, Glass cards, Midnight theme' },
     { name: 'Amber', color: '#fbbf24', img: 'assets/shots/look-amber.webp', cap: 'Amber, Minimal cards, your own background color' },
-    { name: 'Lime', color: '#9fff02', img: 'assets/shots/library.webp', cap: 'Lime, Classic cards, black background' },
+    { name: 'Lime', color: '#9fff02', img: 'assets/shots/look-lime.webp', cap: 'Lime, Classic cards, black background' },
+    { name: 'Light', color: '#9fff02', img: 'assets/shots/look-light.webp', cap: 'The Light theme, Classic cards' },
   ]
   $('look-btns').innerHTML = LOOKS.map(function (l, i) {
     return '<button class="look-btn" type="button" data-i="' + i + '" aria-pressed="' + (i === 0) + '" style="--tone:' + l.color + '">' + HEX + '<span>' + l.name + '</span></button>'

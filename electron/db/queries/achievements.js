@@ -82,9 +82,18 @@ function bulkUpsertAchievements(gameId, achievements) {
       global_unlock_percent = COALESCE(excluded.global_unlock_percent, global_unlock_percent),
       is_hidden = excluded.is_hidden
   `)
+  // Steam writes the same achievement's name in capitals in its Web API
+  // ("BIOME_REACHED_LIGHTHOUSE") and in small letters on the profile page the keyless
+  // ladder reads ("biome_reached_lighthouse"). The unique key is case-sensitive, so a
+  // keyless refresh added every achievement a second time (Dead Cells 121 -> 242, with
+  // the unlocks doubled and a level-up for nothing). A name that only differs in case
+  // is the achievement already stored, under the name it has.
   const run = getDb().transaction(() => {
+    const stored = new Map(getDb().prepare('SELECT steam_api_name FROM achievements WHERE game_id = ?').all(gameId)
+      .map(r => [String(r.steam_api_name).toLowerCase(), r.steam_api_name]))
     for (const a of achievements) {
-      stmt.run({ game_id: gameId, ...a, icon_url: achIconUrl(a.icon_url), icon_locked_url: achIconUrl(a.icon_locked_url) })
+      const name = stored.get(String(a.steam_api_name).toLowerCase()) || a.steam_api_name
+      stmt.run({ game_id: gameId, ...a, steam_api_name: name, icon_url: achIconUrl(a.icon_url), icon_locked_url: achIconUrl(a.icon_locked_url) })
     }
   })
   run()

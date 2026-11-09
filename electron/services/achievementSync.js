@@ -491,7 +491,7 @@ async function syncAfterSession(gameId, sessionId) {
     const nameToAch = {}
     const alreadyUnlocked = new Set()
     for (const a of localAchs) {
-      nameToAch[a.steam_api_name] = a
+      nameToAch[String(a.steam_api_name).toLowerCase()] = a   // names in any case (see bulkUpsertAchievements)
       // Unlocked = an unlock row exists. unlocked_at is nullable (Steam reports
       // no date for some unlocks), so keying on it re-detected those every pass.
       if (a.unlock_id != null) alreadyUnlocked.add(a.id)
@@ -557,14 +557,15 @@ async function syncPlayerUnlocks(gameId) {
   // whose achievement isn't in the stored list means the game added some:
   // fetch the list again before matching, or that unlock is lost.
   let localAchs = await ensureSchema(gameId)
-  const known = new Set(localAchs.map(a => a.steam_api_name))
-  if (steamUnlocks.some(su => !known.has(su.name))) {
+  // Names in any case: Steam's profile page writes them in small letters.
+  const known = new Set(localAchs.map(a => String(a.steam_api_name).toLowerCase()))
+  if (steamUnlocks.some(su => !known.has(String(su.name).toLowerCase()))) {
     localAchs = await ensureSchema(gameId, { force: true, refresh: true })
   }
   const nameToAch = {}
   const alreadyUnlocked = new Set()
   for (const a of localAchs) {
-    nameToAch[a.steam_api_name] = a
+    nameToAch[String(a.steam_api_name).toLowerCase()] = a
     if (a.unlock_id != null) alreadyUnlocked.add(a.id)
   }
 

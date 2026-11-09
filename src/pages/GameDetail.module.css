@@ -92,6 +92,15 @@
     linear-gradient(to bottom, color-mix(in srgb, var(--scrim) 45%, transparent) 0%, transparent 25%, transparent 60%, var(--bg) 100%);
 }
 
+/* Light: the art keeps its own colors with a dark shade behind the name, like the dark
+   themes, and melts into the white page only at its very bottom. Fading to the page
+   color washed the art out and put a black name and white stats on it. */
+:global(:root[data-theme="light"]) .page[data-layout="cinematic"] .heroScrim {
+  background:
+    linear-gradient(to right, rgba(8, 8, 14, 0.78) 0%, rgba(8, 8, 14, 0.5) 32%, transparent 64%),
+    linear-gradient(to bottom, rgba(8, 8, 14, 0.35) 0%, transparent 22%, transparent 62%, rgba(8, 8, 14, 0.5) 90%, var(--bg) 100%);
+}
+
 /* ── Top bar over the art ────────────────────────────────────────────── */
 .topBar {
   position: relative;
@@ -164,7 +173,10 @@
 }
 
 /* ── Cinematic info block ────────────────────────────────────────────── */
+/* Over the art, so it stays dark in Light too: white name, light stats, chips on a dark
+   plate (kz-dark; in the dark themes it does nothing). */
 .cineInfo {
+  composes: kz-dark from global;
   position: relative;
   z-index: var(--z-raised);
   margin-top: auto;
@@ -303,6 +315,12 @@
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
   scrollbar-width: none;
+}
+/* Light: the strip lets the page show through, so it doesn't sit there as a gray box. */
+:global(:root[data-theme="light"]) .tabs {
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  backdrop-filter: blur(12px) saturate(1.2);
+  border-bottom-color: var(--border-subtle);
 }
 .tab { composes: btn from '../styles/controls.module.css'; }
 .tabs .tab {
