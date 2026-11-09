@@ -851,14 +851,14 @@ export default function GameDetail() {
     .sort((a, b) => b.global_unlock_percent - a.global_unlock_percent).slice(0, 5)
   const monthStart = Date.now() - 30 * 86400000
   // The list under the bars is on the Sessions tab, so a bar or a row elsewhere goes there.
-  // A bar narrows the list to that day, the same bar again shows every session, and a day
-  // with one session opens it. A row opens what happened in it, right under it. It doesn't
-  // narrow the list: a session older than 30 days has no bar to go back with.
+  // A bar narrows the list to that day, the same bar again shows every session. Nothing
+  // opens by itself, also on a day with one session (the maker's call): only a click on a
+  // row opens what happened in it, right under it. A row doesn't narrow the list: a session
+  // older than 30 days has no bar to go back with.
   const pickDay = (key) => {
     const off = tab === 'sessions' && pickedDay === key
-    const day = sessions.filter(x => localDayKey(x.started_at) === key)
     setPickedDay(off ? null : key)
-    setOpenSessionId(!off && day.length === 1 ? day[0].id : null)
+    setOpenSessionId(null)
     setTab('sessions')
   }
   const toggleSession = (session) => {

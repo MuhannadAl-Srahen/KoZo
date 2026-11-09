@@ -437,13 +437,13 @@ app.whenReady().then(async () => {
       tab('Overview')
       await wait(400)
       await bar('${olderKey}')
-      const fromOverview = text()
+      const fromOverview = text(), fromOverviewRows = rows()
       tab('Overview')
       await wait(400)
       document.querySelector('[data-session-row="${session}"]')?.click()
       await wait(300)
       const rowFromOverview = text()
-      return { allRows, bars, zero, picked, opened, underRow, switched, closedAgain, backRows, olderDay, olderRows, allAgain, fromRow, rowDialogs, rowKeepsList, stacked, stillThere, afterEsc, dayAfterEsc, fromOverview, rowFromOverview }
+      return { allRows, bars, zero, picked, opened, underRow, switched, closedAgain, backRows, olderDay, olderRows, allAgain, fromRow, rowDialogs, rowKeepsList, stacked, stillThere, afterEsc, dayAfterEsc, fromOverview, fromOverviewRows, rowFromOverview }
     })()`)
     check('Chart: a bar is a day, and only days with play can be clicked', open?.bars === (sameDay ? 2 : 3) && open.zero >= 1, JSON.stringify(open && [open.bars, open.zero]))
     check('Chart: every session is listed before a bar is picked', open?.allRows === 3, open?.allRows)
@@ -460,13 +460,14 @@ app.whenReady().then(async () => {
     }
     check('Chart: the session says played and paused', /1h played, 1h paused/i.test(open?.opened || ''), open?.opened?.slice(0, 160))
     check('Chart: the picked bar again goes back to every session', open?.backRows === 3)
-    check('Chart: a day with one session opens it', open?.olderRows === 1 && /Smoke Older/.test(open?.olderDay || '') && !/Smoke First|Smoke Near/.test(open?.olderDay || ''), open?.olderDay?.slice(0, 160))
+    // Nothing opens by itself, also with one session (the maker's call): only a click opens it.
+    check('Chart: a day with one session shows it closed', open?.olderRows === 1 && (open?.olderDay || '') === '', open?.olderDay?.slice(0, 160))
     check('Chart: that bar again goes back too', open?.allAgain === 3)
     check('Session row: opens itself in the full list, no popup', /Smoke First/.test(open?.fromRow || '') && /Smoke Second/.test(open?.fromRow || '') && open.rowDialogs === 0 && open.rowKeepsList === 3, open?.fromRow?.slice(0, 160))
     check('Session row: in the order they came', (open?.fromRow || '').indexOf('Smoke First') < (open?.fromRow || '').indexOf('Smoke Second'))
     check('Session row: only what this session earned', !/Smoke Older|Smoke Elsewhere|Smoke Locked/.test(open?.fromRow || ''))
     check('Session row: an achievement opens on top, and the session stays open', open?.stacked === 1 && open.stillThere === 1 && open.afterEsc === 0 && open.dayAfterEsc === 1, JSON.stringify(open && [open.stacked, open.afterEsc, open.dayAfterEsc]))
-    check('Overview: a bar goes to that day under the bars', /Smoke Older/.test(open?.fromOverview || ''), open?.fromOverview?.slice(0, 120))
+    check('Overview: a bar goes to that day under the bars, closed', open?.fromOverviewRows === 1 && (open?.fromOverview || '') === '', JSON.stringify([open?.fromOverviewRows, open?.fromOverview?.slice(0, 80)]))
     check('Overview: a session goes there, open', /Smoke First/.test(open?.rowFromOverview || ''), open?.rowFromOverview?.slice(0, 120))
     db.prepare(`DELETE FROM achievements WHERE id IN (${achs.map(() => '?').join(',')})`).run(...achs)
     db.prepare('DELETE FROM sessions WHERE id IN (?, ?, ?)').run(session, near, older)
