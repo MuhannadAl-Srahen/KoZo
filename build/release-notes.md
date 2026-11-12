@@ -1,25 +1,19 @@
-KoZo 1.10.0
+KoZo 1.11.0
 
-XP that rewards rare achievements, badges to earn, search everything with Ctrl+K, playing a game again, and a faster KoZo.
+Every Steam account on your PC, a tidier Library, a smarter Scan PC, and an Upcoming calendar built on Steam's own.
 
-New in 1.10.0
-• XP by rarity: every achievement is worth more the rarer it is, from 55 XP for a Common one to 500 for an Ultra Rare. Your level may go up after this update: that's the new rules counting what you already earned. Profile shows how XP works and what each rarity gave you.
-• Badges: 19 of KoZo's own trophies on your Profile, like First Ultra Rare, 100 hours club, Marathon and Night owl. The locked ones show how close you are, and a new one pops up over your game when you earn it.
-• Search everything: press Ctrl+K anywhere, or Search at the top of the sidebar. Your games, your Game List, KoZo's pages and Steam, in one box.
-• More ways to earn XP: 100% a game, play 10, 25, 50 and 100 hours in one game, finish a game in the month you planned it, and keep a streak going.
-• Play a game again: on a game's page, Start a new playthrough. Finished it before KoZo? Say it's your 3rd time and the earlier ones are kept. Each playthrough shows its own time, and you can give it a note like "Shura ending".
-• Colored notifications with sound: an achievement shows in its rarity's color, and Now playing, Level up, Session complete and the others each have their own color and their own short sound.
-• Update button: when a new KoZo is out, an Update button shows in the sidebar. One click and it updates, after your game if one is running.
-• Uninstalled games: when a game's folder is gone, a card in the corner asks what to do with it. Mark it Finished, Dropped or On hold, remove it from the Library, or delete it.
-• Guides for locked achievements: a Guide button on every locked achievement opens Steam guides, YouTube or a web search for it.
-• Discounts has a search: find any game's price, its lowest ever, and set a price alert, even for a game that isn't on sale.
-• Game List: more games load as you scroll, Select all takes every game in the list, and a game you want that's on sale says so in big letters on its cover.
-• Faster with big libraries: KoZo starts a third faster, the Finished page and Year review open many times faster, and covers take much less memory.
-• This window: What's new shows each new thing, even without internet. Open it again from Settings, About.
+New in 1.11.0
+• Steam accounts: KoZo reads achievements for every Steam account on your PC, so a private profile is never in the way. In Settings, Connections, Accounts, mark each one Mine or Shared. On a shared account, only what you unlock while you play counts, and achievements other people unlocked there can be removed.
+• Library tabs: Current, Finished, Dropped, Hidden and Removed are tabs at the top instead of rows under your games. Removing a game takes it out of the Library with an Undo, and Settings can hide the Hidden and Removed tabs. The numbers at the top moved out: Activity has them.
+• Scan PC: finds a game you removed or uninstalled once it's installed again and brings it back, follows a game to its new folder, fixes a wrong game file, and looks in every Steam library on your PC. Every game has Change game file, to pick the right one yourself.
+• Upcoming like Steam's calendar: every game with a release date in the coming weeks, ranked by wishlists and your taste, with your Steam wishlist marked. Choose a tag, how many games, wishlisted games, or hide Early Access. Strip, Week and Month show the same games, and All shows every game of a day.
+• Games like this: about twice as many games, and more load as you scroll.
+• Discounts: more deals load as you scroll, page after page of Steam's sales.
 
-Fixed in 1.10.0
-• A game opened for less than a minute no longer stays Playing on the Game List.
-• Deleting a game whose Game List entry says Playing asks what it should say now.
-• An archived game can be deleted from its right-click menu.
-• The level badge on your profile picture is no longer cut off.
-• A long game name in Add to Game List stays on one line.
+Fixed in 1.11.0
+• A game you install again turns bright within seconds instead of minutes. A Steam game waits until its download is done.
+• Achievements unlocked through Steam's website are matched again.
+• Achievements read all at once are no longer filed under a single session.
+• Check achievements says what really happened, instead of always "Profile is not public".
+• Trailers start at the volume you last used.
+• No border around the Ctrl+K search box.
