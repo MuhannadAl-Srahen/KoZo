@@ -46,7 +46,7 @@ function loadDisk() {
   diskRead = true
   try {
     const d = JSON.parse(fs.readFileSync(cacheFile(), 'utf8'))
-    if (d?.data && !cache) cache = { at: d.at, cc: d.cc, data: d.data }
+    if (d?.data && !cache) cache = { at: d.at, cc: d.cc, data: d.data, more: d.more || null }
     for (const [k, v] of Object.entries(d?.ids || {})) gameIdOf.set(Number(k), v)
     for (const [k, v] of Object.entries(d?.unknownIds || {})) if (Date.now() - v < UNKNOWN_TTL) unknownAt.set(Number(k), v)
   } catch {}
@@ -58,13 +58,36 @@ function saveDisk() {
 }
 
 // ── Steam ──────────────────────────────────────────────────────────────────
+// Steam's sales, 100 at a time: 'rev' = best reviewed first, 'top' = top sellers. Steam has
+// thousands; the page shows the first page of each and asks for the next as you scroll
+// (moreDeals). Through steamApi.storeGet, so a "slow down" from Steam pauses every store call.
+const SPECIAL_SORTS = { rev: { sort_by: 'Reviews_DESC' }, top: { filter: 'topsellers' } }
+async function specialsPage(kind, page) {
+  try {
+    const r = await steam().storeGet('https://store.steampowered.com/search/results/', {
+      timeout: 15000, headers: UA,
+      params: { specials: 1, category1: 998, infinite: 1, start: page * 100, count: 100, cc: country(), supportedlang: 'english', ...SPECIAL_SORTS[kind] },
+    })
+    const ids = [...new Set([...String(r.data?.results_html || '').matchAll(/data-ds-appid="(\d+)"/g)].map(m => Number(m[1])))]
+    return { ids, total: Number(r.data?.total_count) || 0, ok: true }
+  } catch (e) {
+    return { ids: [], total: 0, ok: false, error: e.message }
+  }
+}
+
 async function specialsIds() {
-  const get = (params) => axios().get('https://store.steampowered.com/search/results/', {
-    timeout: 15000, headers: UA,
-    params: { specials: 1, category1: 998, infinite: 1, start: 0, count: 100, cc: country(), supportedlang: 'english', ...params },
-  }).then(r => [...new Set([...String(r.data?.results_html || '').matchAll(/data-ds-appid="(\d+)"/g)].map(m => Number(m[1])))]).catch(() => [])
-  const [best, sellers] = await Promise.all([get({ sort_by: 'Reviews_DESC' }), get({ filter: 'topsellers' })])
-  return [...new Set([...best, ...sellers])]
+  const [best, sellers] = await Promise.all([specialsPage('rev', 0), specialsPage('top', 0)])
+  return { ids: [...new Set([...best.ids, ...sellers.ids])], ok: best.ok || sellers.ok, totals: { rev: best.total, top: sellers.total } }
+}
+
+// Pure. Is there more of one list to ask for? At most 12 pages of each (1,200 sales).
+const MAX_SPECIAL_PAGES = 12
+function cursorDone(page, total, max = MAX_SPECIAL_PAGES) {
+  return page >= max || (total > 0 && page * 100 >= total)
+}
+// Pure. The ids not seen yet.
+function freshIds(ids, seen) {
+  return [...new Set((ids || []).map(Number))].filter(id => id > 0 && !seen.has(id))
 }
 
 // GetItems with prices (in this PC's currency), tags, reviews and art.
@@ -199,7 +222,16 @@ async function lowInfo(appIds) {
 function dealUrl(dealID) { return `https://www.cheapshark.com/redirect?dealID=${dealID}` }
 
 // ── Your taste: Steam tags of what you play and rate highly ────────────────
+// Kept an hour: Discounts' next pages and Upcoming's calendar both ask for it.
+let tasteMemo = null
 async function tasteVector() {
+  if (tasteMemo && Date.now() - tasteMemo.at < 3600000) return tasteMemo.vec
+  const vec = await computeTaste()
+  tasteMemo = { at: Date.now(), vec }
+  return vec
+}
+function forgetTaste() { tasteMemo = null }
+async function computeTaste() {
   const db = require('../db/database').getDb()
   const w = new Map()
   for (const g of db.prepare('SELECT steam_app_id AS appid, total_playtime_seconds AS secs FROM games WHERE steam_app_id IS NOT NULL AND is_archived = 0').all()) {
@@ -444,22 +476,65 @@ function shape(f, extra) {
   }
 }
 
+// One card's data. ctx = { facts, lows, vec, names, us }.
+function buildDeal(ctx, id, mine) {
+  const { facts, lows, vec, names, us } = ctx
+  const f = facts.get(id)
+  const info = lows.get(id) || null
+  const low = lowState(info)
+  const match = tasteMatch(vec, f.tags)
+  const tagNames = f.tags.slice(0, 20).map(t => names.get(t.id)).filter(Boolean)
+  const why = vec ? f.tags.filter(t => vec.has(t.id) && !GENERIC.has(names.get(t.id))).sort((a, b) => vec.get(b.id) - vec.get(a.id)).slice(0, 3).map(t => names.get(t.id)).filter(Boolean) : []
+  return shape(f, {
+    mine,
+    match: Math.round(match * 100),
+    score: dealScore({ pct: f.price.pct, reviews: f.reviews, match, low }),
+    low, lowest: info?.lowest ?? null, lowestDate: info?.lowestDate ?? null,
+    elsewhere: us ? (info?.best || null) : null,
+    tags: tagNames.slice(0, 4), why,
+  })
+}
+
+function wantedIds(owned) {
+  const db = require('../db/database').getDb()
+  const wantedRows = db.prepare(`SELECT id, name, status, steam_app_id AS appid FROM game_list WHERE steam_app_id IS NOT NULL AND status IN (${WANT.map(() => '?').join(',')})`).all(...WANT)
+  return [...new Set(wantedRows.map(r => Number(r.appid)))].filter(id => !owned.has(id))
+}
+
+// How far down Steam's lists the page has gone (moreDeals), kept a day so the hourly refresh
+// prices those games again instead of dropping what was scrolled to.
+const EXTRA_KEEP_MS = 24 * 3600000
+function depthOf(c) {
+  const m = c?.more
+  if (!m || !m.extraAt || Date.now() - m.extraAt > EXTRA_KEEP_MS) return { cursor: { rev: 1, top: 1 }, totals: {}, extraIds: [], extraAt: 0 }
+  return { cursor: m.cursor || { rev: 1, top: 1 }, totals: m.totals || {}, extraIds: m.extraIds || [], extraAt: m.extraAt }
+}
+const hasMore = (d) => !(cursorDone(d.cursor.rev, d.totals.rev) && cursorDone(d.cursor.top, d.totals.top))
+
 async function compute() {
   loadDisk()
-  const db = require('../db/database').getDb()
   const owned = ownedIds()
-  const wantedRows = db.prepare(`SELECT id, name, status, steam_app_id AS appid FROM game_list WHERE steam_app_id IS NOT NULL AND status IN (${WANT.map(() => '?').join(',')})`).all(...WANT)
-  const wantIds = [...new Set(wantedRows.map(r => Number(r.appid)))].filter(id => !owned.has(id))
+  const wantIds = wantedIds(owned)
 
   const [specials, vec] = await Promise.all([specialsIds(), tasteVector().catch(() => null)])
+  // Steam's search failed (a "slow down", no network): keep the last list rather than replace
+  // it with an empty one for an hour. Asked again in 5 minutes.
+  if (!specials.ok && cache?.data?.deals?.length) {
+    logger.warn('deals: Steam search failed, keeping the last list')
+    retryAt = Date.now() + 5 * 60000
+    return cache.data
+  }
+  const depth = depthOf(cache)
+  depth.totals = { ...depth.totals, ...Object.fromEntries(Object.entries(specials.totals || {}).filter(([, v]) => v)) }
+  const specialIds = [...new Set([...specials.ids, ...depth.extraIds])]
   const alertRows = targetRows()
-  const facts = await priced([...wantIds, ...alertRows.map(r => Number(r.appid)), ...specials])
+  const facts = await priced([...wantIds, ...alertRows.map(r => Number(r.appid)), ...specialIds])
   const names = await steam().getTagNames().catch(() => new Map())
   const topTags = vec ? [...vec.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => names.get(id)).filter(n => n && !GENERIC.has(n)).slice(0, 6) : []
 
   const onSale = (id) => { const f = facts.get(id); return f && f.price && f.price.pct > 0 && f.type === 0 ? f : null }
   const yoursIds = wantIds.filter(onSale)
-  const dealIds = specials.filter(id => onSale(id) && wellReviewed(facts.get(id).reviews) && !owned.has(id) && !wantIds.includes(id))
+  const dealIds = specialIds.filter(id => onSale(id) && wellReviewed(facts.get(id).reviews) && !owned.has(id) && !wantIds.includes(id))
   // CheapShark: your list, plus the Steam deals it knows (a few calls).
   // The page never waits long for it: after 5 seconds it shows what is known,
   // and the rest arrives with a deals:updated push when CheapShark answers.
@@ -471,22 +546,7 @@ async function compute() {
   // Store prices outside Steam are US prices: compared only when Steam's are too.
   const us = country() === 'US'
 
-  const build = (id, mine) => {
-    const f = facts.get(id)
-    const info = lows.get(id) || null
-    const low = lowState(info)
-    const match = tasteMatch(vec, f.tags)
-    const tagNames = f.tags.slice(0, 20).map(t => names.get(t.id)).filter(Boolean)
-    const why = vec ? f.tags.filter(t => vec.has(t.id) && !GENERIC.has(names.get(t.id))).sort((a, b) => vec.get(b.id) - vec.get(a.id)).slice(0, 3).map(t => names.get(t.id)).filter(Boolean) : []
-    return shape(f, {
-      mine,
-      match: Math.round(match * 100),
-      score: dealScore({ pct: f.price.pct, reviews: f.reviews, match, low }),
-      low, lowest: info?.lowest ?? null, lowestDate: info?.lowestDate ?? null,
-      elsewhere: us ? (info?.best || null) : null,
-      tags: tagNames.slice(0, 4), why,
-    })
-  }
+  const build = (id, mine) => buildDeal({ facts, lows, vec, names, us }, id, mine)
   const assemble = () => ({
     cc: country(),
     at: new Date().toISOString(),
@@ -495,10 +555,11 @@ async function compute() {
     deals: dealIds.map(id => build(id, false)).sort((a, b) => b.score - a.score),
     wantedCount: wantIds.length,
     alerts: buildAlerts(alertRows, facts, owned),
+    more: hasMore(depth),
   })
   const data = assemble()
   applyAlerts(data.alerts)
-  cache = { at: Date.now(), cc: data.cc, data }
+  cache = { at: Date.now(), cc: data.cc, data, more: depth }
   saveDisk()
   markNewSales()
   if (late) {
@@ -506,7 +567,7 @@ async function compute() {
       lows = full
       const again = assemble()
       again.alerts = again.alerts.map(a => ({ ...a, hit: data.alerts.find(x => x.listId === a.listId)?.hit ?? a.hit }))
-      cache = { at: Date.now(), cc: again.cc, data: again }
+      cache = { at: Date.now(), cc: again.cc, data: again, more: cache?.more || depth }
       saveDisk()
       broadcast('deals:updated', again)
     })
@@ -558,9 +619,10 @@ function saleMap() {
 
 // Cached answer at once (memory or disk); refreshed in the background when
 // older than an hour or the country changed. `force` waits for a fresh one.
+let retryAt = 0
 async function getDeals({ force = false } = {}) {
   loadDisk()
-  const fresh = cache && cache.cc === country() && Date.now() - cache.at < TTL
+  const fresh = cache && cache.cc === country() && (Date.now() - cache.at < TTL || Date.now() < retryAt)
   if (force || !cache) {
     if (!running) running = compute().finally(() => { running = null })
     return running
@@ -568,6 +630,62 @@ async function getDeals({ force = false } = {}) {
   if (!fresh && !running) running = compute().catch(e => logger.warn('deals: refresh failed', { message: e.message })).finally(() => { running = null })
   // A list saved before the review floor existed still holds small games: drop them now.
   return { ...cache.data, deals: (cache.data.deals || []).filter(g => wellReviewed(g.reviews)) }
+}
+
+// The next page of Steam's sales, when Discounts is scrolled to its end. Up to three rounds
+// (a page can hold nothing new: Steam's best-reviewed order goes band by band), stopping once
+// a dozen or more were added. Returns the same shape as getDeals.
+let moreRun = null
+function moreDeals() {
+  if (!moreRun) moreRun = fetchMoreDeals().finally(() => { moreRun = null })
+  return moreRun
+}
+
+async function fetchMoreDeals() {
+  loadDisk()
+  if (!cache?.data) await getDeals({ force: true })
+  if (!cache?.data) return { deals: [], more: false }
+  const depth = depthOf(cache)
+  const owned = ownedIds()
+  const wantIds = wantedIds(owned)
+  const seen = new Set([...(cache.data.deals || []), ...(cache.data.yours || []), ...(cache.data.alerts || [])].map(g => Number(g.appid)))
+  for (const id of [...owned, ...wantIds, ...depth.extraIds]) seen.add(Number(id))
+  const [vec, names] = await Promise.all([tasteVector().catch(() => null), steam().getTagNames().catch(() => new Map())])
+  const us = country() === 'US'
+  const added = []
+  let failed = false
+  for (let round = 0; round < 3 && added.length < 12 && hasMore(depth); round++) {
+    const kinds = ['rev', 'top'].filter(k => !cursorDone(depth.cursor[k], depth.totals[k]))
+    const pages = await Promise.all(kinds.map(k => specialsPage(k, depth.cursor[k])))
+    if (pages.every(p => !p.ok)) { failed = true; break }
+    kinds.forEach((k, i) => {
+      if (!pages[i].ok) return
+      depth.cursor[k]++
+      if (pages[i].total) depth.totals[k] = pages[i].total
+      if (!pages[i].ids.length) depth.totals[k] = depth.cursor[k] * 100   // an empty page: the end
+    })
+    const fresh = freshIds(pages.flatMap(p => p.ids), seen)
+    for (const id of fresh) seen.add(id)
+    depth.extraIds.push(...fresh)
+    if (!fresh.length) continue
+    const facts = await priced(fresh)
+    const keep = fresh.filter(id => {
+      const f = facts.get(id)
+      return f && f.price && f.price.pct > 0 && f.type === 0 && wellReviewed(f.reviews)
+    })
+    if (!keep.length) continue
+    const lowRun = lowInfo(keep).catch(() => new Map())
+    let lows = await Promise.race([lowRun, pause(5000).then(() => null)])
+    if (!lows) lows = new Map(keep.map(id => [id, lowCache.get(id)?.info]).filter(([, v]) => v))
+    added.push(...keep.map(id => buildDeal({ facts, lows, vec, names, us }, id, false)))
+  }
+  if (!depth.extraAt) depth.extraAt = Date.now()
+  const have = new Set((cache.data.deals || []).map(g => g.appid))
+  const data = { ...cache.data, deals: [...(cache.data.deals || []), ...added.filter(g => !have.has(g.appid))], more: failed || hasMore(depth) }
+  cache = { ...cache, data, more: depth }
+  saveDisk()
+  logger.info('deals: more', { added: added.length, cursor: depth.cursor, failed })
+  return { ...data, deals: (data.deals || []).filter(g => wellReviewed(g.reviews)), ...(failed ? { error: 'Steam did not answer. Scroll again in a moment.' } : {}) }
 }
 
 // Background: every 6 hours when no game is running, so the badge appears on
@@ -582,4 +700,4 @@ function start() {
   timer = setInterval(tick, 6 * 60 * 60 * 1000)
 }
 
-module.exports = { getDeals, saleMap, gamePrices, setTarget, refreshAlerts, lowInfo, markSeen, unseen, start, dealScore, wellReviewed, tasteMatch, lowState, moneyText, targetState, alertChanges }
+module.exports = { getDeals, moreDeals, saleMap, gamePrices, setTarget, refreshAlerts, lowInfo, markSeen, unseen, start, dealScore, wellReviewed, tasteMatch, tasteVector, forgetTaste, lowState, moneyText, targetState, alertChanges, cursorDone, freshIds }

@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   IconDiscount2, IconRefresh, IconThumbUp, IconTrendingDown, IconClock, IconBuildingStore, IconPlus, IconCheck,
-  IconSparkles, IconListCheck, IconBrandSteam, IconChevronDown, IconBell, IconSearch, IconX, IconLoader2,
+  IconSparkles, IconListCheck, IconBrandSteam, IconBell, IconSearch, IconX, IconLoader2,
 } from '@tabler/icons-react'
 import SteamGameModal from '../components/SteamGameModal'
 import GamePrices, { lowestLine } from '../components/GamePrices'
@@ -11,6 +11,8 @@ import { Skeleton } from '../components/ui/Skeleton'
 import useCardZoom from '../lib/useCardZoom'
 import CardSizeSlider from '../components/ui/CardSizeSlider'
 import { timeAgo } from '../lib/utils'
+import useNearEnd from '../lib/useNearEnd'
+import { keepShown } from '../lib/endless'
 import s from './Deals.module.css'
 
 // Discount games: Steam's sales ranked for YOU (services/deals.js). Your
@@ -32,7 +34,10 @@ const SORTS = [
   { key: 'reviews', label: 'Best reviewed' },
   { key: 'ending',  label: 'Ending soon' },
 ]
+// The first cards, then more each time the end comes near (the maker asked for scrolling, not a
+// Show more button). When those run out, the next page of Steam's sales is asked for.
 const PAGE = 36
+const CHUNK = 24
 
 let dealsCache = null   // module cache: a revisit paints at once
 
@@ -193,7 +198,7 @@ export default function Deals() {
     return () => { try { off?.() } catch {} }
   }, [])
 
-  const deals = useMemo(() => {
+  const sorted = useMemo(() => {
     let list = data?.deals || []
     if (filter === 'deep') list = list.filter(g => g.price.pct >= 75)
     else if (filter === 'lowest') list = list.filter(g => g.low === 'lowest')
@@ -209,7 +214,50 @@ export default function Deals() {
     return [...list].sort(by)
   }, [data, filter, sort, query])
 
-  useEffect(() => { setShown(PAGE) }, [filter, sort, query])
+  // Cards already on screen keep their places when a new page of sales arrives; a new filter,
+  // sort or search starts from the top.
+  const orderRef = useRef([])
+  const viewKey = `${filter}|${sort}|${query}`
+  const viewRef = useRef(viewKey)
+  if (viewRef.current !== viewKey) { viewRef.current = viewKey; orderRef.current = [] }
+  const deals = useMemo(() => keepShown(orderRef.current, sorted), [sorted, viewKey])
+  const visibleDeals = deals.slice(0, shown)
+  useLayoutEffect(() => { orderRef.current = visibleDeals.map(g => g.appid) })
+  const [moreBusy, setMoreBusy] = useState(false)
+  const [moreError, setMoreError] = useState(null)
+  // A sparse filter (Lowest price ever) can find nothing new on page after page: once a page
+  // added nothing to what this view shows, stop asking until the view changes.
+  const [moreStopped, setMoreStopped] = useState(false)
+  useEffect(() => { setShown(PAGE); setMoreStopped(false); setMoreError(null) }, [filter, sort, query])
+
+  const searching0 = !!query.trim()
+  const canFetch = !!data?.more && !searching0 && !moreStopped
+  const fetchMore = useCallback(async () => {
+    if (moreBusy) return
+    setMoreBusy(true); setMoreError(null)
+    const before = deals.length
+    const res = await window.kozo?.api?.deals?.more?.()
+    setMoreBusy(false)
+    if (!res?.ok) { setMoreError(res?.error || 'Steam did not answer.'); return }
+    if (res.data?.error) setMoreError(res.data.error)
+    dealsCache = { ...(dealsCache || {}), ...res.data }
+    setData(dealsCache)
+    // How many of the new ones this view shows: the next render tells; compared by count.
+    pendingCheck.current = before
+  }, [moreBusy, deals.length])
+  const pendingCheck = useRef(null)
+  useEffect(() => {
+    if (pendingCheck.current == null) return
+    if (deals.length <= pendingCheck.current) setMoreStopped(true)
+    pendingCheck.current = null
+  }, [deals.length, data])
+  const onReach = useCallback(() => {
+    if (shown < deals.length) setShown(n => n + CHUNK)
+    else if (canFetch && !moreError) fetchMore()
+  }, [shown, deals.length, canFetch, moreError, fetchMore])
+  const endRef = useRef(null)
+  const dealsEnd = shown >= deals.length && !canFetch
+  useNearEnd(endRef, onReach, { enabled: !!data && deals.length > 0 && !dealsEnd, key: `${shown}:${deals.length}:${canFetch}` })
 
   // Steam's own search, a moment after typing stops.
   useEffect(() => {
@@ -317,7 +365,7 @@ export default function Deals() {
             <section className={s.section}>
               <div className={s.sectionHead}>
                 <IconDiscount2 size={15} /> Best deals for you
-                {data && <span className={s.count}>{deals.length}</span>}
+                {data && <span className={s.count}>{deals.length}{canFetch ? '+' : ''}</span>}
               </div>
               <div className={s.filters}>
                 <div className={s.seg}>
@@ -337,13 +385,21 @@ export default function Deals() {
                   : <EmptyState Icon={IconDiscount2} title="Nothing matches" desc="Try another filter." />
               ) : (
                 <>
-                  <div className={s.grid} style={zoomStyle}>
-                    {deals.slice(0, shown).map((g, i) => <DealCard key={g.appid} g={g} i={i % PAGE} us={us} onOpen={openWindow} />)}
+                  <div className={s.grid} style={zoomStyle} data-deals-grid>
+                    {visibleDeals.map((g, i) => <DealCard key={g.appid} g={g} i={Math.min(i % CHUNK, 8)} us={us} onOpen={openWindow} />)}
                   </div>
-                  {deals.length > shown && (
-                    <button type="button" className={s.more} onClick={() => setShown(n => n + PAGE)}>
-                      <IconChevronDown size={14} /> Show more ({deals.length - shown})
-                    </button>
+                  {!dealsEnd && (
+                    <div ref={endRef} className={s.loadMore} data-deals-more>
+                      {shown >= deals.length && moreBusy && <DealsSkeleton count={3} />}
+                      {shown >= deals.length && moreError && !moreBusy && (
+                        <button type="button" className={s.moreRetry} onClick={() => { setMoreError(null); fetchMore() }}>
+                          <IconRefresh size={14} /> {moreError} Try again
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {dealsEnd && !searching0 && (
+                    <p className={s.endLine} data-deals-end>That's every deal for now. KoZo checks again every few hours.</p>
                   )}
                 </>
               )}

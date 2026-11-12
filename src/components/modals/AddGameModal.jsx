@@ -85,7 +85,7 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
   const [saving, setSaving]           = useState(false)
   const [errors, setErrors]           = useState({})
   const [exeWarn, setExeWarn]         = useState(false)
-  const [dupWarn, setDupWarn]         = useState(false)
+  const [dupWarn, setDupWarn]         = useState(false)   // false, or the game already in KoZo
   const [showPicker, setShowPicker]   = useState(false)
   // Games that aren't on Steam, found on SteamGridDB (needs the user's key).
   const [sgdbResults, setSgdbResults] = useState([])
@@ -195,11 +195,25 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
     return null
   }, [name, exeName, installPath])
 
+  // The game KoZo already has with this Steam id, or null. A removed one (archived) is
+  // offered back instead of a dead end ("I removed it, installed it again, and can't add it").
   async function checkDuplicate(appId) {
-    if (!appId) return false
+    if (!appId) return null
     const res = await window.kozo?.api?.games?.list()
-    if (!res?.ok) return false
-    return res.data.some(g => g.steam_app_id === appId)
+    if (!res?.ok) return null
+    return res.data.find(g => String(g.steam_app_id) === String(appId)) || null
+  }
+
+  async function bringBack(game) {
+    setSaving(true)
+    const patch = { is_archived: 0 }
+    const dir = typeof installPath === 'string' ? installPath.trim() : ''
+    const exe = typeof exeName === 'string' ? exeName.trim() : ''
+    if (dir) { patch.install_path = dir; patch.is_installed = 1 }
+    if (exe && exe.toLowerCase().endsWith('.exe')) patch.exe_name = exe
+    await window.kozo?.api?.games?.update(game.id, patch)
+    setSaving(false)
+    onAdded?.(game)
   }
 
   async function handleSave() {
@@ -215,8 +229,8 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
     setSaving(true)
     try {
       if (selected?.steam_app_id) {
-        const isDup = await checkDuplicate(selected.steam_app_id)
-        if (isDup) { setDupWarn(true); setSaving(false); return }
+        const dup = await checkDuplicate(selected.steam_app_id)
+        if (dup) { setDupWarn(dup); setSaving(false); return }
       }
 
       const safeTrim = (v) => (typeof v === 'string' ? v.trim() : '')
@@ -384,12 +398,22 @@ export default function AddGameModal({ onClose, onAdded, prefillExe, prefillInst
         <>
           <hr className={s.divider} />
 
-          {dupWarn && (
+          {dupWarn && !dupWarn.is_archived && (
             <div className={s.warning}>
               <IconAlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
               This game is already in your library.
             </div>
           )}
+          {dupWarn && dupWarn.is_archived ? (
+            <div className={s.warning} data-add-removed>
+              <IconAlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span style={{ flex: 1 }}>
+                You removed this game earlier. Its hours, sessions and achievements are kept.
+                {' '}Bring it back{installPath ? ' with the folder and file above' : ''}?
+              </span>
+              <button type="button" className={s.dupBtn} onClick={() => bringBack(dupWarn)} disabled={saving}>Bring it back</button>
+            </div>
+          ) : null}
 
           <div className={s.field}>
             <label className={`${s.label} ${s.labelRequired}`}>Game name</label>

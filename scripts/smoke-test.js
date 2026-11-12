@@ -31,6 +31,11 @@ app.setPath('userData', tmp)
 app.setPath('documents', path.join(tmp, 'Documents'))
 process.env.KOZO_SMOKE = '1'
 process.env.KOZO_RENDERER = 'dist'
+// A pretend Steam folder (empty until the steamaccounts part fills it): KoZo reads every Steam
+// account's files on the PC, and a test run must never read the real ones.
+const fakeSteam = path.join(tmp, 'Steam')
+fs.mkdirSync(fakeSteam, { recursive: true })
+process.env.KOZO_STEAM_PATH = fakeSteam
 
 let pass = 0
 let fail = 0
@@ -41,9 +46,9 @@ function check(name, cond, detail = '') {
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 // SMOKE_ONLY=upcoming,tray,... runs only those parts (the start and the seeded library always
 // run): after a change, test what changed, not all ~290 checks (the maker's call).
-// Parts: pages edit backups gamelist year sessions toolexe drive privacy version wishlist
-// upcoming review appearance narrow controller pick big steamcopy update playthrough uninstalled
-// listscroll dealsearch extras tray
+// Parts: pages library edit backups gamelist year sessions toolexe scan drive privacy steamaccounts
+// version wishlist upcoming review appearance narrow controller pick big steamcopy update playthrough
+// uninstalled listscroll dealsearch endless extras tray
 const ONLY = process.env.SMOKE_ONLY ? process.env.SMOKE_ONLY.split(',').map(x => x.trim()) : null
 const want = (part) => !ONLY || ONLY.includes(part)
 
@@ -210,6 +215,109 @@ app.whenReady().then(async () => {
   check('Edit: opens for a game with no launcher', /No launcher/.test(editText), editText.slice(0, 80))
   check('Edit: never says cracked', !/\bcrack(ed|s)?\b/i.test(editText), (editText.match(/.{0,30}\bcrack.{0,30}/i) || [''])[0])
   await escape()
+  }
+
+  if (want('library')) {
+  // The Library's tabs (Current, Finished, Dropped, Hidden, Removed) replaced three folding rows
+  // under the grid, and a game removed with its history kept leaves the Library view.
+  const [alphaId, betaId] = seeded
+  await go('#/', 1500)
+  const libEv = (body) => ev(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const tabs = () => [...document.querySelectorAll('[data-lib-tab]')].map(b => b.dataset.libTab + ':' + b.getAttribute('aria-selected')).join()
+    const text = () => document.querySelector('.app-main').innerText
+    const cards = () => document.querySelectorAll('.app-main [data-gpnav] [data-gpclick]').length
+    const game = async (id) => ((await window.kozo.api.games.list())?.data || []).find(g => g.id === id)
+    const menuOn = async (name) => {
+      const card = [...document.querySelectorAll('.app-main [data-gpnav]')].find(c => c.innerText.includes(name))
+      if (!card) return false
+      card.scrollIntoView({ block: 'center' }); await wait(200)
+      const b = card.getBoundingClientRect()
+      const t = document.elementFromPoint(b.left + b.width / 2, b.top + Math.min(b.height / 2, 60)) || card
+      t.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: b.left + b.width / 2, clientY: b.top + 40 }))
+      await wait(300)
+      return !!document.querySelector('[role=menu]')
+    }
+    const menuItem = (label) => [...document.querySelectorAll('[role=menu] button, [role=menuitem]')].find(b => b.innerText.trim().startsWith(label))
+    ${body}
+  })()`)
+  const lib1 = await libEv(`
+    return { tabs: tabs(), alpha: text().includes('Smoke Alpha'), gamma: text().includes('Smoke Gamma'), rows: !!document.querySelector('[class*=hiddenHeader]') }`)
+  check('Library: tabs for what the library holds, Current first', lib1.tabs === 'current:true,finished:false', JSON.stringify(lib1))
+  check('Library: no Games / Playtime / Achievements boxes on top (Activity has them)', await ev(`!document.querySelector('.app-main [class*=statsBar]') && !/This week/i.test(document.querySelector('.app-main').innerText.slice(0, 200))`))
+  check('Library: a finished game is in its tab, not under the grid', lib1.alpha && !lib1.gamma && !lib1.rows, JSON.stringify(lib1))
+  const lib2 = await libEv(`
+    document.querySelector('[data-lib-tab=finished]').click(); await wait(500)
+    return { tabs: tabs(), cards: cards(), gamma: text().includes('Smoke Gamma'), alpha: text().includes('Smoke Alpha'), status: text().includes('All statuses') }`)
+  check('Library: the Finished tab shows the finished game with the same grid', lib2.cards === 1 && lib2.gamma && !lib2.alpha && /finished:true/.test(lib2.tabs), JSON.stringify(lib2))
+  check('Library: the status filter is on Current only', lib2.status === false, JSON.stringify(lib2))
+  await go(`#/game/${alphaId}`, 1000)
+  await go('#/', 1200)
+  const lib3 = await libEv(`return { tabs: tabs() }`)
+  check('Library: back from a game page lands on the tab you left', /finished:true/.test(lib3.tabs), JSON.stringify(lib3))
+  const lib4 = await libEv(`
+    document.querySelector('[data-lib-tab=current]').click(); await wait(300)
+    await window.kozo.api.games.update(${betaId}, { is_hidden: 1 }); await wait(1200)
+    const out = { tabs: tabs(), beta: text().includes('Smoke Beta') }
+    document.querySelector('[data-lib-tab=hidden]')?.click(); await wait(400)
+    out.hiddenCards = cards(); out.note = document.querySelector('[data-lib-note]')?.innerText || ''
+    await window.kozo.api.games.update(${betaId}, { is_hidden: 0 }); await wait(1200)
+    out.after = tabs()
+    return out`)
+  check('Library: a hidden game gets a Hidden tab', /hidden:false/.test(lib4.tabs) && !lib4.beta && lib4.hiddenCards === 1 && /Still tracked/.test(lib4.note), JSON.stringify(lib4))
+  check('Library: an emptied tab closes and Current comes back', lib4.after === 'current:true,finished:false', JSON.stringify(lib4))
+  const lib5 = await libEv(`
+    if (!(await menuOn('Smoke Alpha'))) return { step: 'no menu' }
+    menuItem('Remove from library')?.click(); await wait(300)
+    menuItem('Keep history')?.click(); await wait(1200)
+    const out = { archived: (await game(${alphaId}))?.is_archived, alpha: [...document.querySelectorAll('.app-main [data-gpnav]')].some(c => c.innerText.includes('Smoke Alpha')), tabs: tabs(), bar: document.querySelector('[data-undo-bar]')?.innerText || '' }
+    ;[...document.querySelectorAll('[data-undo-bar] button')].find(b => /Undo/.test(b.textContent))?.click(); await wait(1200)
+    out.undone = (await game(${alphaId}))?.is_archived; out.tabsAfter = tabs()
+    return out`)
+  check('Library: Remove with history kept takes the game out of the view', lib5.archived === 1 && lib5.alpha === false && /removed:false/.test(lib5.tabs), JSON.stringify(lib5))
+  check('Library: it says where the game went, and Undo brings it back', /Removed Smoke Alpha/.test(lib5.bar) && lib5.undone === 0 && !/removed/.test(lib5.tabsAfter), JSON.stringify(lib5))
+  const lib6 = await libEv(`
+    await window.kozo.api.games.archive([${alphaId}]); await wait(1200)
+    document.querySelector('[data-lib-tab=removed]')?.click(); await wait(400)
+    const out = { note: document.querySelector('[data-lib-note]')?.innerText || '', cards: cards() }
+    if (!(await menuOn('Smoke Alpha'))) return { ...out, step: 'no menu' }
+    out.menu = document.querySelector('[role=menu]').innerText
+    menuItem('Restore to library')?.click(); await wait(1200)
+    out.archived = (await game(${alphaId}))?.is_archived; out.tabs = tabs()
+    return out`)
+  check('Library: the Removed tab says the history is kept', /kept/.test(lib6.note) && lib6.cards === 1, JSON.stringify(lib6))
+  // Settings > Appearance can leave the Removed tab out: those games are nowhere in the Library.
+  const lookWas = await ev(`window.kozo.api.settings.get('appearance').then(r => r?.data ?? null)`)
+  await ev(`window.kozo.api.games.archive([${alphaId}]).then(() => window.kozo.api.settings.get('appearance')).then(r => { const p = r?.data ? JSON.parse(r.data) : {}; p.hideLibraryRemovedTab = true; return window.kozo.api.settings.set('appearance', JSON.stringify(p)) }).then(() => true)`)
+  await ev(`location.reload(); true`); await sleep(2500)
+  const off = await libEv(`return { tabs: tabs(), alpha: [...document.querySelectorAll('.app-main [data-gpnav]')].some(c => c.innerText.includes('Smoke Alpha')) }`)
+  check('Library: the Removed tab can be turned off in Settings', !/removed/.test(off.tabs) && off.alpha === false, JSON.stringify(off))
+  await ev(`window.kozo.api.settings.set('appearance', ${JSON.stringify(lookWas)}).then(() => window.kozo.api.games.unarchive([${alphaId}])).then(() => true)`)
+  await ev(`location.reload(); true`); await sleep(2500)
+  check('Library: a removed game offers Restore and Delete, not Hide or Plan',
+    /Restore to library/.test(lib6.menu || '') && /Delete with history/.test(lib6.menu || '') && !/Hide from library|Plan for month/.test(lib6.menu || ''), JSON.stringify(lib6))
+  check('Library: Restore brings it back and the tab closes', lib6.archived === 0 && lib6.tabs === 'current:true,finished:false', JSON.stringify(lib6))
+  const lib7 = await libEv(`
+    const input = document.querySelector('.app-main input[aria-label="Search games"]')
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+    set.call(input, 'Gamma'); input.dispatchEvent(new Event('input', { bubbles: true })); await wait(400)
+    const out = { empty: text(), count: document.querySelector('[data-lib-tab=finished]')?.innerText || '' }
+    ;[...document.querySelectorAll('.app-main button')].find(b => b.innerText.trim() === 'Show Finished')?.click(); await wait(900)
+    out.tabs = tabs(); out.gamma = text().includes('Smoke Gamma')
+    out.cards = [...document.querySelectorAll('.app-main [data-gpnav]')].map(c => c.innerText.replace(/s+/g, ' ').slice(0, 60))
+
+    set.call(input, ''); input.dispatchEvent(new Event('input', { bubbles: true })); await wait(300)
+    document.querySelector('[data-lib-tab=current]')?.click(); await wait(300)
+    return out`)
+  check('Library: a search says which other tab has the game', /Found in Finished \(1\)/.test(lib7.empty) && /1/.test(lib7.count), JSON.stringify(lib7).slice(0, 300))
+  check('Library: one click shows it there', /finished:true/.test(lib7.tabs) && lib7.gamma, JSON.stringify(lib7).slice(0, 300))
+  await go('#/?show=finished', 1200)
+  const lib8 = await libEv(`
+    const out = { tabs: tabs(), hash: location.hash }
+    document.querySelector('[data-lib-tab=current]')?.click(); await wait(300)
+    return out`)
+  check('Library: a link can open a tab', /finished:true/.test(lib8.tabs) && lib8.hash === '#/', JSON.stringify(lib8))
+  check('Library: no errors', errors.length === 0, errors.join(' | '))
   }
 
   if (want('backups')) {
@@ -511,6 +619,116 @@ app.whenReady().then(async () => {
   }
   }
 
+  if (want('scan')) {
+  // Scan PC with games KoZo already has: a removed one comes back, a wrong game file is fixed,
+  // a moved game is found again, and any card's game file can be chosen by hand.
+  {
+    const before = errors.length
+    const db = require(path.join(root, 'electron', 'db', 'database.js')).getDb()
+    const settings = require(path.join(root, 'electron', 'db', 'queries', 'settings.js'))
+    // Not under Temp: Scan PC never looks inside a temp folder. Made-up names only.
+    const scanRoot = path.join(os.homedir(), `kozo-smoke-scan-${process.pid}`, 'Games')
+    const put = (rel) => { const f = path.join(scanRoot, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, Buffer.alloc(64)); return f }
+    put('Smoke Back/SmokeBack.exe')
+    put('Smoke Fix/SmokeFix.exe'); put('Smoke Fix/WorldBuilder.exe')
+    put('Smoke - Moved/SmokeMoved.exe')
+    put('Smoke Fine/SmokeFine.exe'); put('Smoke Fine/bin/FineAlt.exe')
+    put('Smoke Unsure/Thing.exe'); put('Smoke Unsure/bin/Other.exe')
+    put('Smoke Tools/WorldBuilder.exe')
+    const addRow = (name, dir, exe, more = {}) => db.prepare(`INSERT INTO games (name, exe_name, install_path, source, is_cracked, is_installed, is_archived)
+      VALUES (@name, @exe, @dir, 'cracked', 1, @inst, @arch)`).run({ name, exe, dir, inst: more.inst ?? 1, arch: more.arch ?? 0 }).lastInsertRowid
+    const ids = {
+      back: addRow('Smoke Back', path.join(scanRoot, 'Smoke Back'), 'SmokeBack.exe', { inst: 0, arch: 1 }),
+      fix: addRow('Smoke Fix', path.join(scanRoot, 'Smoke Fix'), 'WorldBuilder.exe'),
+      moved: addRow('Smoke: Moved™', 'C:\\SmokeGone\\Smoke Moved', 'SmokeMoved.exe', { inst: 0 }),
+      fine: addRow('Smoke Fine', path.join(scanRoot, 'Smoke Fine'), 'SmokeFine.exe'),
+    }
+    const row = (id) => db.prepare('SELECT * FROM games WHERE id = ?').get(id)
+    const wasPaths = settings.getSetting('scan_paths')
+    settings.setSetting('scan_paths', JSON.stringify([scanRoot]))
+    await go('#/', 1200)
+    await ev(`document.querySelector('[data-tour="scan-pc"]')?.click(); true`)
+    let cards = []
+    for (let i = 0; i < 60 && !cards.length; i++) {
+      await sleep(250)
+      cards = await ev(`[...document.querySelectorAll('[data-scan-card]')].map(c => ({ name: c.dataset.scanName, state: c.dataset.scanCard, text: c.innerText }))`)
+    }
+    const card = (part) => cards.find(c => c.name.includes(part)) || { state: 'missing', text: '' }
+    check('Scan: a removed game installed again can be brought back', card('Smoke Back').state === 'update' && /Removed/.test(card('Smoke Back').text) && /Back in your Library/.test(card('Smoke Back').text), JSON.stringify(card('Smoke Back')))
+    check('Scan: a tool stored as the game gets the real file offered', card('Smoke Fix').state === 'update' && /Game file: SmokeFix\.exe \(was WorldBuilder\.exe\)/.test(card('Smoke Fix').text), JSON.stringify(card('Smoke Fix')))
+    check('Scan: a moved game is found again by itself, its file kept', /Found again/.test(card('Moved').text) &&
+      row(ids.moved).install_path === path.join(scanRoot, 'Smoke - Moved') && row(ids.moved).is_installed === 1 && row(ids.moved).exe_name === 'SmokeMoved.exe', JSON.stringify(card('Moved')))
+    check('Scan: a game that is fine has nothing to do', card('Smoke Fine').state === 'in-library' && /In your Library/.test(card('Smoke Fine').text), JSON.stringify(card('Smoke Fine')))
+    check('Scan: no sign of a game, not sure', card('Smoke Unsure').state === 'unsure', JSON.stringify(card('Smoke Unsure')))
+    check('Scan: only tools, no game file yet', card('Smoke Tools').state === 'no-file' && /Choose the game file/.test(card('Smoke Tools').text), JSON.stringify(card('Smoke Tools')))
+    const scanText = await ev(`document.querySelector('[role=dialog]')?.innerText || ''`)
+    check('Scan: no long dashes, never the forbidden word', !/[\u2013\u2014]/.test(scanText) && !/\bcrack(ed|s)?\b/i.test(scanText), (scanText.match(/.{0,30}([\u2013\u2014]|crack).{0,30}/i) || [''])[0])
+
+    // The game file menu: every file in the folder, with its size, folder and what it is.
+    const pickIn = (part, file) => ev(`(async () => { try {
+      const wait = (ms) => new Promise(r => setTimeout(r, ms))
+      const c = [...document.querySelectorAll('[data-scan-card]')].find(x => x.dataset.scanName.includes(${JSON.stringify(part)}))
+      c.querySelector('[data-scan-exe]').click(); await wait(300)
+      const menu = document.querySelector('[role=menu]')?.innerText || ''
+      ${file ? `;[...document.querySelectorAll('[role=menu] button')].find(b => b.innerText.includes(${JSON.stringify(file)}))?.click(); await wait(300)` : ''}
+      return { menu, state: c.dataset.scanCard, text: c.innerText, hash: location.hash, dialogs: document.querySelectorAll('[role=dialog]').length, title: document.querySelector('[role=dialog] h2')?.innerText }
+    } catch (e) { return { error: String(e && e.stack || e) } } })()`)
+    const unsure = await pickIn('Smoke Unsure', 'Other.exe')
+    check('Scan: the file menu lists the folder\'s files, size and folder', /Thing\.exe/.test(unsure.menu) && /Other\.exe/.test(unsure.menu) && /\bbin\b/.test(unsure.menu) && /Not sure/.test(unsure.menu) && /Browse for the file/.test(unsure.menu), unsure.menu)
+    check('Scan: picking a file makes the game ready to add', unsure.state === 'new' && /Other\.exe/.test(unsure.text), JSON.stringify(unsure))
+    const tools = await pickIn('Smoke Tools', 'WorldBuilder.exe')
+    check('Scan: a tool can still be picked by hand, with a warning', tools.state === 'new' && /Looks like a tool/.test(tools.text) && /Tool/.test(tools.menu), JSON.stringify(tools))
+    const fine = await pickIn('Smoke Fine', 'FineAlt.exe')
+    check('Scan: another file on a game in KoZo turns it into an update', fine.state === 'update' && /FineAlt\.exe/.test(fine.text), JSON.stringify(fine))
+    const esc = await ev(`(async () => {
+      const wait = (ms) => new Promise(r => setTimeout(r, ms))
+      const c = [...document.querySelectorAll('[data-scan-card]')].find(x => x.dataset.scanName.includes('Smoke Fix'))
+      c.querySelector('[data-scan-exe]').click(); await wait(300)
+      const opened = !!document.querySelector('[role=menu]')
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await wait(300)
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await wait(300)
+      return { opened, menu: !!document.querySelector('[role=menu]'), dialog: !!document.querySelector('[role=dialog]') }
+    })()`)
+    check('Scan: Escape closes the file menu, not the results', esc.opened && !esc.menu && esc.dialog, JSON.stringify(esc))
+
+    // Tick the updates and the new ones, then do it.
+    const applied = await ev(`(async () => {
+      const wait = (ms) => new Promise(r => setTimeout(r, ms))
+      document.querySelector('[data-scan-select-updates]')?.click(); await wait(200)
+      for (const part of ['Smoke Unsure', 'Smoke Tools']) {
+        const c = [...document.querySelectorAll('[data-scan-card]')].find(x => x.dataset.scanName.includes(part))
+        if (!c.className.includes('Selected')) c.click()
+      }
+      await wait(200)
+      const label = document.querySelector('[data-scan-apply]').innerText
+      document.querySelector('[data-scan-apply]').click()
+      // Adding waits up to 10 s for covers (none come offline). The Library closes the window once done.
+      for (let i = 0; i < 120 && document.querySelector('[data-scan-apply]') && !document.querySelector('[data-scan-msg]'); i++) await wait(200)
+      return { label, closed: !document.querySelector('[data-scan-apply]'), msg: document.querySelector('[data-scan-msg]')?.innerText || '' }
+    })()`)
+    check('Scan: one button adds and updates', /Add 2, update 3/.test(applied.label) && (applied.closed || /Added 2, updated 3/.test(applied.msg)), JSON.stringify(applied))
+    const back = row(ids.back), fix = row(ids.fix), fineRow = row(ids.fine)
+    check('Scan: the removed game is back and installed', back.is_archived === 0 && back.is_installed === 1, JSON.stringify(back))
+    check('Scan: the wrong game file is fixed', fix.exe_name === 'SmokeFix.exe', fix.exe_name)
+    check('Scan: a file picked for a game in KoZo is saved', fineRow.exe_name === 'FineAlt.exe', fineRow.exe_name)
+    const addedUnsure = db.prepare("SELECT * FROM games WHERE exe_name = 'Other.exe'").get()
+    check('Scan: a new game with a picked file lives where that file is', addedUnsure?.install_path === path.join(scanRoot, 'Smoke Unsure', 'bin'), JSON.stringify(addedUnsure))
+    check('Scan: a hand-picked file is added even where only tools were found', !!db.prepare("SELECT 1 FROM games WHERE exe_name = 'WorldBuilder.exe' AND install_path LIKE ?").get(scanRoot + '%'))
+    await escape(); await sleep(400)
+    await go('#/', 1200)
+    const grid = await ev(`[...document.querySelectorAll('.app-main [data-gpnav]')].map(c => c.innerText).join(' | ')`)
+    check('Scan: the game brought back is in the Library', /Smoke Back/.test(grid), grid.slice(0, 200))
+
+    db.prepare("DELETE FROM games WHERE install_path LIKE ?").run(scanRoot + '%')
+    db.prepare('DELETE FROM games WHERE id IN (?, ?, ?, ?)').run(ids.back, ids.fix, ids.moved, ids.fine)
+    db.prepare("DELETE FROM game_list WHERE name LIKE 'Smoke%' AND game_id IS NULL AND name NOT IN ('Smoke Alpha', 'Smoke Beta', 'Smoke Gamma')").run()
+    settings.setSetting('scan_paths', wasPaths || '')
+    try { fs.rmSync(path.dirname(scanRoot), { recursive: true, force: true }) } catch {}
+    await go('#/', 600)
+    check('Scan: no errors', errorsSince(before).length === 0, errorsSince(before).join(' | '))
+  }
+  }
+
   if (want('drive')) {
   // Signing in with a Google account that holds another PC's backup: three questions, one
   // after another. A pretend Drive, so no account and no network. Ids collide on purpose:
@@ -722,6 +940,116 @@ app.whenReady().then(async () => {
   }
   }
 
+  if (want('steamaccounts')) {
+  // Two Steam accounts on the PC: one the user's own, one shared with other people. Unlocks are
+  // read from Steam's own files for both; on the shared one only what was unlocked during a
+  // session of the game counts. The Steam folder is a pretend one, the app id is made up.
+  {
+    const before = errors.length
+    const db = require(path.join(root, 'electron', 'db', 'database.js')).getDb()
+    const settings = require(path.join(root, 'electron', 'db', 'queries', 'settings.js'))
+    const steam = require(path.join(root, 'electron', 'services', 'steamApi.js'))
+    const sa = require(path.join(root, 'electron', 'services', 'steamAccounts.js'))
+    const kv = require(path.join(root, 'electron', 'services', 'binaryKV.js'))
+    const sync = require(path.join(root, 'electron', 'services', 'achievementSync.js'))
+    const real = { accountPrivacy: steam.accountPrivacy, getPlayerAchievements: steam.getPlayerAchievements, getPlayerAchievementsXml: steam.getPlayerAchievementsXml, refreshGameData: steam.refreshGameData }
+    const was = Object.fromEntries(['steam_user_id', 'steam_persona', 'steam_user_confirmed', 'steam_accounts', 'steam_profile_private'].map(k => [k, settings.getSetting(k)]))
+    const OWN = '76561198000000011', SHARED = '76561198000000022', APP = 9200001
+    const acct = (id) => sa.accountIdOf(id)
+    fs.mkdirSync(path.join(fakeSteam, 'config'), { recursive: true })
+    fs.mkdirSync(path.join(fakeSteam, 'appcache', 'stats'), { recursive: true })
+    fs.writeFileSync(path.join(fakeSteam, 'config', 'loginusers.vdf'),
+      `"users"\n{\n\t"${SHARED}"\n\t{\n\t\t"AccountName"\t\t"smoke_shop"\n\t\t"PersonaName"\t\t"Smoke Shop"\n\t\t"timestamp"\t\t"1794405977"\n\t}\n` +
+      `\t"${OWN}"\n\t{\n\t\t"AccountName"\t\t"smoke_me"\n\t\t"PersonaName"\t\t"Smoke Me"\n\t\t"timestamp"\t\t"1793592873"\n\t}\n}\n`)
+    const gameId = db.prepare("INSERT INTO games (name, exe_name, steam_app_id, source) VALUES ('Smoke Shared Play', 'smokeshared.exe', ?, 'steam')").run(String(APP)).lastInsertRowid
+    const names = ['OWN_OLD_1', 'OWN_OLD_2', 'SHOP_MINE', 'SHOP_OTHER_1', 'SHOP_OTHER_2']
+    for (const n of names) db.prepare('INSERT INTO achievements (game_id, steam_api_name, display_name) VALUES (?, ?, ?)').run(gameId, n.toLowerCase(), 'Smoke ' + n)
+    const t0 = Date.now() - 5 * 86400000
+    const iso = (ms) => new Date(ms).toISOString()
+    const s1 = db.prepare('INSERT INTO sessions (game_id, started_at, ended_at, duration_seconds) VALUES (?, ?, ?, 3600)').run(gameId, iso(t0), iso(t0 + 3600000)).lastInsertRowid
+    const s2 = db.prepare('INSERT INTO sessions (game_id, started_at, ended_at, duration_seconds) VALUES (?, ?, ?, 3600)').run(gameId, iso(t0 + 2 * 86400000), iso(t0 + 2 * 86400000 + 3600000)).lastInsertRowid
+    const sec = (ms) => Math.round(ms / 1000)
+    const bits = Object.fromEntries(names.map((n, i) => [i, { name: n, bit: i }]))
+    const stats = path.join(fakeSteam, 'appcache', 'stats')
+    fs.writeFileSync(path.join(stats, `UserGameStatsSchema_${APP}.bin`), kv.encodeBinaryKV({ [APP]: { stats: { 1: { type: 'ACHIEVEMENTS', bits } } } }))
+    // Own account: two unlocks from long before any session. Shared: one during the first
+    // session, two by someone else outside every session.
+    fs.writeFileSync(path.join(stats, `UserGameStats_${acct(OWN)}_${APP}.bin`),
+      kv.encodeBinaryKV({ cache: { 1: { data: 0b00011, AchievementTimes: { 0: sec(t0 - 90 * 86400000), 1: sec(t0 - 80 * 86400000) } } } }))
+    fs.writeFileSync(path.join(stats, `UserGameStats_${acct(SHARED)}_${APP}.bin`),
+      kv.encodeBinaryKV({ cache: { 1: { data: 0b11100, AchievementTimes: { 2: sec(t0 + 1200000), 3: sec(t0 + 86400000), 4: sec(t0 + 86400000) + 60 } } } }))
+    sa.forget()
+    steam.refreshGameData = async () => ({ achievementCount: names.length })
+    steam.getPlayerAchievements = steam.getPlayerAchievementsXml = async () => ({ unlocks: [], error: 'private' })
+    steam.accountPrivacy = async () => 'public'
+    const stored = () => db.prepare(`SELECT a.steam_api_name AS name, au.session_id FROM achievement_unlocks au JOIN achievements a ON a.id = au.achievement_id WHERE a.game_id = ? ORDER BY a.id`).all(gameId)
+    const wipe = () => db.prepare('DELETE FROM achievement_unlocks WHERE achievement_id IN (SELECT id FROM achievements WHERE game_id = ?)').run(gameId)
+
+    // Nobody said which account is whose: neither is trusted, only the in-session unlock counts.
+    settings.setSetting('steam_user_id', SHARED); settings.setSetting('steam_persona', 'Smoke Shop')
+    settings.setSetting('steam_user_confirmed', ''); settings.setSetting('steam_accounts', '')
+    sync.resetAccountState()
+    let r = await ev(`window.kozo.api.steam.refresh(${gameId})`)
+    let rows = stored()
+    check('Steam accounts: with no account picked, only what was unlocked while playing counts',
+      rows.length === 1 && rows[0].name === 'shop_mine' && rows[0].session_id === s1, JSON.stringify(rows))
+    check('Steam accounts: the unlock is filed under the session it happened in, not the latest', rows[0]?.session_id === s1 && s2 !== s1)
+
+    // Settings asks which one is yours, and the window lists both.
+    await go('#/settings?tab=accounts', 1500)
+    const row = await ev(`(() => { const b = document.querySelector('[data-steam-accounts-btn]'); return { btn: !!b, text: document.querySelector('.app-main').innerText } })()`)
+    check('Steam accounts: Settings asks which account is yours', row.btn && /2 Steam accounts on this PC/.test(row.text), row.text.slice(0, 200))
+    await ev(`document.querySelector('[data-steam-accounts-btn]').click(); true`); await sleep(900)
+    const win = await ev(`document.querySelector('[data-steam-accounts]')?.innerText || ''`)
+    check('Steam accounts: the window lists every account on the PC', /Smoke Shop/.test(win) && /Smoke Me/.test(win) && /Which account is yours/.test(win), win.slice(0, 300))
+
+    // "This is mine" on the own account: its old unlocks count now, quietly; the shared one's don't.
+    await ev(`(() => { const row = document.querySelector('[data-steam-account="${OWN}"]'); [...row.querySelectorAll('button')].find(b => /This is mine/.test(b.textContent))?.click(); return true })()`)
+    await sleep(2500)
+    rows = stored()
+    check('Steam accounts: your own account counts in full',
+      settings.getSetting('steam_user_id') === OWN && rows.map(x => x.name).join() === 'own_old_1,own_old_2,shop_mine', JSON.stringify(rows))
+    const win2 = await ev(`document.querySelector('[data-steam-accounts]')?.innerText || ''`)
+    check('Steam accounts: the window shows which one is yours', /Your account/.test(win2) && !/Which account is yours/.test(win2), win2.slice(0, 300))
+
+    // Unlocks other people earned that are already stored are offered for removal, with Undo.
+    const achId = (n) => db.prepare('SELECT id FROM achievements WHERE game_id = ? AND steam_api_name = ?').get(gameId, n).id
+    for (const [n, t] of [['shop_other_1', sec(t0 + 86400000) * 1000], ['shop_other_2', (sec(t0 + 86400000) + 60) * 1000]]) {
+      db.prepare("INSERT INTO achievement_unlocks (achievement_id, session_id, unlocked_at, source) VALUES (?, ?, ?, 'steam_stats')").run(achId(n), s2, iso(t))
+    }
+    sa.findForeign()
+    await ev(`window.kozo.api.steam.accounts(); true`); await sleep(200)
+    await escape(); await sleep(300)
+    await ev(`document.querySelector('[data-steam-accounts-btn]').click(); true`); await sleep(900)
+    const offer = await ev(`document.querySelector('[data-steam-foreign]')?.innerText || ''`)
+    check('Steam accounts: other people\'s unlocks are offered for removal, not removed', /2 achievements/.test(offer) && /Smoke Shared Play 2/.test(offer) && stored().length === 5, offer)
+    await ev(`[...document.querySelectorAll('[data-steam-foreign] button')].find(b => /Remove them/.test(b.textContent))?.click(); true`); await sleep(1200)
+    check('Steam accounts: Remove takes only theirs', stored().map(x => x.name).join() === 'own_old_1,own_old_2,shop_mine', JSON.stringify(stored()))
+    await ev(`[...document.querySelectorAll('[data-undo-bar] button')].find(b => /Undo/.test(b.textContent))?.click(); true`); await sleep(1200)
+    check('Steam accounts: Undo brings them back', stored().length === 5, JSON.stringify(stored()))
+    await ev(`window.kozo.api.steam.removeForeign()`)
+    await escape(); await sleep(300)
+
+    // The game page: Steam's website refuses the game, and nobody is told to change privacy.
+    await go(`#/game/${gameId}`, 1500)
+    r = await ev(`window.kozo.api.steam.refresh(${gameId})`)
+    check('Steam accounts: the check reports what each account holds',
+      r?.ok && r.data.playerSyncReason === 'private' && r.data.account?.mode === 'mine' && (r.data.local?.accounts || []).length === 2, JSON.stringify(r?.data)?.slice(0, 300))
+    const lastErr = await ev(`window.kozo.api.steam.lastSyncError(${gameId})`)
+    check('Steam accounts: no privacy warning when this PC has the unlocks', lastErr?.ok && !lastErr.data, JSON.stringify(lastErr))
+
+    Object.assign(steam, real)
+    db.prepare('DELETE FROM games WHERE id = ?').run(gameId)
+    for (const [k, v] of Object.entries(was)) settings.setSetting(k, v || '')
+    for (const f of fs.readdirSync(stats)) fs.rmSync(path.join(stats, f), { force: true })
+    fs.rmSync(path.join(fakeSteam, 'config', 'loginusers.vdf'), { force: true })
+    sa.forget(); sync.resetAccountState()
+    settings.setSetting('steam_foreign_found', '')
+    await go('#/', 600)
+    check('Steam accounts: no errors', errorsSince(before).length === 0, errorsSince(before).join(' | '))
+  }
+  }
+
   if (want('version')) {
   // The version tag, from files in a throwaway folder. No Steam id, so nothing goes online.
   {
@@ -853,15 +1181,15 @@ app.whenReady().then(async () => {
     location.hash = '#/upcoming'
     for (let i = 0; i < 80; i++) {
       await new Promise(r => setTimeout(r, 100))
-      if (document.querySelector('.app-main [class*=steamCapFrame]')) break
+      if (document.querySelector('.app-main [class*=steamCapFrame], .app-main [data-cap]')) break
     }
     // Steam's look: every weekday is a box, empty or not (data-games = its releases).
     const days = [...document.querySelectorAll('.app-main [data-day]')].filter(d => Number(d.dataset.games) > 0)
-    const weeks = [...document.querySelectorAll('.app-main [class*=steamWeek_]')]
+    const weeks = [...document.querySelectorAll('.app-main [class*=steamWeek_], .app-main [class*=calWeek_]')]
     return {
-      days: days.length, empty: days.filter(d => !d.querySelector('[class*=steamCapFrame]')).length,
+      days: days.length, empty: days.filter(d => !d.querySelector('[class*=steamCapFrame], [data-cap]')).length,
       weeks: weeks.length, fiveEach: weeks.every(w => w.querySelectorAll('[data-day]').length === 5),
-      heads: [...document.querySelectorAll('.app-main [class*=steamWeekHead] span')].map(s => s.textContent.trim()).join(','),
+      heads: [...document.querySelectorAll('.app-main [class*=steamWeekHead] span, .app-main [class*=calWeekHead] span')].map(s => s.textContent.trim()).join(','),
       text: document.querySelector('.app-main').innerText,
     }
   })()`)
@@ -889,6 +1217,11 @@ app.whenReady().then(async () => {
     const forYouSvc = require(path.join(root, 'electron', 'services', 'steamForYou.js'))
     const realForYou = forYouSvc.forYou
     forYouSvc.forYou = async () => null
+    // The Steam layout reads Steam's store index (services/steamCalendar.js); when that can't
+    // be reached it falls back to these lists and their picks bar, which is what this block checks.
+    const calSvc = require(path.join(root, 'electron', 'services', 'steamCalendar.js'))
+    const realCal = calSvc.get
+    calSvc.get = async () => { throw new Error('offline') }
 
     const open = async (pick) => {
       await ev(`localStorage.setItem('kozo:calendar:view', 'steam'); ${pick ? `localStorage.setItem('kozo:calendar:pick', '${pick}')` : "localStorage.removeItem('kozo:calendar:pick')"}; location.hash = '#/upcoming'; location.reload(); true`)
@@ -938,21 +1271,112 @@ app.whenReady().then(async () => {
     check('Upcoming: For you on Steam shows only its games', (await caps()) === 'Smoke Other A,Smoke Other B', await caps())
     // textContent: weeks below the fold aren't drawn (content-visibility), so innerText skips them.
     check('Upcoming: and says why', /On your Steam wishlist/.test(await ev(`document.querySelector('.app-main').textContent`)))
-    // Settings > Appearance > Upcoming calendar > Classic: the old grid of days, starting
-    // on Like my games with the match % (the maker asked for it back as a choice).
-    const lookWas = await ev(`window.kozo.api.settings.get('appearance').then(r => r?.data ?? null)`)
-    await ev(`window.kozo.api.settings.get('appearance').then(r => { const p = r?.data ? JSON.parse(r.data) : {}; p.upcomingLayout = 'classic'; return window.kozo.api.settings.set('appearance', JSON.stringify(p)) }).then(() => true)`)
-    await open(null)
-    const classic = await ev(`({ grid: !!document.querySelector('[data-upcoming-classic]'), weeks: !!document.querySelector('[class*=steamWeeks]'), pct: !!document.querySelector('.app-main [class*=matchOnCap]') })`)
-    check('Upcoming Classic: the old grid of days, not the weeks', classic.grid && !classic.weeks, JSON.stringify(classic))
-    check('Upcoming Classic: starts on Like my games, with the match %', (await active()) === 'like' && classic.pct, JSON.stringify([await active(), classic.pct]))
-    await ev(`window.kozo.api.settings.set('appearance', ${JSON.stringify(lookWas)}).then(() => true)`)
     forYouSvc.forYou = realForYou
 
     Object.assign(steam, real)
+    calSvc.get = realCal
     await ev(`localStorage.removeItem('kozo:calendar:pick'); location.hash = '#/'; location.reload(); true`)
     await sleep(800)
     check('Upcoming top bar: no errors', errors.length === before, errors.slice(before).join(' | '))
+  }
+
+  // Steam's own calendar (services/steamCalendar.js, stubbed with made-up games): its weeks,
+  // its covers, its controls.
+  {
+    const before = errors.length
+    const calSvc = require(path.join(root, 'electron', 'services', 'steamCalendar.js'))
+    const realCal = calSvc.get
+    const mon = calSvc.startMonday()
+    const at = (week, dow, h = 12) => { const d = new Date(mon); return new Date(d.getFullYear(), d.getMonth(), d.getDate() + week * 7 + dow, h).getTime() }
+    let order = 0
+    const it = (appid, name, day, more = {}) => ({ appid, name, day, order: ++order, early: false, v1: false, onWishlist: false, onList: false, owned: false, match: 0, because: null,
+      tagIds: [101], release: { ts: day, display: 'date_full', soon: true, text: null }, art: { heroCapsule: null, capsule: null, header: null, portrait: null, hero: null }, ...more })
+    const items = [
+      it(9100101, 'Smoke Cal Monday', at(0, 0)),
+      it(9100102, 'Smoke Cal Solo', at(1, 1)),
+      it(9100103, 'Smoke Cal Pair A', at(1, 2)), it(9100104, 'Smoke Cal Pair B', at(1, 2)),
+      ...Array.from({ length: 5 }, (_, i) => it(9100110 + i, 'Smoke Cal Busy ' + i, at(1, 3))),
+      it(9100120, 'Smoke Cal Wished', at(1, 3), { onWishlist: true }),
+      it(9100121, 'Smoke Cal Early', at(1, 4), { early: true, tagIds: [102] }),
+      ...Array.from({ length: 6 }, (_, i) => it(9100130 + i, 'Smoke Cal Later ' + i, at(2, 0))),
+      ...Array.from({ length: 10 }, (_, i) => it(9100140 + i, 'Smoke Cal Crowd ' + i, at(2, 2))),
+    ]
+    calSvc.get = async () => ({ from: mon, to: mon + 56 * 86400000, items, tagNames: [{ id: 101, name: 'Smoke Tag' }, { id: 102, name: 'Smoke Other Tag' }], tasteTags: [], wishlist: { state: 'ok', count: 1 }, partial: false })
+    // Only the calendar's games: no feeds, picks or Steam account (Strip is checked below).
+    const steam = require(path.join(root, 'electron', 'services', 'steamApi.js'))
+    const real = { getPicks: steam.getPicks, getComingSoon: steam.getComingSoon, getAppAssets: steam.getAppAssets }
+    steam.getPicks = async () => ({ picks: {}, sources: 0, names: [], wanted: [] })
+    steam.getComingSoon = async () => ({ items: [], total: 0 })
+    steam.getAppAssets = async () => ({})
+    const forYouSvc = require(path.join(root, 'electron', 'services', 'steamForYou.js'))
+    const realForYou = forYouSvc.forYou
+    forYouSvc.forYou = async () => null
+    const open = async () => {
+      await ev(`localStorage.setItem('kozo:calendar:view', 'steam'); location.hash = '#/upcoming'; location.reload(); true`)
+      for (let i = 0; i < 60; i++) { await sleep(120); if (await ev(`!!document.querySelector('[data-steam-weeks] [data-cap]')`).catch(() => false)) break }
+      await sleep(300)
+    }
+    await ev(`['count', 'wish', 'tag', 'noEa', 'noOwned'].forEach(k => localStorage.removeItem('kozo:calendar:' + k)); true`)
+    await open()
+    const look = await ev(`(() => {
+      const cell = (name) => [...document.querySelectorAll('[data-steam-weeks] [data-day]')].find(d => d.innerText.includes(name) || [...d.querySelectorAll('button[title]')].some(b => b.title === name))
+      const caps = (name) => [...(cell(name)?.querySelectorAll('[data-cap]') || [])].map(c => c.dataset.cap)
+      const busy = cell('Smoke Cal Wished')
+      return {
+        heads: [...document.querySelectorAll('[data-steam-weeks] [class*=calWeekHead] span')].map(s => s.textContent.trim()).join(','),
+        solo: caps('Smoke Cal Solo'), pair: caps('Smoke Cal Pair A'), busy: caps('Smoke Cal Wished'),
+        busyMore: busy?.querySelector('[class*=calMore]')?.innerText || '',
+        firstInBusy: busy?.querySelector('[data-cap] button')?.title || '',
+        wishTag: /on wishlist/i.test(busy?.innerText || ''),   // drawn in capitals
+        monday: cell('Smoke Cal Monday') ? getComputedStyle(cell('Smoke Cal Monday')).opacity : 'none',
+        hero: !!document.querySelector('[data-upcoming-hero]'), pickBar: !!document.querySelector('[data-pick]'),
+        text: document.querySelector('[data-steam-weeks]')?.innerText || '',
+      }
+    })()`)
+    check("Steam calendar: Monday to Friday, like Steam's", /^monday,tuesday,wednesday,thursday,friday$/i.test(look.heads), look.heads)
+    check('Steam calendar: a day with one game shows its tall cover', look.solo.join() === 'tall', JSON.stringify(look.solo))
+    check('Steam calendar: two games stack their wide covers', look.pair.join() === 'wide,wide', JSON.stringify(look.pair))
+    check('Steam calendar: a busy day shows four and the rest as more', look.busy.length === 4 && /\+2 More/.test(look.busyMore), JSON.stringify([look.busy, look.busyMore]))
+    check('Steam calendar: your wishlist comes first in its day, marked', look.firstInBusy === 'Smoke Cal Wished' && look.wishTag, look.firstInBusy)
+    check('Steam calendar: this week\'s earlier days keep their games, not dimmed', look.monday === '1', look.monday)
+    check('Steam calendar: no banner and no picks bar, Steam\'s controls instead', !look.hero && !look.pickBar && /Game count/i.test(look.text) && /Wishlisted games/i.test(look.text), JSON.stringify([look.hero, look.pickBar]))
+    const total = () => ev(`Number((document.querySelector('[data-steam-weeks]')?.innerText.match(/(\\d+) games? in these weeks/) || [])[1])`)
+    check('Steam calendar: every game is counted', (await total()) === items.length, String(await total()))
+    await ev(`[...document.querySelectorAll('[data-cal-count] button')].find(b => b.innerText.trim() === '10').click(); true`); await sleep(300)
+    check('Steam calendar: a game count of 10 keeps 10, plus your wishlist', (await total()) === 11, String(await total()))
+    await ev(`[...document.querySelectorAll('[data-cal-count] button')].find(b => b.innerText.trim() === 'All').click(); true`); await sleep(300)
+    check('Steam calendar: a game count of All shows every game', (await total()) === items.length, String(await total()))
+    await ev(`[...document.querySelectorAll('[data-cal-wish] button')].find(b => b.innerText.trim() === 'Only').click(); true`); await sleep(300)
+    check('Steam calendar: wishlisted only', (await total()) === 1, String(await total()))
+    await ev(`[...document.querySelectorAll('[data-cal-wish] button')].find(b => b.innerText.trim() === 'Show').click(); true`); await sleep(200)
+    await ev(`[...document.querySelectorAll('[data-cal-count] button')].find(b => b.innerText.trim() === '500').click(); true`); await sleep(200)
+    await ev(`document.querySelector('[data-steam-weeks] [role=switch][aria-label="Hide Early Access"]').click(); true`); await sleep(300)
+    check('Steam calendar: Early Access can be hidden', (await total()) === items.length - 1, String(await total()))
+    await open()
+    check('Steam calendar: the choices are remembered', (await total()) === items.length - 1 &&
+      await ev(`document.querySelector('[data-steam-weeks] [role=switch][aria-label="Hide Early Access"]').getAttribute('aria-checked') === 'true'`))
+    await ev(`['count', 'wish', 'tag', 'noEa', 'noOwned'].forEach(k => localStorage.removeItem('kozo:calendar:' + k)); true`)
+
+    // Strip shows the calendar's games too, and All shows every game of a day (it stopped at 8).
+    await ev(`localStorage.setItem('kozo:calendar:view', 'strip'); localStorage.setItem('kozo:calendar:pick', 'all'); location.hash = '#/upcoming'; location.reload(); true`)
+    for (let i = 0; i < 60; i++) { await sleep(120); if (await ev(`!!document.querySelector('.app-main [class*=chipCount]')`).catch(() => false)) break }
+    const strip = await ev(`(async () => {
+      const chip = [...document.querySelectorAll('.app-main [class*=chipCount]')].find(c => c.textContent.trim() === '10')
+      if (!chip) return { chip: false, counts: [...document.querySelectorAll('.app-main [class*=chipCount]')].map(c => c.textContent.trim()).join() }
+      chip.closest('button').click()
+      await new Promise(r => setTimeout(r, 300))
+      return { chip: true, cards: document.querySelectorAll('.app-main [class*=wideHit]').length, showAll: /Show all \\d+ releases/.test(document.querySelector('.app-main').innerText) }
+    })()`)
+    check("Upcoming Strip: Steam's calendar games are there", strip.chip, JSON.stringify(strip))
+    check('Upcoming Strip: All shows every game of the day', strip.cards === 10 && !strip.showAll, JSON.stringify(strip))
+    await ev(`localStorage.setItem('kozo:calendar:view', 'steam'); localStorage.removeItem('kozo:calendar:pick'); true`)
+
+    Object.assign(steam, real)
+    forYouSvc.forYou = realForYou
+    calSvc.get = realCal
+    await ev(`location.hash = '#/'; location.reload(); true`)
+    await sleep(800)
+    check('Steam calendar: no errors', errors.length === before, errors.slice(before).join(' | '))
   }
   }
 
@@ -1154,6 +1578,7 @@ app.whenReady().then(async () => {
     await go('#/settings?tab=appearance', 1800)
     const typeHex = (hex) => ev(`(async () => {
       const i = document.querySelector('[aria-label="Hex color"]')
+      if (!i) return { missing: true, hash: location.hash, dialogs: [...document.querySelectorAll('[role=dialog]')].map(d => d.innerText.slice(0, 80)), btn: !!document.querySelector('button[aria-label="Background color"]') }
       const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
       set.call(i, ${JSON.stringify(hex)})
       i.dispatchEvent(new Event('input', { bubbles: true }))
@@ -1671,6 +2096,57 @@ app.whenReady().then(async () => {
     n = await names()
     check('Discounts search: clearing shows every deal again', ['Quiet Farm', 'Smoke Racer Deluxe', 'Speedy Puzzle'].every(x => n.includes(x)) && await ev(`!document.querySelector('[data-deals-steam]')`), n.join(' | '))
     deals.getDeals = realDeals; deals.markSeen = realMark; steamApi.searchGames = realSearch
+  }
+  }
+
+  if (want('endless')) {
+  // ── Games like and Discounts load more as you scroll, no button (the maker's ask). Steam is
+  // stubbed with made-up ids, so nothing goes online. ──
+  {
+    const before = errors.length
+    const steamApi = require(path.join(root, 'electron', 'services', 'steamApi.js'))
+    const deals = require(path.join(root, 'electron', 'services', 'deals.js'))
+    const real = { similarGames: steamApi.similarGames, similarMore: steamApi.similarMore, getDeals: deals.getDeals, moreDeals: deals.moreDeals, markSeen: deals.markSeen }
+    const likeGame = (appid, i) => ({ appid, name: `Smoke Like ${i}`, pct: 99 - Math.floor(i / 3), shared: ['Roguelike'], header: null, capsule: null,
+      reviews: { count: 1000, pct: 90 }, release: null, releasedAt: Date.now() - i * 86400000, soon: false, developers: [] })
+    let similarCalls = 0, moreCalls = 0
+    steamApi.similarGames = async (id) => { similarCalls++; return { seed: { appid: id, name: 'Smoke Seed', tags: [] }, top: 1, more: true, partial: false, games: Array.from({ length: 60 }, (_, i) => likeGame(900600 + i, i)) } }
+    steamApi.similarMore = async () => { moreCalls++; await sleep(300); return { more: false, games: Array.from({ length: 30 }, (_, i) => likeGame(900700 + i, 60 + i)) } }
+    const scrollEnd = (sel) => ev(`(() => { const m = document.querySelector(${JSON.stringify(sel)}); let p = m?.parentElement; while (p && !/auto|scroll/.test(getComputedStyle(p).overflowY)) p = p.parentElement; (p || document.scrollingElement).scrollTop = 1e9; return !!m })()`)
+    const likeIds = () => ev(`[...document.querySelectorAll('[data-like-card]')].map(c => Number(c.dataset.likeCard))`)
+    await go('#/like?app=900599', 1800)
+    const first = await likeIds()
+    check('Games like scroll: starts with 24 cards', first.length === 24, String(first.length))
+    check('Games like scroll: no Show more button', await ev(`![...document.querySelectorAll('.app-main button')].some(b => /show more/i.test(b.innerText)) && !!document.querySelector('[data-like-more]')`))
+    let seen = first
+    for (let i = 0; i < 14 && !(await ev(`!!document.querySelector('[data-like-end]')`)); i++) { await scrollEnd('[data-like-more]'); await sleep(450); seen = await likeIds() }
+    check('Games like scroll: reaches every game, each once', seen.length === 90 && new Set(seen).size === 90, `${seen.length} cards`)
+    check('Games like scroll: the cards already seen keep their places', first.every((id, i) => seen[i] === id))
+    check('Games like scroll: Steam is asked once for each part', similarCalls === 1 && moreCalls === 1, `similar ${similarCalls}, more ${moreCalls}`)
+    check('Games like scroll: the end says so', /That's every game like Smoke Seed/.test(await ev(`document.querySelector('[data-like-end]')?.innerText || ''`)) && await ev(`!document.querySelector('[data-like-more]')`))
+
+    const deal = (appid, i) => ({ appid, name: `Smoke Deal ${i}`, header: null, capsule: null, score: 90 - (i % 50), match: 10, low: null, tags: [], why: [],
+      price: { pct: 50, final: 999, finalText: '$9.99', original: 1999, originalText: '$19.99', endsAt: null }, reviews: { pct: 90, count: 1200, label: 'Very Positive' } })
+    const base = { at: Date.now(), cc: 'US', taste: [], wantedCount: 0, yours: [], alerts: [] }
+    let dealMore = 0
+    const firstDeals = Array.from({ length: 50 }, (_, i) => deal(900800 + i, i))
+    deals.getDeals = async () => ({ ...base, more: true, deals: firstDeals })
+    deals.moreDeals = async () => { dealMore++; await sleep(300); return { ...base, more: false, deals: [...firstDeals, ...Array.from({ length: 30 }, (_, i) => deal(900900 + i, 50 + i))] } }
+    deals.markSeen = async () => true
+    await go('#/deals', 1800)
+    const dealCount = () => ev(`document.querySelectorAll('[data-deals-grid] > *').length`)
+    const d0 = await dealCount()
+    check('Discounts scroll: starts with 36 deals', d0 === 36, String(d0))
+    check('Discounts scroll: no Show more button', await ev(`![...document.querySelectorAll('.app-main button')].some(b => /show more/i.test(b.innerText)) && !!document.querySelector('[data-deals-more]')`))
+    let dn = d0
+    for (let i = 0; i < 12 && !(await ev(`!!document.querySelector('[data-deals-end]')`)); i++) { await scrollEnd('[data-deals-more]'); await sleep(450); dn = await dealCount() }
+    check('Discounts scroll: the next page of sales comes in as you scroll', dn === 80 && dealMore === 1, `${dn} cards, asked ${dealMore} times`)
+    check('Discounts scroll: the end says so', await ev(`!!document.querySelector('[data-deals-end]') && !document.querySelector('[data-deals-more]')`))
+
+    Object.assign(steamApi, { similarGames: real.similarGames, similarMore: real.similarMore })
+    Object.assign(deals, { getDeals: real.getDeals, moreDeals: real.moreDeals, markSeen: real.markSeen })
+    await go('#/', 600)
+    check('Endless lists: no errors', errorsSince(before).length === 0, errorsSince(before).join(' | '))
   }
   }
 

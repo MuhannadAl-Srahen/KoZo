@@ -133,3 +133,14 @@
 .match { composes: kz-dark from global; }
 /* The "On Game List" chip on the cover: stays dark in the Light theme (customize.css .kz-dark). */
 .owned { composes: kz-dark from global; }
+
+/* Endless list: the watched spot under the cards, and the line at the very end. */
+.loadMore { min-height: 1px; margin-top: var(--sp-12); }
+.moreRetry {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: var(--r-sm);
+  border: 1px solid var(--border); background: var(--surface-2);
+  color: var(--text-secondary); font: inherit; font-size: var(--fs-sm); cursor: pointer;
+}
+.moreRetry:hover { color: var(--text-primary); }
+.endLine { margin: var(--sp-16) 0 var(--sp-8); text-align: center; color: var(--text-muted); font-size: var(--fs-sm); }

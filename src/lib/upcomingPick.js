@@ -84,11 +84,43 @@ export function filterBuckets(buckets, mode) {
   return { byDay: narrow(buckets.byDay), byMonth: narrow(buckets.byMonth), later: buckets.later.filter(keep), all: buckets.all.filter(keep) }
 }
 
-// What a day shows before "+N more": best match first for games like yours, most
-// popular first otherwise.
+// How wanted a game is, lower first: its rank on Steam's calendar (wishlists and your taste),
+// else its place in the most wishlisted or popular coming soon feed.
+export function popRank(g) {
+  return Math.min(g?.calOrder ?? 1e4, g?.wishRank ?? 1e4, g?.popRank ?? 1e4)
+}
+
+// What a day shows before "+N more": the 5 best matches for games like yours; your Steam picks
+// in Steam's order; Other games and All show every game, most wanted first (the maker: "if I
+// press All not all the games show", it showed 8 a day).
 export function pickDay(list, mode) {
-  const pop = (g) => Math.min(g.wishRank ?? 1e4, g.popRank ?? 1e4)
-  if (mode === 'steam') return [...list].sort((a, b) => (a.steamRank ?? 1e4) - (b.steamRank ?? 1e4)).slice(0, 8)
-  if (mode === 'like') return [...list].sort((a, b) => (b.match || 0) - (a.match || 0) || pop(a) - pop(b)).slice(0, 5)
-  return [...list].sort((a, b) => pop(a) - pop(b)).slice(0, 8)
+  if (mode === 'steam') return [...list].sort((a, b) => (a.steamRank ?? 1e4) - (b.steamRank ?? 1e4))
+  if (mode === 'like') return [...list].sort((a, b) => (b.match || 0) - (a.match || 0) || popRank(a) - popRank(b)).slice(0, 5)
+  return [...list].sort((a, b) => popRank(a) - popRank(b))
+}
+
+// ── Steam layout, built on Steam's own store index (electron/services/steamCalendar.js) ──
+// The controls on Steam's calendar: how many games (10 to 500, or 0 = All, every game with a
+// date), wishlisted games Show / Hide / Only, one tag, no Early Access, nothing you own. Items
+// come ranked (order 1 = first). Your wishlist and your Game List are always kept unless hidden,
+// like on Steam.
+export const CALENDAR_COUNTS = [10, 25, 50, 100, 250, 500, 0]
+export function calendarShown(items, { count = 100, wish = 'show', tag = null, hideEarly = false, hideOwned = false } = {}) {
+  const flagged = (g) => g.onWishlist || g.onList
+  let list = (items || []).filter(g =>
+    (!hideEarly || (!g.early && !g.v1)) &&
+    (!hideOwned || !g.owned) &&
+    (!tag || (g.tagIds || []).includes(Number(tag))))
+  if (wish === 'only') return list.filter(flagged)
+  if (wish === 'hide') list = list.filter(g => !flagged(g))
+  const keep = wish === 'show' ? list.filter(flagged) : []
+  const ranked = list.filter(g => !(wish === 'show' && flagged(g))).sort((a, b) => (a.order || 0) - (b.order || 0))
+  const rest = count > 0 ? ranked.slice(0, count) : ranked
+  return [...keep, ...rest]
+}
+
+// One day's games: wishlisted and listed first, then by rank (Steam's own order on its calendar).
+export function calendarDay(list) {
+  return [...(list || [])].sort((a, b) =>
+    ((b.onWishlist || b.onList) ? 1 : 0) - ((a.onWishlist || a.onList) ? 1 : 0) || (a.order || 0) - (b.order || 0))
 }

@@ -96,25 +96,35 @@ function envDirs() {
 }
 const mtime = (p) => { try { return fs.statSync(p).mtimeMs } catch { return 0 } }
 
-// Steam\userdata\<account>\<appid>\remote for the connected Steam account (steam_user_id),
-// else the one account folder that already has this game; null when it can't be told.
+// Steam\userdata\<account>\<appid>\remote. The connected account's when it has this game; else
+// the account folder that has it (the one written last when several do: a game played on a
+// shared account keeps its saves under that account); else the connected account's, for a game
+// not played yet. null when it can't be told.
 function steamRemoteFolder(appid) {
   let steam = null
   try { steam = require('./steamStatsWatcher').getSteamPath() } catch {}
   if (!steam) return null
+  let own = null
   try {
     const id = String(require('../db/queries/settings').getSetting('steam_user_id') || '').trim()
     if (/^\d+$/.test(id)) {
       const acct = (BigInt(id) - 76561197960265728n).toString()
-      if (Number(acct) > 0) return path.join(steam, 'userdata', acct, String(appid), 'remote')
+      if (Number(acct) > 0) own = acct
     }
   } catch {}
+  if (own && exists(path.join(steam, 'userdata', own, String(appid)))) return path.join(steam, 'userdata', own, String(appid), 'remote')
   try {
     const have = fs.readdirSync(path.join(steam, 'userdata'), { withFileTypes: true })
       .filter(e => e.isDirectory() && exists(path.join(steam, 'userdata', e.name, String(appid))))
-    if (have.length === 1) return path.join(steam, 'userdata', have[0].name, String(appid), 'remote')
+      .map(e => {
+        let at = 0
+        try { at = fs.statSync(path.join(steam, 'userdata', e.name, String(appid))).mtimeMs } catch {}
+        return { name: e.name, at }
+      })
+      .sort((a, b) => b.at - a.at)
+    if (have.length) return path.join(steam, 'userdata', have[0].name, String(appid), 'remote')
   } catch {}
-  return null
+  return own ? path.join(steam, 'userdata', own, String(appid), 'remote') : null
 }
 
 // The folders in a game's install where its crack's files may sit: the install

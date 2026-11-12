@@ -1318,8 +1318,14 @@ handle('genres:distinct', () => gameListQ.distinctGenres())
 // ── Settings ──────────────────────────────────────────────────────────────────
 handle('settings:get', (key) => settingsQ.getSetting(key))
 handle('settings:set', (key, value) => {
+  const was = key === 'steam_user_id' ? settingsQ.getSetting(key) : null
   settingsQ.setSetting(key, value)
   if (key === 'pad_wake_combo') require('./services/controllerWake').setCombo(value)
+  // Another Steam account: nothing learned about the old one (privacy, sync errors) holds.
+  if (key === 'steam_user_id' && String(was || '') !== String(value || '')) {
+    try { require('./services/steamAccounts').forget(); require('./services/achievementSync').resetAccountState() } catch {}
+    broadcast('steam:accounts-changed', null)
+  }
   return true
 })
 handle('settings:getAll', () => settingsQ.getAllSettings())
@@ -1598,6 +1604,18 @@ handle('steam:diagnose', async (gameId) => {
   }
 })
 
+// Names for the accounts in a local scan's report.
+function withPersonas(accounts) {
+  try {
+    const known = require('./services/steamAccounts').knownAccounts()
+    const own = settingsQ.getSetting('steam_user_id')
+    return accounts.map(a => {
+      const k = known.find(x => x.steamId === a.steamId)
+      return { ...a, persona: k?.persona || k?.accountName || '', connected: a.steamId === own }
+    })
+  } catch { return accounts }
+}
+
 handle('steam:refresh', async (gameId) => {
   const { refreshGameData } = require('./services/steamApi')
   const { syncPlayerUnlocks } = require('./services/achievementSync')
@@ -1618,7 +1636,11 @@ handle('steam:refresh', async (gameId) => {
   }
 
   let playerSync = { added: 0 }
+  // Steam's own files on this PC, for every account the game was played on: no network, and no
+  // privacy setting in the way.
+  let local = { added: 0, accounts: [] }
   if (!game?.is_cracked) {
+    local = await require('./services/steamStatsWatcher').scanGameOnce(gameId).catch(() => ({ added: 0, accounts: [] }))
     playerSync = await syncPlayerUnlocks(gameId).catch(() => ({ added: 0 }))
   }
 
@@ -1631,8 +1653,10 @@ handle('steam:refresh', async (gameId) => {
 
   return {
     ...result,
-    playerUnlocksAdded: playerSync.added,
+    playerUnlocksAdded: (playerSync.added || 0) + (local.added || 0),
     playerSyncReason: playerSync.reason,
+    local: { added: local.added || 0, accounts: withPersonas(local.accounts || []) },
+    account: require('./services/achievementSync').accountState(),
     crackUnlocksAdded: crackScan.added,
     crackHits: crackScan.hits,
     crackScannedPaths: crackScan.scannedPaths,
@@ -1693,6 +1717,14 @@ handle('scanner:scan', async (paths) => {
   const { nameKey } = require('./services/steamGridDb')
   const existingRows = db.prepare('SELECT name, install_path, steam_app_id FROM games').all()
   const existingAppIds = new Set(existingRows.filter(g => g.steam_app_id).map(g => String(g.steam_app_id)))
+  // Steam's own library folders are always looked at, also ones added after the scan list was
+  // saved (a D: and an E: library were never scanned). Not in a test run: only its own folders.
+  if (!process.env.KOZO_SMOKE) {
+    try {
+      const libs = require('./services/installCheck').steamLibraries().map(l => pathMod.join(l, 'steamapps', 'common'))
+      paths = [...(paths || []), ...libs]
+    } catch {}
+  }
   // The same folder, one inside the other, or the same name: which file the scan chose this
   // time doesn't make it another game.
   const libraryRowFor = (g) => existingRows.find(r => sameGameFolder(r.install_path, g.install_path) || (nameKey(g.name) && nameKey(r.name) === nameKey(g.name)))
@@ -1728,7 +1760,7 @@ handle('scanner:scan', async (paths) => {
 
   // Epic, GOG and Xbox know their own games, wherever those are installed. One scan finds them
   // all. A launcher that can't be read just adds nothing.
-  try {
+  if (!process.env.KOZO_SMOKE) try {
     const li = require('./services/launcherImport')
     const merged = li.mergeLauncherGames(results, await scanLaunchers({ match: false }))
     results.length = 0
@@ -1740,7 +1772,7 @@ handle('scanner:scan', async (paths) => {
   // which gives them real cover art and a clean name, just like Add Game. Games
   // already in the library are skipped (nothing to add), and lookups are cached
   // and capped at 6 s each so one slow request can't stall the scan.
-  const toMatch = results.filter(g => !g.steam_app_id && g.name && !g.no_game_file && !libraryRowFor(g))
+  const toMatch = process.env.KOZO_SMOKE ? [] : results.filter(g => !g.steam_app_id && g.name && !g.no_game_file && !libraryRowFor(g))
   const timeout = (ms) => new Promise(r => setTimeout(() => r(null), ms))
   let idx = 0, matched = 0
   if (toMatch.length) broadcast('scanner:progress', { stage: 'matching', done: 0, total: toMatch.length })
@@ -1771,60 +1803,95 @@ handle('scanner:scan', async (paths) => {
     g.alreadyInLibrary = !!g.alreadyInLibrary || !!libraryRowFor(g) || !!(g.steam_app_id && existingAppIds.has(String(g.steam_app_id)))
   }
 
-  // Re-point games that MOVED. A scan that finds a library game at a new path
-  // used to just flag it "already in library" and walk away, leaving the dead
-  // path in place — so a game you relocated stayed dimmed and unplayable no
-  // matter how many times you rescanned. Match on appid (exact) or name, and
-  // only ever rewrite a path that is genuinely gone from disk, so this can
-  // never move a game that's sitting happily where it is.
+  // Games already in KoZo (services/scanPlan.js). Each result is matched to its Library row.
+  // What is certain is fixed right here: "installed again", and "the same game file in another
+  // folder" (never for a removed game, never onto a drive that isn't there, and the game file is
+  // never swapped by the scan itself). Everything else is offered on the card: bring a removed
+  // game back, a new folder, a better game file.
   try {
-    const fsx = require('fs')
-    const rows = db.prepare('SELECT id, name, install_path, exe_name, steam_app_id FROM games').all()
-    const setPath = db.prepare('UPDATE games SET install_path = ?, exe_name = COALESCE(?, exe_name), is_installed = 1 WHERE id = ?')
-    const norm = (s) => String(s || '').trim().toLowerCase()
-    const relocated = []
-
-    for (const row of rows) {
-      // Adopt a path for a game that has NONE as well as re-pointing one whose
-      // path died. A game added from crack discovery arrives with an app id and
-      // no exe (its unlocks are read by app id), so this is how a later scan
-      // gives it an executable and makes it session-trackable.
-      if (row.install_path && fsx.existsSync(row.install_path)) continue   // still there — leave alone
-      const hit = results.find(g => !g.no_game_file && (
-        (row.steam_app_id && g.steam_app_id && String(g.steam_app_id) === String(row.steam_app_id)) ||
-        norm(g.name) === norm(row.name)))
-      if (!hit || norm(hit.install_path) === norm(row.install_path)) continue
-      setPath.run(hit.install_path, hit.exe_name || null, row.id)
-      hit.relocatedGameId = row.id
-      hit.alreadyInLibrary = true
-      relocated.push(row.install_path
-        ? `${row.name}: ${row.install_path} -> ${hit.install_path}`
-        : `${row.name}: (no path) -> ${hit.install_path}`)
-      broadcast('game:updated', row.id)
+    const plan = require('./services/scanPlan')
+    const rows = db.prepare(`SELECT id, name, install_path, exe_name, launch_file, steam_app_id, is_archived, is_installed,
+      completion_status, banner_local_path, banner_url, total_playtime_seconds, crack_dir FROM games`).all()
+    const exists = (p) => { try { return !!p && fsx.existsSync(p) } catch { return false } }
+    const driveGone = (p) => { const m = /^([a-z]):[\\/]/i.exec(String(p || '')); return !!m && !exists(m[1] + ':\\') }
+    const taken = new Set()
+    const fixes = []
+    for (const g of results) {
+      const hit = plan.matchRow(g, rows, taken)
+      if (!hit) continue
+      const row = hit.row
+      taken.add(row.id)
+      const { auto, offer } = plan.planChanges(g, row, { exists, driveGone })
+      if (auto.installed) fixes.push({ row, g, set: { is_installed: 1 } })
+      if (auto.folder) fixes.push({ row, g, set: { install_path: auto.folder.to, is_installed: 1, ...(auto.folder.exe ? { exe_name: auto.folder.exe } : {}) }, from: auto.folder.from })
+      g.alreadyInLibrary = true
+      g.library = {
+        id: row.id, name: row.name, status: row.completion_status || null, is_archived: row.is_archived ? 1 : 0,
+        is_installed: (auto.installed || auto.folder) ? 1 : (row.is_installed ? 1 : 0),
+        exe_name: auto.folder?.exe || row.exe_name || '', install_path: auto.folder?.to || row.install_path || '',
+        launch_file: row.launch_file || null,
+      }
+      g.changes = offer
+      if (auto.installed) g.fixed = { installed: true }
+      if (auto.folder) g.fixed = { folder: auto.folder.to }
+      g.library_cover_path = row.banner_local_path || null
+      g.library_cover_url = row.banner_url || null
     }
-    if (relocated.length) {
-      logger.info(`scanner: re-pointed ${relocated.length} moved game(s)`, { moves: relocated })
+    if (fixes.length) {
+      db.transaction(() => { for (const f of fixes) gamesQ.updateGame(f.row.id, f.set) })()
+      logger.info(`scanner: ${fixes.length} game(s) found again`, {
+        games: fixes.map(f => f.set.install_path ? `${f.row.name}: ${f.from || '(no folder)'} -> ${f.set.install_path}` : `${f.row.name}: installed again`),
+      })
+      broadcast('game:updated', fixes.length === 1 ? fixes[0].row.id : null)
+      broadcast('uninstalled:changed', null)
+      bk()
     }
   } catch (e) {
-    logger.warn('scanner: relocate pass failed', { message: e.message })
+    logger.warn('scanner: library pass failed', { message: e.message })
   }
 
-  // Games already in the library show the cover they have there (a cracked
-  // copy has no Steam id, so the modal had nothing to draw).
-  try {
-    const norm = (s) => String(s || '').trim().toLowerCase().replace(/[\\/]+$/, '')
-    const lib = db.prepare('SELECT name, install_path, steam_app_id, banner_local_path, banner_url FROM games').all()
-    for (const g of results) {
-      if (!g.alreadyInLibrary) continue
-      const row = lib.find(r =>
-        sameGameFolder(r.install_path, g.install_path) ||
-        (r.steam_app_id && g.steam_app_id && String(r.steam_app_id) === String(g.steam_app_id)) ||
-        (nameKey(g.name) && nameKey(r.name) === nameKey(g.name)))
-      if (row) { g.library_cover_path = row.banner_local_path || null; g.library_cover_url = row.banner_url || null }
-    }
-  } catch {}
-
   return results
+})
+
+// Scan PC, for games already in KoZo: the changes the user ticked (services/scanPlan.js).
+// list = [{ id, restore, installed, install_path, exe_name, launch_file, picked }]. Never while
+// that game runs (its session is tied to the file being watched), never a status change, never
+// the Steam id.
+handle('scanner:updateGames', async (list) => {
+  const fsx = require('fs')
+  const pathMod = require('path')
+  const plan = require('./services/scanPlan')
+  const pw = require('./services/processWatcher')
+  const { isHelperExe } = require('./services/pcScanner')
+  const exists = (p) => { try { return !!p && fsx.existsSync(p) } catch { return false } }
+  const running = new Set()
+  // Both are Maps keyed by game id.
+  try { for (const id of pw.getActiveSessions().keys()) running.add(Number(id)) } catch {}
+  try { for (const id of pw.getDetectingGames().keys()) running.add(Number(id)) } catch {}
+  const updated = [], skipped = []
+  for (const c of Array.isArray(list) ? list : []) {
+    const row = gamesQ.getGame(Number(c?.id))
+    if (!row) continue
+    const skip = (reason) => skipped.push({ id: row.id, name: row.name, reason })
+    if (running.has(row.id)) { skip('running'); continue }
+    if (c.install_path && !exists(c.install_path)) { skip('folder gone'); continue }
+    if (c.exe_name) {
+      // The file can sit deeper than the game's folder (a Steam game keeps its root: Phantom
+      // Blade Zero's PBZ.exe is under steam), so look where the scan saw it.
+      const file = pathMod.join(c.exe_dir || c.install_path || row.install_path || '', c.exe_name)
+      if (!exists(file)) { skip('file gone'); continue }
+      if (pw.HARD_DENY?.has(String(c.exe_name).toLowerCase())) { skip('Windows program'); continue }
+      if (!c.picked && isHelperExe(c.exe_name)) { skip('tool'); continue }
+    }
+    const patch = plan.patchFor(row, c, { exists })
+    if (!Object.keys(patch).length) continue
+    gamesQ.updateGame(row.id, patch)
+    updated.push(row.id)
+    logger.info(`scanner: updated "${row.name}"`, { patch })
+    broadcast('game:updated', row.id)
+  }
+  if (updated.length) { broadcast('uninstalled:changed', null); bk() }
+  return { updated: updated.length, skipped }
 })
 
 // ── Import from launchers (Epic, GOG, Xbox) ───────────────────────────────────
@@ -1923,7 +1990,7 @@ handle('scanner:addGames', async (games) => {
   // Not on Steam: SteamGridDB knows the real name and the cover. Asked before adding, so the
   // card and its Game List row have that name from the start, and a row kept from before is
   // found again instead of a second one appearing. A name the person typed stays.
-  const list = (games || []).filter(g => !g.no_game_file)
+  const list = (games || []).filter(g => !g.no_game_file || (g.exe_picked && g.exe_name))
   const offSteam = list.filter(g => !g.steam_app_id)
   const matches = new Map()
   let nextMatch = 0
@@ -1959,6 +2026,8 @@ handle('scanner:addGames', async (games) => {
           : null,
         banner_local_path: null,
       })
+      // Picked by hand as a .bat or a shortcut: Play starts that, the exe is what gets watched.
+      if (g.launch_file) { try { gamesQ.updateGame(game.id, { launch_file: g.launch_file }) } catch {} }
       added.push(game)
       try { gameListQ.ensureListRowForGame(game) } catch {}
       if (game.steam_app_id) existingAppIds.add(String(game.steam_app_id))
@@ -2022,12 +2091,23 @@ handle('scanner:addGames', async (games) => {
 // back to the newest Timestamp when several are saved.
 handle('steam:detectUser', () => require('./services/steamStatsWatcher').detectLoggedInUser())
 
+// Steam accounts on this PC and whose achievements count (services/steamAccounts.js):
+// Settings > Connections > Steam accounts.
+handle('steam:accounts', () => require('./services/steamAccounts').listAccounts())
+handle('steam:accountState', () => require('./services/achievementSync').accountState())
+handle('steam:useAccount', (steamId) => require('./services/steamAccounts').useAccount(steamId))
+handle('steam:setAccountMode', (steamId, mode) => require('./services/steamAccounts').setMode(steamId, mode))
+handle('steam:removeForeign', () => require('./services/steamAccounts').removeForeign())
+handle('steam:restoreUnlocks', (rows) => require('./services/steamAccounts').restoreUnlocks(rows))
+
 // Real browser "Sign in with Steam" (OpenID) — fallback / account switching.
 handle('steam:signIn', () => require('./services/steamOpenId').signIn())
 
 // Store-page details (description, developers, screenshots) for the Upcoming popup.
 handle('steam:storeDetails', (appId) => require('./services/steamApi').getStoreDetails(appId))
 handle('steam:comingSoon', (feed, page) => require('./services/steamApi').getComingSoon(feed, page))
+// Upcoming's Steam layout: Steam's store index for the weeks asked, ranked (services/steamCalendar.js).
+handle('steam:calendar', (range) => require('./services/steamCalendar').get(range || {}))
 // appIds → { [appid]: { portrait, hero, header, capsule } } real store art URLs.
 handle('steam:tasteProfile', () => require('./services/steamApi').getTasteProfile())
 handle('steam:picks', () => require('./services/steamApi').getPicks())
@@ -2042,6 +2122,8 @@ handle('steam:reviews', (appId) => require('./services/steamApi').getReviews(Num
 // Discount games (pages/Deals.jsx, services/deals.js).
 handle('deals:list', (opts) => require('./services/deals').getDeals(opts || {}))
 handle('deals:markSeen', () => require('./services/deals').markSeen())
+// The next page of Steam's sales, when Discounts is scrolled to its end.
+handle('deals:more', () => require('./services/deals').moreDeals())
 handle('deals:saleMap', () => require('./services/deals').saleMap())
 handle('deals:unseen', () => require('./services/deals').unseen())
 handle('deals:gamePrices', (appid) => require('./services/deals').gamePrices(appid))
@@ -2059,6 +2141,8 @@ handle('gameList:wishlistImport', async (appids) => {
 handle('steam:news', (appid) => require('./services/steamNews').getNews(appid))
 // Games like (pages/GamesLike.jsx, Game Detail): steamApi.similarGames.
 handle('steam:similar', (appId) => require('./services/steamApi').similarGames(Number(appId)))
+// The second batch, when Games like is scrolled to its end.
+handle('steam:similarMore', (appId) => require('./services/steamApi').similarMore(Number(appId)))
 handle('steam:appAssets', async (appIds) => Object.fromEntries(await require('./services/steamApi').getAppAssets(appIds, { allowStale: true })))
 
 // Called when the Upcoming tab opens: warms the store-details cache for every
@@ -2776,7 +2860,7 @@ handle('overlay:test', () => {
 // ── Backup / Restore (Import) ─────────────────────────────────────────────────
 // Paths are per-machine (a restore on a new PC must keep the folders just set up there) and
 // the API key is never exported: keep the local values.
-const LOCAL_SETTINGS = new Set(['sync_folder', 'auto_backup_dir', 'saves_backup_dir', 'backup_base', 'backup_copy_dir', 'backup_copy_error', 'steam_api_key', 'steamgriddb_key',
+const LOCAL_SETTINGS = new Set(['steam_foreign_found', 'sync_folder', 'auto_backup_dir', 'saves_backup_dir', 'backup_base', 'backup_copy_dir', 'backup_copy_error', 'steam_api_key', 'steamgriddb_key',
   'gdrive_token', 'gdrive_folder_id', 'gdrive_email', 'gdrive_last_sync', 'gdrive_last_result', 'gdrive_error', 'gdrive_client_id', 'gdrive_client_secret', 'install_id', 'backup_defaults_v1', 'drive_news_seen', 'launch_miss_dismissed'])
 
 // Profile, look and preferences from a backup, on a PC that had nothing.

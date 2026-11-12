@@ -683,6 +683,15 @@ async function tick() {
         if (game.is_archived === 1) {
           try { gamesQ.updateGame(game.id, { is_archived: 0 }); sendToRenderer('game:updated', game.id) } catch {}
         }
+        // Running proves it is here: a game started right after installing it stayed dimmed with
+        // LIVE on its card for the whole session, because the install check waits for games to end.
+        if (game.is_installed === 0 && game.install_path) {
+          require('fs').promises.access(game.install_path).then(() => {
+            gamesQ.updateGame(game.id, { is_installed: 1 })
+            sendToRenderer('game:updated', game.id)
+            sendToRenderer('uninstalled:changed', null)
+          }).catch(() => {})
+        }
         emitter.emit('change')
 
         // Sync achievements right away so anything unlocked before/at launch shows
@@ -1022,6 +1031,8 @@ function scheduleNextTick() {
     // those paths used to leave idle jobs queued forever. A Map size check, so
     // it costs nothing on the in-session cadence.
     if (deferredJobs.size && !isSessionActive()) emitter.emit('idle')
+    // A tick with nothing playing: cheap chores may ride on it (the install recheck, main.js).
+    if (!isSessionActive()) emitter.emit('idleTick')
     if (gen === tickGen) scheduleNextTick()
   }, delay)
 }
@@ -1188,6 +1199,9 @@ function isSessionActive() {
 
 // Fires when the last active session ends. Deferred jobs subscribe here.
 function onIdle(cb) { emitter.on('idle', cb) }
+function onIdleTick(cb) { emitter.on('idleTick', cb) }
+// The connected Steam account changed: what was parked for the old one may work now.
+function clearSyncParking() { syncParked.clear() }
 
 // Run `fn` now if nothing is playing, otherwise once the last session ends.
 // Coalesced: queuing the same job repeatedly during a session runs it once.
@@ -1288,7 +1302,7 @@ async function listRunningProcesses() {
 module.exports = {
   start, stop, pause, resume, nudge,
   getActiveSessions, getDetectingGames, isPaused,
-  isSessionActive, onIdle, runWhenIdle,
+  isSessionActive, onIdle, onIdleTick, runWhenIdle, clearSyncParking,
   onChange, onUnknownProcess,
   listRunningProcesses, getRunningProcesses, getProcessPathsBatch, HARD_DENY,
 }

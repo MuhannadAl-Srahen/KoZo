@@ -220,5 +220,4 @@
 :root[data-ambient="on"] .app-main { background: transparent; }
 
 /* ── Show / hide parts ──────────────────────────────────────────────── */
-:root[data-hide-library-stats] [data-tour="library-stats"] { display: none; }
 :root[data-hide-upcoming-hero] [data-upcoming-hero] { display: none; }

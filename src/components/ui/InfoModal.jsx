@@ -79,16 +79,18 @@ export default function InfoModal({
 
 // Helper: show a Steam-privacy guidance block (with a link button) inside an
 // InfoModal — used by the Diagnose / Sync flows.
-export function PrivacyHelp({ openSteamPrivacy }) {
+// Shown only for the user's OWN account when it really is private (lib/steamCheck.js): for a
+// game on another account, or a shared account, these steps were the wrong advice.
+export function PrivacyHelp({ openSteamPrivacy, persona }) {
   return (
     <div className={s.helpBox}>
       <div className={s.helpTitle}>
         <IconAlertTriangle size={13} stroke={2} />
-        Steam privacy is blocking achievement access
+        To get unlocks from other PCs too
       </div>
       <p className={s.helpText}>
-        Steam's API refuses to share achievement data when your profile is private.
-        Fix it in 3 steps:
+        Steam's website shares achievements only when {persona ? <strong>{persona}</strong> : 'your account'} lets it.
+        If this account is yours:
       </p>
       <ol className={s.helpSteps}>
         <li>Open Steam → click your name (top-right) → <strong>Profile</strong></li>
@@ -96,7 +98,7 @@ export function PrivacyHelp({ openSteamPrivacy }) {
         <li>Set <strong>Game details</strong> to <strong>Public</strong> and save</li>
       </ol>
       <p className={s.helpTextSpaced}>
-        After changing, wait ~1 minute then click <strong>Refresh achievements</strong> again.
+        Wait about a minute, then check again. Not your account? Pick yours under Steam accounts.
       </p>
       {openSteamPrivacy && (
         <button type="button" className={s.helpBtn} onClick={openSteamPrivacy}>

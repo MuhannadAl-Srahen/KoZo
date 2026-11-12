@@ -41,7 +41,8 @@ function existsSync(p) {
 // proved it once is remembered, and the search only runs when that file is gone. A folder that
 // can't be read (Xbox's WindowsApps) says nothing, so it counts as there.
 const provedBy = new Map()   // game id -> file
-async function hasGameFile(g) {
+const walkedAt = new Map()   // game id -> when its folder was last walked and held no game file
+async function hasGameFile(g, { walkGapMs = 0 } = {}) {
   if (g.launch_uri) return true
   const known = provedBy.get(g.id)
   if (known && await exists(known)) return true
@@ -50,8 +51,12 @@ async function hasGameFile(g) {
   for (const f of [g.launch_file, g.exe_name && path.join(g.install_path, g.exe_name)]) {
     if (f && await exists(f)) { provedBy.set(g.id, f); return true }
   }
+  // The fast recheck comes by every few seconds: a folder an installer is still filling is
+  // walked at most once per gap, not on every round.
+  if (walkGapMs && Date.now() - (walkedAt.get(g.id) || 0) < walkGapMs) return false
   const [found] = require('./pcScanner').collectExes(g.install_path, 4)
-  if (!found) return false
+  if (!found) { walkedAt.set(g.id, Date.now()); return false }
+  walkedAt.delete(g.id)
   provedBy.set(g.id, path.join(found.dir, found.name))
   return true
 }
@@ -83,7 +88,7 @@ async function volumeMissing(p) {
 // with the tail "Binaries/Win64", and it's the Outlast folder that moved.
 const STRUCT_TAIL = new Set([
   'win64', 'win32', 'x64', 'x86', 'binaries', 'bin', 'binary', 'win',
-  'shipping', 'retail', 'game', 'app', 'build', 'redist',
+  'shipping', 'retail', 'game', 'app', 'build', 'redist', 'bin64', 'bin32',
 ])
 
 // Split a stored path into the game's own folder name and the tail beneath it.
@@ -100,10 +105,15 @@ function splitGameFolder(installPath) {
 // Steam records exactly where it put each game. appmanifest_<appid>.acf lives
 // in the library that currently holds it and names the install dir, so for a
 // Steam game this is authoritative and costs a couple of file reads.
+let _libs = null, _libsAt = 0, _libsFor = null
 function steamLibraries() {
+  let steam = null
+  try { steam = require('./steamStatsWatcher').getSteamPath() } catch {}
+  // Kept for a minute (for the same Steam folder): the fast recheck asks every few seconds.
+  if (_libs && _libsFor === steam && Date.now() - _libsAt < 60_000) return _libs
   const out = []
+  _libs = out; _libsAt = Date.now(); _libsFor = steam
   try {
-    const steam = require('./steamStatsWatcher').getSteamPath()
     if (!steam) return out
     out.push(steam)
     const vdf = path.join(steam, 'steamapps', 'libraryfolders.vdf')
@@ -207,10 +217,11 @@ function findNewLocation(game) {
   return null
 }
 
-let _drives = null
+let _drives = null, _drivesAt = 0
 function driveLetters() {
-  if (_drives) return _drives
-  _drives = []
+  // Looked up again every 10 minutes: a drive plugged in later must be found too.
+  if (_drives && Date.now() - _drivesAt < 10 * 60_000) return _drives
+  _drives = []; _drivesAt = Date.now()
   for (let c = 67; c <= 90; c++) {          // C..Z
     const l = String.fromCharCode(c)
     if (existsSync(`${l}:\\`)) _drives.push(l)
@@ -230,7 +241,7 @@ async function reconcile({ quick = false } = {}) {
   let games = []
   try {
     games = db.prepare(
-      "SELECT id, name, install_path, exe_name, launch_file, launch_uri, is_installed FROM games WHERE install_path IS NOT NULL AND install_path != ''"
+      "SELECT id, name, install_path, exe_name, launch_file, launch_uri, is_installed, steam_app_id, is_cracked, source FROM games WHERE install_path IS NOT NULL AND install_path != ''"
     ).all()
   } catch { return { checked: 0, nowMissing: 0, nowFound: 0, missing: [] } }
 
@@ -243,6 +254,8 @@ async function reconcile({ quick = false } = {}) {
   for (const g of games) {
     const folderThere = await exists(g.install_path)
     let there = folderThere && await hasGameFile(g)
+    // A game coming back: not while Steam is still downloading it.
+    if (there && g.is_installed !== 1 && await steamState(g) === 'installing') there = false
 
     // Gone from where we last saw it — before writing it off, look for where
     // it moved to. Without this a game you relocate stays dimmed forever, since
@@ -257,7 +270,10 @@ async function reconcile({ quick = false } = {}) {
       // original never came back when the drive was reconnected. A missing
       // drive root means "not available right now", which is what the flag
       // already expresses.
-      if (!(await volumeMissing(g.install_path))) {
+      // Steam keeps one install per game and its manifest says where it is now: safe to
+      // follow even when the old drive is gone.
+      if (isSteamManaged(g)) { try { dest = await steamDest(g) } catch {} }
+      if (!dest && !(await volumeMissing(g.install_path))) {
         try { dest = findNewLocation(g) } catch (e) {
           logger.warn(`installCheck: relocate failed for "${g.name}"`, { message: e.message })
         }
@@ -293,19 +309,190 @@ async function reconcile({ quick = false } = {}) {
       `${nowFound} marked installed again`,
       { games: changed.map(c => `${c.name}${c.want ? '' : ' (missing)'}`) }
     )
-    // Refresh every window so the Library re-renders with honest state, and the
-    // uninstalled card (components/UninstalledCard.jsx) asks about games that went.
-    try {
-      const { BrowserWindow } = require('electron')
-      for (const w of BrowserWindow.getAllWindows()) {
-        if (w.isDestroyed()) continue
-        for (const c of changed) w.webContents.send('game:updated', c.id)
-        w.webContents.send('uninstalled:changed', null)
-      }
-    } catch {}
+    announce(changed.map(c => c.id))
   }
 
   return { checked: games.length, nowMissing, nowFound, missing, moved }
 }
 
-module.exports = { reconcile, findNewLocation, hasGameFile, fromSteamManifest, steamLibraries }
+// Refresh every window so the Library re-renders with honest state, and the uninstalled card
+// (components/UninstalledCard.jsx) asks about games that went. One message however many games
+// changed (the id for one game, null for several): every listener reloads on any value, and a
+// message per game made the Library reload once per game when a drive came back.
+function announce(ids) {
+  if (!ids || !ids.length) return
+  try {
+    const { BrowserWindow } = require('electron')
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (w.isDestroyed()) continue
+      w.webContents.send('game:updated', ids.length === 1 ? ids[0] : null)
+      w.webContents.send('uninstalled:changed', null)
+    }
+  } catch {}
+}
+
+// ── Steam's own word on a game ───────────────────────────────────────────────
+// "D:\SteamLibrary\steamapps\common\Crimson Desert\bin64" gives the steamapps folder, Steam's
+// folder name for the game and what comes under it. null for a path outside a Steam library.
+function steamFolderOf(installPath) {
+  const m = /^(.*[\\/]steamapps)[\\/]common[\\/]([^\\/]+)(?:[\\/](.*))?$/i.exec(String(installPath || '').replace(/[\\/]+$/, ''))
+  if (!m) return null
+  return { steamapps: m[1], installdir: m[2], tail: m[3] || '' }
+}
+
+function parseAcf(text) {
+  const t = String(text || '')
+  const get = (k) => t.match(new RegExp(`"${k}"\\s*"([^"]*)"`, 'i'))?.[1]
+  const appid = get('appid'), installdir = get('installdir')
+  if (!appid && !installdir) return null
+  return { appid: appid || '', installdir: installdir || '', stateFlags: Number(get('StateFlags')) }
+}
+
+// Bit 4 = fully installed: 4 and 6 (an update is waiting) can be played, 1026 is still downloading.
+function isFullyInstalled(flags) {
+  const n = Number(flags)
+  return flags !== '' && flags != null && Number.isFinite(n) && (n & 4) === 4
+}
+
+function isSteamManaged(g) {
+  if (!g || !g.steam_app_id) return false
+  return (g.source === 'steam' && !g.is_cracked) || !!steamFolderOf(g.install_path)
+}
+
+async function readAcf(steamapps, appId) {
+  try { return parseAcf(await fs.promises.readFile(path.join(steamapps, `appmanifest_${appId}.acf`), 'utf8')) } catch { return null }
+}
+
+// What Steam says about the copy in this game's own folder: 'installed', 'installing', or null
+// when Steam has nothing to say (no manifest beside it, or a manifest for another folder). Only
+// ever used to hold a game back from "installed again", never to mark an installed game missing.
+async function steamState(g) {
+  if (!g || !g.steam_app_id) return null
+  const sf = steamFolderOf(g.install_path)
+  if (!sf) return null
+  const acf = await readAcf(sf.steamapps, g.steam_app_id)
+  if (!acf || acf.installdir.toLowerCase() !== sf.installdir.toLowerCase()) return null
+  return isFullyInstalled(acf.stateFlags) ? 'installed' : 'installing'
+}
+
+// Where Steam has this game now, when that isn't the stored folder: installed again into another
+// Steam library, or under another folder name. null unless Steam has it fully installed.
+async function steamDest(g, libs = steamLibraries()) {
+  if (!g || !g.steam_app_id) return null
+  const sf = steamFolderOf(g.install_path)
+  const tail = sf ? sf.tail : splitGameFolder(g.install_path).tail
+  const stored = String(g.install_path || '').replace(/[\\/]+$/, '').toLowerCase()
+  for (const lib of libs) {
+    const acf = await readAcf(path.join(lib, 'steamapps'), g.steam_app_id)
+    if (!acf || !acf.installdir || !isFullyInstalled(acf.stateFlags)) continue
+    const base = path.join(lib, 'steamapps', 'common', acf.installdir)
+    for (const dest of tail ? [path.join(base, tail), base] : [base]) {
+      if (dest.toLowerCase() === stored) continue
+      if (!(await exists(dest))) continue
+      if (!g.exe_name || looksRight(dest, g.exe_name)) return dest
+    }
+  }
+  return null
+}
+
+// ── The fast recheck ─────────────────────────────────────────────────────────
+// A game installed again showed as "not installed" for minutes: nothing looked between the
+// window getting focus and the five-minute round. This looks only at the games flagged not
+// installed (a couple of file checks each; about 1 ms for 26 games, measured), so it runs every
+// few seconds while KoZo is on screen (main.js) and on the watcher's idle ticks.
+
+// Which rows to look at, and which drive letters they need. Network paths are left to the full
+// round: a dead share can hold one file check for 20 seconds.
+function pickRecheck(rows) {
+  const seen = new Set(), probe = [], letters = new Set()
+  for (const g of rows || []) {
+    if (!g || seen.has(g.id)) continue
+    const m = /^([A-Za-z]):[\\/]/.exec(String(g.install_path || ''))
+    if (!m) continue
+    seen.add(g.id); probe.push(g); letters.add(m[1].toUpperCase())
+  }
+  return { probe, letters: [...letters] }
+}
+
+// How long until the next look while the window is on screen. null = don't look.
+function fastDelay({ visible, minimized, sessionActive } = {}) {
+  return visible && !minimized && !sessionActive ? 5000 : null
+}
+
+// 0 = run now, else the milliseconds left before a call may run again.
+function throttleDelay(lastAt, now, gapMs) {
+  return Math.max(0, (Number(lastAt) || 0) + gapMs - now)
+}
+
+let rechecking = null
+let lastSteamPass = 0
+// One round at a time: a call while one runs gets the same answer.
+function recheckMissing(opts = {}) {
+  if (rechecking) return rechecking
+  rechecking = doRecheck(opts)
+    .catch((e) => { logger.warn('installCheck: recheck failed', { message: e.message }); return { found: 0, moved: 0 } })
+    .finally(() => { rechecking = null })
+  return rechecking
+}
+
+async function doRecheck({ reason = '', steam } = {}) {
+  const none = { found: 0, moved: 0 }
+  let db, rows
+  try {
+    db = require('../db/database').getDb()
+    rows = db.prepare(
+      "SELECT id, name, install_path, exe_name, launch_file, launch_uri, steam_app_id, is_cracked, source FROM games WHERE is_installed = 0 AND install_path IS NOT NULL AND install_path != ''"
+    ).all()
+  } catch { return none }
+  if (!rows.length) return none
+
+  const { probe, letters } = pickRecheck(rows)
+  const drives = new Map()
+  for (const l of letters) drives.set(l, await exists(`${l}:\\`))
+
+  const found = [], moved = []
+  for (const g of probe) {
+    if (!drives.get(g.install_path[0].toUpperCase())) continue
+    if (!(await exists(g.install_path))) continue
+    if (!(await hasGameFile(g, { walkGapMs: 15000 }))) continue
+    if (await steamState(g) === 'installing') continue
+    found.push(g)
+  }
+
+  // Installed again through Steam somewhere else: another library, or the old drive is gone.
+  if (steam === 'force' || Date.now() - lastSteamPass >= 15000) {
+    lastSteamPass = Date.now()
+    for (const g of probe) {
+      if (found.includes(g) || !isSteamManaged(g)) continue
+      let dest = null
+      try { dest = await steamDest(g) } catch {}
+      if (dest) moved.push({ g, dest })
+    }
+  }
+  if (!found.length && !moved.length) return none
+
+  try {
+    const setFlag = db.prepare('UPDATE games SET is_installed = 1 WHERE id = ?')
+    const setPath = db.prepare('UPDATE games SET install_path = ?, is_installed = 1 WHERE id = ?')
+    db.transaction(() => {
+      for (const g of found) setFlag.run(g.id)
+      for (const m of moved) setPath.run(m.dest, m.g.id)
+    })()
+  } catch (e) {
+    logger.warn('installCheck: recheck could not save', { message: e.message })
+    return none
+  }
+  if (moved.length) { try { require('./autoBackup').markDirty() } catch {} }
+  logger.info(`installCheck: ${found.length + moved.length} game(s) installed again (recheck: ${reason || 'tick'})`, {
+    games: found.map(g => g.name),
+    moves: moved.map(m => `${m.g.name}: ${m.g.install_path} -> ${m.dest}`),
+  })
+  announce([...found.map(g => g.id), ...moved.map(m => m.g.id)])
+  return { found: found.length, moved: moved.length }
+}
+
+module.exports = {
+  reconcile, findNewLocation, hasGameFile, fromSteamManifest, steamLibraries,
+  recheckMissing, announce, steamState, steamDest, isSteamManaged,
+  pickRecheck, fastDelay, throttleDelay, steamFolderOf, parseAcf, isFullyInstalled, splitGameFolder,
+}

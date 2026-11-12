@@ -233,7 +233,24 @@ function unlockedApiNames(schemaRoot, statsRoot) {
   return m === null ? null : new Set(m.keys())
 }
 
+// The other way round, for the tests only: a plain object as a binary KeyValues buffer (objects,
+// strings and 32-bit numbers), so a test can write a pretend Steam stats file.
+function encodeBinaryKV(obj) {
+  const parts = []
+  const cstr = (s) => Buffer.concat([Buffer.from(String(s), 'utf8'), Buffer.from([0])])
+  const walk = (node) => {
+    for (const [k, v] of Object.entries(node)) {
+      if (v && typeof v === 'object') { parts.push(Buffer.from([TYPE_NONE]), cstr(k)); walk(v); parts.push(Buffer.from([TYPE_END])) }
+      else if (typeof v === 'number') { const b = Buffer.alloc(4); b.writeInt32LE(v | 0); parts.push(Buffer.from([TYPE_INT32]), cstr(k), b) }
+      else parts.push(Buffer.from([TYPE_STRING]), cstr(k), cstr(v))
+    }
+  }
+  walk(obj)
+  parts.push(Buffer.from([TYPE_END]))
+  return Buffer.concat(parts)
+}
+
 module.exports = {
   parseBinaryKV, extractAchievementBits, extractStatValues,
-  extractAchievementTimes, unlockedWithTimes, unlockedApiNames,
+  extractAchievementTimes, unlockedWithTimes, unlockedApiNames, encodeBinaryKV,
 }

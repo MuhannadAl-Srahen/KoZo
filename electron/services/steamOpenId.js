@@ -115,9 +115,13 @@ function signIn() {
       try { server.close() } catch {}
 
       if (valid && steamId) {
-        settingsQ().setSetting('steam_user_id', steamId)
+        // Signing in says "this account is mine": it counts fully from now on, and what was
+        // known about the account connected before is forgotten (services/steamAccounts.js).
         const persona = await fetchPersona(steamId)
-        if (persona) settingsQ().setSetting('steam_persona', persona)
+        try { require('./steamAccounts').useAccount(steamId, { persona }) } catch {
+          settingsQ().setSetting('steam_user_id', steamId)
+          if (persona) settingsQ().setSetting('steam_persona', persona)
+        }
         logger.info(`steamOpenId: signed in as ${persona || steamId}`)
         finish({ steamId, personaName: persona })
       } else {

@@ -2,48 +2,6 @@
   composes: page from '../styles/page.module.css';
 }
 
-/* ── Stats bar ──────────────────────────────────────────────── */
-.statsBar {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-  padding: 16px 20px 12px;
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
-}
-
-/* Headline strip — the one row of cards that carries the faint accent tint
-   (--surface-accent), so the page opens with atmosphere while the grid below
-   stays flat. Values are HUD numbers: accent, tabular, muted labels. */
-.statCard {
-  background: var(--surface-accent);
-  border: 1px solid var(--border);
-  border-radius: var(--r-card);
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.statLabel {
-  font-size: var(--fs-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--text-muted);
-  font-weight: 500;
-}
-
-.statValue {
-  font-size: 20px;
-  font-weight: 500;
-  color: var(--a);
-  line-height: 1.2;
-  font-variant-numeric: tabular-nums;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* ── Toolbar ────────────────────────────────────────────────── */
 /* Composed so every page's toolbar shares one padding — there used to be four
    different values across the app. */
@@ -129,25 +87,41 @@
   border-radius: var(--r-card);
 }
 
-/* Collapsed hidden-games section header at the bottom of the grid */
-.hiddenHeader {
+/* Tabs under the top bar: Current, Finished, Dropped, Hidden, Removed (lib/libraryTabs.js).
+   The same pills as the Game List's status tabs. One row that scrolls sideways when the
+   window is narrow, never a second row over the cards. */
+.tabRow {
   display: flex;
   align-items: center;
-  gap: 6px;
-  width: 100%;
-  margin-top: 18px;
-  padding: 8px 4px;
-  background: none;
-  border: none;
-  border-top: 1px solid var(--border-subtle);
-  color: var(--text-muted);
-  font-family: inherit;
-  font-size: var(--fs-sm);
-  font-weight: 500;
-  cursor: pointer;
-  transition: color 0.12s;
+  flex-shrink: 0;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
 }
-.hiddenHeader:hover { color: var(--text-secondary); }
+.tabs { display: inline-flex; flex-shrink: 0; align-items: center; gap: 2px; padding: 3px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); }
+.tab {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: 999px; border: 0;
+  background: transparent; color: var(--text-secondary); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; white-space: nowrap;
+}
+.tab:hover { color: var(--text-primary); }
+.tabOn { background: var(--surface-3); color: var(--text-primary); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--st, var(--a)) 55%, transparent); }
+.tabNone { opacity: 0.5; }
+.tabDot { width: 7px; height: 7px; border-radius: 50%; background: var(--st, var(--a)); }
+.tabCount { font-size: var(--fs-xs); color: var(--text-muted); }
+.tabSep { width: 1px; height: 18px; margin: 0 4px; background: var(--border); }
+
+/* One quiet line over the Hidden and Removed tabs' cards */
+.tabNote {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+.tabNote svg { flex-shrink: 0; }
 
 .btnSecondary {
   display: flex;

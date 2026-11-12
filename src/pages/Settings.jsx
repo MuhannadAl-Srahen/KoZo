@@ -23,6 +23,7 @@ import SaveManagerModal from '../components/modals/SaveManagerModal'
 import BackupsTab from '../components/BackupsTab'
 import StorageTab from '../components/StorageTab'
 import DriveSetupModal, { DriveBlockedHint } from '../components/DriveSetupModal'
+import SteamAccountsModal from '../components/modals/SteamAccountsModal'
 import WhatsNewModal from '../components/WhatsNewModal'
 import s from './Settings.module.css'
 
@@ -706,6 +707,35 @@ function SteamTab() {
     return () => off?.()
   }, [])
 
+  // Steam accounts on this PC (services/steamAccounts.js): which one is connected, is it the
+  // user's own, and did other people's unlocks get in. /settings?tab=accounts&steam=accounts
+  // opens the window.
+  const [params, setParams] = useSearchParams()
+  const [acct, setAcct] = useState(null)             // { state, foreign }
+  const [accountsOpen, setAccountsOpen] = useState(false)
+  async function loadAcct() {
+    const [st, list] = await Promise.all([window.kozo?.api?.steam?.accountState?.(), window.kozo?.api?.steam?.accounts?.()])
+    const state = st?.ok ? st.data : null
+    if (state) {
+      setAcct({ state, foreign: list?.ok ? list.data?.foreign : null })
+      setSteamUserId(state.steamId || '')
+      setSteamPersona(state.persona || '')
+      steamTabCache = { ...(steamTabCache || {}), steamUserId: state.steamId || '', steamPersona: state.persona || '' }
+    }
+  }
+  useEffect(() => {
+    loadAcct()
+    const off = window.kozo?.events?.onSteamAccountsChanged?.(() => loadAcct())
+    return () => off?.()
+  }, [])
+  useEffect(() => {
+    if (params.get('steam') !== 'accounts') return
+    setAccountsOpen(true)
+    const next = new URLSearchParams(params); next.delete('steam'); setParams(next, { replace: true })
+  }, [params])
+  const manyAccounts = (acct?.state?.accounts || 0) > 1
+  const needsPick = manyAccounts && !acct?.state?.confirmed
+
   useEffect(() => {
     async function load() {
       if (!window.kozo?.api) return
@@ -820,6 +850,8 @@ function SteamTab() {
   async function detectFromPc() {
     const r = await window.kozo?.api?.steam?.detectUser?.()
     const d = r?.ok ? r.data : r
+    // Several accounts on this PC: which one is yours is your call, never a guess.
+    if (!d?.steamId && d?.accounts?.length > 1) { setAccountsOpen(true); return }
     if (d?.steamId) {
       setSteamUserId(d.steamId)
       setSteamPersona(d.personaName || '')
@@ -908,9 +940,14 @@ function SteamTab() {
           <ConnRow
             icon={profile?.avatar ? <img src={profile.avatar} alt="" /> : <IconBrandSteam size={20} />}
             name="Steam"
-            tone={steamUserId ? 'ok' : 'muted'}
-            status={steamUserId ? <>Connected as <b>{steamPersona || profile?.persona_name || steamUserId}</b></> : 'Not connected. Sign in with your browser, the Steam app is not needed.'}>
-            <button type="button" className={s.testBtn} onClick={detectFromPc} title="Read the account from the Steam app on this PC">Detect</button>
+            tone={needsPick || (acct?.state?.confirmed && acct?.foreign?.total > 0) ? 'warn' : steamUserId ? 'ok' : 'muted'}
+            status={needsPick ? <>{acct.state.accounts} Steam accounts on this PC. Which one is yours?</>
+              : acct?.state?.confirmed && acct?.foreign?.total > 0 ? <>{acct.foreign.total} achievements came from other people on shared accounts</>
+              : steamUserId ? <>Connected as <b>{steamPersona || profile?.persona_name || steamUserId}</b></>
+              : 'Not connected. Sign in with your browser, the Steam app is not needed.'}>
+            {manyAccounts
+              ? <button type="button" className={s.testBtn} data-steam-accounts-btn onClick={() => setAccountsOpen(true)} title="The Steam accounts on this PC, and whose achievements count">Accounts</button>
+              : <button type="button" className={s.testBtn} onClick={detectFromPc} title="Read the account from the Steam app on this PC">Detect</button>}
             <button type="button" className={s.testBtn} disabled={signingIn} onClick={signInWithSteam}>
               {signingIn ? <><IconLoader2 size={13} className="spin" /> Waiting…</> : (steamUserId ? 'Change account' : 'Sign in')}
             </button>
@@ -949,7 +986,8 @@ function SteamTab() {
         {driveBusy && <DriveBlockedHint />}
         <Message msg={detectMsg} />
         <Message msg={bannerMsg} />
-        {privacyError && (
+        {/* Only for the user's own account: a shared account's privacy isn't theirs to change. */}
+        {privacyError && acct?.state?.mode !== 'shared' && (
           <div className={s.privacyBanner}>
             <IconAlertTriangle size={15} stroke={1.8} className={s.privacyIcon} />
             <div>
@@ -982,6 +1020,7 @@ function SteamTab() {
       </section>
 
       {driveSetup && <DriveSetupModal onClose={() => setDriveSetup(false)} onDone={() => window.kozo?.api?.drive?.status?.().then(r => { if (r?.ok) setDrive(r.data) })} />}
+      {accountsOpen && <SteamAccountsModal onClose={() => setAccountsOpen(false)} onChanged={() => { setProfileState('idle'); setProfile(null); loadAcct() }} />}
 
       {/* Every key and ID, in one place, folded away */}
       <details className={`${s.section} ${s.foldSection}`}>
@@ -1601,23 +1640,6 @@ function LookCustomize() {
       </section>
 
       <section className={s.section}>
-        <div className={s.sectionHeader}><IconLayoutCards size={15} stroke={1.6} /><span>Upcoming calendar</span></div>
-        <p className={s.sectionDesc}>How Upcoming's Steam view lays out the release days.</p>
-        <div className={s.cardStyles} role="radiogroup" aria-label="Upcoming calendar">
-          {[
-            { value: 'weeks', label: 'Steam weeks', desc: "Like Steam's own calendar: Monday to Friday, one row per week" },
-            { value: 'classic', label: 'Classic', desc: 'The look before: days with releases in a grid, with the match % and why on every game' },
-          ].map(c => (
-            <button key={c.value} type="button" role="radio" aria-checked={prefs.upcomingLayout === c.value} data-upcoming-layout={c.value}
-              className={`${s.cardStyleTile} ${prefs.upcomingLayout === c.value ? s.cardStyleOn : ''}`} onClick={() => setPrefs({ upcomingLayout: c.value })}>
-              <span className={s.cardStyleText}><strong>{c.label}</strong><small>{c.desc}</small></span>
-              {prefs.upcomingLayout === c.value && <IconCheck size={14} stroke={2.6} className={s.cardStyleCheck} />}
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section className={s.section}>
         <div className={s.sectionHeader}><IconLayoutCards size={15} stroke={1.6} /><span>Game cards</span></div>
         <p className={s.sectionDesc}>How cards look in the Library and the Game List.</p>
         <div className={s.cardStudio}>
@@ -1679,7 +1701,8 @@ function LookCustomize() {
       <section className={s.section}>
         <div className={s.sectionHeader}><IconEye size={15} stroke={1.6} /><span>Show or hide</span></div>
         <div className={s.toggleList}>
-          <ToggleRow label="Library numbers" desc="The Games, Playtime, Achievements and This week boxes above the Library." checked={!prefs.hideLibraryStats} onChange={v => setPrefs({ hideLibraryStats: !v })} />
+          <ToggleRow label="Hidden games in the Library" desc="The Hidden tab. Off: hidden games are nowhere in the Library, still tracked and counted. Ctrl+K finds them." checked={!prefs.hideLibraryHiddenTab} onChange={v => setPrefs({ hideLibraryHiddenTab: !v })} />
+          <ToggleRow label="Removed games in the Library" desc="The Removed tab. Off: removed games are nowhere in the Library. Their hours stay, and Ctrl+K finds one to restore it from its page." checked={!prefs.hideLibraryRemovedTab} onChange={v => setPrefs({ hideLibraryRemovedTab: !v })} />
           <ToggleRow label="Upcoming banner" desc="The big rotating banner and This week row on Upcoming." checked={!prefs.hideUpcomingHero} onChange={v => setPrefs({ hideUpcomingHero: !v })} />
         </div>
       </section>

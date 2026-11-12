@@ -11,13 +11,23 @@ import s from './MediaGallery.module.css'
 // trailers are HLS streams), loaded only when a trailer is shown.
 
 // Trailers start by themselves, so they start muted, like the Steam store.
-// Turning the sound on once is remembered for the next one.
+// Turning the sound on once is remembered for the next one, and so is the volume
+// (the maker turned it down on every trailer and the next one started at full).
 const MUTE_KEY = 'kozo:trailer:muted'
+const VOLUME_KEY = 'kozo:trailer:volume'
 function startMuted() {
   try { return localStorage.getItem(MUTE_KEY) !== '0' } catch { return true }
 }
-function rememberMuted(muted) {
-  try { localStorage.setItem(MUTE_KEY, muted ? '1' : '0') } catch {}
+function startVolume() {
+  try { const v = Number(localStorage.getItem(VOLUME_KEY)); return v > 0 && v <= 1 ? v : 1 } catch { return 1 }
+}
+// Volume at 0 counts as muted, and the last volume you could hear is kept, so turning
+// the sound back on never starts silent.
+function remember(el) {
+  try {
+    localStorage.setItem(MUTE_KEY, el.muted || el.volume === 0 ? '1' : '0')
+    if (el.volume > 0) localStorage.setItem(VOLUME_KEY, String(Math.round(el.volume * 100) / 100))
+  } catch {}
 }
 
 function VideoPlayer({ video, poster, className }) {
@@ -25,6 +35,7 @@ function VideoPlayer({ video, poster, className }) {
   useEffect(() => {
     const el = ref.current
     if (!el) return
+    el.volume = startVolume()
     el.muted = startMuted()    // React's `muted` prop doesn't reach the DOM property reliably
     let hls = null, dead = false
     if (video.hls) {
@@ -63,7 +74,7 @@ function VideoPlayer({ video, poster, className }) {
   }, [])
   return (
     <video ref={ref} className={className} poster={poster} controls autoPlay playsInline
-      onVolumeChange={(e) => rememberMuted(e.currentTarget.muted)}
+      onVolumeChange={(e) => remember(e.currentTarget)}
       onClick={(e) => e.stopPropagation()} />
   )
 }

@@ -104,7 +104,7 @@ export default function QuickSearch() {
   const sections = useMemo(() => {
     if (!q) return [{ title: 'Go to', items: PAGES.slice(0, 8).map(p => ({ kind: 'page', id: p.to, label: p.label, hint: p.hint, to: p.to })) }]
     const lib = games.filter(g => hit(g.name, q)).slice(0, 6)
-      .map(g => ({ kind: 'game', id: `g${g.id}`, label: g.name, hint: g.is_archived ? 'Archived' : g.is_installed === 0 ? 'Not installed' : null, game: g }))
+      .map(g => ({ kind: 'game', id: `g${g.id}`, label: g.name, hint: g.is_archived ? 'Removed' : g.is_installed === 0 ? 'Not installed' : null, game: g }))
     const libSteam = new Set(games.map(g => Number(g.steam_app_id)).filter(Boolean))
     const libNames = new Set(games.map(g => key(g.name)))
     const list = listRows.filter(r => !r.game_id && !libNames.has(key(r.name))).slice(0, 6)

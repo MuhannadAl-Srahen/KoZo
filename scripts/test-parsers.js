@@ -230,7 +230,7 @@ console.log('\nlauncherImport')
 console.log('\nupcoming top bar')
 {
   const src = require('fs').readFileSync(path.join(__dirname, '..', 'src', 'lib', 'upcomingPick.js'), 'utf8')
-    .replace(/export function/g, 'function')
+    .replace(/export (function|const)/g, '$1')
   const { readPickMode, defaultPickMode, filterBuckets, pickDay, onlyIds, weekRows } = new Function(src + '; return { readPickMode, defaultPickMode, filterBuckets, pickDay, onlyIds, weekRows }')()
   check('the old "picked" choice means Like my games', readPickMode('picked') === 'like')
   check('the three choices read back', ['like', 'others', 'all'].every(m => readPickMode(m) === m))
@@ -253,7 +253,9 @@ console.log('\nupcoming top bar')
   const many = Array.from({ length: 12 }, (_, i) => ({ appid: i, match: i, popRank: 100 - i }))
   check('a like day: best match first, 5 of them', pickDay(many, 'like').map(g => g.appid).join() === '11,10,9,8,7')
   check('a same-match tie goes to the more popular', pickDay([{ appid: 1, match: 5, popRank: 9 }, { appid: 2, match: 5, popRank: 3 }], 'like')[0].appid === 2)
-  check('an others day: most popular first, 8 of them', pickDay(many, 'others').length === 8 && pickDay(many, 'others')[0].appid === 11)
+  check('an others day: every game, most popular first', pickDay(many, 'others').length === 12 && pickDay(many, 'others')[0].appid === 11)
+  check('an All day: every game, not 8 (the maker: "if I press All not all the games show")', pickDay(many, 'all').length === 12)
+  check("Steam's calendar rank counts as popularity", pickDay([{ appid: 1, popRank: 3 }, { appid: 2, calOrder: 1 }], 'all')[0].appid === 2)
   check('picking a day leaves the list alone', many[0].appid === 0)
 
   // Steam's own picks (signed in to the Steam store) and its Monday-to-Friday weeks.
@@ -270,6 +272,42 @@ console.log('\nupcoming top bar')
   check('two weeks, no more', rows.length === 2, String(rows.length))
   const mid = weekRows(new Map([['2026-11-11', [{ appid: 9 }]]]), '2026-11-11', '2026-11-11')
   check('on a Wednesday the week starts on its Monday, the past days dimmed', mid[0].cells[0].key === '2026-11-09' && mid[0].cells[0].past && !mid[0].cells[2].past)
+
+  // Steam's own calendar: its controls (game count, wishlisted games, a tag) and a day's order.
+  const { calendarShown, calendarDay } = new Function(src + '; return { calendarShown, calendarDay }')()
+  const item = (appid, order, more = {}) => ({ appid, order, tagIds: [1], ...more })
+  const cal = [item(1, 1), item(2, 2), item(3, 3, { early: true }), item(4, 4, { v1: true, tagIds: [2] }), item(5, 90, { onWishlist: true }), item(6, 91, { onList: true, owned: true })]
+  const ids = (l) => l.map(g => g.appid).sort((a, b) => a - b).join()
+  check('calendar: the count keeps the best, your wishlist and list always stay', ids(calendarShown(cal, { count: 2 })) === '1,2,5,6')
+  check('calendar: All keeps every game', ids(calendarShown(cal, { count: 0 })) === '1,2,3,4,5,6')
+  check('calendar: wishlisted only', ids(calendarShown(cal, { wish: 'only' })) === '5,6')
+  check('calendar: wishlisted hidden', ids(calendarShown(cal, { wish: 'hide' })) === '1,2,3,4')
+  check('calendar: no Early Access, 1.0 launches included', ids(calendarShown(cal, { hideEarly: true })) === '1,2,5,6')
+  check('calendar: one tag', ids(calendarShown(cal, { tag: 2 })) === '4')
+  check('calendar: nothing you have', ids(calendarShown(cal, { hideOwned: true })) === '1,2,3,4,5')
+  check('calendar: a day shows your wishlist first, then Steam\'s order', calendarDay([item(1, 1), item(5, 90, { onWishlist: true }), item(2, 2)]).map(g => g.appid).join() === '5,1,2')
+  const scs = require(path.join(__dirname, '..', 'electron', 'services', 'steamCalendar.js'))
+  const local = (y, m, d) => new Date(y, m - 1, d).getTime()
+  const spans = scs.calendarRanges(local(2026, 11, 9), local(2027, 1, 4))
+  const dayMs = 86400000
+  check('calendar: queries cover the weeks with no gap', spans[0].from === local(2026, 11, 9) && spans.at(-1).to === local(2027, 1, 4) && spans.every((r, i) => i === 0 || r.from === spans[i - 1].to))
+  check('calendar: no query spans more than two weeks', spans.every(r => r.to - r.from <= 15 * dayMs))
+  const alone = (y, m, d) => spans.some(r => r.from === local(y, m, d) && r.to === local(y, m, d + 1) && r.count === 500)
+  check('calendar: a month\'s last day is asked for alone (Steam piles vague dates there)', alone(2026, 11, 30) && alone(2026, 12, 31), JSON.stringify(spans.map(r => [new Date(r.from).toDateString(), r.count])))
+  const at = (y, m, d) => Math.floor(local(y, m, d) / 1000) + 12 * 3600
+  const asset = { asset_url_format: 'steam/apps/1/${FILENAME}?t=1', hero_capsule: 'hero_capsule.jpg', main_capsule: 'capsule_616x353.jpg' }
+  const full = scs.calendarItem({ appid: 1, type: 0, name: 'A', release: { steam_release_date: at(2026, 11, 20), coming_soon_display: 'date_full', is_coming_soon: true }, assets: asset }, { assetBase: 'https://x/' })
+  check('calendar: a game with an exact day is kept, with its tall cover', full && full.day === at(2026, 11, 20) * 1000 && full.art.heroCapsule === 'https://x/steam/apps/1/hero_capsule.jpg?t=1')
+  check('calendar: a month, a quarter or a year is not a day', ['date_month', 'date_quarter', 'date_year', 'text_tba'].every(d => scs.calendarItem({ appid: 2, type: 0, release: { steam_release_date: at(2026, 12, 31), coming_soon_display: d } }) === null))
+  check('calendar: out this week already still shows on its day', scs.calendarItem({ appid: 3, type: 0, release: { steam_release_date: at(2026, 11, 10) } })?.day === at(2026, 11, 10) * 1000)
+  const ea = scs.calendarItem({ appid: 4, type: 0, is_early_access: true, release: { steam_release_date: at(2024, 1, 1), release_from_early_access_date: at(2026, 12, 3) } }, { ea: true })
+  check('calendar: an Early Access game\'s 1.0 day', ea && ea.v1 && !ea.early && ea.day === at(2026, 12, 3) * 1000)
+  check('calendar: DLC and the like are not games', scs.calendarItem({ appid: 5, type: 4, release: { steam_release_date: at(2026, 11, 20) } }) === null)
+  const pool = [{ appid: 1, rank: 0, size: 100, tags: [{ id: 9 }] }, { appid: 2, rank: 5, size: 100, tags: [{ id: 7 }] }, { appid: 3, rank: 50, size: 100, tags: [{ id: 7 }] }]
+  check('calendar: with nothing known about you, Steam\'s wishlist order', scs.rankCalendar(pool).map(g => g.appid).join() === '1,2,3')
+  const liked = scs.rankCalendar(pool, { taste: (tags) => (tags[0].id === 7 ? 1 : 0) })
+  check('calendar: a game like yours moves above a slightly more popular one', liked[0].appid === 2 && liked.find(g => g.appid === 1).order > 1, liked.map(g => g.appid).join())
+  check('calendar: the week starts on Monday, the next one on a weekend', new Date(scs.startMonday(local(2026, 11, 12))).getDate() === 9 && new Date(scs.startMonday(local(2026, 11, 14))).getDate() === 16)
   const { playedSources, forYouItems } = require(path.join(__dirname, '..', 'electron', 'services', 'steamForYou.js'))
   const owned = [
     { appid: 1, name: 'Old favourite', playtime_forever: 300 * 60 },
@@ -285,6 +323,143 @@ console.log('\nupcoming top bar')
   check('for you on Steam: then games like yours, best first', items.slice(3).map(x => x.appid).join() === '61,60')
   check('for you on Steam: a game you own never shows, a wishlisted one shows once', !items.some(x => x.appid === 1) && items.filter(x => x.appid === 50).length === 1 && items.find(x => x.appid === 50).wishlist)
   check('for you on Steam: nothing connected, nothing shown', forYouItems(null, null).length === 0)
+}
+
+// Steam accounts on this PC and whose unlocks count (electron/services/steamAccounts.js).
+console.log('\nsteam accounts')
+{
+  const sa = require(path.join(__dirname, '..', 'electron', 'services', 'steamAccounts.js'))
+  // The shape seen on a real PC: small "timestamp", no "MostRecent", a name in another alphabet.
+  const vdf = '"users"\n{\n\t"76561190000000001"\n\t{\n\t\t"AccountName"\t\t"shared_shop"\n\t\t"PersonaName"\t\t"Shop RPG"\n\t\t"timestamp"\t\t"1794405977"\n\t}\n' +
+    '\t"76561190000000002"\n\t{\n\t\t"AccountName"\t\t"own_acc"\n\t\t"PersonaName"\t\t"Крим"\n\t\t"Timestamp"\t\t"1793592873"\n\t\t"MostRecent"\t\t"1"\n\t}\n}\n'
+  const users = sa.parseLoginUsers(vdf)
+  check('accounts: Steam\'s sign-in list is read, keys in any case',
+    users.length === 2 && users[0].accountName === 'shared_shop' && users[0].timestamp === 1794405977 && !users[0].mostRecent &&
+    users[1].persona === 'Крим' && users[1].timestamp === 1793592873 && users[1].mostRecent, JSON.stringify(users))
+  check('accounts: the long id and the short one turn into each other',
+    sa.accountIdOf('76561199800038227') === '1839772499' && sa.steamIdOf('1839772499') === '76561199800038227' &&
+    sa.accountIdOf('abc') === null && sa.accountIdOf('') === null && sa.steamIdOf('0') === null)
+
+  const A = '76561190000000001', B = '76561190000000002'
+  check('accounts: what the user set wins', sa.effectiveMode(A, { modes: { [A]: 'shared' }, connectedId: A, confirmed: true }) === 'shared' &&
+    sa.effectiveMode(B, { modes: { [B]: 'mine' }, connectedId: A, accountCount: 3 }) === 'mine')
+  check('accounts: the account the user picked is theirs', sa.effectiveMode(A, { connectedId: A, confirmed: true, accountCount: 3 }) === 'mine')
+  check('accounts: several accounts and no pick, none is trusted', sa.effectiveMode(A, { connectedId: A, confirmed: false, accountCount: 3 }) === 'shared')
+  check('accounts: the only account on the PC is the user\'s', sa.effectiveMode(A, { connectedId: A, confirmed: false, accountCount: 1 }) === 'mine')
+  check('accounts: an account that isn\'t connected is shared', sa.effectiveMode(B, { connectedId: A, confirmed: true, accountCount: 2 }) === 'shared')
+
+  const t0 = Date.parse('2026-10-29T17:00:00Z')
+  const iso = (ms) => new Date(ms).toISOString()
+  const sessions = [
+    { id: 384, started_at: iso(t0), ended_at: iso(t0 + 3600_000) },
+    { id: 426, started_at: iso(t0 + 13 * 86400_000), ended_at: null },
+  ]
+  const now = t0 + 13 * 86400_000 + 600_000
+  const win = sa.sessionWindows(sessions, { now })
+  check('accounts: a session counts from 2 minutes before to 5 minutes after',
+    sa.windowAt(win, t0 - 120_000) === 384 && sa.windowAt(win, t0 - 121_000) === null &&
+    sa.windowAt(win, t0 + 3600_000 + 300_000) === 384 && sa.windowAt(win, t0 + 3600_000 + 301_000) === null)
+  check('accounts: a session still open runs until now', sa.windowAt(win, now) === 426 && sa.windowAt(win, t0 + 5 * 86400_000) === null)
+
+  const sec = (ms) => Math.round(ms / 1000)
+  // A lender's file: 47 unlocks months before the first session (the Ghost of Tsushima case).
+  const lender = new Map(Array.from({ length: 47 }, (_, i) => ['ACH_' + i, sec(t0 - 90 * 86400_000) + i * 60]))
+  check('accounts: unlocks from before you ever played stay out', sa.countedUnlocks(lender, 'shared', win).length === 0)
+  // A shared account: 59 unlocked, 5 of them at once during your session.
+  const sharedFile = new Map(Array.from({ length: 54 }, (_, i) => ['OTHER_' + i, sec(t0 + 3 * 86400_000) + i * 600]))
+  for (let i = 0; i < 5; i++) sharedFile.set('MINE_' + i, sec(t0 + 1986_000))
+  const counted = sa.countedUnlocks(sharedFile, 'shared', win)
+  check('accounts: on a shared account only what you unlocked while playing counts',
+    counted.length === 5 && counted.every(c => c.name.startsWith('MINE_') && c.sessionId === 384), JSON.stringify(counted.slice(0, 2)))
+  check('accounts: your own account counts in full, each unlock under its session or none',
+    sa.countedUnlocks(sharedFile, 'mine', win).length === 59 && sa.countedUnlocks(sharedFile, 'mine', win).filter(c => c.sessionId === 384).length === 5)
+  check('accounts: an unlock with no time is never taken from a shared account',
+    sa.countedUnlocks(new Map([['X', 0]]), 'shared', win).length === 0 && sa.countedUnlocks(new Map([['X', 0]]), 'mine', win).length === 1)
+
+  // What is already stored: other people's rows are found, yours are kept.
+  const lc = (m) => new Map([...m].map(([k, v]) => [k.toLowerCase(), v]))
+  const stored = [
+    ...Array.from({ length: 54 }, (_, i) => ({ id: 100 + i, name: 'OTHER_' + i, unlocked_at: iso((sec(t0 + 3 * 86400_000) + i * 600) * 1000) })),
+    ...Array.from({ length: 5 }, (_, i) => ({ id: 200 + i, name: 'MINE_' + i, unlocked_at: iso(sec(t0 + 1986_000) * 1000) })),
+    { id: 300, name: 'ELSEWHERE', unlocked_at: iso(t0 + 9 * 86400_000) },   // no file knows it: kept
+  ]
+  const foreign = sa.foreignRows(stored, [{ mode: 'shared', entries: lc(sharedFile) }], win)
+  check('accounts: stored unlocks other people earned are found', foreign.length === 54 && foreign.every(r => r.name.startsWith('OTHER_')), String(foreign.length))
+  check('accounts: nothing is foreign when the same unlock is on your own account',
+    sa.foreignRows(stored, [{ mode: 'shared', entries: lc(sharedFile) }, { mode: 'mine', entries: lc(sharedFile) }], win).length === 0)
+
+  const filed = [
+    { id: 1, session_id: 426, unlocked_at: iso(t0 + 1986_000) },            // happened in 384
+    { id: 2, session_id: 426, unlocked_at: iso(t0 + 3 * 86400_000) },       // happened in no session
+    { id: 3, session_id: 384, unlocked_at: iso(t0 + 60_000) },              // right
+    { id: 4, session_id: null, unlocked_at: iso(t0 + 60_000) },             // not filed: left alone
+  ]
+  const fixes = sa.misfiledRows(filed, win)
+  check('accounts: an unlock filed under the wrong session is moved to its own',
+    JSON.stringify(fixes) === JSON.stringify([{ id: 1, session_id: 384 }, { id: 2, session_id: null }]), JSON.stringify(fixes))
+
+  // A pretend Steam stats file, written and read back with its unlock times.
+  const kv = require(path.join(__dirname, '..', 'electron', 'services', 'binaryKV.js'))
+  const schemaBuf = kv.encodeBinaryKV({ 9200001: { stats: { 1: { type: 'ACHIEVEMENTS', bits: { 0: { name: 'ACH_A', bit: 0 }, 1: { name: 'ACH_B', bit: 1 }, 2: { name: 'ACH_C', bit: 2 } } } } } })
+  const statsBuf = kv.encodeBinaryKV({ cache: { 1: { data: 0b101, AchievementTimes: { 0: 1790000000, 2: 1790000500 } } } })
+  const read = kv.unlockedWithTimes(kv.parseBinaryKV(schemaBuf), kv.parseBinaryKV(statsBuf))
+  check('accounts: a Steam stats file gives each unlock with its time',
+    read && read.size === 2 && read.get('ACH_A') === 1790000000 && read.get('ACH_C') === 1790000500 && !read.has('ACH_B'), read && JSON.stringify([...read]))
+
+  // What "Check achievements" says when Steam's website refuses a game (src/lib/steamCheck.js).
+  const checkSrc = require('fs').readFileSync(path.join(__dirname, '..', 'src', 'lib', 'steamCheck.js'), 'utf8').replace(/export function/g, 'function')
+  const { steamCheckMessage } = new Function(checkSrc + '; return { steamCheckMessage }')()
+  const mine = { persona: 'Kozo', mode: 'mine', confirmed: true, accounts: 3, private: false }
+  const ok = steamCheckMessage({ name: 'G', refresh: { playerSyncReason: undefined, account: mine }, diag: {} })
+  const local = steamCheckMessage({ name: 'G', diag: { error: 'private', local_unlocked: 5, local_total: 66 },
+    refresh: { playerSyncReason: 'private', account: mine, local: { added: 5, accounts: [{ persona: 'Shop RPG', mode: 'shared', unlocked: 59, counted: 5 }, { persona: 'Kozo', mode: 'mine', unlocked: 12, counted: 12 }] } } })
+  const notOn = steamCheckMessage({ name: 'G', refresh: { playerSyncReason: 'private', account: mine, local: { accounts: [] } } })
+  const priv = steamCheckMessage({ name: 'G', refresh: { playerSyncReason: 'private', account: { ...mine, private: true }, local: { accounts: [] } } })
+  const shared = steamCheckMessage({ name: 'G', refresh: { playerSyncReason: 'private', account: { persona: 'Shop RPG', mode: 'shared', confirmed: true, accounts: 3, private: true } } })
+  const unpicked = steamCheckMessage({ name: 'G', refresh: { playerSyncReason: 'private', account: { persona: 'Shop RPG', mode: 'shared', confirmed: false, accounts: 3, private: true } } })
+  check('check: Steam answered, the usual report applies', ok === null)
+  check('check: unlocks read from this PC are reported per account, with no privacy steps',
+    local.privacyHelp === false && /Read from the Steam app/.test(local.message) && /5 of 59 are yours/.test(local.lines[0]) && /Kozo \(your account\): 12/.test(local.lines[1]) && /5 \/ 66/.test(local.lines[2]), JSON.stringify(local))
+  check('check: a game that isn\'t on your account says so, with no privacy steps', /isn't on Kozo/.test(notOn.title) && notOn.privacyHelp === false)
+  check('check: privacy steps only for your own private account', priv.privacyHelp === true && shared.privacyHelp === false && unpicked.privacyHelp === false)
+  check('check: a shared account is never told to change its privacy', /shared account/.test(shared.message) && shared.accountsButton && /which one is yours/.test(unpicked.message))
+  const allText = [local, notOn, priv, shared, unpicked].map(m => [m.title, m.message, ...m.lines].join(' ')).join(' ')
+  check('check: no long dashes and the forbidden word never shows', !/[–—]/.test(allText) && !/crack/i.test(allText))
+
+  // The Steam website writes names in capitals, the profile page in small letters: both must match.
+  const src = require('fs').readFileSync(path.join(__dirname, '..', 'electron', 'services', 'achievementSync.js'), 'utf8')
+  check('accounts: Steam unlock names are matched in any case', !/nameToAch\[su\.name\]/.test(src) && (src.match(/nameToAch\[String\(su\.name\)\.toLowerCase\(\)\]/g) || []).length === 2)
+}
+
+// The Library's tabs (src/lib/libraryTabs.js, an ES module loaded the same way).
+console.log('\nlibraryTabs')
+{
+  const src = require('fs').readFileSync(path.join(__dirname, '..', 'src', 'lib', 'libraryTabs.js'), 'utf8')
+    .replace(/export (function|const)/g, '$1')
+  const { LIBRARY_TABS, tabOf, countTabs, shownTabs, settleTab, startTab, matchesStatus } =
+    new Function(src + '; return { LIBRARY_TABS, tabOf, countTabs, shownTabs, settleTab, startTab, matchesStatus }')()
+  check('tabs: removed wins over hidden and the status', tabOf({ is_archived: 1, is_hidden: 1, completion_status: 'finished' }) === 'removed')
+  check('tabs: hidden wins over the status', tabOf({ is_hidden: 1, completion_status: 'finished' }) === 'hidden')
+  check('tabs: finished and dropped have their own', tabOf({ completion_status: 'finished' }) === 'finished' && tabOf({ completion_status: 'dropped' }) === 'dropped')
+  check('tabs: playing, on hold and no status are current',
+    ['playing', 'on_hold', null, undefined].every(st => tabOf({ completion_status: st }) === 'current'))
+  const lib = [
+    { name: 'A' }, { name: 'B', completion_status: 'playing' }, { name: 'C', completion_status: 'finished' },
+    { name: 'D', completion_status: 'finished', is_hidden: 1 }, { name: 'E', is_archived: 1 },
+  ]
+  const counts = countTabs(lib)
+  check('tabs: every game is counted once', JSON.stringify(counts) === JSON.stringify({ current: 2, finished: 1, dropped: 0, hidden: 1, removed: 1 }), JSON.stringify(counts))
+  check('tabs: counting only what a search matches', countTabs(lib, g => g.name === 'C').finished === 1 && countTabs(lib, g => g.name === 'C').current === 0)
+  check('tabs: a tab shows only with games, Current always', shownTabs(counts).join() === 'current,finished,hidden,removed' && shownTabs({ current: 0 }).join() === 'current')
+  check('tabs: an emptied tab goes back to Current', settleTab('removed', { removed: 0 }) === 'current' && settleTab('finished', { finished: 3 }) === 'finished' && settleTab('bogus', counts) === 'current')
+  check('tabs: Hidden and Removed can be turned off in Settings', shownTabs(counts, ['hidden', 'removed']).join() === 'current,finished' && shownTabs(counts, ['removed']).join() === 'current,finished,hidden')
+  check('tabs: a tab turned off goes back to Current', settleTab('removed', counts, ['removed']) === 'current' && settleTab('hidden', counts, ['removed']) === 'hidden')
+  check('tabs: a link wins, then the tab used before, then an old status filter',
+    startTab({ show: 'hidden', remembered: 'finished' }) === 'hidden' && startTab({ remembered: 'finished', savedStatus: 'dropped' }) === 'finished' &&
+    startTab({ savedStatus: 'dropped' }) === 'dropped' && startTab({ savedStatus: 'playing' }) === 'current' && startTab() === 'current')
+  check('tabs: the status filter on Current', matchesStatus({ completion_status: 'on_hold' }, '') && matchesStatus({}, 'none') &&
+    !matchesStatus({ completion_status: 'playing' }, 'none') && matchesStatus({ completion_status: 'on_hold' }, 'on_hold') && !matchesStatus({}, 'playing'))
+  check('tabs: five of them, in order', LIBRARY_TABS.join() === 'current,finished,dropped,hidden,removed')
 }
 
 // src/lib/pickForMe.js is an ES module; load it as a plain function body.
@@ -387,6 +562,47 @@ console.log('\ngames like')
   check('DLC and tiny review counts left out', !ids.includes(5) && !ids.includes(6), ids.join())
   check('poor reviews pushed down', ids.indexOf(7) > ids.indexOf(2), ids.join())
   check('shared tags given as the reason', out[0].shared.includes(10) && out[0].pct === 99)
+
+  // Steam's More like this page, cut by its own containers (a real page's six lists).
+  const sa = require(path.join(__dirname, '..', 'electron', 'services', 'steamApi.js'))
+  const box = (id, ids) => `<div class="recommendation_area_ctn similar_grid_ctn" id="${id}" data-items-to-display="9">` +
+    ids.map(x => `<a data-ds-appid="${x}" href="#">x</a>`).join('') + '</div>'
+  const page = '<html>' + box('released', [1, 2, 3]) + box('comingsoon', [4, 5]) + box('freegames3', [6]) + box('demogames3', [7]) +
+    box('newreleases', [8]) + box('topselling', [9, 10]) + '</html>'
+  const secs = sa.parseMoreLike(page)
+  check('like: top sellers are their own list', JSON.stringify(secs.topselling) === '[9,10]', JSON.stringify(secs))
+  check('like: coming soon holds no free games or demos', JSON.stringify(secs.comingsoon) === '[4,5]' && JSON.stringify(secs.freegames) === '[6]' && JSON.stringify(secs.demos) === '[7]')
+  check('like: new releases stop where top sellers start', JSON.stringify(secs.newreleases) === '[8]' && JSON.stringify(secs.released) === '[1,2,3]')
+  check('like: a page with no lists gives nothing', Object.keys(sa.parseMoreLike('<html>no lists</html>')).length === 0)
+  const names = new Map([[1, 'Action Roguelike'], [2, 'Pixel Graphics'], [3, 'Roguelite'], [4, 'Multiplayer'], [5, 'Hack and Slash'], [6, 'Mythology'], [7, 'Indie']])
+  check('like: searches use telling tags, in order', sa.strongTags([1, 2, 3, 4, 5, 6, 7].map(id => ({ id })), names).join() === '1,3,5,6')
+  check('like: too few telling tags are topped up', sa.strongTags([2, 4, 1].map(id => ({ id })), names).join() === '1,2,4')
+  const q = sa.similarQueries([1, 3, 5, 6])
+  check('like: three searches first, three more on scroll',
+    JSON.stringify(q.first.map(x => x.tags)) === '[[1,3,5],[1,3],[1,5]]' && JSON.stringify(q.more.map(x => [x.tags, x.start])) === '[[[3,5],0],[[1,6],0],[[1,3,5],50]]', JSON.stringify(q))
+  check('like: no fourth tag, no search on it', !sa.similarQueries([1, 3, 5]).more.some(x => x.tags.length === 2 && x.tags[1] === undefined) && sa.similarQueries([1, 3, 5]).more.length === 2)
+  const far = { appid: 30, name: 'Far', type: 0, tags: T(50, 51, 52, 53, 14), reviews: { count: 5000, pct: 92 } }
+  check('like: a game far from the seed is left out', !sa.scoreSimilar(seed, [cands[0], far], new Map(), { floor: 0.35 }).some(o => o.appid === 30))
+  check('like: unless Steam itself listed it', sa.scoreSimilar(seed, [cands[0], far], new Map(), { floor: 0.35, keep: new Set([30]) }).some(o => o.appid === 30))
+  const first = scoreSimilar(seed, [cands[0]])
+  const later = sa.scoreSimilar(seed, [{ ...cands[0], appid: 40, tags: T(10, 11, 50) }], new Map(), { top: first[0].score })
+  check('like: a later batch is scored against the first list', later[0].pct < first[0].pct && later[0].pct <= 99, `${later[0]?.pct} vs ${first[0].pct}`)
+  check('like: the defaults are unchanged', JSON.stringify(scoreSimilar(seed, cands, new Map([[3, 0]]))) === JSON.stringify(out))
+}
+
+// Endless lists: what is on screen keeps its place (src/lib/endless.js).
+console.log('\nendless lists')
+{
+  const src = require('fs').readFileSync(path.join(__dirname, '..', 'src', 'lib', 'endless.js'), 'utf8').replace(/export function/g, 'function')
+  const { keepShown } = new Function(src + '; return { keepShown }')()
+  const g = (...ids) => ids.map(appid => ({ appid }))
+  const ids = (list) => list.map(x => x.appid).join()
+  check('endless: cards on screen keep their order when the list is sorted again', ids(keepShown([1, 2, 3], g(9, 3, 1, 2, 8))) === '1,2,3,9,8')
+  check('endless: a card that left the list is gone', ids(keepShown([1, 2, 3], g(3, 1, 7))) === '1,3,7')
+  check('endless: nothing shown yet, the list as it is', ids(keepShown([], g(5, 4))) === '5,4' && ids(keepShown(null, g(5))) === '5')
+  const { cursorDone, freshIds } = require(path.join(__dirname, '..', 'electron', 'services', 'deals.js'))
+  check('deals more: twelve pages at most, or the end of the list', cursorDone(12, 5000) && cursorDone(3, 250) && !cursorDone(1, 3887) && !cursorDone(1, 0))
+  check('deals more: only ids not seen yet', freshIds([1, 2, 2, 3, 0], new Set([2])).join() === '1,3')
 }
 
 // Discounts: the deal score and the price-history verdict.
@@ -1232,6 +1448,72 @@ console.log('\ngame file check')
     check('launchers: the rest are added', merged.length === 3 && merged.some(g => g.name === 'Forza' && g.isInstalled))
     check('launchers: folder games stay', merged[0].name === 'Folder Only')
 
+    // ── Scan PC and games already in KoZo (services/scanPlan.js) ──
+    // Phantom Blade Zero: the game sits under a folder named "steam", next to a bigger archiver.
+    put('steamapps/common/PBZ/steam/PBZ.exe', fakeExe(['d3d12.dll', 'steam_api64.dll'], 4096))
+    put('steamapps/common/PBZ/ProjectPBZ/Binaries/Win64/8za_v2.exe', fakeExe(['KERNEL32.dll'], 20000))
+    const [pbz] = scanner.scanFolder(path.join(root, 'steamapps', 'common', 'PBZ'))
+    check('scan: a game kept under a folder named steam is found', pbz?.exe_name === 'PBZ.exe', JSON.stringify(pbz && { exe: pbz.exe_name, choices: pbz.exe_choices?.map(c => c.exe_name) }))
+    check('scan: an archiver is a tool', scanner.isHelperExe('8za_v2.exe') && scanner.isHelperExe('7za.exe') && scanner.isHelperExe('7z.exe') && !scanner.isHelperExe('7 Days to Die.exe') && !scanner.isHelperExe('Za.exe'))
+    const choices = pbz?.exe_choices || []
+    check('scan: every file is offered, the pick first and tools last', choices[0]?.exe_name === 'PBZ.exe' && choices[0].sure && choices.at(-1)?.exe_name === '8za_v2.exe' && choices.at(-1).tool && choices[0].rel === 'steam', JSON.stringify(choices))
+    check('scan: each entry knows its game folder', pbz?.game_root === path.join(root, 'steamapps', 'common', 'PBZ'))
+    const uSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'utils.js'), 'utf8')
+    const sSrc = fs.readFileSync(path.join(__dirname, '..', 'electron', 'services', 'pcScanner.js'), 'utf8')
+    const lines = (src) => src.slice(src.indexOf('HELPER_EXE_RE = new RegExp(['), src.indexOf("].join('|'), 'i')", src.indexOf('HELPER_EXE_RE'))).split(/\r?\n/).map(l => l.replace(/\/\/.*$/, '').trim()).filter(l => /^'/.test(l))
+    // The app's copy also calls a launcher a tool (exeLooksLikeTool); the scanner may start from one.
+    check('scan: the tool list is the same in the app and the scanner', lines(uSrc).map(l => l.replace('launcher|', '')).join() === lines(sSrc).join(), lines(uSrc).length + ' vs ' + lines(sSrc).length)
+
+    const plan = require(path.join(__dirname, '..', 'electron', 'services', 'scanPlan.js'))
+    const there = new Set()
+    const exists = (p) => there.has(String(p).toLowerCase())
+    const G = (p) => 'C:\\Games\\' + p
+    const result = (name, dir, exe, more = {}) => ({ name, install_path: G(dir), game_root: G(dir), exe_name: exe, detected_type: 'Cracked',
+      exe_choices: [{ exe_name: exe, dir: G(dir), rel: '', size: 1, tool: false, sure: true }, ...(more.extra || [])], ...more })
+    const rows = [
+      { id: 1, name: 'Smoke Removed', install_path: G('Smoke Removed'), exe_name: 'Removed.exe', is_archived: 1, is_installed: 0 },
+      { id: 2, name: 'Smoke Removed', install_path: G('Elsewhere'), exe_name: 'Removed.exe', is_archived: 0, is_installed: 1, total_playtime_seconds: 10 },
+      { id: 3, name: 'Smoke: Moved™', install_path: 'C:\\Old\\Smoke Moved', exe_name: 'Moved.exe', is_archived: 0, is_installed: 0 },
+      { id: 4, name: 'Smoke Tool', install_path: G('Smoke Tool'), exe_name: 'WorldBuilder.exe', is_archived: 0, is_installed: 1 },
+    ]
+    check('match: the same folder wins over the name', plan.matchRow(result('Other Name', 'Smoke Removed', 'Removed.exe'), rows)?.row.id === 1)
+    check('match: by name, a game in the Library beats a removed one', plan.matchRow({ name: 'Smoke Removed', install_path: 'D:\\X' }, rows)?.row.id === 2)
+    check('match: a row matched once is not taken again', plan.matchRow({ name: 'Smoke Removed', install_path: 'D:\\X' }, rows, new Set([2]))?.row.id === 1)
+    check('match: the same words make the same game', plan.matchRow(result('Smoke - Moved', 'Smoke - Moved', 'Moved.exe'), rows)?.row.id === 3)
+    check('match: nothing alike, no match', plan.matchRow(result('Brand New', 'Brand New', 'New.exe'), rows) === null)
+
+    there.add(G('smoke removed').toLowerCase())
+    const archived = plan.planChanges(result('Smoke Removed', 'Smoke Removed', 'Removed.exe'), rows[0], { exists })
+    check('plan: a removed game is offered back, never changed by the scan', archived.offer.restore && !Object.keys(archived.auto).length && archived.offer.installed, JSON.stringify(archived))
+    const moved = plan.planChanges(result('Smoke - Moved', 'Smoke - Moved', 'Moved.exe'), rows[2], { exists })
+    check('plan: the same file in a new folder is fixed by the scan, the file kept', moved.auto.folder?.to === G('Smoke - Moved') && !moved.offer.exe && !moved.offer.folder, JSON.stringify(moved))
+    const offline = plan.planChanges(result('Smoke - Moved', 'Smoke - Moved', 'Moved.exe'), rows[2], { exists, driveGone: () => true })
+    check('plan: nothing moves while the old drive is unplugged', !offline.auto.folder && !offline.offer.folder && !offline.offer.installed, JSON.stringify(offline))
+    const newFile = plan.planChanges(result('Smoke - Moved', 'Smoke - Moved', 'Other.exe'), rows[2], { exists })
+    check('plan: a new folder with another file is offered, not done', !newFile.auto.folder && newFile.offer.folder && newFile.offer.exe?.to === 'Other.exe', JSON.stringify(newFile))
+    there.add(G('smoke tool').toLowerCase())
+    const tool = plan.planChanges(result('Smoke Tool', 'Smoke Tool', 'Smoke Wrong.exe', { extra: [{ exe_name: 'WorldBuilder.exe', dir: G('Smoke Tool'), tool: true }] }), rows[3], { exists })
+    check('plan: a tool stored as the game gets a better file offered', tool.offer.exe?.from === 'WorldBuilder.exe' && tool.offer.exe.to === 'Smoke Wrong.exe' && !tool.auto.installed, JSON.stringify(tool))
+    const unsure = plan.planChanges(result('Smoke Tool', 'Smoke Tool', 'Smoke Wrong.exe', { exe_unsure: true }), rows[3], { exists })
+    check('plan: an uncertain file is never offered', !unsure.offer.exe)
+    there.add('c:\\games\\smoke tool\\start.bat')
+    const launcher = plan.planChanges(result('Smoke Tool', 'Smoke Tool', 'Smoke Wrong.exe'), { ...rows[3], launch_file: G('Smoke Tool\\start.bat') }, { exists })
+    check('plan: a game started from a launcher keeps its file', !launcher.offer.exe)
+    const back = plan.planChanges(result('Smoke Tool', 'Smoke Tool', 'WorldBuilder.exe', { extra: [] }), { ...rows[3], is_installed: 0, exe_name: 'WorldBuilder.exe' }, { exists })
+    check('plan: installed again in its own folder is fixed by the scan', back.auto.installed === true, JSON.stringify(back))
+    check('plan: the state of each card', plan.scanState({ library: {}, changes: { restore: true } }) === 'update' && plan.scanState({ library: {}, changes: {} }) === 'in-library' &&
+      plan.scanState({ no_game_file: true }) === 'no-file' && plan.scanState({ exe_unsure: true }) === 'unsure' && plan.scanState({}) === 'new')
+
+    const pRow = { id: 3, install_path: 'C:\\Old\\Smoke Moved', exe_name: 'Moved.exe', launch_file: 'C:\\Old\\Smoke Moved\\go.bat', crack_dir: 'C:\\Old\\Smoke Moved\\steam_settings' }
+    const p1 = plan.patchFor(pRow, { restore: true, install_path: G('Smoke Moved'), exe_name: 'Moved.exe' }, { exists })
+    check('patch: back, installed, in its new folder; the status is never touched',
+      p1.is_archived === 0 && p1.is_installed === 1 && p1.install_path === G('Smoke Moved') && !('exe_name' in p1) && !('completion_status' in p1) && !('steam_app_id' in p1), JSON.stringify(p1))
+    check('patch: a launcher left in the old folder is cleared, and the old emulator folder too', p1.launch_file === null && p1.crack_dir === null, JSON.stringify(p1))
+    there.add('c:\\games\\smoke moved\\go.bat')
+    const p2 = plan.patchFor({ ...pRow, launch_file: G('Smoke Moved\\go.bat'), install_path: G('Smoke Moved') }, { exe_name: 'Other.exe' }, { exists })
+    check('patch: a launcher still there in the folder is kept', p2.exe_name === 'Other.exe' && !('launch_file' in p2), JSON.stringify(p2))
+    check('patch: a hand-picked launcher is stored', plan.patchFor(pRow, { exe_name: 'X.exe', launch_file: 'C:\\Old\\Smoke Moved\\run.bat' }, { exists }).launch_file === 'C:\\Old\\Smoke Moved\\run.bat')
+
   } finally {
     fs.rmSync(root, { recursive: true, force: true })
   }
@@ -1434,6 +1716,58 @@ async function installCheckTests() {
     check('installed: the file it starts from counts', inst.bat === true)
     check('installed: a store app is not judged by its folder', inst.uri === true)
     check('installed: nothing there', inst.gone === false)
+
+    // The fast recheck (a game installed again shows within seconds).
+    const sf = ic.steamFolderOf('D:\\SteamLibrary\\steamapps\\common\\Smoke Desert\\bin64')
+    check('recheck: a Steam folder is read apart', sf && sf.steamapps === 'D:\\SteamLibrary\\steamapps' && sf.installdir === 'Smoke Desert' && sf.tail === 'bin64', JSON.stringify(sf))
+    const lower = ic.steamFolderOf('c:/program files (x86)/steam/steamapps/common/Smoke Torment')
+    check('recheck: small letters and forward slashes too', lower && lower.installdir === 'Smoke Torment' && lower.tail === '')
+    check('recheck: a folder outside Steam is not one', ic.steamFolderOf('M:\\Games\\X') === null)
+    const acf = (flags, dir = 'SmokeSteam') => `"AppState"\n{\n\t"appid"\t\t"9300001"\n\t"StateFlags"\t\t"${flags}"\n\t"installdir"\t\t"${dir}"\n}\n`
+    const parsed = ic.parseAcf(acf(1026))
+    check('recheck: Steam manifest is read', parsed && parsed.appid === '9300001' && parsed.installdir === 'SmokeSteam' && parsed.stateFlags === 1026, JSON.stringify(parsed))
+    check('recheck: installed means bit 4', ic.isFullyInstalled(4) && ic.isFullyInstalled(6) && !ic.isFullyInstalled(1026) && !ic.isFullyInstalled('') && !ic.isFullyInstalled(NaN))
+    const split = ic.splitGameFolder('D:\\SteamLibrary\\steamapps\\common\\Smoke Desert\\bin64')
+    check('recheck: bin64 is part of the layout, not the game', split.folderName === 'Smoke Desert' && split.tail === 'bin64', JSON.stringify(split))
+    const pick = ic.pickRecheck([{ id: 1, install_path: 'c:\\a' }, { id: 1, install_path: 'c:\\a' }, { id: 2, install_path: '\\\\nas\\x' }, { id: 3, install_path: 'M:/g' }, { id: 4, install_path: '' }])
+    check('recheck: network and empty paths are left out, each game once', pick.probe.map(g => g.id).join() === '1,3' && pick.letters.join() === 'C,M', JSON.stringify(pick))
+    check('recheck: looks every 5 s only while on screen and nothing plays',
+      ic.fastDelay({ visible: true }) === 5000 && ic.fastDelay({ visible: false }) === null &&
+      ic.fastDelay({ visible: true, minimized: true }) === null && ic.fastDelay({ visible: true, sessionActive: true }) === null)
+    check('recheck: a call too early waits out the rest', ic.throttleDelay(0, 1e6, 15000) === 0 && ic.throttleDelay(1e6 - 5000, 1e6, 15000) === 10000)
+
+    // A folder an installer is still filling is walked once per gap.
+    const filling = { id: 9100, install_path: path.join(root, 'filling'), exe_name: 'Late.exe' }
+    put('filling/readme.txt')
+    const first = await ic.hasGameFile(filling, { walkGapMs: 80 })
+    put('filling/bin/Late2.exe')
+    const tooSoon = await ic.hasGameFile(filling, { walkGapMs: 80 })
+    await new Promise(r => setTimeout(r, 120))
+    const later = await ic.hasGameFile(filling, { walkGapMs: 80 })
+    check('recheck: a folder with no game yet is not walked again at once', first === false && tooSoon === false && later === true, `${first} ${tooSoon} ${later}`)
+
+    // Steam is still downloading: the game stays "not installed" until Steam says it is done.
+    const lib = path.join(root, 'lib')
+    put('lib/steamapps/common/SmokeSteam/SmokeSteam.exe')
+    const sg = { id: 9101, steam_app_id: 9300001, install_path: path.join(lib, 'steamapps', 'common', 'SmokeSteam'), exe_name: 'SmokeSteam.exe' }
+    const noManifest = await ic.steamState(sg)
+    fs.writeFileSync(path.join(lib, 'steamapps', 'appmanifest_9300001.acf'), acf(1026))
+    const downloading = await ic.steamState(sg)
+    fs.writeFileSync(path.join(lib, 'steamapps', 'appmanifest_9300001.acf'), acf(4))
+    const done = await ic.steamState(sg)
+    fs.writeFileSync(path.join(lib, 'steamapps', 'appmanifest_9300001.acf'), acf(4, 'OtherFolder'))
+    const other = await ic.steamState(sg)
+    check('recheck: Steam still downloading holds the game back', noManifest === null && downloading === 'installing' && done === 'installed' && other === null, `${noManifest} ${downloading} ${done} ${other}`)
+
+    // Installed again through Steam in another library: the manifest says where.
+    put('lib2/steamapps/common/SmokeMoved/SmokeMoved.exe')
+    fs.writeFileSync(path.join(root, 'lib2', 'steamapps', 'appmanifest_9300002.acf'), acf(4, 'SmokeMoved').replace('9300001', '9300002'))
+    const mg = { id: 9102, steam_app_id: 9300002, install_path: 'Q:\\SteamLibrary\\steamapps\\common\\SmokeMoved', exe_name: 'SmokeMoved.exe', source: 'steam' }
+    const dest = await ic.steamDest(mg, [lib, path.join(root, 'lib2')])
+    check('recheck: a Steam game installed in another library is found by its manifest', dest === path.join(root, 'lib2', 'steamapps', 'common', 'SmokeMoved'), String(dest))
+    fs.writeFileSync(path.join(root, 'lib2', 'steamapps', 'appmanifest_9300002.acf'), acf(1026, 'SmokeMoved').replace('9300001', '9300002'))
+    check('recheck: not while Steam is still downloading it there', await ic.steamDest(mg, [path.join(root, 'lib2')]) === null)
+    check('recheck: only Steam games follow Steam', ic.isSteamManaged(mg) && !ic.isSteamManaged({ steam_app_id: 5, install_path: 'C:\\Games\\X', source: 'cracked', is_cracked: 1 }) && !ic.isSteamManaged({ install_path: sg.install_path }))
   } finally {
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   }

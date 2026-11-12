@@ -1,9 +1,13 @@
 import React, { useState } from 'react'
 import {
   IconSearch, IconPlus, IconCheck, IconDeviceGamepad2, IconX, IconAlertTriangle,
+  IconChevronDown, IconFolderOpen, IconFile, IconTool, IconRefresh,
 } from '@tabler/icons-react'
 import Modal, { modalStyles as ms } from '../ui/Modal'
-import { LAUNCHERS, fileUrl } from '../../lib/utils'
+import ContextMenu from '../ui/ContextMenu'
+import { LAUNCHERS, fileUrl, exeLooksLikeTool } from '../../lib/utils'
+import { LIBRARY_STATUSES } from '../../lib/cardModel'
+import { bytesText } from '../StorageTab'
 import s from './ScanResultModal.module.css'
 
 const BANNER_BG = ['#1a0f2e','#0f1e3a','#0f2a1e','#2a1a0a','#2a0f0f','#1e1a0a','#1a2a0a','#0a1a2a']
@@ -37,15 +41,49 @@ function nextType(current, detected) {
 
 // What a scan type is called on screen. The value stays 'Cracked' (it sets is_cracked).
 const typeLabel = (t) => (t === 'Cracked' ? 'No launcher' : t)
+const low = (x) => String(x || '').toLowerCase()
+const lastTwo = (p) => String(p || '').split(/[\\/]/).filter(Boolean).slice(-2).join('\\')
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
+
+// One card as it stands now: the scan's answer plus a game file picked by hand.
+// A game already in KoZo (r.library) has `changes`: what ticking it would update there
+// (electron/services/scanPlan.js). A hand pick that differs from the stored file is a change too.
+function viewOf(r, type, edit) {
+  const lib = r.library || null
+  const fromFiles = type === 'Cracked'
+  const exe = edit?.exe_name ?? r.exe_name ?? null
+  const dir = edit ? edit.dir : null
+  let changes = lib ? { ...(r.changes || {}) } : null
+  if (lib && edit) {
+    const differs = low(edit.exe_name) !== low(lib.exe_name)
+    if (differs) changes.exe = { from: lib.exe_name, to: edit.exe_name, dir: edit.dir }
+    else delete changes.exe
+    if (fromFiles && low(edit.dir) !== low(lib.install_path)) changes.folder = { from: lib.install_path, to: edit.dir }
+    else if (changes.folder && changes.exe) changes.folder = { ...changes.folder, to: fromFiles ? edit.dir : changes.folder.to }
+  }
+  const hasChanges = !!changes && Object.keys(changes).length > 0
+  const state = lib ? (hasChanges ? 'update' : 'in-library')
+    : !exe ? 'no-file'
+    : (r.exe_unsure && !edit) ? 'unsure' : 'new'
+  return {
+    lib, exe, changes, state,
+    install_path: lib ? null : (edit ? (fromFiles ? dir : (r.game_root || r.install_path)) : r.install_path),
+    canTick: state === 'new' || state === 'unsure' || state === 'update',
+    tool: !!edit && exeLooksLikeTool(edit.exe_name),
+  }
+}
 
 export default function ScanResultModal({ results, onClose, onAdd, title }) {
   const [selected, setSelected]       = useState(() => new Set())
   const [nameEdits, setNameEdits]     = useState({})
   const [typeOverrides, setTypeOverrides] = useState({})
+  const [exeEdits, setExeEdits]       = useState({})     // key -> { exe_name, dir, launch_file } picked by hand
+  const [menu, setMenu]               = useState(null)   // { key, x, y }: the Change game file menu
   const [search, setSearch]           = useState('')
   const [typeFilter, setTypeFilter]   = useState('all')
   const [adding, setAdding]           = useState(false)
   const [addMsg, setAddMsg]           = useState(null)    // { type: 'ok'|'err', text }
+  const [done, setDone]               = useState(() => new Set())   // keys already added or updated
   // Lazily resolved hashed art URLs for games where both CDN paths 404
   const [resolvedUrls, setResolvedUrls] = useState({})
 
@@ -58,9 +96,19 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
     }).catch(() => setResolvedUrls(p => ({ ...p, [appId]: '' })))
   }
 
-  // A folder with no game file can't be added, and one KoZo isn't sure of waits for a hand tick.
-  const canAdd = (r) => !r.alreadyInLibrary && !r.no_game_file
-  const newCount = results.filter(r => canAdd(r) && !r.exe_unsure).length
+  const typeOf = (r) => typeOverrides[keyOf(r)] ?? r.detected_type
+  const view = (r) => {
+    const k = keyOf(r)
+    if (done.has(k)) return { lib: r.library || { name: r.name }, exe: exeEdits[k]?.exe_name ?? r.exe_name, changes: {}, state: 'in-library', canTick: false, tool: false }
+    return viewOf(r, typeOf(r), exeEdits[k])
+  }
+
+  const views = results.map(r => ({ r, v: view(r) }))
+  const newKeys = views.filter(x => x.v.state === 'new').map(x => keyOf(x.r))
+  const updateKeys = views.filter(x => x.v.state === 'update').map(x => keyOf(x.r))
+  const picked = views.filter(x => selected.has(keyOf(x.r)) && x.v.canTick)
+  const nAdd = picked.filter(x => !x.v.lib).length
+  const nUpd = picked.filter(x => x.v.lib).length
 
   function toggle(key) {
     setSelected(prev => {
@@ -70,60 +118,118 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
     })
   }
 
-  function selectAllNew() {
-    setSelected(new Set(results.filter(r => canAdd(r) && !r.exe_unsure).map(keyOf)))
+  // A file picked by hand: that card is ticked, since picking is saying "this one".
+  function pickExe(key, pick) {
+    setExeEdits(p => ({ ...p, [key]: pick }))
+    setSelected(prev => new Set(prev).add(key))
   }
 
-  async function handleAdd() {
-    const toAdd = results
-      .filter(r => selected.has(keyOf(r)))
-      .map(r => {
-        const k = keyOf(r)
-        return {
-          ...r,
-          name: nameEdits[k] ?? r.name,
-          name_edited: nameEdits[k] !== undefined,
-          detected_type: typeOverrides[k] ?? r.detected_type,
-          is_cracked: typeOverrides[k] !== undefined
-            ? (typeOverrides[k] === 'Cracked' ? 1 : 0)
-            : r.is_cracked,
-        }
-      })
-    if (!toAdd.length) return
+  async function browse(r) {
+    const key = keyOf(r)
+    const res = await window.kozo?.api?.dialog?.pickExe?.(r.game_root || r.install_path || undefined)
+    const d = res?.ok ? res.data : null
+    if (!d || !d.exe_name) return
+    pickExe(key, { exe_name: d.exe_name, dir: d.install_path, launch_file: d.launch_file || null })
+  }
+
+  async function handleApply() {
+    const toAdd = picked.filter(x => !x.v.lib).map(({ r, v }) => {
+      const k = keyOf(r)
+      const type = typeOf(r)
+      const edit = exeEdits[k]
+      return {
+        ...r,
+        name: nameEdits[k] ?? r.name,
+        name_edited: nameEdits[k] !== undefined,
+        detected_type: type,
+        is_cracked: typeOverrides[k] !== undefined ? (type === 'Cracked' ? 1 : 0) : r.is_cracked,
+        ...(edit ? { exe_name: edit.exe_name, install_path: v.install_path, exe_dir: edit.dir, launch_file: edit.launch_file || null, exe_picked: true, exe_unsure: false, no_game_file: false } : {}),
+      }
+    })
+    const toUpdate = picked.filter(x => x.v.lib).map(({ r, v }) => {
+      const edit = exeEdits[keyOf(r)]
+      const c = v.changes || {}
+      return {
+        id: v.lib.id,
+        restore: !!c.restore,
+        installed: !!c.installed,
+        install_path: c.folder?.to || undefined,
+        exe_name: c.exe?.to || undefined,
+        exe_dir: c.exe?.dir || undefined,
+        ...(edit ? { launch_file: edit.launch_file || null, picked: true } : {}),
+      }
+    })
+    if (!toAdd.length && !toUpdate.length) return
     setAdding(true)
     setAddMsg(null)
-    const res = await window.kozo?.api?.scanner?.addGames?.(toAdd)
+    const api = window.kozo?.api?.scanner
+    const addRes = toAdd.length ? await api?.addGames?.(toAdd) : null
+    const updRes = toUpdate.length ? await api?.updateGames?.(toUpdate) : null
     setAdding(false)
-    if (res?.ok) {
-      setAddMsg({ type: 'ok', text: `Added ${res.data?.added} game${res.data?.added === 1 ? '' : 's'}!` })
-      onAdd?.(res.data?.added || 0)
-      setSelected(new Set())
-    } else {
-      setAddMsg({ type: 'err', text: res?.error || 'Failed' })
+    const failed = (toAdd.length && !addRes?.ok) || (toUpdate.length && !updRes?.ok)
+    if (failed) { setAddMsg({ type: 'err', text: addRes?.error || updRes?.error || 'That did not work.' }); return }
+    const added = addRes?.data?.added || 0
+    const updated = updRes?.data?.updated || 0
+    const skipped = updRes?.data?.skipped || []
+    const parts = []
+    if (added) parts.push(`Added ${added}`)
+    if (updated) parts.push(`${added ? 'updated' : 'Updated'} ${updated}`)
+    let text = parts.length ? parts.join(', ') + '.' : 'Nothing changed.'
+    for (const sk of skipped) {
+      text += sk.reason === 'running' ? ` ${sk.name} is running, so it wasn't changed.` : ` ${sk.name} wasn't changed (${sk.reason}).`
     }
+    setAddMsg({ type: skipped.length && !added && !updated ? 'err' : 'ok', text })
+    const skippedIds = new Set(skipped.map(x => x.id))
+    setDone(prev => {
+      const next = new Set(prev)
+      for (const { r, v } of picked) if (!v.lib || !skippedIds.has(v.lib.id)) next.add(keyOf(r))
+      return next
+    })
+    setSelected(new Set())
+    if (added || updated) onAdd?.(added + updated)
   }
 
-  const types = ['all', ...new Set(results.map(r => typeOverrides[keyOf(r)] ?? r.detected_type))]
+  const types = ['all', ...new Set(results.map(typeOf))]
 
-  const filtered = results.filter(r => {
+  const filtered = views.filter(({ r }) => {
     const k = keyOf(r)
-    const t = typeOverrides[k] ?? r.detected_type
-    if (typeFilter !== 'all' && t !== typeFilter) return false
+    if (typeFilter !== 'all' && typeOf(r) !== typeFilter) return false
     const name = nameEdits[k] ?? r.name
     if (search && !name.toLowerCase().includes(search.toLowerCase())) return false
     return true
   })
 
+  const menuFor = menu && results.find(r => keyOf(r) === menu.key)
+  const menuItems = menuFor ? (() => {
+    const cur = view(menuFor)
+    const items = (menuFor.exe_choices || []).map(c => ({
+      label: c.exe_name,
+      Icon: c.tool ? IconTool : IconFile,
+      hint: [bytesText(c.size), c.rel || 'Game folder', c.tool ? 'Tool' : !c.sure ? 'Not sure' : null].filter(Boolean).join(', '),
+      active: low(c.exe_name) === low(cur.exe),
+      onClick: () => pickExe(menu.key, { exe_name: c.exe_name, dir: c.dir, launch_file: null }),
+    }))
+    if (items.length) items.push({ divider: true })
+    items.push({ label: 'Browse for the file', Icon: IconFolderOpen, onClick: () => browse(menuFor) })
+    return items
+  })() : null
+
+  const applyLabel = nAdd && nUpd ? `Add ${nAdd}, update ${nUpd}`
+    : nUpd ? `Update ${plural(nUpd, 'game')}`
+    : `Add ${plural(nAdd, 'game')} to Library`
+
   return (
     <Modal
-      title={`${title || 'Scan Results'}: ${results.length} games, ${newCount} new`}
+      title={`${title || 'Scan Results'}: ${plural(results.length, 'game')}, ${newKeys.length} new${updateKeys.length ? `, ${updateKeys.length} to update` : ''}`}
       icon={<IconDeviceGamepad2 size={17} stroke={1.6} />}
       onClose={onClose}
+      // Escape with the file menu open closes the menu, not the whole window and its picks.
+      onRequestClose={() => { if (menu) setMenu(null); else onClose() }}
       width={780}
       footer={
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%' }}>
           {addMsg && (
-            <span style={{
+            <span data-scan-msg style={{
               display: 'flex', alignItems: 'center', gap: 5,
               fontSize: 12,
               color: addMsg.type === 'err' ? 'var(--status-dropped)' : 'var(--status-playing)',
@@ -139,12 +245,13 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
             <button className={ms.btnCancel} onClick={onClose}>Close</button>
             <button
               className={ms.btnPrimary}
-              onClick={handleAdd}
-              disabled={selected.size === 0 || adding}
+              data-scan-apply
+              onClick={handleApply}
+              disabled={picked.length === 0 || adding}
             >
               {adding
-                ? <><span className="spin" style={{ display: 'inline-block', marginRight: 6 }}>↻</span>Adding…</>
-                : <><IconPlus size={14} stroke={2} style={{ marginRight: 4 }} />Add {selected.size} game{selected.size === 1 ? '' : 's'} to Library</>
+                ? <><span className="spin" style={{ display: 'inline-block', marginRight: 6 }}>↻</span>Working…</>
+                : <>{nUpd && !nAdd ? <IconRefresh size={14} stroke={2} style={{ marginRight: 4 }} /> : <IconPlus size={14} stroke={2} style={{ marginRight: 4 }} />}{applyLabel}</>
               }
             </button>
           </div>
@@ -174,9 +281,14 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
           ))}
         </div>
 
-        <button className={s.actionBtn} onClick={selectAllNew} disabled={newCount === 0}>
-          <IconCheck size={12} stroke={2} /> Select {newCount} new
+        <button className={s.actionBtn} onClick={() => setSelected(new Set(newKeys))} disabled={newKeys.length === 0}>
+          <IconCheck size={12} stroke={2} /> Select {newKeys.length} new
         </button>
+        {updateKeys.length > 0 && (
+          <button className={s.actionBtn} onClick={() => setSelected(prev => new Set([...prev, ...updateKeys]))} data-scan-select-updates>
+            <IconRefresh size={12} stroke={2} /> Select {updateKeys.length} to update
+          </button>
+        )}
         <button className={s.actionBtn} onClick={() => setSelected(new Set())} disabled={selected.size === 0}>
           <IconX size={12} stroke={2} /> Clear
         </button>
@@ -184,20 +296,25 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
 
       {/* Card grid */}
       <div className={s.grid}>
-        {filtered.map(r => {
+        {filtered.map(({ r, v }) => {
           const key = keyOf(r)
-          const type = typeOverrides[key] ?? r.detected_type
+          const type = typeOf(r)
           const ts = typeStyle(type)
-          const isChecked = r.alreadyInLibrary || selected.has(key)
+          const isNew = !v.lib
+          const editable = isNew && v.canTick
+          const isChecked = selected.has(key) && v.canTick
           const name = nameEdits[key] ?? r.name
+          const c = v.changes || {}
           // resolvedUrls[appId]: undefined=not tried, null=fetching, ''=failed, string=url
           const resolved = r.steam_app_id ? resolvedUrls[r.steam_app_id] : undefined
-          const libraryCover = r.alreadyInLibrary && (fileUrl(r.library_cover_path) || r.library_cover_url)
+          const libraryCover = v.lib && (fileUrl(r.library_cover_path) || r.library_cover_url)
           const bannerUrl = libraryCover || ((resolved != null && resolved !== '')
             ? resolved
             : (r.steam_app_id
               ? `https://cdn.akamai.steamstatic.com/steam/apps/${r.steam_app_id}/library_600x900_2x.jpg`
               : null))
+          const hasFolder = !!(r.game_root || r.install_path) && !r.launch_uri
+          const statusLabel = v.lib?.status ? LIBRARY_STATUSES[v.lib.status]?.label || null : null
 
           function handleImgError(e) {
             const img = e.target
@@ -218,9 +335,10 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
           return (
             <div
               key={key}
-              className={`${s.card} ${!canAdd(r) ? s.cardDim : ''} ${selected.has(key) ? s.cardSelected : ''}`}
-              onClick={() => canAdd(r) && toggle(key)}
-              data-scan-card={r.alreadyInLibrary ? 'in-library' : r.no_game_file ? 'no-file' : r.exe_unsure ? 'unsure' : 'new'}
+              className={`${s.card} ${!v.canTick ? s.cardDim : ''} ${isChecked ? s.cardSelected : ''}`}
+              onClick={() => v.canTick && toggle(key)}
+              data-scan-card={v.state}
+              data-scan-name={r.name}
             >
               {/* Banner — blurred fill + contained cover so landscape art
                   (a header for a game with no portrait) still looks clean. */}
@@ -239,9 +357,9 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
                 )}
 
                 {/* Checkbox overlay */}
-                {canAdd(r) || r.alreadyInLibrary ? (
+                {v.canTick ? (
                   <div className={`${s.checkOverlay} ${isChecked ? s.checkOverlayOn : ''}`}>
-                    {isChecked && <IconCheck size={14} stroke={2.5} style={{ color: r.alreadyInLibrary ? 'var(--text-muted)' : '#fff' }} />}
+                    {isChecked && <IconCheck size={14} stroke={2.5} style={{ color: '#fff' }} />}
                   </div>
                 ) : null}
 
@@ -250,7 +368,7 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
                   style={{ color: ts.color, background: ts.bg, borderColor: ts.border }}
                   onClick={e => {
                     e.stopPropagation()
-                    if (!canAdd(r)) return
+                    if (!editable) return
                     const next = nextType(type, r.detected_type)
                     setTypeOverrides(p => {
                       const n = { ...p }
@@ -259,19 +377,22 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
                       return n
                     })
                   }}
-                  title={!canAdd(r) ? undefined : 'Click to change type'}
+                  title={!editable ? undefined : 'Click to change type'}
                 >
                   {typeLabel(type)}
                 </div>
 
-                {r.isInstalled && canAdd(r) && (
+                {r.isInstalled && editable && (
                   <div className={s.installedTag}>Installed</div>
                 )}
 
-                {r.alreadyInLibrary && (
-                  <div className={s.inLibraryOverlay}>In Library</div>
+                {/* A game KoZo already has: say so in a corner, the cover stays readable */}
+                {v.lib && (
+                  <div className={s.libChip}>
+                    {v.lib.is_archived && c.restore ? 'Removed' : 'In your Library'}{statusLabel ? `, ${statusLabel}` : ''}
+                  </div>
                 )}
-                {r.no_game_file && !r.alreadyInLibrary && (
+                {v.state === 'no-file' && (
                   <div className={s.inLibraryOverlay}>No game file</div>
                 )}
               </div>
@@ -280,17 +401,52 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
               <div className={s.info}>
                 <input
                   className={s.nameInput}
-                  value={name}
+                  value={v.lib?.name && !isNew ? v.lib.name : name}
                   onChange={e => { e.stopPropagation(); setNameEdits(p => ({ ...p, [key]: e.target.value })) }}
                   onClick={e => e.stopPropagation()}
-                  disabled={!canAdd(r)}
+                  disabled={!editable}
                   placeholder="Game name"
                 />
-                {!r.alreadyInLibrary && (r.no_game_file || r.exe_name) && (
-                  <div className={`${s.exeLine} ${r.no_game_file || r.exe_unsure ? s.exeLineWarn : ''}`} title={r.exe_name || undefined}>
-                    {(r.no_game_file || r.exe_unsure) && <IconAlertTriangle size={11} stroke={2} />}
-                    <span>{r.no_game_file ? 'Only tools in this folder' : r.exe_unsure ? `Not sure: ${r.exe_name}` : r.exe_name}</span>
+
+                {/* What ticking this card changes for a game already in KoZo */}
+                {v.state === 'update' && (
+                  <ul className={s.changes} data-scan-changes>
+                    {c.restore && <li>Back in your Library</li>}
+                    {c.installed && <li>Installed again</li>}
+                    {c.folder && <li title={`${c.folder.from || 'No folder'} to ${c.folder.to}`}>Folder: {lastTwo(c.folder.to)}</li>}
+                    {c.exe && <li title={c.exe.dir}>Game file: {c.exe.to}{c.exe.from ? ` (was ${c.exe.from})` : ''}</li>}
+                  </ul>
+                )}
+                {r.fixed && !done.has(key) && (
+                  <div className={s.fixedLine} data-scan-fixed>
+                    <IconCheck size={11} stroke={2.4} />
+                    <span>{r.fixed.folder ? `Found again at ${lastTwo(r.fixed.folder)}` : 'Installed again'}</span>
                   </div>
+                )}
+                {done.has(key) && <div className={s.fixedLine}><IconCheck size={11} stroke={2.4} /><span>Done</span></div>}
+
+                {/* The game file, and a way to choose another one */}
+                {hasFolder && !done.has(key) && (
+                  <button type="button" data-scan-exe data-gpnav=""
+                    className={`${s.exeBtn} ${(v.state === 'no-file' || v.state === 'unsure' || v.tool) ? s.exeLineWarn : ''}`}
+                    title="Change game file"
+                    onClick={e => {
+                      e.stopPropagation()
+                      const b = e.currentTarget.getBoundingClientRect()
+                      setMenu({ key, x: b.left, y: b.bottom + 4 })
+                    }}>
+                    {(v.state === 'no-file' || v.state === 'unsure' || v.tool) && <IconAlertTriangle size={11} stroke={2} />}
+                    <span>
+                      {v.state === 'no-file' ? 'Choose the game file'
+                        : v.state === 'unsure' ? `Not sure: ${v.exe}`
+                        : v.exe || 'Choose the game file'}
+                    </span>
+                    <IconChevronDown size={11} stroke={2} />
+                  </button>
+                )}
+                {v.tool && <div className={`${s.exeLine} ${s.exeLineWarn}`}><span>Looks like a tool, not the game</span></div>}
+                {exeEdits[key]?.launch_file && (
+                  <div className={s.exeLine}><span>Starts with {String(exeEdits[key].launch_file).split(/[\\/]/).pop()}</span></div>
                 )}
                 <div className={s.metaLine}>
                   {r.playtime > 0 && <span>{Math.round(r.playtime / 60)}h</span>}
@@ -307,6 +463,16 @@ export default function ScanResultModal({ results, onClose, onAdd, title }) {
         <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-secondary)', fontSize: 13 }}>
           No games match the current filter.
         </div>
+      )}
+
+      {menu && menuFor && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          header={{ name: nameEdits[menu.key] ?? menuFor.name, sub: 'Which file is the game?' }}
+          items={menuItems}
+        />
       )}
     </Modal>
   )

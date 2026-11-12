@@ -130,6 +130,8 @@ function sameGameFolder(a, b) {
   return !isDriveRoot(outer) && !CONTAINER_NAMES.has(path.win32.basename(outer))
 }
 
+const INSIDE_SKIP = new Set(['$recycle.bin', 'system volume information'])
+
 // Collect .exe files inside `gamePath` up to `maxDepth` folders deep. Many
 // cracked / unzipped games keep the launcher nested (e.g.
 // "<Game>\Binaries\Win64\Game-Shipping.exe"), so a flat scan misses them.
@@ -147,7 +149,10 @@ function collectExes(gamePath, maxDepth) {
         }
       } else if (e.isDirectory() && depth < maxDepth) {
         const lower = e.name.toLowerCase()
-        if (NESTED_SKIP.has(lower) || SKIP_FOLDERS.has(lower) || INSTALLER_FOLDER_RE.test(lower)) continue
+        // SKIP_FOLDERS is for finding game folders on a drive ("steam", "java", "microsoft" are
+        // not games). Inside a game's own folder those names are just folders: Phantom Blade
+        // Zero keeps PBZ.exe under "steam", and with that skipped an archiver was picked.
+        if (NESTED_SKIP.has(lower) || INSTALLER_FOLDER_RE.test(lower) || INSIDE_SKIP.has(lower)) continue
         walk(path.join(dir, e.name), depth + 1)
       }
     }
@@ -258,6 +263,7 @@ const HELPER_EXE_RE = new RegExp([
   '(^|[-_. ])(map|level|world)[-_. ]?(editor|edit|builder)[-_. 0-9]*\\.exe$',   // WorldBuilder.exe
   '(^|[-_. ])editor[-_. 0-9]*\\.exe$|modkit|modtools',
   'resolution[-_. 0-9]*\\.exe$',                       // YuriScreenResolution.exe
+  '^(7z|7za|7zr|8za)([-_. ]?v?[0-9.]*)?\\.exe$',      // archivers shipped beside a game: 8za_v2.exe
 ].join('|'), 'i')
 
 function isHelperExe(name) {
@@ -435,7 +441,8 @@ function buildEntry(gamePath, lenient) {
   const fromFiles = type === 'Cracked'
   const real = exes.filter(e => !isHelperExe(e.name))
   if (fromFiles && !real.length) {
-    return { name, exe_name: null, install_path: gamePath, detected_type: type, steam_app_id: appid, is_cracked: 1, no_game_file: true }
+    return { name, exe_name: null, install_path: gamePath, detected_type: type, steam_app_id: appid, is_cracked: 1, no_game_file: true,
+      game_root: gamePath, exe_choices: exeChoices(exes, null, gamePath) }
   }
   const usable = real.length ? real : exes
   for (const e of usable) e.looksGame = looksLikeGame(path.join(e.dir, e.name))
@@ -465,7 +472,30 @@ function buildEntry(gamePath, lenient) {
                  type !== 'Ubisoft' && type !== 'EA' && type !== 'Xbox') ? 1 : 0,
     // Nothing says it's the game, so it isn't ticked with the others.
     ...(fromFiles && !isSure(bestExe) ? { exe_unsure: true } : {}),
+    // Every file that could be the game, for "Change game file" in the results window.
+    game_root: gamePath,
+    exe_choices: exeChoices(exes.map(e => ({ ...e, sure: !isHelperExe(e.name) && isSure(e) })), bestExe, gamePath),
   }
+}
+
+// The files a user may choose from: the scan's pick first, then files that look like the
+// game, then the rest by size, tools last (marked). At most 12.
+function exeChoices(exes, best, gamePath) {
+  const seen = new Set()
+  const list = []
+  for (const e of exes || []) {
+    const key = (e.dir + '\\' + e.name).toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    const tool = isHelperExe(e.name)
+    list.push({
+      exe_name: e.name, dir: e.dir, rel: path.relative(gamePath, e.dir), size: e.size || 0,
+      tool, sure: !tool && !!e.sure,
+      pick: !!best && e.name === best.name && e.dir === best.dir,
+    })
+  }
+  list.sort((a, b) => (b.pick - a.pick) || (a.tool - b.tool) || (b.sure - a.sure) || (b.size - a.size))
+  return list.slice(0, 12).map(({ pick, ...c }) => c)
 }
 
 const MAX_SCAN_DEPTH = 5
@@ -555,4 +585,4 @@ function getDefaultScanPaths() {
   return [...new Set(found)]
 }
 
-module.exports = { scanFolder, getDefaultScanPaths, pickBestExe, isGameExe, isHelperExe, isJunkFolder, cleanGameName, tidyFolderName, collectExes, sameGameFolder, namesTheGame }
+module.exports = { scanFolder, getDefaultScanPaths, pickBestExe, isGameExe, isHelperExe, isJunkFolder, cleanGameName, tidyFolderName, collectExes, sameGameFolder, namesTheGame, exeChoices }

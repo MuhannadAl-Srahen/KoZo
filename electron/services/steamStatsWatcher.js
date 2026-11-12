@@ -27,6 +27,9 @@ const scanDebounce = new Map()
 let cachedSteamPath // undefined = not probed, null = not found
 
 function getSteamPath() {
+  // KOZO_STEAM_PATH: the tests point KoZo at a pretend Steam folder ('' = no Steam at all), so
+  // a test run never reads the real one.
+  if (process.env.KOZO_STEAM_PATH != null) return process.env.KOZO_STEAM_PATH || null
   if (cachedSteamPath !== undefined) return cachedSteamPath
   const { execSync } = require('child_process')
   const tryReg = (cmd, valueName) => {
@@ -64,6 +67,7 @@ function regQuery(args) {
   })
 }
 async function warmSteamPath() {
+  if (process.env.KOZO_STEAM_PATH != null) return process.env.KOZO_STEAM_PATH || null
   if (cachedSteamPath !== undefined) return cachedSteamPath
   const found =
     steamPathFromReg(await regQuery(['query', 'HKCU\\Software\\Valve\\Steam', '/v', 'SteamPath']), 'SteamPath') ||
@@ -84,23 +88,28 @@ function getAccountId() {
   } catch { return null }
 }
 
-// OWN account only — never fall back to another account's file. A fallback to
-// "any UserGameStats_*_<appid>.bin" was tried and imported 47
-// Ghost of Tsushima unlocks that belonged to the account the game is shared
-// FROM: achievements are per-account even for family-shared games (playing a
-// shared game records YOUR unlocks under YOUR account id), so a missing
-// own-account file means the user genuinely has no local progress — not that
-// it's hiding under a lender id. The purgeForeignStatsUnlocks migration
-// (db/database.js) cleans up what that fallback imported.
+// Every account on this PC, each with its mode (services/steamAccounts.js). Reading "any
+// account's file" in full was tried once and imported 47 Ghost of Tsushima unlocks that belonged
+// to the account the game was shared from; reading only the connected account then left every
+// game played on another account with no achievements at all. So: an account that is yours
+// counts fully, any other account counts only what was unlocked during a KoZo session of that
+// game on this PC (steamAccounts.countedUnlocks), which keeps other people's unlocks out.
 function statsFilesFor(appid) {
-  const steam = getSteamPath()
-  const acct = getAccountId()
-  if (!steam || !acct) return null
-  const dir = path.join(steam, 'appcache', 'stats')
+  const steam = module.exports.getSteamPath()
+  if (!steam) return null
+  const accounts = require('./steamAccounts').accountsForApp(appid)
+  if (!accounts.length) return null
   return {
-    statsFile: path.join(dir, `UserGameStats_${acct}_${appid}.bin`),
-    schemaFile: path.join(dir, `UserGameStatsSchema_${appid}.bin`),
+    accounts,
+    schemaFile: path.join(steam, 'appcache', 'stats', `UserGameStatsSchema_${appid}.bin`),
   }
+}
+
+// Does Steam on this PC hold unlock data for this game, for any account?
+function hasLocalStats(appid) {
+  const files = statsFilesFor(appid)
+  if (!files) return false
+  return files.accounts.some(a => { try { return fs.statSync(a.statsFile).size > 0 } catch { return false } })
 }
 
 // Parse both files → Map<apiName, unlockUnixSeconds|0>, or null if either file
@@ -144,14 +153,36 @@ async function scanGame(gameId, entry) {
   const game = gamesQ.getGame(gameId)
   if (!game) return { added: 0 }
 
-  const unlockedSet = readUnlockedSet(entry)
+  // Each account's file, and what of it counts (all of it, or only what happened during a
+  // session of this game here).
+  const accounts = entry.accounts || []
+  const sa = require('./steamAccounts')
+  let windows = []
+  try {
+    windows = sa.sessionWindows(require('../db/database').getDb()
+      .prepare('SELECT id, started_at, ended_at FROM sessions WHERE game_id = ?').all(gameId))
+  } catch {}
+  let unlockedSet = null             // lowercase api name -> { t, sessionId }, the earliest per name
+  const report = []
+  for (const acc of accounts) {
+    const set = readUnlockedSet({ statsFile: acc.statsFile, schemaFile: entry.schemaFile })
+    if (set === null) continue
+    if (!unlockedSet) unlockedSet = new Map()
+    const counted = sa.countedUnlocks(set, acc.mode, windows)
+    report.push({ steamId: acc.steamId, mode: acc.mode, unlocked: set.size, counted: counted.length })
+    for (const c of counted) {
+      const key = String(c.name).toLowerCase()
+      const cur = unlockedSet.get(key)
+      if (!cur || (c.t > 0 && (cur.t === 0 || c.t < cur.t))) unlockedSet.set(key, c)
+    }
+  }
   if (unlockedSet === null) {
     logger.debug(`steamStatsWatcher: local parse unavailable for "${game.name}" — Web API burst fallback`)
     // Only worth a network fallback for a game actually being played (a live
     // watcher). A library-wide sweep must not fire a burst per game — most
     // misses there are simply "you never launched this one on this machine".
     if (entry.watcher) webApiBurst(gameId)
-    return { added: 0, fallback: true }
+    return { added: 0, fallback: true, accounts: report }
   }
 
   // Make sure the schema rows exist so api-names can be matched to local rows.
@@ -167,19 +198,23 @@ async function scanGame(gameId, entry) {
     // unlock_id, not unlocked_at — a recorded unlock whose date Steam never
     // reported has a NULL unlocked_at and is still unlocked.
     if (ach.unlock_id != null) continue
-    if (!ach.steam_api_name || !unlockedSet.has(ach.steam_api_name)) continue
+    // Names in any case: the stored one and the file's can differ in capitals.
+    const hit = ach.steam_api_name ? unlockedSet.get(String(ach.steam_api_name).toLowerCase()) : null
+    if (!hit) continue
     // Steam records the real unlock time in the same file (AchievementTimes),
     // so a locally-detected unlock carries its true date — no need to stamp
     // "now" and hope the Web API corrects it later (it can't, on a private
     // profile). Falls back to now only when the file has no time for that bit.
-    const ts = unlockedSet.get(ach.steam_api_name)
+    const ts = hit.t
     const unlocked_at = ts > 0 ? new Date(ts * 1000).toISOString() : now
     try {
       // addUnlock is INSERT OR IGNORE — 0 inserted means the unlock was already
       // recorded (another sync path beat us to it); no toast, no XP for it.
+      // A dated unlock belongs to the session it happened in (or to none): a backlog read
+      // when a session starts used to be filed under that session, 59 unlocks in one case.
       const inserted = achievementsQ.addUnlock({
         achievement_id: ach.id,
-        session_id: entry.sessionId ?? null,
+        session_id: ts > 0 ? (hit.sessionId ?? null) : (entry.sessionId ?? null),
         unlocked_at,
         source: 'steam_stats',
       })
@@ -194,7 +229,7 @@ async function scanGame(gameId, entry) {
     logger.info(`steamStatsWatcher: ${added} instant unlock(s) for "${game.name}" from local Steam stats`)
     require('./achievementSync').emitNewUnlocks(game, newUnlocks)
   }
-  return { added }
+  return { added, accounts: report }
 }
 
 function scheduleScan(gameId) {
@@ -230,7 +265,8 @@ function watchGame(gameId, sessionId) {
   try {
     // Watch the exact file (chokidar handles it appearing later). Steam rewrites
     // it atomically on unlock, so awaitWriteFinish avoids reading a half-write.
-    watcher = chokidar.watch(files.statsFile, {
+    // Every account's file: the game may be played on any of them.
+    watcher = chokidar.watch(files.accounts.map(a => a.statsFile), {
       ignoreInitial: true,
       awaitWriteFinish: { stabilityThreshold: 250, pollInterval: 100 },
     })
@@ -244,7 +280,7 @@ function watchGame(gameId, sessionId) {
   watcher.on('error', (e) => logger.debug('steamStatsWatcher: watch error', { message: e.message }))
 
   watchers.set(gameId, { watcher, ...files, sessionId: sessionId ?? null })
-  logger.info(`steamStatsWatcher: watching local Steam stats for "${game.name}"`, { file: files.statsFile })
+  logger.info(`steamStatsWatcher: watching local Steam stats for "${game.name}"`, { accounts: files.accounts.length })
 
   // Initial scan — catches unlocks that landed before the watcher started
   // (e.g. earned at the very start of the session, or while KoZo was closed).
@@ -262,6 +298,14 @@ function unwatchGame(gameId) {
 
 function unwatchAll() {
   for (const gameId of [...watchers.keys()]) unwatchGame(gameId)
+}
+
+// The accounts or their modes changed: watch the running games again with the new set.
+function rewatchActive() {
+  for (const [gameId, entry] of [...watchers.entries()]) {
+    unwatchGame(gameId)
+    watchGame(gameId, entry.sessionId)
+  }
 }
 
 // ── Library-wide catch-up ────────────────────────────────────────────────────
@@ -294,9 +338,9 @@ async function scanGameOnce(gameId, sessionId = null) {
  * closed show up on their own. Cheap: a couple of small reads per game, and it
  * bails immediately if Steam or the account id can't be resolved.
  */
-async function scanAllSteamGames() {
-  if (!getSteamPath() || !getAccountId()) {
-    logger.debug('steamStatsWatcher: no Steam path or account id — skipping library sweep')
+async function scanAllSteamGames({ quiet = false } = {}) {
+  if (!module.exports.getSteamPath()) {
+    logger.debug('steamStatsWatcher: no Steam path, skipping library sweep')
     return { totalAdded: 0, gamesScanned: 0 }
   }
   let games = []
@@ -307,8 +351,13 @@ async function scanAllSteamGames() {
   } catch { return { totalAdded: 0, gamesScanned: 0 } }
 
   let totalAdded = 0
+  // quiet: after the user says which account is theirs, a backlog comes in. No toasts for it.
+  const sync = quiet ? require('./achievementSync') : null
   for (const g of games) {
+    const hush = quiet && !watchers.has(g.id)
+    if (hush) sync.silenceGame(g.id)
     try { totalAdded += (await scanGameOnce(g.id))?.added || 0 } catch {}
+    finally { if (hush) sync.unsilenceGame(g.id) }
   }
   if (totalAdded > 0) {
     logger.info(`steamStatsWatcher: library sweep recorded ${totalAdded} unlock(s) from local Steam stats`)
@@ -320,7 +369,7 @@ async function scanAllSteamGames() {
 // local loginusers.vdf — picks the MostRecent account, falling back to the
 // newest Timestamp. Used for silent auto-setup so nobody types their ID.
 function detectLoggedInUser() {
-  const steamPath = getSteamPath()
+  const steamPath = module.exports.getSteamPath()
   if (!steamPath) return { error: 'steam_not_found' }
   const vdfPath = path.join(steamPath, 'config', 'loginusers.vdf')
   if (!fs.existsSync(vdfPath)) return { error: 'no_users' }
@@ -337,9 +386,13 @@ function detectLoggedInUser() {
       })
     }
     if (!users.length) return { error: 'no_users' }
-    const pick = users.find(u => u.mostRecent)
-      || users.slice().sort((a, b) => b.timestamp - a.timestamp)[0]
-    return { steamId: pick.steamId, personaName: pick.personaName }
+    // Several accounts: which one is the user's can't be told from here. The last one signed
+    // in may be a shared account (that is how a shared account once became "yours"), so the
+    // caller gets the list and asks.
+    const accounts = users.slice().sort((a, b) => b.timestamp - a.timestamp)
+      .map(u => ({ steamId: u.steamId, personaName: u.personaName }))
+    if (users.length > 1) return { accounts }
+    return { steamId: users[0].steamId, personaName: users[0].personaName, accounts }
   } catch (e) {
     logger.warn('detectLoggedInUser failed', { message: e.message })
     return { error: 'parse_failed' }
@@ -351,6 +404,6 @@ function isWatching(gameId) { return watchers.has(gameId) }
 
 module.exports = {
   isWatching,
-  watchGame, unwatchGame, unwatchAll, scanGame, scanGameOnce, scanAllSteamGames,
-  getSteamPath, warmSteamPath, detectLoggedInUser,
+  watchGame, unwatchGame, unwatchAll, rewatchActive, scanGame, scanGameOnce, scanAllSteamGames,
+  getSteamPath, warmSteamPath, detectLoggedInUser, hasLocalStats, statsFilesFor,
 }
