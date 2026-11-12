@@ -75,16 +75,49 @@ function shouldStartMinimized() {
   } catch { return false }
 }
 
-// Is each game still on this PC? Never while a game runs, and at most every 15 s.
+// Is each game still on this PC? At most every 15 s, and a call that comes too early runs when
+// the 15 s are over instead of being dropped (the focus that would have caught a finished
+// uninstall used to be lost). While a game runs it waits for the game to end.
 let lastInstallCheck = 0
+let installCheckLater = null
 function checkInstalled() {
   try {
-    if (Date.now() - lastInstallCheck < 15000) return
-    if (require('./services/processWatcher').isSessionActive()) return
+    const ic = require('./services/installCheck')
+    const wait = ic.throttleDelay(lastInstallCheck, Date.now(), 15000)
+    if (wait > 0) {
+      if (!installCheckLater) installCheckLater = setTimeout(() => { installCheckLater = null; checkInstalled() }, wait)
+      return
+    }
     lastInstallCheck = Date.now()
-    require('./services/installCheck').reconcile({ quick: true }).catch(() => {})
+    // Its own key: 'installCheck' is the full round queued at start, the only one that hunts
+    // for moved games, and a job with the same key would replace it.
+    require('./services/processWatcher').runWhenIdle('installCheckQuick', () => {
+      ic.reconcile({ quick: true }).catch(() => {})
+    })
   } catch {}
 }
+
+// A game installed again must show within seconds, not minutes: while the window is on screen
+// the games flagged "not installed" are looked at every 5 s (installCheck.recheckMissing: a
+// couple of file checks each, nothing during a game), and at once when the window comes back.
+let fastInstallTimer = null
+function armFastInstallCheck({ now = false, steam } = {}) {
+  clearTimeout(fastInstallTimer); fastInstallTimer = null
+  try {
+    const ic = require('./services/installCheck')
+    const w = mainWindow, live = !!w && !w.isDestroyed()
+    const delay = ic.fastDelay({
+      visible: live && w.isVisible(), minimized: live && w.isMinimized(),
+      sessionActive: require('./services/processWatcher').isSessionActive(),
+    })
+    if (delay == null) return
+    fastInstallTimer = setTimeout(() => {
+      fastInstallTimer = null
+      ic.recheckMissing({ reason: now ? 'focus' : 'visible', steam }).catch(() => {}).finally(() => armFastInstallCheck())
+    }, now ? 0 : delay)
+  } catch {}
+}
+function stopFastInstallCheck() { clearTimeout(fastInstallTimer); fastInstallTimer = null }
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -151,21 +184,25 @@ function createWindow() {
       mainWindow.hide()
     }
   })
-  mainWindow.on('hide', () => { if (!app.isQuitting) armDestroyTimer() })
+  mainWindow.on('hide', () => { stopFastInstallCheck(); if (!app.isQuitting) armDestroyTimer() })
+  mainWindow.on('minimize', stopFastInstallCheck)
+  mainWindow.on('restore', () => { checkInstalled(); armFastInstallCheck({ now: true, steam: 'force' }) })
   mainWindow.on('show', () => {
     clearDestroyTimer()
     // Cheap DB-only pass, so a release that passed while KoZo sat in the tray
     // shows up the moment the window opens.
     try { require('./services/releaseWatch').check() } catch {}
     checkInstalled()
+    armFastInstallCheck({ now: true, steam: 'force' })
   })
-  // Back from uninstalling something: the card says so at once.
-  mainWindow.on('focus', checkInstalled)
+  // Back from uninstalling or installing something: the card says so at once.
+  mainWindow.on('focus', () => { checkInstalled(); armFastInstallCheck({ now: true, steam: 'force' }) })
   // destroy() (the unload-in-tray path below) skips 'close' but still fires
   // 'closed' — clear the module ref so getOrCreateMainWindow knows to recreate.
   // The graphics process keeps what this window drew; services/gpuTrim.js frees it.
   mainWindow.on('closed', () => {
     mainWindow = null
+    stopFastInstallCheck()
     if (!app.isQuitting) { try { require('./services/gpuTrim').schedule() } catch {} }
   })
 
@@ -441,6 +478,12 @@ Close any program that may be using it and start KoZo again.`)
     })
   }, 6000)
   setInterval(checkInstalled, 5 * 60 * 1000)
+  // With KoZo in the tray the same recheck rides on the watcher's idle ticks (20 to 45 s), and
+  // the on-screen loop starts again after a game ends.
+  watcher.onIdleTick(() => {
+    require('./services/installCheck').recheckMissing({ reason: 'tick' }).catch(() => {})
+    if (!fastInstallTimer) armFastInstallCheck()
+  })
 
   // Re-test the Steam profile's readability once per launch. The private-profile
   // warning is persisted, and nothing else clears it — set Game details back to
@@ -464,6 +507,8 @@ Close any program that may be using it and start KoZo again.`)
       // API key and — unlike the Web API — works with a private profile, which
       // is why it's the primary path rather than a fallback.
       require('./services/steamStatsWatcher').scanAllSteamGames().catch(() => {})
+      // Unlocks filed under the wrong session (once), and ones other people earned on shared accounts.
+      try { require('./services/steamAccounts').reviewStored() } catch {}
       // Steam Web: new achievements in a game's list, and unlocks earned on
       // another PC (the stats files above only know this one).
       require('./services/achievementSync').sweepSteamGames().catch(() => {})
@@ -523,6 +568,8 @@ Close any program that may be using it and start KoZo again.`)
   try {
     const settingsQ = require('./db/queries/settings')
     if (!settingsQ.getSetting('steam_user_id')) {
+      // Only when Steam has exactly one account: with several, which one is the user's can't be
+      // told (the last one signed in was once a shared account), so Settings asks.
       const d = require('./services/steamStatsWatcher').detectLoggedInUser()
       if (d?.steamId) {
         settingsQ.setSetting('steam_user_id', d.steamId)

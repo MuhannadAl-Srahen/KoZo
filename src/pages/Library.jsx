@@ -3,10 +3,10 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import {
   IconPlus, IconList, IconLayoutColumns,
   IconDeviceGamepad2, IconScan, IconLoader2, IconCheckbox, IconSquare,
-  IconX, IconCheck, IconSearch, IconEyeOff, IconChevronRight, IconChevronDown,
-  IconArchive, IconFlag, IconCalendarEvent, IconTrash, IconDownload, IconEdit,
+  IconX, IconCheck, IconSearch, IconEyeOff, IconChevronRight,
+  IconArchive, IconCalendarEvent, IconTrash, IconDownload, IconEdit, IconArrowBackUp,
 } from '@tabler/icons-react'
-import GameCard, { formatPlaytime, STATUS_META } from '../components/GameCard'
+import GameCard from '../components/GameCard'
 import AddGameModal from '../components/modals/AddGameModal'
 import EditGameModal from '../components/modals/EditGameModal'
 import InfoModal from '../components/ui/InfoModal'
@@ -20,6 +20,8 @@ import PlanMonthModal from '../components/modals/PlanMonthModal'
 import BulkEditModal from '../components/modals/BulkEditModal'
 import UndoBar from '../components/ui/UndoBar'
 import useCardZoom from '../lib/useCardZoom'
+import { LIBRARY_TABS, tabOf, countTabs, shownTabs, settleTab, startTab, matchesStatus } from '../lib/libraryTabs'
+import { useAppearance } from '../context/AppearanceContext'
 import { CardSkeletonGrid } from '../components/ui/Skeleton'
 import s from './Library.module.css'
 
@@ -74,25 +76,36 @@ function sortGames(games, sortBy) {
 
 const VIEW_KEY = 'kozo:view:library'
 
-function computeStats(games) {
-  const totalPlaytime = games.reduce((a, g) => a + (g.total_playtime_seconds || 0), 0)
-  const totalUnlocked = games.reduce((a, g) => a + (Number(g._unlocked) || 0), 0)
-  const totalAchs     = games.reduce((a, g) => a + (Number(g._total)    || 0), 0)
-  return { totalPlaytime, totalUnlocked, totalAchs }
+// The tabs under the toolbar (lib/libraryTabs.js). A tab shows only while it holds a game.
+const TAB_META = {
+  current:  { label: 'Current',  color: 'var(--a)', hint: 'Playing, on hold and not started yet' },
+  finished: { label: 'Finished', color: 'var(--status-finished)' },
+  dropped:  { label: 'Dropped',  color: 'var(--status-dropped)' },
+  hidden:   { label: 'Hidden',   Icon: IconEyeOff, color: 'var(--text-muted)', hint: 'Hidden games are still tracked and still count in your stats' },
+  removed:  { label: 'Removed',  Icon: IconArchive, color: 'var(--text-muted)', hint: 'Not in your Library. Hours, sessions and achievements are kept' },
 }
+// The status dropdown on Current (Finished and Dropped are tabs).
+const CURRENT_STATUSES = [
+  { value: 'playing', label: 'Playing' },
+  { value: 'on_hold', label: 'On hold' },
+  { value: 'none',    label: 'No status' },
+]
+const CURRENT_STATUS_VALUES = new Set(CURRENT_STATUSES.map(o => o.value))
 
-// Module-level cache so navigating back to the Library renders the grid + stat
-// numbers instantly from memory and refreshes silently — instead of flashing
-// empty/zero values on every visit.
+// Module-level cache so navigating back to the Library renders the grid instantly from
+// memory and refreshes silently, instead of flashing empty on every visit. (The Games,
+// Playtime, Achievements and This week boxes are gone from the top: Activity has them, and
+// the maker asked for them off the Library.)
 let libraryCache = null
-let weekCache = null
+// The tab in use, for this run only: back from a game page lands on the tab you left, and a
+// restart opens Current again (a Removed tab coming back by itself is the "it's still there").
+let libraryTab = null
 
 export default function Library() {
   const location = useLocation()
   const navigate = useNavigate()
 
   const [games, setGames]           = useState(libraryCache ?? [])
-  const [weekSeconds, setWeekSeconds] = useState(weekCache ?? 0)
   const [liveIds, setLiveIds]       = useState(new Set())
   // Big grid or list. The old Small grid view is gone (Ctrl + mouse wheel sizes
   // the cards now), so a saved 'small' opens the grid.
@@ -113,19 +126,23 @@ export default function Library() {
     const saved = localStorage.getItem('kozo:sort:library')
     return SORT_VALUES.has(saved) ? saved : 'last_played'
   })
-  // Collapsible shelves under the grid: finished/dropped, hidden, archived.
-  const [shelfOpen, setShelfOpen] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('kozo:library-shelves') || 'null') || { hidden: localStorage.getItem('kozo:show-hidden') === '1' } }
-    catch { return {} }
+  // Which tab is shown: Current, Finished, Dropped, Hidden or Removed.
+  const [tab, setTabState] = useState(() => {
+    let savedStatus = ''
+    try { savedStatus = localStorage.getItem('kozo:status:library') || '' } catch {}
+    return startTab({ show: new URLSearchParams(location.search).get('show'), remembered: libraryTab, savedStatus })
   })
-  function toggleShelf(key) {
-    setShelfOpen(prev => {
-      const next = { ...prev, [key]: !prev[key] }
-      try { localStorage.setItem('kozo:library-shelves', JSON.stringify(next)) } catch {}
-      return next
-    })
-  }
-  const [statusFilter, setStatusFilter] = useState(() => localStorage.getItem('kozo:status:library') || '')
+  const [statusFilter, setStatusFilter] = useState(() => {
+    try { const v = localStorage.getItem('kozo:status:library') || ''; return CURRENT_STATUS_VALUES.has(v) ? v : '' } catch { return '' }
+  })
+  // Once: the old folding rows' saved state goes, and an old Finished / Dropped filter is a tab now.
+  useEffect(() => {
+    try {
+      localStorage.removeItem('kozo:library-shelves')
+      localStorage.removeItem('kozo:show-hidden')
+      if (!CURRENT_STATUS_VALUES.has(localStorage.getItem('kozo:status:library') || '')) localStorage.setItem('kozo:status:library', '')
+    } catch {}
+  }, [])
   const [planIds, setPlanIds] = useState(null)   // game ids for the Plan-for-month modal
   const [editIds, setEditIds] = useState(null)   // game ids for Edit (status, favorite, hidden)
   const [undo, setUndo] = useState(null)         // { text, run }: the Undo bar after a change to many games
@@ -184,6 +201,12 @@ export default function Library() {
       navigate('/', { replace: true })
       runScan()
     }
+    // ?show=removed (or any tab): a link straight to that tab.
+    const show = params.get('show')
+    if (LIBRARY_TABS.includes(show)) {
+      changeTab(show)
+      navigate('/', { replace: true })
+    }
   }, [location.search])
 
   // New launcher games found in the background (main process, on launch).
@@ -209,6 +232,13 @@ export default function Library() {
   function changeView(v) {
     setView(v)
     localStorage.setItem(VIEW_KEY, v)
+  }
+
+  function changeTab(k) {
+    libraryTab = k
+    setTabState(k)
+    setSelectedIds(new Set())
+    setConfirmDelete(false)
   }
 
   function enterSelection() {
@@ -248,18 +278,37 @@ export default function Library() {
     setSelectedIds(new Set())
   }
 
-  // "Remove" archives: the games leave the Library but keep playtime,
-  // sessions and achievements (restore any time from the Archived shelf).
-  // Remove the selected games: keep their history (archive) or delete it too.
+  // "Remove" with Keep history archives: the games leave the Library but keep playtime,
+  // sessions and achievements, and can come back from the Removed tab (or Undo right away).
+  // Delete with history deletes them for good.
   async function handleBulkDelete(withHistory = false) {
     if (!confirmDelete) { setConfirmDelete(true); return }
     setBulkDeleting(true)
-    if (withHistory) await window.kozo?.api?.games?.delete([...selectedIds])
-    else await window.kozo?.api?.games?.archive([...selectedIds])
+    const ids = [...selectedIds]
+    if (withHistory) await window.kozo?.api?.games?.delete(ids)
+    else await window.kozo?.api?.games?.archive(ids)
     await loadGames()
-    loadWeekPlaytime({ invalidate: true })
     setBulkDeleting(false)
     exitSelection()
+    if (!withHistory && ids.length) {
+      setUndo({
+        text: `Removed ${gamesWord(ids.length)} from the Library`,
+        run: async () => { await window.kozo?.api?.games?.unarchive(ids); loadGames({ silent: true }) },
+      })
+    }
+  }
+
+  // The Removed tab: bring the selected games back.
+  async function handleBulkRestore() {
+    const ids = [...selectedIds]
+    if (!ids.length) return
+    await window.kozo?.api?.games?.unarchive(ids)
+    await loadGames({ silent: true })
+    exitSelection()
+    setUndo({
+      text: `Restored ${gamesWord(ids.length)}`,
+      run: async () => { await window.kozo?.api?.games?.archive(ids); loadGames({ silent: true }) },
+    })
   }
 
   // ── Data ────────────────────────────────────────────────────────────────────
@@ -291,20 +340,6 @@ export default function Library() {
     if (res?.ok) setLiveIds(new Set((res.data ?? []).map(s => s.gameId)))
   }, [])
 
-  // "This Week" must be time played IN the last 7 days — summing the lifetime
-  // playtime of games merely touched this week inflated it by hundreds of hours.
-  // stats:get always returns weeklyPlaytime for the trailing 7 days; refreshed
-  // on session end and on delete only (it runs ~10 queries, so not on every
-  // game:updated — that fires on favorite/status/hidden toggles too).
-  // `invalidate` drops the module cache up front: deleting a game cascades its
-  // sessions away, so the cached figure is provably wrong from that moment and
-  // must not be re-seeded as the first paint if the page remounts mid-refetch.
-  const loadWeekPlaytime = useCallback(async ({ invalidate = false } = {}) => {
-    if (!window.kozo?.api?.stats?.get) return
-    if (invalidate) weekCache = null
-    const res = await window.kozo.api.stats.get('7d')
-    if (res?.ok) { weekCache = res.data?.weeklyPlaytime?.seconds || 0; setWeekSeconds(weekCache) }
-  }, [])
 
   // Scan the PC for installed games right from the Library (the folder list is
   // still configured in Settings → Scan PC). Uses the saved scan paths, or the
@@ -336,13 +371,12 @@ export default function Library() {
     // Warm cache → refresh silently (no loading flash); cold → show the spinner.
     loadGames({ silent: !!libraryCache })
     loadActiveSessions()
-    loadWeekPlaytime()
     if (!window.kozo?.events) return
     // Unsubscribe THIS page's own listeners only — removeAll() is window-wide
     // and would tear down the always-mounted Sidebar's listeners too.
     const offs = [
       window.kozo.events.onSessionStarted(() => { loadGames({ silent: true }); loadActiveSessions() }),
-      window.kozo.events.onSessionEnded(()   => { loadGames({ silent: true }); loadActiveSessions(); loadWeekPlaytime() }),
+      window.kozo.events.onSessionEnded(()   => { loadGames({ silent: true }); loadActiveSessions() }),
       window.kozo.events.onSessionDiscarded?.(() => { loadGames({ silent: true }); loadActiveSessions() }),
       window.kozo.events.onGameUpdated(() => loadGames({ silent: true })),
       // Optimistic LIVE badge — light up the cover ~one poll after launch.
@@ -350,37 +384,36 @@ export default function Library() {
       window.kozo.events.onSessionUndetected?.(() => loadActiveSessions()),
     ]
     return () => { for (const off of offs) off?.() }
-  }, [loadGames, loadActiveSessions, loadWeekPlaytime])
+  }, [loadGames, loadActiveSessions])
 
   // Memoized: new objects on every render made every (memoized) card redraw anyway.
   const allGamesWithLive = useMemo(() => games.map(g => ({ ...g, _isLive: liveIds.has(g.id) })), [games, liveIds])
-  // Shared search/status predicate for both the main grid and the hidden section.
-  const matchesFilters = g => {
-    if (statusFilter && g.completion_status !== statusFilter) return false
-    if (search.trim()) {
-      const q = search.trim().toLowerCase()
-      if (!g.name.toLowerCase().includes(q) && !(g.exe_name || '').toLowerCase().includes(q)) return false
-    }
-    return true
-  }
-  // Finished/dropped games move to their own shelf so the grid shows what you
-  // still play — unless you filter for that status explicitly.
-  const isDone = g => !statusFilter && (g.completion_status === 'finished' || g.completion_status === 'dropped')
-  const filtered = allGamesWithLive.filter(g => !g.is_hidden && !g.is_archived && !isDone(g) && matchesFilters(g))
-  const gamesWithLive = sortGames(filtered, sortBy)
+  // One grid, one tab at a time: every game has exactly one tab (lib/libraryTabs.js), and each
+  // tab gets the same search, sort, sizes, select mode and menus.
+  const q = search.trim().toLowerCase()
+  const matchesSearch = useCallback(
+    g => !q || g.name.toLowerCase().includes(q) || (g.exe_name || '').toLowerCase().includes(q), [q])
+  // Settings > Appearance > Show or hide: the Hidden and Removed tabs can be left out, and then
+  // those games are nowhere in the Library (Ctrl+K still finds them, their page can restore).
+  const { prefs: look } = useAppearance()
+  const offTabs = useMemo(() => [look.hideLibraryHiddenTab && 'hidden', look.hideLibraryRemovedTab && 'removed'].filter(Boolean),
+    [look.hideLibraryHiddenTab, look.hideLibraryRemovedTab])
+  const tabCounts = useMemo(() => countTabs(allGamesWithLive), [allGamesWithLive])
+  // While searching, each tab's number is its matches, so a game in another tab is one click away.
+  const tabMatches = useMemo(() => (q ? countTabs(allGamesWithLive, matchesSearch) : tabCounts), [q, allGamesWithLive, tabCounts, matchesSearch])
+  const visibleTabs = shownTabs(tabCounts, offTabs)
+  const gamesWithLive = useMemo(() => sortGames(
+    allGamesWithLive.filter(g => tabOf(g) === tab && matchesSearch(g) && (tab !== 'current' || matchesStatus(g, statusFilter))),
+    sortBy), [allGamesWithLive, tab, matchesSearch, statusFilter, sortBy])
   const allSelected = gamesWithLive.length > 0 && selectedIds.size === gamesWithLive.length
-  const shelves = [
-    { key: 'done', label: 'Finished & dropped', Icon: IconFlag,
-      games: sortGames(allGamesWithLive.filter(g => !g.is_hidden && !g.is_archived && isDone(g) && matchesFilters(g)), sortBy) },
-    { key: 'hidden', label: 'Hidden', Icon: IconEyeOff,
-      games: sortGames(allGamesWithLive.filter(g => g.is_hidden && !g.is_archived && matchesFilters(g)), sortBy) },
-    { key: 'archived', label: 'Archived', Icon: IconArchive,
-      hint: 'Removed from the Library. Playtime, sessions and achievements are kept.',
-      games: sortGames(allGamesWithLive.filter(g => g.is_archived && matchesFilters(g)), sortBy) },
-  ]
-  // Header stats include hidden games — hiding only affects grid visibility,
-  // not playtime/achievement totals.
-  const stats = computeStats(games)
+  // Matches for the search that sit in other tabs.
+  const elsewhere = q ? visibleTabs.filter(k => k !== tab && tabMatches[k] > 0) : []
+  // A tab that emptied (the last removed game restored, the last finished one set back) closes.
+  useEffect(() => {
+    if (loading) return
+    const t = settleTab(tab, tabCounts, offTabs)
+    if (t !== tab) changeTab(t)
+  }, [loading, tabCounts, tab, offTabs])
 
   const gamesWord = (n) => `${n} game${n !== 1 ? 's' : ''}`
   async function savePlan(month) {
@@ -438,11 +471,11 @@ export default function Library() {
     const ro = new ResizeObserver(measure)
     ro.observe(grid)
     return () => ro.disconnect()
-  }, [view, zoomStyle?.['--card-min'], loading, games.length])
+  }, [view, zoomStyle?.['--card-min'], loading, tab, gamesWithLive.length])
 
   // One grid card with drag-to-reorder.
   function renderCard(game) {
-    const draggable = !selectionMode
+    const draggable = !selectionMode && tab !== 'removed'
     return (
       <div
         key={game.id}
@@ -475,26 +508,6 @@ export default function Library() {
 
   return (
     <div className={s.page}>
-      {/* Stats */}
-      <div className={s.statsBar} data-tour="library-stats">
-        <div className={s.statCard}>
-          <span className={s.statLabel}>Games</span>
-          <span className={s.statValue}>{games.filter(g => !g.is_archived).length}</span>
-        </div>
-        <div className={s.statCard}>
-          <span className={s.statLabel}>Playtime</span>
-          <span className={s.statValue}>{formatPlaytime(stats.totalPlaytime)}</span>
-        </div>
-        <div className={s.statCard}>
-          <span className={s.statLabel}>Achievements</span>
-          <span className={s.statValue}>{stats.totalUnlocked}/{stats.totalAchs}</span>
-        </div>
-        <div className={s.statCard}>
-          <span className={s.statLabel}>This Week</span>
-          <span className={s.statValue}>{formatPlaytime(weekSeconds)}</span>
-        </div>
-      </div>
-
       {/* ── Toolbar (changes based on selection mode) ── */}
       {!selectionMode ? (
         <div className={`${s.toolbar} ${s.oneRow}`}>
@@ -533,7 +546,8 @@ export default function Library() {
           />
           </div>
 
-          {/* Status filter — filter out dropped/on-hold etc. without hiding */}
+          {/* Status filter, on Current only: Finished and Dropped are tabs */}
+          {tab === 'current' && (
           <div className={s.selectSlot} style={{ '--slot': '140px' }}>
           <SearchableSelect
             value={statusFilter}
@@ -542,12 +556,13 @@ export default function Library() {
               setStatusFilter(next)
               localStorage.setItem('kozo:status:library', next)
             }}
-            options={Object.entries(STATUS_META).map(([value, st]) => ({ value, label: st.label }))}
+            options={CURRENT_STATUSES}
             placeholder="All statuses"
             searchable={false}
             width="100%"
           />
           </div>
+          )}
 
           <button
             className={s.btnSecondary}
@@ -616,22 +631,52 @@ export default function Library() {
               ? 'Tap cards to select'
               : `${selectedIds.size} game${selectedIds.size !== 1 ? 's' : ''} selected`
             }
+            {tab !== 'current' ? ` in ${TAB_META[tab].label}` : ''}
           </span>
 
-          {selectedIds.size > 0 && !confirmDelete && (
+          {selectedIds.size > 0 && !confirmDelete && tab !== 'removed' && (
             <button className={s.btnSecondary} onClick={() => setEditIds([...selectedIds])} data-bulk-edit>
               <IconEdit size={14} stroke={1.6} />
               Edit
             </button>
           )}
-          {selectedIds.size > 0 && !confirmDelete && (
+          {selectedIds.size > 0 && !confirmDelete && tab !== 'removed' && (
             <button className={s.btnSecondary} onClick={() => setPlanIds([...selectedIds])}>
               <IconCalendarEvent size={14} stroke={1.6} />
               Plan for month
             </button>
           )}
 
-          {selectedIds.size > 0 && (
+          {/* Removed tab: bring them back, or delete them for good */}
+          {selectedIds.size > 0 && tab === 'removed' && !confirmDelete && (
+            <button className={s.btnSecondary} onClick={handleBulkRestore} data-bulk-restore>
+              <IconArrowBackUp size={14} stroke={1.6} />
+              Restore {selectedIds.size}
+            </button>
+          )}
+          {selectedIds.size > 0 && tab === 'removed' && (
+            confirmDelete ? (
+              <div className={s.confirmRow}>
+                <span className={s.confirmText}>
+                  Delete {gamesWord(selectedIds.size)} with their hours, sessions and achievements? This can't be undone.
+                </span>
+                <button className={s.btnSecondary} onClick={() => setConfirmDelete(false)} disabled={bulkDeleting}>
+                  Cancel
+                </button>
+                <button className={s.btnDanger} onClick={() => handleBulkDelete(true)} disabled={bulkDeleting}>
+                  <IconTrash size={14} stroke={1.6} />
+                  {bulkDeleting ? 'Deleting…' : 'Delete with history'}
+                </button>
+              </div>
+            ) : (
+              <button className={s.btnDanger} onClick={() => setConfirmDelete(true)}>
+                <IconTrash size={14} stroke={1.6} />
+                Delete {selectedIds.size}
+              </button>
+            )
+          )}
+
+          {selectedIds.size > 0 && tab !== 'removed' && (
             confirmDelete ? (
               <div className={s.confirmRow}>
                 <span className={s.confirmText}>
@@ -659,9 +704,37 @@ export default function Library() {
         </div>
       )}
 
+      {/* Tabs: one row, only the tabs that hold games, hidden while there is just Current */}
+      {!selectionMode && !loading && visibleTabs.length > 1 && (
+        <div className={s.tabRow} onWheel={(e) => {
+          // One row that scrolls sideways in a narrow window; the wheel scrolls it.
+          const el = e.currentTarget
+          if (el.scrollWidth > el.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) el.scrollLeft += e.deltaY
+        }}>
+          <div className={s.tabs} role="tablist" aria-label="Show">
+            {visibleTabs.map(k => {
+              const meta = TAB_META[k]
+              const sep = k === 'hidden' || (k === 'removed' && !visibleTabs.includes('hidden'))
+              return (
+                <React.Fragment key={k}>
+                  {sep && <span className={s.tabSep} aria-hidden="true" />}
+                  <button type="button" role="tab" data-lib-tab={k} aria-selected={tab === k} title={meta.hint}
+                    className={`${s.tab} ${tab === k ? s.tabOn : ''} ${q && !tabMatches[k] ? s.tabNone : ''}`}
+                    style={{ '--st': meta.color }}
+                    onClick={() => changeTab(k)}>
+                    {meta.Icon ? <meta.Icon size={13} stroke={1.7} /> : <span className={s.tabDot} />}
+                    {meta.label} <span className={s.tabCount}>{q ? tabMatches[k] : tabCounts[k]}</span>
+                  </button>
+                </React.Fragment>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Game grid */}
       <div className={s.content}>
-        {launcherNew > 0 && (
+        {tab === 'current' && launcherNew > 0 && (
           <div className={s.launcherStrip} role="status">
             <IconDownload size={16} stroke={1.7} />
             <span>
@@ -679,7 +752,19 @@ export default function Library() {
             </button>
           </div>
         )}
-        <ReleasedPanel onChanged={() => loadGames({ silent: true })} />
+        {tab === 'current' && <ReleasedPanel onChanged={() => loadGames({ silent: true })} />}
+        {!loading && tab === 'hidden' && gamesWithLive.length > 0 && (
+          <div className={s.tabNote} data-lib-note>
+            <IconEyeOff size={14} stroke={1.7} />
+            Hidden from the other tabs and from Big Picture. Still tracked and counted.
+          </div>
+        )}
+        {!loading && tab === 'removed' && gamesWithLive.length > 0 && (
+          <div className={s.tabNote} data-lib-note>
+            <IconArchive size={14} stroke={1.7} />
+            Not in your Library. Hours, sessions and achievements are kept. Right-click one to restore it, or play it to bring it back.
+          </div>
+        )}
         {/* Three distinct states. The old version could show two messages at
             once (empty search AND empty library), and showed NOTHING at all
             when a status filter matched nothing — a blank page with no
@@ -696,7 +781,31 @@ export default function Library() {
           />
         )}
 
-        {!loading && games.length > 0 && gamesWithLive.length === 0 && (
+        {/* The search found nothing here, but it did in another tab: say where */}
+        {!loading && games.length > 0 && gamesWithLive.length === 0 && elsewhere.length > 0 && (
+          <EmptyState
+            Icon={IconSearch}
+            title={`No games match "${search}" in ${TAB_META[tab].label}`}
+            desc={`Found in ${elsewhere.map(k => `${TAB_META[k].label} (${tabMatches[k]})`).join(', ')}.`}
+            action={{
+              label: `Show ${TAB_META[elsewhere[0]].label}`,
+              Icon: IconChevronRight,
+              onClick: () => changeTab(elsewhere[0]),
+            }}
+          />
+        )}
+
+        {/* Every game is finished, dropped, hidden or removed */}
+        {!loading && games.length > 0 && gamesWithLive.length === 0 && !elsewhere.length && tab === 'current' && !q && !statusFilter && (
+          <EmptyState
+            Icon={IconDeviceGamepad2}
+            title="Nothing left to play"
+            desc="Every game here is finished, dropped, hidden or removed. Scan your PC or add a game."
+            action={{ label: 'Scan PC', Icon: IconScan, onClick: runScan }}
+          />
+        )}
+
+        {!loading && games.length > 0 && gamesWithLive.length === 0 && !elsewhere.length && (q || statusFilter || tab !== 'current') && (
           <EmptyState
             Icon={IconDeviceGamepad2}
             title={search ? `No games match "${search}"` : 'Nothing matches these filters'}
@@ -718,34 +827,6 @@ export default function Library() {
             {gamesWithLive.map(renderCard)}
           </div>
         )}
-
-
-        {/* Shelves — collapsed sections at the bottom instead of mixing into
-            the grid; expand to manage them (right-click still works) */}
-        {!loading && !selectionMode && shelves.filter(sh => sh.games.length > 0).map(sh => (
-          <React.Fragment key={sh.key}>
-            <button className={s.hiddenHeader} onClick={() => toggleShelf(sh.key)} title={sh.hint}>
-              {shelfOpen[sh.key] ? <IconChevronDown size={14} stroke={1.8} /> : <IconChevronRight size={14} stroke={1.8} />}
-              <sh.Icon size={13} stroke={1.6} />
-              {sh.label} ({sh.games.length})
-            </button>
-            {shelfOpen[sh.key] && (
-              <div className={gridClass} style={zoomStyle}>
-                {sh.games.map(game => (
-                  <GameCard
-                    key={game.id}
-                    game={game}
-                    view={view}
-                    selectionMode={false}
-                    onFavorite={handleFavorite}
-                    onContextMenu={openCardMenu}
-                    cardCover={cardCover}
-                  />
-                ))}
-              </div>
-            )}
-          </React.Fragment>
-        ))}
       </div>
 
       {showAddModal && (
@@ -777,7 +858,7 @@ export default function Library() {
             setGames(prev => { const u = prev.map(g => g.id === game.id ? { ...g, completion_status: status } : g); libraryCache = u; return u })
             window.kozo?.api?.games?.update(game.id, { completion_status: status })
           }}
-          onToggleHidden={(game) => {
+          onToggleHidden={ctxMenu.game.is_archived ? undefined : (game) => {
             const next = game.is_hidden ? 0 : 1
             setGames(prev => { const u = prev.map(g => g.id === game.id ? { ...g, is_hidden: next } : g); libraryCache = u; return u })
             window.kozo?.api?.games?.update(game.id, { is_hidden: next })
@@ -793,11 +874,20 @@ export default function Library() {
             setGames(prev => { const u = prev.map(g => g.id === game.id ? { ...g, is_archived: 1 } : g); libraryCache = u; return u })
             await window.kozo?.api?.games?.archive([game.id])
             loadGames({ silent: true })
+            // Where did it go, and a way back.
+            setUndo({
+              text: `Removed ${game.name} from the Library`,
+              run: async () => { await window.kozo?.api?.games?.unarchive([game.id]); loadGames({ silent: true }) },
+            })
           }}
           onRestore={ctxMenu.game.is_archived ? async (game) => {
             setGames(prev => { const u = prev.map(g => g.id === game.id ? { ...g, is_archived: 0 } : g); libraryCache = u; return u })
             await window.kozo?.api?.games?.unarchive([game.id])
             loadGames({ silent: true })
+            setUndo({
+              text: `Restored ${game.name}`,
+              run: async () => { await window.kozo?.api?.games?.archive([game.id]); loadGames({ silent: true }) },
+            })
           } : undefined}
           deleteIsArchive
           deleteLabel="Remove from library"
@@ -805,9 +895,8 @@ export default function Library() {
             setGames(prev => { const u = prev.filter(g => g.id !== game.id); libraryCache = u; return u })
             await window.kozo?.api?.games?.delete(game.id)
             loadGames({ silent: true })
-            loadWeekPlaytime({ invalidate: true })
           }}
-          extraItems={[
+          extraItems={ctxMenu.game.is_archived ? [] : [
             { label: 'Plan for month…', Icon: IconCalendarEvent, onClick: (g) => setPlanIds([g.id]) },
           ]}
         />

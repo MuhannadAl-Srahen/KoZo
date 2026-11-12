@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   IconChevronLeft, IconChevronRight, IconBrandSteam, IconBookmark, IconBookmarkFilled, IconCheck,
   IconX, IconCalendarMonth, IconLoader2, IconClock,
   IconCalendarEvent, IconCalendarWeek, IconHourglass, IconSearch, IconInfoCircle, IconClockHour4, IconSparkles,
+  IconStarFilled,
 } from '@tabler/icons-react'
 import Modal, { modalStyles as ms } from './ui/Modal'
 import ContextMenu from './ui/ContextMenu'
@@ -12,8 +13,10 @@ import { PanelSkeleton } from './ui/Skeleton'
 import { parseRelease, storeRelease, countdownTo, localDayKey, monthKey, formatMonthKey } from '../lib/utils'
 import useCardZoom from '../lib/useCardZoom'
 import UpcomingHero from './UpcomingHero'
-import { defaultPickMode, filterBuckets, onlyIds, pickDay, readPickMode, weekRows } from '../lib/upcomingPick'
-import { useAppearance } from '../context/AppearanceContext'
+import { defaultPickMode, filterBuckets, onlyIds, pickDay, popRank, readPickMode, weekRows, calendarShown, calendarDay, CALENDAR_COUNTS } from '../lib/upcomingPick'
+import SearchableSelect from './ui/SearchableSelect'
+import Switch from './ui/Switch'
+import useNearEnd from '../lib/useNearEnd'
 import s from './SteamCalendar.module.css'
 
 // Steam-style release calendar: popular games coming soon plus the most
@@ -326,6 +329,8 @@ const STEAM_WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
 // Steam's calendar: Monday to Friday, one row per week, a date bar on each day and
 // its games under it; a weekend release shows on the Monday after (lib/upcomingPick
 // weekRows), as on Steam. A day with nothing stays an empty box, like Steam's.
+// Only drawn when Steam's store index can't be reached (SteamWeeks is the Steam layout).
+const COLUMN_SHOW = 8
 function SteamView({ days, todayKey, lastKey, dayPick, picked, isTracked, renderTrack, onOpen, onMenu, onMore, empty }) {
   if (!days.length) return empty ? <div className={s.muted}>{empty}</div> : null
   const rows = weekRows(new Map(days), todayKey, lastKey)
@@ -337,7 +342,7 @@ function SteamView({ days, todayKey, lastKey, dayPick, picked, isTracked, render
       {rows.map(row => (
         <div key={row.key} className={s.steamWeek}>
           {row.cells.map(({ key: k, date: d, list: full, past }) => {
-            const list = dayPick(full)
+            const list = dayPick(full).slice(0, COLUMN_SHOW)
             return (
               <section key={k} className={`${s.steamDay} ${past ? s.steamDayPast : ''}`} data-day={k} data-games={full.length}>
                 <div className={`${s.steamDayHead} ${k === todayKey ? s.steamDayToday : ''}`}>
@@ -371,44 +376,217 @@ function SteamView({ days, todayKey, lastKey, dayPick, picked, isTracked, render
   )
 }
 
-// Settings > Appearance > Upcoming calendar > Classic: the Steam view as it was before
-// Steam's weeks (5dfbc9b), only the days with releases in a grid, every card with its
-// match % and why. The maker liked it and asked for it back as a choice.
-function ClassicSteamView({ days, todayKey, dayPick, picked, isTracked, renderTrack, onOpen, onMenu, onMore, empty }) {
-  if (!days.length) return empty ? <div className={s.muted}>{empty}</div> : null
+// ── Steam layout: Steam's own calendar ───────────────────────────────────────
+// Built on Steam's store index (electron/services/steamCalendar.js): every game with an exact
+// date in the weeks shown, ranked by wishlists and your taste, your Steam wishlist and Game List
+// marked and kept. Drawn the way Steam draws its calendar: Monday to Friday, a day with one game
+// shows its tall cover, two to four stack their wide ones, more show four and "+N more". Steam's
+// own controls (game count, wishlisted games, a tag) instead of KoZo's picks bar, and no banner.
+// The maker compared it with Steam's page: "it's not the same and not even the same games".
+const CAL_WEEKS = 8           // what the first load covers, like Steam's page
+const CAL_MORE_DAYS = 28      // each scroll past the end
+const CAL_MAX_DAYS = 26 * 7
+const DAY_SHOW = 4
+let steamCalCache = null      // { from, to, items, tagNames, tasteTags, wishlist }
+if (typeof window !== 'undefined') window.addEventListener('kozo:adult-changed', () => { steamCalCache = null })
+
+const readLS = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v } catch { return d } }
+const writeLS = (k, v) => { try { localStorage.setItem(k, String(v)) } catch {} }
+
+// One calendar item as the rest of the page knows a game (details window, menus, Track).
+function asGame(it) {
+  const art = { ...(it.art || {}), release: it.release }
+  return { ...it, rel: storeRelease(it.release, null), art, capsule: it.art?.capsule || null, reason: it.because || null, showMatch: false, calOrder: it.order }
+}
+// Your Steam wishlist and your Game List first in a day's window.
+const flagged = (g) => (g.onWishlist || g.onList ? 1 : 0)
+
+// Steam's calendar data, loaded once for the whole page: the Steam layout draws it, and Strip,
+// Week and Month show its games too (the maker: "if I press All not all the games show": those
+// layouts only had the two coming soon feeds). `failed` = the first load got nothing and nothing
+// was cached, so the Steam layout falls back to the feeds.
+function useSteamCal() {
+  const [data, setData] = useState(() => steamCalCache)
+  const [error, setError] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const busyRef = useRef(false)
+
+  const load = useCallback(async (range, append) => {
+    if (busyRef.current) return
+    busyRef.current = true
+    setBusy(true)
+    const res = await window.kozo?.api?.steam?.calendar?.(range).catch(() => null)
+    busyRef.current = false
+    setBusy(false)
+    // Weeks already on screen stay when a refresh fails; only a first load with nothing to show
+    // falls back to the old lists.
+    if (!res?.ok || !res.data) {
+      if (!append && !steamCalCache) { setError(res?.error || 'Steam did not answer.'); setFailed(true) }
+      return
+    }
+    if (!append && !res.data.items?.length) { if (!steamCalCache) setFailed(true); return }
+    setError(null)
+    setData(prev => {
+      const base = append && prev ? prev : null
+      const byId = new Map((base?.items || []).map(g => [g.appid, g]))
+      for (const it of res.data.items) if (!byId.has(it.appid)) byId.set(it.appid, it)
+      // Two loads are ranked apart: keep each one's order, the later weeks after the earlier.
+      const offset = base ? Math.max(0, ...base.items.map(g => g.order || 0)) : 0
+      const items = base ? [...byId.values()].map(g => (base.items.includes(g) ? g : { ...g, order: (g.order || 0) + offset })) : res.data.items
+      const tags = new Map([...(base?.tagNames || []), ...(res.data.tagNames || [])].map(t => [t.id, t]))
+      const next = { ...res.data, from: base ? base.from : res.data.from, to: res.data.to, items, tagNames: [...tags.values()] }
+      steamCalCache = next
+      return next
+    })
+  }, [])
+
+  useEffect(() => {
+    load({}, false)   // the cached weeks paint at once; this refreshes them
+  }, [load])
+
+  // The next weeks, up to half a year from the first. `until`: at least to that moment.
+  const more = useCallback((until = 0) => {
+    const d = steamCalCache
+    if (!d) return
+    const cap = d.from + CAL_MAX_DAYS * DAY_MS
+    if (d.to >= cap) return
+    load({ from: d.to, to: Math.min(cap, Math.max(until, d.to + CAL_MORE_DAYS * DAY_MS)) }, true)
+  }, [load])
+
+  return { data, error, busy, failed, more }
+}
+
+function SteamWeeks({ cal, steamConnected, isTracked, renderTrack, onOpen, onMenu, onMore }) {
+  const { data, error, busy } = cal
+  const [count, setCount] = useState(() => { const n = Number(readLS('kozo:calendar:count', 100)); return CALENDAR_COUNTS.includes(n) ? n : 100 })
+  const [wish, setWish] = useState(() => { const v = readLS('kozo:calendar:wish', 'show'); return ['show', 'hide', 'only'].includes(v) ? v : 'show' })
+  const [tag, setTag] = useState(() => Number(readLS('kozo:calendar:tag', '')) || null)
+  const [hideEarly, setHideEarly] = useState(() => readLS('kozo:calendar:noEa', '0') === '1')
+  const [hideOwned, setHideOwned] = useState(() => readLS('kozo:calendar:noOwned', '0') === '1')
+
+  const shown = useMemo(() => calendarShown(data?.items, { count, wish, tag, hideEarly, hideOwned }), [data, count, wish, tag, hideEarly, hideOwned])
+  const byDay = useMemo(() => {
+    const m = new Map()
+    for (const it of shown) {
+      const k = localDayKey(new Date(it.day))
+      if (!m.has(k)) m.set(k, [])
+      m.get(k).push(asGame(it))
+    }
+    return m
+  }, [shown])
+
+  const todayKey = localDayKey(new Date())
+  const lastKey = data ? localDayKey(new Date(data.to - DAY_MS)) : todayKey
+  const rows = useMemo(() => weekRows(byDay, todayKey, lastKey), [byDay, todayKey, lastKey])
+
+  // Scrolling past the last week asks for the next four, up to half a year.
+  const canMore = !!data && data.to - data.from < CAL_MAX_DAYS * DAY_MS
+  const endRef = useRef(null)
+  useNearEnd(endRef, () => { if (!busy && canMore) cal.more() }, { enabled: canMore && !busy, key: data?.to })
+
+  const setOpt = (setter, key) => (v) => { setter(v); writeLS(key, typeof v === 'boolean' ? (v ? '1' : '0') : (v ?? '')) }
+  const tagOptions = useMemo(() => {
+    const all = data?.tagNames || []
+    const mine = new Set(data?.tasteTags || [])
+    return [...all.filter(t => mine.has(t.id)), ...all.filter(t => !mine.has(t.id))].map(t => ({ value: t.id, label: t.name }))
+  }, [data])
+
+  if (!data && error) return <EmptyState Icon={IconBrandSteam} title="Steam calendar unavailable" desc={`${error} Check your connection and try again.`} />
+  if (!data) return <PanelSkeleton lines={6} />
+
+  const total = shown.length
   return (
-    <div className={s.steamGrid} data-upcoming-classic="">
-      {days.map(([k, full]) => {
-        const list = dayPick(full)
-        const d = new Date(`${k}T00:00:00`)
-        const label = d.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })
-        return (
-          <section key={k} className={s.steamDay}>
-            <div className={`${s.steamDayHead} ${k === todayKey ? s.steamDayToday : ''}`}>
-              {k === todayKey ? `Today, ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : label}
-            </div>
-            <div className={s.steamDayList}>
-              {list.map(g => (
-                <div key={g.appid} className={`${s.steamCap} ${isTracked(g) ? s.steamCapTracked : ''}`} onContextMenu={(e) => { e.preventDefault(); onMenu(e, g) }}>
-                  <div className={s.steamCapFrame}>
-                    <button className={s.steamCapHit} onClick={() => onOpen(g)} title={g.name}>
-                      <Cover g={g} wide className={s.steamCapArt} />
-                      {picked && <MatchBadge g={g} className={s.matchOnCap} />}
-                    </button>
-                    <div className={s.capTrack}>{renderTrack(g, 'icon')}</div>
-                  </div>
-                  {picked && reasonText(g) && <div className={s.capReason} title={reasonText(g)}>{reasonText(g)}</div>}
-                </div>
+    <div className={s.calWrap} data-steam-weeks="">
+      <div className={s.calHead}>
+        <div className={s.calTitleRow}>
+          <h2 className={s.calTitle}>Your calendar</h2>
+          <span className={s.muted}>{total} game{total === 1 ? '' : 's'} in these weeks, picked from what you play and what Steam players wishlist</span>
+        </div>
+        <div className={s.calControls} data-zoom-ignore="">
+          <label className={s.calField}>
+            <span>Tag</span>
+            <span className={s.calSelect}>
+              <SearchableSelect value={tag} onChange={(v) => setOpt(setTag, 'kozo:calendar:tag')(v ? Number(v) : null)} options={tagOptions} placeholder="Any tag" width="100%" />
+            </span>
+          </label>
+          <div className={s.calField}>
+            <span>Game count</span>
+            <div className={s.viewToggle} role="radiogroup" aria-label="Game count" data-cal-count>
+              {CALENDAR_COUNTS.map(n => (
+                <button key={n} type="button" role="radio" aria-checked={count === n} title={n ? undefined : 'Every game Steam lists with a date in these weeks'}
+                  className={`${s.viewBtn} ${count === n ? s.viewBtnActive : ''}`} onClick={() => setOpt(setCount, 'kozo:calendar:count')(n)}>{n || 'All'}</button>
               ))}
-              {full.length > list.length && (
-                <button className={s.steamMore} onClick={() => onMore(d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }), full)}>
-                  +{full.length - list.length} more
-                </button>
-              )}
             </div>
-          </section>
-        )
-      })}
+          </div>
+          <div className={s.calField}>
+            <span>Wishlisted games</span>
+            <div className={s.viewToggle} role="radiogroup" aria-label="Wishlisted games" data-cal-wish>
+              {[['show', 'Show'], ['hide', 'Hide'], ['only', 'Only']].map(([k, label]) => (
+                <button key={k} type="button" role="radio" aria-checked={wish === k}
+                  className={`${s.viewBtn} ${wish === k ? s.viewBtnActive : ''}`} onClick={() => setOpt(setWish, 'kozo:calendar:wish')(k)}>{label}</button>
+              ))}
+            </div>
+          </div>
+          <label className={s.calSwitch}><Switch checked={hideEarly} onChange={setOpt(setHideEarly, 'kozo:calendar:noEa')} label="Hide Early Access" /> Hide Early Access</label>
+          <label className={s.calSwitch}><Switch checked={hideOwned} onChange={setOpt(setHideOwned, 'kozo:calendar:noOwned')} label="Hide games I have" /> Hide games I have</label>
+        </div>
+        {steamConnected && data.wishlist?.state === 'empty' && (
+          <p className={s.muted} data-cal-wishnote>
+            Your Steam wishlist is private or empty, so only your Game List is marked.
+            {' '}<a href="#/settings?tab=accounts" className={s.calLink}>Steam accounts</a>
+          </p>
+        )}
+      </div>
+
+      <div className={s.calWeeks}>
+        <div className={s.calWeekHead} aria-hidden="true">
+          {STEAM_WEEKDAYS.map(d => <span key={d}>{d}</span>)}
+        </div>
+        {rows.map(row => (
+          <div key={row.key} className={s.calWeek}>
+            {row.cells.map(({ key: k, date: d, list: full }) => {
+              const list = calendarDay(full)
+              const top = list.slice(0, DAY_SHOW)
+              const tall = list.length === 1
+              return (
+                <section key={k} className={`${s.calDay} ${k === todayKey ? s.calDayToday : ''}`} data-day={k} data-games={full.length}>
+                  <div className={s.calDayHead} title={k === todayKey ? 'Today' : undefined}>
+                    {d.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}
+                  </div>
+                  <div className={s.calDayList}>
+                    {top.map(g => (
+                      <div key={g.appid} className={`${s.calCap} ${isTracked(g) ? s.steamCapTracked : ''}`} data-cap={tall ? 'tall' : 'wide'}
+                        onContextMenu={(e) => { e.preventDefault(); onMenu(e, g) }}>
+                        <button className={`${s.calCapHit} ${tall ? s.calCapTall : ''}`} onClick={() => onOpen(g)} title={g.name}>
+                          {tall && g.art?.heroCapsule
+                            ? <img className={s.calCapImg} src={g.art.heroCapsule} alt="" loading="lazy" decoding="async" />
+                            : <Cover g={g} wide className={s.calCapImg} />}
+                          {(g.onWishlist || g.onList) && (
+                            <span className={s.calTag}>{g.onWishlist ? <><IconStarFilled size={10} /> On wishlist</> : <><IconBookmarkFilled size={10} /> On your list</>}</span>
+                          )}
+                          {(g.v1 || g.early) && <span className={s.calChip}>{g.v1 ? '1.0' : 'Early Access'}</span>}
+                        </button>
+                        <div className={s.capTrack}>{renderTrack(g, 'icon')}</div>
+                      </div>
+                    ))}
+                    {list.length > DAY_SHOW && (
+                      <button className={s.calMore} onClick={() => onMore(d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }), list)}>
+                        +{list.length - DAY_SHOW} More
+                      </button>
+                    )}
+                  </div>
+                </section>
+              )
+            })}
+          </div>
+        ))}
+      </div>
+      <div ref={endRef} className={s.moreRow} data-cal-more>
+        {busy ? <><IconLoader2 size={14} className="spin" /> Loading more weeks</>
+          : canMore ? <span>Scroll for more weeks</span>
+          : <span>That is every dated release Steam lists in these weeks</span>}
+      </div>
     </div>
   )
 }
@@ -615,17 +793,18 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
   const [pickChoice, setPickChoice] = useState(() => {
     try { return readPickMode(localStorage.getItem('kozo:calendar:pick')) } catch { return null }
   })
-  // Classic (Settings > Appearance > Upcoming calendar) starts on Like my games, as it did.
-  const { prefs: look } = useAppearance()
-  const classic = look.upcomingLayout === 'classic'
   const pickMode = pickChoice === 'steam' && steamKnown && !steamCal ? defaultPickMode(picks)
-    : pickChoice || defaultPickMode(picks, !!steamCal && !classic)
+    : pickChoice || defaultPickMode(picks, !!steamCal)
+  // Steam's own calendar (services/steamCalendar.js): the Steam layout, and its games in Strip,
+  // Week and Month too, so every layout has the same games.
+  const cal = useSteamCal()
+  const calById = useMemo(() => new Map((cal.data?.items || []).map(it => [Number(it.appid), it])), [cal.data])
   // For you on Steam: its games only have a name and a date once their store record is in
   // (the feeds don't carry most of them), so until then it's loading, not empty. It said
   // "Nothing from your Steam wishlist..." for a moment before the games came in.
   const steamArtPending = pickMode === 'steam' && !!steamCal && (() => {
     const have = new Set(games.map(g => Number(g.appid)))
-    return steamCal.items.some(it => !have.has(Number(it.appid)) && !art[it.appid] && !artTried.has(Number(it.appid)))
+    return steamCal.items.some(it => !have.has(Number(it.appid)) && !calById.has(Number(it.appid)) && !art[it.appid] && !artTried.has(Number(it.appid)))
   })()
   const picksPending = pickMode === 'steam' ? (!steamCal || steamArtPending) : (!picks && pickMode !== 'all')
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()))
@@ -717,20 +896,24 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
   const extraIds = useMemo(() => [...new Set([...pickIds, ...steamIds.keys()])], [pickIds, steamIds])
   useEffect(() => {
     const have = new Set(games.map(g => Number(g.appid)))
-    const need = extraIds.filter(id => !have.has(id) && !art[id] && !artTried.has(id))
+    const need = extraIds.filter(id => !have.has(id) && !calById.has(id) && !art[id] && !artTried.has(id))
     if (need.length) fetchArt(need)
-  }, [extraIds, games.length])
+  }, [extraIds, games.length, calById])
+  // Steam's calendar brings its own name, date and art, so its games need no store record.
   const allGames = useMemo(() => {
     const have = new Set(games.map(g => Number(g.appid)))
+    const fromCal = []
+    for (const [id, it] of calById) if (!have.has(id)) { have.add(id); fromCal.push({ appid: id, name: it.name, release: null, capsule: it.art?.capsule || null }) }
     const extra = extraIds.filter(id => !have.has(id) && art[id]?.name).map(id => ({ appid: id, name: art[id].name, release: null, capsule: null }))
-    return extra.length ? [...games, ...extra] : games
-  }, [games, extraIds, art])
+    return fromCal.length || extra.length ? [...games, ...fromCal, ...extra] : games
+  }, [games, extraIds, art, calById])
 
   const buckets = useMemo(() => {
     const byDay = new Map(), byMonth = new Map(), later = [], all = []
     const todayStart = dayStart(Date.now())
     for (const g of allGames) {
-      const a = art[g.appid] || art[String(g.appid)] || (artTried.has(Number(g.appid)) ? {} : null)
+      const c = calById.get(Number(g.appid))
+      const a = art[g.appid] || art[String(g.appid)] || (c ? { ...c.art, name: c.name, release: c.release } : null) || (artTried.has(Number(g.appid)) ? {} : null)
       const st = pickMode === 'steam' ? steamIds.get(Number(g.appid)) : null
       const rel = storeRelease(a?.release, g.release)
       // Out already (the feeds lag behind the store): not upcoming any more.
@@ -741,7 +924,9 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
         match: st ? (st.wishlist ? 0 : st.pct || 0) : pick?.pct || 0,
         reason: st ? (st.wishlist ? null : st.because) : pick?.because || null,
         wantedSources: st ? null : picks?.wanted || null,
-        onWishlist: !!st?.wishlist,
+        onWishlist: !!st?.wishlist || !!c?.onWishlist,
+        onList: !!c?.onList,
+        calOrder: c?.order,      // Steam's calendar rank (wishlists and your taste)
         steamRank: st ? st.rank : undefined,
         showMatch: pickMode === 'like' || (pickMode === 'steam' && !!st),
       }
@@ -759,7 +944,7 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
       }
     }
     return { byDay, byMonth, later, all }
-  }, [allGames, art, artTried, picks, pickMode, steamIds])
+  }, [allGames, art, artTried, picks, pickMode, steamIds, calById])
 
   // What the top bar's choice shows. Steam, Strip, Week and the banner follow it; Month
   // and TBA show every game, and that bar isn't there.
@@ -817,7 +1002,10 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
     if (pickMode !== 'like' && pickMode !== 'steam' && canLoadMore && !loadingRef.current) loadPages({ soon: pages.soon + 2, wishlist: pages.wishlist + 2 })
   }
   const sentinelRef = useRef(null)
-  const hasSentinel = games.length > 0 && view === 'steam' && !picksPending
+  // The Steam layout is Steam's own calendar (SteamWeeks), the feeds only when it can't load.
+  const steamWeeks = view === 'steam' && !cal.failed
+  const haveGames = allGames.length > 0
+  const hasSentinel = haveGames && view === 'steam' && !picksPending && !steamWeeks
   useEffect(() => {
     const el = sentinelRef.current
     if (!el) return
@@ -834,6 +1022,16 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
   }, [view, weekStart, lastLoadedDay])
   const thisWeek = mondayOf(new Date())
   const weekEnd = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 6)
+  // Week and Month past the calendar's last loaded day ask Steam's calendar for those weeks.
+  // Once per end reached, so a failing Steam isn't asked again and again.
+  const calTo = cal.data?.to || 0
+  const askedAt = useRef(0)
+  useEffect(() => {
+    if (!calTo || cal.busy || askedAt.current === calTo) return
+    const need = view === 'week' ? weekEnd.getTime() + DAY_MS
+      : view === 'month' ? new Date(month.getFullYear(), month.getMonth() + 1, 8).getTime() : 0
+    if (need > calTo) { askedAt.current = calTo; cal.more(need) }
+  }, [view, weekStart, month, calTo, cal.busy])
 
   function shiftMonth(delta) { setMonth(m => new Date(m.getFullYear(), m.getMonth() + delta, 1)) }
   function shiftWeek(delta) { setWeekStart(w => new Date(w.getFullYear(), w.getMonth(), w.getDate() + delta * 7)) }
@@ -900,7 +1098,7 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
           title="Releases you track">
           <IconBookmarkFilled size={14} /> Tracked <span className={s.tbaCount}>{trackedEntries.length}</span>
         </button>
-        {['steam', 'strip', 'week'].includes(view) && (
+        {['steam', 'strip', 'week'].includes(view) && !steamWeeks && (
           <div className={s.viewToggle} role="radiogroup" aria-label="Which games">
             {steamCal && (
               <button className={`${s.viewBtn} ${pickMode === 'steam' ? s.viewBtnActive : ''}`} onClick={() => setPick('steam')} data-pick="steam"
@@ -919,17 +1117,22 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
           </div>
         )}
         <div className={s.spacer} />
-        {pickMode === 'like' && ['steam', 'strip', 'week'].includes(view) && (
+        {pickMode === 'like' && ['steam', 'strip', 'week'].includes(view) && !steamWeeks && (
           <span className={s.muted} title={picks?.names?.length ? `Steam's "More like this" for: ${picks.names.join(', ')}` : ''}>
             {!picks ? 'Finding games like yours…'
               : picks.sources ? `Like ${picks.sources} of your games`
               : ''}
           </span>
         )}
-        {loading && <IconLoader2 size={15} className="spin" />}
+        {loading && !steamWeeks && <IconLoader2 size={15} className="spin" />}
       </div>
 
-      {games.length > 0 && ['steam', 'strip', 'week'].includes(view) && (
+      {steamWeeks && (
+        <SteamWeeks cal={cal} steamConnected={!!steamCal || steamKnown} isTracked={isTracked} renderTrack={renderTrack}
+          onOpen={setDetail} onMenu={openMenu} onMore={openMore} />
+      )}
+
+      {haveGames && ['steam', 'strip', 'week'].includes(view) && !steamWeeks && (
         <UpcomingHero games={shown.all} isTracked={isTracked} onOpen={setDetail} renderTrack={renderTrack} />
       )}
 
@@ -953,18 +1156,15 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
         </div>
       )}
 
-      {error && !games.length && (
+      {error && !haveGames && !steamWeeks && (
         <EmptyState Icon={IconBrandSteam} title="Steam calendar unavailable" desc={`${error} Check your connection and try again.`} />
       )}
-      {loading && !games.length && <PanelSkeleton lines={6} />}
+      {loading && !haveGames && !steamWeeks && <PanelSkeleton lines={6} />}
 
-      {games.length > 0 && picksPending && ['steam', 'strip', 'week'].includes(view) && <PanelSkeleton lines={6} />}
-      {games.length > 0 && !picksPending && view === 'steam' && (
-        classic
-          ? <ClassicSteamView days={steamRun} todayKey={todayKey} dayPick={dayPick} picked={pickMode === 'like' || pickMode === 'steam'} isTracked={isTracked}
-              renderTrack={renderTrack} onOpen={setDetail} onMenu={openMenu} onMore={openMore} empty={steamHasLater ? '' : emptyText} />
-          : <SteamView days={steamRun} todayKey={todayKey} lastKey={todayKey} dayPick={dayPick} picked={pickMode === 'like' || pickMode === 'steam'} isTracked={isTracked}
-              renderTrack={renderTrack} onOpen={setDetail} onMenu={openMenu} onMore={openMore} empty={steamHasLater ? '' : emptyText} />
+      {haveGames && picksPending && ['steam', 'strip', 'week'].includes(view) && !steamWeeks && <PanelSkeleton lines={6} />}
+      {haveGames && !picksPending && view === 'steam' && !steamWeeks && (
+        <SteamView days={steamRun} todayKey={todayKey} lastKey={todayKey} dayPick={dayPick} picked={pickMode === 'like' || pickMode === 'steam'} isTracked={isTracked}
+          renderTrack={renderTrack} onOpen={setDetail} onMenu={openMenu} onMore={openMore} empty={steamHasLater ? '' : emptyText} />
       )}
       {hasSentinel && (
         <div ref={sentinelRef} className={s.moreRow}>
@@ -976,12 +1176,12 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
             : <span>That is everything Steam lists as coming soon</span>}
         </div>
       )}
-      {games.length > 0 && !picksPending && view === 'strip' && <StripView buckets={shown} todayKey={todayKey} wide={wide} dayPick={dayPick} onMore={openMore} empty={emptyText} />}
-      {games.length > 0 && !picksPending && view === 'week' && <WeekView buckets={shown} todayKey={todayKey} weekStart={weekStart} wide={wide} dayPick={dayPick} onMore={openMore} empty={weekEmpty} />}
+      {haveGames && !picksPending && view === 'strip' && <StripView buckets={shown} todayKey={todayKey} wide={wide} dayPick={dayPick} onMore={openMore} empty={emptyText} />}
+      {haveGames && !picksPending && view === 'week' && <WeekView buckets={shown} todayKey={todayKey} weekStart={weekStart} wide={wide} dayPick={dayPick} onMore={openMore} empty={weekEmpty} />}
       {view === 'tracked' && <TrackedView entries={trackedEntries} card={(g) => (
         <TrackedCard key={g.appid} g={g} info={infoOf(g)} renderTrack={renderTrack} onOpen={setDetail} onMenu={openMenu} onWant={onWant} />
       )} />}
-      {games.length > 0 && view === 'tba' && <TbaView later={buckets.later} poster={poster} />}
+      {haveGames && view === 'tba' && <TbaView later={buckets.later} poster={poster} />}
 
       {view === 'month' && (
         <div className={s.gridScroll}>
@@ -989,7 +1189,7 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
             {WEEKDAYS.map(d => <div key={d} className={s.weekday}>{d}</div>)}
             {monthGrid(month).flat().map(day => {
               const k = localDayKey(day)
-              const list = buckets.byDay.get(k) || []
+              const list = [...(buckets.byDay.get(k) || [])].sort((a, b) => popRank(a) - popRank(b))   // the most wanted in front
               const outside = day.getMonth() !== month.getMonth()
               const lead = list[0]
               return (
@@ -1030,7 +1230,7 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], o
 
       {dayOpen && (
         <Modal title={dayOpen.label} icon={<IconCalendarMonth size={17} stroke={1.6} />} onClose={() => setDayOpen(null)} width={1080}>
-          <div className={`${s.posterGrid} ${s.dayModalGrid}`}>{[...dayOpen.games].sort((a, b) => b.match - a.match).map(g => poster(g))}</div>
+          <div className={`${s.posterGrid} ${s.dayModalGrid}`}>{[...dayOpen.games].sort((a, b) => (b.match || 0) - (a.match || 0) || flagged(b) - flagged(a) || popRank(a) - popRank(b)).map(g => poster(g))}</div>
         </Modal>
       )}
 

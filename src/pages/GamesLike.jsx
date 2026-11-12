@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
-  IconSparkles, IconSearch, IconX, IconThumbUp, IconCheck, IconPlus, IconBooks, IconListCheck,
+  IconSparkles, IconSearch, IconX, IconThumbUp, IconCheck, IconPlus, IconBooks, IconListCheck, IconRefresh,
 } from '@tabler/icons-react'
 import SteamGameModal from '../components/SteamGameModal'
 import EmptyState from '../components/ui/EmptyState'
@@ -9,6 +9,8 @@ import GeneratedCover from '../components/GeneratedCover'
 import { CardSkeletonGrid } from '../components/ui/Skeleton'
 import useCardZoom from '../lib/useCardZoom'
 import { rankResults } from '../lib/searchRank'
+import useNearEnd from '../lib/useNearEnd'
+import { keepShown } from '../lib/endless'
 import s from './GamesLike.module.css'
 
 // Games like: pick any game (search, or one of yours) and see the games most
@@ -29,6 +31,10 @@ const SORTS = [
 
 // Module cache: a revisit (or the same seed on Game Detail) paints at once.
 const resultCache = new Map()
+// One request per game at a time: the page and its grid both ask for the same seed, and two
+// requests each doubled the store calls (and the chance Steam says "slow down").
+const inflight = new Map()
+const moreInflight = new Map()
 let ownedCache = null
 
 export function tone(pct) { return pct >= 85 ? 'high' : pct >= 70 ? 'mid' : 'low' }
@@ -55,29 +61,64 @@ async function loadOwned() {
 }
 export function forgetOwned() { ownedCache = null }
 
+function askSimilar(appId) {
+  if (!inflight.has(appId)) {
+    inflight.set(appId, Promise.resolve(window.kozo?.api?.steam?.similar?.(appId)).finally(() => inflight.delete(appId)))
+  }
+  return inflight.get(appId)
+}
+
 export function useSimilar(appId) {
   const [state, setState] = useState(() => (appId && resultCache.get(appId)) || null)
   const [error, setError] = useState(null)
+  const [moreBusy, setMoreBusy] = useState(false)
+  const [moreError, setMoreError] = useState(null)
+  const [attempt, setAttempt] = useState(0)
   useEffect(() => {
-    setError(null)
+    setError(null); setMoreError(null)
     if (!appId) { setState(null); return }
     const hit = resultCache.get(appId)
     setState(hit || null)
     if (hit) return
     let alive = true
-    window.kozo?.api?.steam?.similar?.(appId).then(res => {
+    askSimilar(appId).then(res => {
       if (!alive) return
       if (res?.ok) { resultCache.set(appId, res.data); setState(res.data) }
       else setError(res?.error || 'Steam did not answer. Try again in a moment.')
     })
     return () => { alive = false }
+  }, [appId, attempt])
+
+  // The second batch, once: what Steam lists beside the closest matches, and more searches.
+  const loadMore = useCallback(async () => {
+    const cur = resultCache.get(appId)
+    if (!appId || !cur?.more) return
+    if (!moreInflight.has(appId)) {
+      moreInflight.set(appId, Promise.resolve(window.kozo?.api?.steam?.similarMore?.(appId)).finally(() => moreInflight.delete(appId)))
+    }
+    setMoreBusy(true); setMoreError(null)
+    const res = await moreInflight.get(appId)
+    setMoreBusy(false)
+    const now = resultCache.get(appId)
+    if (!now) return
+    if (!res?.ok) { setMoreError(res?.error || 'Steam did not answer.'); return }
+    if (res.data?.error) setMoreError(res.data.error)
+    const have = new Set(now.games.map(g => g.appid))
+    const next = { ...now, games: [...now.games, ...(res.data?.games || []).filter(g => !have.has(g.appid))], more: !!res.data?.more }
+    resultCache.set(appId, next)
+    setState(next)
   }, [appId])
-  return { data: state, error, loading: !!appId && !state && !error }
+
+  const retry = useCallback(() => { resultCache.delete(appId); setAttempt(n => n + 1) }, [appId])
+  return { data: state, error, loading: !!appId && !state && !error, loadMore, moreBusy, moreError, retry }
 }
 
 // The results grid with its filters, shared by this page and Game Detail.
 export function GamesLikeGrid({ appId, pageKey = 'like', compact = false }) {
-  const { data, error, loading } = useSimilar(appId)
+  const { data, error, loading, loadMore, moreBusy, moreError, retry } = useSimilar(appId)
+  // Shown a chunk at a time, more as the end of the list comes near.
+  const CHUNK = compact ? 12 : 24
+  const [shown, setShown] = useState(CHUNK)
   const [owned, setOwned] = useState(ownedCache)
   const [show, setShow] = useState('released')
   const [sort, setSort] = useState('match')
@@ -89,7 +130,7 @@ export function GamesLikeGrid({ appId, pageKey = 'like', compact = false }) {
 
   useEffect(() => { loadOwned().then(setOwned) }, [])
 
-  const games = useMemo(() => {
+  const filtered = useMemo(() => {
     let list = data?.games || []
     if (show === 'released') list = list.filter(g => !g.soon)
     else if (show === 'soon') list = list.filter(g => g.soon)
@@ -98,6 +139,30 @@ export function GamesLikeGrid({ appId, pageKey = 'like', compact = false }) {
     else if (sort === 'newest') list = [...list].sort((a, b) => (b.releasedAt || 9e15) - (a.releasedAt || 9e15))
     return list
   }, [data, show, sort, hideOwned, owned, added])
+
+  // The cards on screen keep their places when the second batch arrives (lib/endless.js);
+  // a new filter or sort starts over from the top.
+  const orderRef = useRef([])
+  const filterKey = `${appId}|${show}|${sort}|${hideOwned}`
+  const keyRef = useRef(filterKey)
+  if (keyRef.current !== filterKey) { keyRef.current = filterKey; orderRef.current = [] }
+  useEffect(() => { setShown(CHUNK) }, [filterKey, CHUNK])
+  const games = useMemo(() => keepShown(orderRef.current, filtered), [filtered, filterKey])
+  const visible = games.slice(0, shown)
+  useLayoutEffect(() => { orderRef.current = visible.map(g => g.appid) })
+
+  const more = !!data?.more
+  const onReach = useCallback(() => {
+    if (shown < games.length) setShown(n => n + CHUNK)
+    else if (more && !moreBusy) loadMore()
+  }, [shown, games.length, more, moreBusy, loadMore, CHUNK])
+  // Ask for the second batch a little early, so a scroll rarely waits for Steam.
+  useEffect(() => {
+    if (more && !moreBusy && !moreError && games.length - shown <= CHUNK) loadMore()
+  }, [more, moreBusy, moreError, games.length, shown, CHUNK, loadMore])
+  const endRef = useRef(null)
+  const atEnd = shown >= games.length && !more
+  useNearEnd(endRef, onReach, { enabled: !!data && !atEnd, key: `${shown}:${games.length}:${more}` })
 
   async function addToList(g) {
     setAdding(g.appid)
@@ -115,7 +180,8 @@ export function GamesLikeGrid({ appId, pageKey = 'like', compact = false }) {
     return null
   }
 
-  if (error) return <EmptyState Icon={IconSparkles} title="Couldn't load similar games" desc={error} />
+  if (error) return <EmptyState Icon={IconSparkles} title="Couldn't load similar games" desc={error}
+    action={{ label: 'Try again', Icon: IconRefresh, onClick: retry }} />
 
   return (
     <div className={s.results}>
@@ -139,18 +205,18 @@ export function GamesLikeGrid({ appId, pageKey = 'like', compact = false }) {
         </label>
       </div>
 
-      {loading ? (
+      {loading || (games.length === 0 && more) ? (
         <CardSkeletonGrid gridClassName={s.grid} count={compact ? 6 : 12} portrait={false} />
       ) : games.length === 0 ? (
         <EmptyState Icon={IconSparkles} title="Nothing here"
           desc={show === 'soon' ? 'No upcoming games like this one right now.' : 'Try another filter.'} />
       ) : (
-        <div className={s.grid} style={zoomStyle}>
-          {games.map((g, i) => {
+        <div className={s.grid} style={zoomStyle} data-like-grid>
+          {visible.map((g, i) => {
             const b = badge(g)
             return (
               <button key={g.appid} type="button" className={s.card} data-gpnav onClick={() => setOpen(g)}
-                style={{ '--i': Math.min(i, 16) }}>
+                data-like-card={g.appid} style={{ '--i': Math.min(i % CHUNK, 8) }}>
                 <div className={s.art}>
                   {g.header || g.capsule ? <img src={g.header || g.capsule} alt="" loading="lazy" decoding="async" /> : null}
                   <span className={`${s.match} ${s['match_' + tone(g.pct)]}`}>{g.pct}%</span>
@@ -175,6 +241,21 @@ export function GamesLikeGrid({ appId, pageKey = 'like', compact = false }) {
             )
           })}
         </div>
+      )}
+
+      {/* The end of the list: more comes in as it nears, a skeleton while Steam answers. */}
+      {!!data && games.length > 0 && !atEnd && (
+        <div ref={endRef} className={s.loadMore} data-like-more>
+          {shown >= games.length && moreBusy && <CardSkeletonGrid gridClassName={s.grid} count={compact ? 3 : 4} portrait={false} />}
+          {shown >= games.length && moreError && !moreBusy && (
+            <button type="button" className={s.moreRetry} onClick={loadMore}><IconRefresh size={14} /> {moreError} Try again</button>
+          )}
+        </div>
+      )}
+      {!!data && games.length > 0 && atEnd && (
+        <p className={s.endLine} data-like-end>
+          {show === 'soon' ? 'That\'s every upcoming game' : 'That\'s every game'} like {data.seed?.name || 'this one'} KoZo found.
+        </p>
       )}
 
       {open && (

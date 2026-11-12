@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 38,
+  rev: 39,
   // Settings → Appearance → UI scale.
   ui: {
     setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
@@ -108,11 +108,19 @@ contextBridge.exposeInMainWorld('kozo', {
       refreshAllBanners: () => ipcRenderer.invoke('steam:refreshAllBanners'),
       bannerRefreshStatus: () => ipcRenderer.invoke('banners:refreshStatus'),
       detectUser: () => ipcRenderer.invoke('steam:detectUser'),
+      accounts: () => ipcRenderer.invoke('steam:accounts'),
+      accountState: () => ipcRenderer.invoke('steam:accountState'),
+      useAccount: (steamId) => ipcRenderer.invoke('steam:useAccount', steamId),
+      setAccountMode: (steamId, mode) => ipcRenderer.invoke('steam:setAccountMode', steamId, mode),
+      removeForeign: () => ipcRenderer.invoke('steam:removeForeign'),
+      restoreUnlocks: (rows) => ipcRenderer.invoke('steam:restoreUnlocks', rows),
       signIn: () => ipcRenderer.invoke('steam:signIn'),
       storeDetails: (appId) => ipcRenderer.invoke('steam:storeDetails', appId),
       comingSoon: (feed, page) => ipcRenderer.invoke('steam:comingSoon', feed, page),
+      calendar: (range) => ipcRenderer.invoke('steam:calendar', range),
       appAssets: (appIds) => ipcRenderer.invoke('steam:appAssets', appIds),
       similar: (appId) => ipcRenderer.invoke('steam:similar', appId),
+      similarMore: (appId) => ipcRenderer.invoke('steam:similarMore', appId),
       tasteProfile: () => ipcRenderer.invoke('steam:tasteProfile'),
       picks: () => ipcRenderer.invoke('steam:picks'),
       reviews: (appId) => ipcRenderer.invoke('steam:reviews', appId),
@@ -126,6 +134,7 @@ contextBridge.exposeInMainWorld('kozo', {
       getDefaultPaths: () => ipcRenderer.invoke('scanner:getDefaultPaths'),
       scan: (paths) => ipcRenderer.invoke('scanner:scan', paths),
       addGames: (games) => ipcRenderer.invoke('scanner:addGames', games),
+      updateGames: (list) => ipcRenderer.invoke('scanner:updateGames', list),
     },
     crack: {
       scanGame: (gameId) => ipcRenderer.invoke('crack:scanGame', gameId),
@@ -214,6 +223,7 @@ contextBridge.exposeInMainWorld('kozo', {
     },
     deals: {
       list: (opts) => ipcRenderer.invoke('deals:list', opts),
+      more: () => ipcRenderer.invoke('deals:more'),
       markSeen: () => ipcRenderer.invoke('deals:markSeen'),
       saleMap: () => ipcRenderer.invoke('deals:saleMap'),
       unseen: () => ipcRenderer.invoke('deals:unseen'),
@@ -322,6 +332,7 @@ contextBridge.exposeInMainWorld('kozo', {
       // Steam refused (or resumed allowing) a player-unlock read — library-wide,
       // driven by achievementSync.recordSyncError.
       onSteamPrivacyChanged: sub('steam:privacy-changed', pass),
+      onSteamAccountsChanged: sub('steam:accounts-changed', pass),
       onAchievementOverlay: sub('achievement:overlay', pass),
       onSessionOverlay: sub('session:overlay', pass),
       onStatusOverlay: sub('status:overlay', pass),

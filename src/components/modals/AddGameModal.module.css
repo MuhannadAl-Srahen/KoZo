@@ -460,3 +460,17 @@
   font: inherit; font-size: var(--fs-2xs); font-weight: 600; letter-spacing: 0.04em; color: var(--text-muted);
 }
 .labelAction:hover { color: var(--a); }
+
+.dupBtn {
+  flex-shrink: 0;
+  align-self: center;
+  padding: 4px 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid color-mix(in srgb, var(--orange) 45%, transparent);
+  background: color-mix(in srgb, var(--orange) 14%, transparent);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.dupBtn:hover { background: color-mix(in srgb, var(--orange) 22%, transparent); }

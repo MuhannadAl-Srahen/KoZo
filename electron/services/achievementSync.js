@@ -126,9 +126,68 @@ function recordSyncError(gameId, error) {
   }
 }
 // On an account known to be open, a game's refusal only means it isn't on the account:
-// its page must not say the profile is private.
+// its page must not say the profile is private. The same when the connected account is a
+// shared one (its privacy isn't the user's to change) or when Steam's own files on this PC hold
+// the game's unlocks (nothing is missing then).
 function getLastSyncError(gameId) {
-  return _accountReadable ? null : (lastSyncErrors.get(gameId) || null)
+  if (_accountReadable) return null
+  const err = lastSyncErrors.get(gameId) || null
+  if (!err) return null
+  try {
+    const sa = require('./steamAccounts')
+    if (sa.modeOf(sa.connectedId()) !== 'mine') return null
+    const appid = require('../db/queries/games').getGame(gameId)?.steam_app_id
+    if (appid && require('./steamStatsWatcher').hasLocalStats(appid)) return null
+  } catch {}
+  return err
+}
+
+// The connected account changed, or whose it is: nothing learned about the old one holds.
+function resetAccountState() {
+  try { require('./processWatcher').clearSyncParking() } catch {}
+  lastSyncErrors.clear()
+  _accountReadable = false
+  _revalidateAt = 0
+  setProfilePrivateFlag(null)
+}
+
+// For the game page and Settings: who is connected, is it the user's own, is it private.
+function accountState() {
+  const settingsQ = require('../db/queries/settings')
+  const sa = require('./steamAccounts')
+  const steamId = sa.connectedId()
+  return {
+    steamId,
+    persona: settingsQ.getSetting('steam_persona') || '',
+    mode: steamId ? sa.modeOf(steamId) : null,
+    confirmed: sa.isConfirmed(),
+    accounts: sa.knownAccounts().length,
+    private: !!settingsQ.getSetting('steam_profile_private'),
+    readable: _accountReadable,
+  }
+}
+
+// Whose unlocks the Steam website's answer may bring in. The connected account as the user's
+// own: all of them. As a shared account: only what was unlocked during a session of this game
+// on this PC, because the rest is other people's. place(unix seconds) says whether an unlock
+// counts and which session it belongs to.
+function accountRule(gameId) {
+  let mode = 'mine', windows = []
+  try {
+    const sa = require('./steamAccounts')
+    mode = sa.modeOf(sa.connectedId())
+    windows = sa.sessionWindows(require('../db/database').getDb()
+      .prepare('SELECT id, started_at, ended_at FROM sessions WHERE game_id = ?').all(gameId))
+    return {
+      mode,
+      place(unlocktime) {
+        const sessionId = unlocktime > 0 ? sa.windowAt(windows, unlocktime * 1000) : null
+        return { counts: mode === 'mine' || sessionId != null, sessionId }
+      },
+    }
+  } catch {
+    return { mode, place: () => ({ counts: true, sessionId: null }) }
+  }
 }
 
 /**
@@ -498,10 +557,13 @@ async function syncAfterSession(gameId, sessionId) {
     }
 
     const newUnlocks = []
+    const rule = accountRule(gameId)
     for (const su of steamUnlocks) {
-      const ach = nameToAch[su.name]
+      const ach = nameToAch[String(su.name).toLowerCase()]
       if (!ach) continue
       if (alreadyUnlocked.has(ach.id)) continue
+      const placed = rule.place(su.unlocktime)
+      if (!placed.counts) continue
 
       const unlockedAt = su.unlocktime > 0
         ? new Date(su.unlocktime * 1000).toISOString()
@@ -509,7 +571,8 @@ async function syncAfterSession(gameId, sessionId) {
 
       const inserted = achievementsQ.addUnlock({
         achievement_id: ach.id,
-        session_id: sessionId ?? null,
+        // A dated unlock goes to the session it happened in, not to whichever just ended.
+        session_id: unlockedAt ? placed.sessionId : (sessionId ?? null),
         unlocked_at: unlockedAt,
         source: 'steam_api',
       })
@@ -571,15 +634,18 @@ async function syncPlayerUnlocks(gameId) {
 
   let added = 0
   const newUnlocks = []
+  const rule = accountRule(gameId)
   for (const su of steamUnlocks) {
-    const ach = nameToAch[su.name]
+    const ach = nameToAch[String(su.name).toLowerCase()]
     if (!ach || alreadyUnlocked.has(ach.id)) continue
+    const placed = rule.place(su.unlocktime)
+    if (!placed.counts) continue
     const unlockedAt = su.unlocktime > 0
       ? new Date(su.unlocktime * 1000).toISOString()
       : null   // no timestamp from Steam — the UI shows "no date", never a fake one
     const inserted = achievementsQ.addUnlock({
       achievement_id: ach.id,
-      session_id: null,
+      session_id: placed.sessionId,
       unlocked_at: unlockedAt,
       source: 'steam_api',
     })
@@ -636,4 +702,4 @@ async function sweepSteamGames() {
   return { games: games.length, added, refreshed }
 }
 
-module.exports = { sweepSteamGames, fetchAndStoreAchievements, syncAfterSession, syncPlayerUnlocks, ensureSchema, importSchemaFromAppId, autoImportSchemaByName, emitNewUnlocks, isForeignLauncher, getLastSyncError, revalidateProfilePrivacy }
+module.exports = { sweepSteamGames, fetchAndStoreAchievements, syncAfterSession, syncPlayerUnlocks, ensureSchema, importSchemaFromAppId, autoImportSchemaByName, emitNewUnlocks, isForeignLauncher, getLastSyncError, revalidateProfilePrivacy, resetAccountState, accountState, silenceGame, unsilenceGame }

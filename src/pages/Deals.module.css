@@ -124,12 +124,6 @@
 .alertLine, .alertLow { white-space: normal; overflow: visible; }
 .alertRow .badge { flex-shrink: 0; white-space: nowrap; }
 
-.more {
-  align-self: center; display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 18px;
-  border-radius: var(--r-pill); border: 1px solid var(--border); background: var(--surface-1); color: var(--text-secondary);
-  font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer;
-}
-.more:hover { color: var(--a); border-color: color-mix(in srgb, var(--a) 50%, var(--border)); }
 
 @keyframes dealUp { from { opacity: 0; transform: translateY(12px); } }
 :global(html[data-motion]) .card { animation: dealUp 0.35s var(--ease-out) backwards; animation-delay: calc(var(--i, 0) * 0.025s); }
@@ -137,3 +131,14 @@
 
 /* Discount and score chips on the cover: stays dark in the Light theme (customize.css .kz-dark). */
 .art { composes: kz-dark from global; }
+
+/* Endless list: the watched spot under the cards, and the line at the very end. */
+.loadMore { min-height: 1px; margin-top: var(--sp-12); }
+.moreRetry {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: var(--r-sm);
+  border: 1px solid var(--border); background: var(--surface-2);
+  color: var(--text-secondary); font: inherit; font-size: var(--fs-sm); cursor: pointer;
+}
+.moreRetry:hover { color: var(--text-primary); }
+.endLine { margin: var(--sp-16) 0 var(--sp-8); text-align: center; color: var(--text-muted); font-size: var(--fs-sm); }

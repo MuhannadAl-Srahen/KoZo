@@ -19,6 +19,7 @@ import { clockTime } from '../lib/sessionDetail'
 import EditGameModal from '../components/modals/EditGameModal'
 import SaveManagerModal from '../components/modals/SaveManagerModal'
 import InfoModal, { PrivacyHelp } from '../components/ui/InfoModal'
+import { steamCheckMessage } from '../lib/steamCheck'
 import EmptyState from '../components/ui/EmptyState'
 import { HeroSkeleton, PanelSkeleton } from '../components/ui/Skeleton'
 import GeneratedCover from '../components/GeneratedCover'
@@ -654,12 +655,24 @@ export default function GameDetail() {
     const d = res?.ok ? (res.data || {}) : {}
     const diag = diagRes?.ok ? (diagRes.data || {}) : null
 
-    if (d.playerSyncReason === 'private' || diag?.error === 'private') {
+    // Steam's website refused this game. That is a privacy problem only for the user's own
+    // private account; otherwise the game is on another account, and the Steam app on this PC
+    // has (or will have) its unlocks (lib/steamCheck.js).
+    const refused = steamCheckMessage({ name: game.name, refresh: d, diag })
+    if (refused) {
+      const closeInfo = () => setInfo(null)
       setInfo({
-        variant: 'warning',
-        title: `Couldn't read your Steam unlocks for "${game.name}"`,
-        message: 'Steam returned "Profile is not public", so your unlock list is hidden.',
-        children: <PrivacyHelp openSteamPrivacy={() => window.kozo?.api?.shell?.openExternal(STEAM_PRIVACY_URL)} />,
+        variant: refused.variant,
+        title: refused.title,
+        message: refused.message,
+        lines: refused.lines,
+        children: refused.privacyHelp
+          ? <PrivacyHelp persona={d.account?.persona} openSteamPrivacy={() => window.kozo?.api?.shell?.openExternal(STEAM_PRIVACY_URL)} />
+          : null,
+        actions: refused.accountsButton ? [
+          { label: 'Steam accounts', variant: 'secondary', onClick: () => { closeInfo(); navigate('/settings?tab=accounts&steam=accounts') } },
+          { label: 'OK', variant: 'primary', onClick: closeInfo },
+        ] : undefined,
       })
       return
     }

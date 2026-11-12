@@ -316,6 +316,7 @@ export const HELPER_EXE_RE = new RegExp([
   '(^|[-_. ])(map|level|world)[-_. ]?(editor|edit|builder)[-_. 0-9]*\\.exe$',   // WorldBuilder.exe
   '(^|[-_. ])editor[-_. 0-9]*\\.exe$|modkit|modtools',
   'resolution[-_. 0-9]*\\.exe$',                       // YuriScreenResolution.exe
+  '^(7z|7za|7zr|8za)([-_. ]?v?[0-9.]*)?\\.exe$',      // archivers shipped beside a game: 8za_v2.exe
 ].join('|'), 'i')
 
 export function isHelperExe(name) {

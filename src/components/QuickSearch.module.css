@@ -23,6 +23,8 @@
 .inputIcon { flex-shrink: 0; color: var(--a); }
 .input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; color: var(--text-primary); font: inherit; font-size: var(--fs-lg); }
 .input::placeholder { color: var(--text-muted); }
+/* No ring: the box is the search, and the global focus ring drew a border around it on every open. */
+.input:focus, .input:focus-visible, .input[data-gpfocus] { outline: none; box-shadow: none; }
 .clear { display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 50%; background: var(--surface-3); color: var(--text-secondary); cursor: pointer; }
 .results { flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-6) var(--sp-8) var(--sp-8); }
 .section { display: flex; flex-direction: column; gap: 2px; padding-top: var(--sp-6); }

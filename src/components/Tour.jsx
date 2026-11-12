@@ -17,11 +17,6 @@ import s from './Tour.module.css'
 const STEPS = [
   { id: 'welcome' },
   {
-    route: '/', target: 'library-stats',
-    title: 'Your library at a glance',
-    body: 'Games, total playtime, achievements and this week\'s play. Everything updates by itself while you play.',
-  },
-  {
     route: '/', target: 'scan-pc',
     title: 'Find your games in one click',
     body: 'Scan PC looks through your drives for Steam, Epic, GOG, Xbox and games with no launcher, then lets you pick which ones to add.',
@@ -342,7 +337,7 @@ function SteamConnect() {
         </button>
       )}
       {msg && <div className={s.err}>{msg}</div>}
-      <p className={s.note}>Your Steam profile's Game details must be Public for achievement sync. You can change this later in Settings, Connections.</p>
+      <p className={s.note}>Achievements are read from the Steam app on this PC. Public Game details on your Steam profile only add unlocks from other PCs. More than one Steam account here? Pick yours in Settings, Connections.</p>
     </div>
   )
 }

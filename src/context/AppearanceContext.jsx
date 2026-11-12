@@ -41,7 +41,6 @@ export const DEFAULT_APPEARANCE = {
   textColor: null,                // the main text color (any hex) or null = the theme's own
   gamePage: 'store',              // Game Detail layout: store | cinematic
   gameListEdit: 'tab',            // Game List window: tab (all in an Edit tab) | overview (status and plan on the Overview)
-  upcomingLayout: 'weeks',        // Upcoming's Steam view: weeks (Steam's calendar, Monday to Friday) | classic (the look before, days with releases in a grid)
   font: 'dm',                     // FONTS key, the whole app
   cardStyle: 'classic',           // classic | poster | glass | minimal (GameCard / GameList css)
   textScale: 1,                   // 0.9 to 1.2, scales every --fs-* token
@@ -55,7 +54,8 @@ export const DEFAULT_APPEARANCE = {
   pageWidth: 'full',              // full | centered
   scrollbar: 'thin',              // thin | hidden (an older 'wide' reads as thin)
   ambient: 'off',                 // off | on (slow accent glow behind the app)
-  hideLibraryStats: false,
+  hideLibraryHiddenTab: false,     // the Library's Hidden tab (and its games) left out
+  hideLibraryRemovedTab: false,    // the Library's Removed tab (and its games) left out
   hideUpcomingHero: false,
   bigPicture: DEFAULT_BIG_PICTURE,
 }
@@ -98,7 +98,8 @@ function normalize(saved) {
   if (!FONTS[p.font]) p.font = 'dm'
   if (!['store', 'cinematic'].includes(p.gamePage)) p.gamePage = 'store'
   if (!['tab', 'overview'].includes(p.gameListEdit)) p.gameListEdit = 'tab'
-  if (!['weeks', 'classic'].includes(p.upcomingLayout)) p.upcomingLayout = 'weeks'
+  // The Upcoming calendar choice (Steam weeks or Classic) is gone: the maker saw no use for it.
+  delete p.upcomingLayout
   // 75% was the first default darkness and hid most of the picture.
   if (saved?.bg?.dim === 75 && !saved?.bg?.image && !saved?.bg?.gameArt) p.bg.dim = d.bg.dim
   // Saved order first; a tab added in a later version slots in right after the
@@ -171,7 +172,6 @@ function apply(p) {
   // Controller buttons drawn as PlayStation's, and Big Picture's hint bar (GamepadHints).
   if (p.bigPicture?.buttons === 'playstation') el.dataset.padGlyphs = 'playstation'; else delete el.dataset.padGlyphs
   if (p.bigPicture?.hints === false) el.dataset.bpHints = 'off'; else delete el.dataset.bpHints
-  if (p.hideLibraryStats) el.dataset.hideLibraryStats = ''; else delete el.dataset.hideLibraryStats
   if (p.hideUpcomingHero) el.dataset.hideUpcomingHero = ''; else delete el.dataset.hideUpcomingHero
   const font = FONTS[p.font] || FONTS.dm
   if (p.font && p.font !== 'dm') { el.style.setProperty('--font', font.css); el.dataset.font = p.font } else { el.style.removeProperty('--font'); delete el.dataset.font }

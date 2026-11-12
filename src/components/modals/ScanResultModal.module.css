@@ -98,7 +98,7 @@
    picked card must not swap its accent border back to the plain hover tint. */
 .card:hover:not(.cardDim):not(.cardSelected) { border-color: var(--ab); transform: translateY(-1px); }
 .cardSelected.cardSelected { border-color: var(--a); }
-.cardDim { opacity: 0.5; cursor: default; }
+.cardDim { filter: saturate(0.4) brightness(0.62); cursor: default; }
 
 /* ── Banner ── */
 .banner {
@@ -252,3 +252,70 @@
 }
 .exeLine svg { flex-shrink: 0; }
 .exeLineWarn { color: var(--orange); }
+
+/* A game KoZo already has: a chip on the cover instead of a scrim over all of it. */
+.libChip {
+  composes: kz-dark from global;
+  position: absolute;
+  left: var(--sp-6);
+  right: var(--sp-6);
+  bottom: var(--sp-6);
+  z-index: 3;
+  padding: 2px 8px;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, black 72%, transparent);
+  color: var(--on-art, #fff);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* What updating it changes */
+.changes {
+  list-style: none;
+  margin: 3px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: var(--fs-2xs, 10px);
+  color: var(--a);
+}
+.changes li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.changes li::before { content: '+ '; opacity: 0.7; }
+
+.fixedLine {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
+  font-size: var(--fs-2xs, 10px);
+  color: var(--status-playing);
+}
+.fixedLine span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fixedLine svg { flex-shrink: 0; }
+
+/* The game file: a button that opens the list of files in the folder */
+.exeBtn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  margin-top: 3px;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: var(--r-xs, 4px);
+  background: none;
+  font: inherit;
+  font-size: var(--fs-2xs, 10px);
+  color: var(--text-muted);
+  cursor: pointer;
+  text-align: left;
+}
+.exeBtn:hover { border-color: var(--border); color: var(--text-secondary); }
+.exeBtn span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.exeBtn svg { flex-shrink: 0; }
