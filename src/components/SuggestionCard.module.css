@@ -1,0 +1,76 @@
+/* The suggestion card: the same corner and surface as UninstalledCard and LaunchMissCard. */
+.card {
+  position: fixed;
+  right: var(--sp-16);
+  bottom: var(--sp-16);
+  /* Under dialogs and menus: it never blocks an answer to something else. */
+  z-index: calc(var(--z-popover, 1000) - 2);
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  padding: var(--sp-12);
+  border-radius: var(--r-card);
+  background: var(--surface-2);
+  border: 1px solid var(--ab);
+  box-shadow: var(--elev-3);
+}
+/* A question that matters more takes the corner first: which program a game is, an uninstalled
+   game. And never over an open window (the rating window after a finish comes first). */
+:global(body:has([data-launch-miss])) .card,
+:global(body:has([data-uninstalled])) .card,
+:global(body:has([role="dialog"])) .card { display: none; }
+
+.head { display: flex; align-items: center; gap: var(--sp-10); min-width: 0; }
+.art {
+  position: relative;
+  flex-shrink: 0;
+  width: 40px;
+  height: 52px;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--surface-3);
+}
+.art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.headText { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.kind { display: flex; align-items: center; gap: 5px; font-size: var(--fs-xs); font-weight: 700; color: var(--a); text-transform: uppercase; letter-spacing: 0.04em; }
+.kind svg { flex-shrink: 0; }
+.title { font-size: var(--fs-md); font-weight: 700; color: var(--text-primary); overflow-wrap: anywhere; line-height: 1.25; }
+.count { font-size: var(--fs-2xs); color: var(--text-muted); }
+
+.text { margin: 0; font-size: var(--fs-sm); color: var(--text-secondary); line-height: var(--lh-base, 1.45); overflow-wrap: anywhere; }
+
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-6); }
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn:hover:not(:disabled) { border-color: var(--ab); background: var(--ad); color: var(--a); }
+.primary { background: var(--a); border-color: transparent; color: var(--accent-ink); }
+.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--a) 86%, white); color: var(--accent-ink); border-color: transparent; }
+
+.foot { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-8); }
+.link {
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.link:hover:not(:disabled) { color: var(--a); text-decoration: underline; }
+.note { margin: 0; font-size: var(--fs-xs); color: var(--text-muted); }
+button:disabled { opacity: 0.6; cursor: default; }

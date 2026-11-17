@@ -116,6 +116,61 @@ function foreignRows(stored, files, windows) {
   return out
 }
 
+// Steam's Library page cache for one account and game (userdata\<account>\config\librarycache\
+// <appid>.json, an array of [key, { version, data }]): its achievements panel, written by Steam
+// itself. On a rented account in Offline Mode it was rewritten after a session while the stats
+// file had not changed for three days (Phantom Blade Zero), so it is read beside the stats file.
+// lowercase api name -> unlock seconds (0 = no time), or null when it can't be read.
+function libraryCacheUnlocks(text) {
+  let list
+  try { list = JSON.parse(String(text || '')) } catch { return null }
+  if (!Array.isArray(list)) return null
+  const data = list.find(e => Array.isArray(e) && e[0] === 'achievements')?.[1]?.data
+  if (!data || typeof data !== 'object') return null
+  const out = new Map()
+  for (const key of ['vecHighlight', 'vecUnachieved', 'vecAchievedHidden']) {
+    for (const a of Array.isArray(data[key]) ? data[key] : []) {
+      if (!a?.bAchieved || !a.strID) continue
+      const t = Number(a.rtUnlocked) > 0 ? Math.floor(Number(a.rtUnlocked)) : 0
+      const name = String(a.strID).toLowerCase()
+      const cur = out.get(name)
+      if (cur == null || (t > 0 && (cur === 0 || t < cur))) out.set(name, t)
+    }
+  }
+  return out
+}
+
+// Two sources for one account: every name, the earliest time (0 = no time). null when neither.
+function mergeEntries(a, b) {
+  if (!a) return b || null
+  if (!b) return a
+  const out = new Map(a)
+  for (const [k, t] of b) {
+    const cur = out.get(k)
+    if (cur == null || (t > 0 && (cur === 0 || t < cur))) out.set(k, t)
+  }
+  return out
+}
+
+// Achievements a shared account has that you don't, unlocked outside every session of the game
+// here: someone else on that account got there first, and Steam keeps one unlock per account, so
+// it never showed them to you (Phantom Blade Zero: 59 of 66 were unlocked by another renter before
+// the maker got there). files: [{ mode, steamId, persona, entries }], mine: Set of lowercase names
+// already yours. Unlocks inside a session are yours and are imported, so they're left out here.
+function othersUnlocks(files, windows, mine) {
+  const out = new Map()
+  for (const f of files || []) {
+    if (f.mode === 'mine') continue
+    for (const [name, t] of f.entries || []) {
+      if (mine?.has(name)) continue
+      if (t > 0 && windowAt(windows, t * 1000) != null) continue
+      const cur = out.get(name)
+      if (!cur || (t > 0 && (cur.t === 0 || t < cur.t))) out.set(name, { name, t, steamId: f.steamId, persona: f.persona || '' })
+    }
+  }
+  return [...out.values()]
+}
+
 // Dated unlocks filed under a session they did not happen in: [{ id, session_id: right one or null }].
 function misfiledRows(rows, windows) {
   const out = []
@@ -195,7 +250,12 @@ function accountsForApp(appid) {
   const dir = path.join(steam, 'appcache', 'stats')
   return list.map(accountId => {
     const steamId = steamIdOf(accountId)
-    return { accountId, steamId, mode: modeOf(steamId, Math.max(known.length, list.length)), statsFile: path.join(dir, `UserGameStats_${accountId}_${appid}.bin`) }
+    return {
+      accountId, steamId, mode: modeOf(steamId, Math.max(known.length, list.length)),
+      persona: known.find(k => k.accountId === accountId)?.persona || '',
+      statsFile: path.join(dir, `UserGameStats_${accountId}_${appid}.bin`),
+      libraryFile: path.join(steam, 'userdata', accountId, 'config', 'librarycache', `${appid}.json`),
+    }
   })
 }
 
@@ -321,14 +381,53 @@ function readEntries(statsFile, schemaFile) {
   } catch { return null }
 }
 
+function readLibraryCache(file) {
+  try { return libraryCacheUnlocks(fs.readFileSync(file, 'utf8')) } catch { return null }
+}
+
+// Everything Steam on this PC says one account has unlocked in a game: its stats file and its
+// Library cache together. lowercase name -> seconds, or null when neither can be read.
+function accountEntries(account, schemaFile) {
+  return mergeEntries(readEntries(account.statsFile, schemaFile), account.libraryFile ? readLibraryCache(account.libraryFile) : null)
+}
+
 function gameFiles(appid) {
   const steam = steamPath()
   if (!steam) return []
   const schemaFile = path.join(steam, 'appcache', 'stats', `UserGameStatsSchema_${appid}.bin`)
   const out = []
   for (const a of accountsForApp(appid)) {
-    const entries = readEntries(a.statsFile, schemaFile)
+    const entries = accountEntries(a, schemaFile)
     if (entries) out.push({ ...a, entries })
+  }
+  return out
+}
+
+// The game page's Achievements tab: what someone else unlocked on a shared account this game was
+// played on, for the "I did these too" choice. [{ achievementId, persona, unlockedAt }]
+function othersOnAccount(gameId) {
+  const db = require('../db/database').getDb()
+  const g = db.prepare('SELECT id, steam_app_id, is_cracked FROM games WHERE id = ?').get(Number(gameId))
+  if (!g?.steam_app_id || g.is_cracked === 1) return []
+  const files = gameFiles(g.steam_app_id).filter(f => f.mode !== 'mine')
+  if (!files.length) return []
+  const achs = db.prepare(`SELECT a.id, a.steam_api_name,
+      (SELECT au.id FROM achievement_unlocks au WHERE au.achievement_id = a.id LIMIT 1) AS unlock_id
+    FROM achievements a WHERE a.game_id = ?`).all(g.id)
+  const byName = new Map()
+  const mine = new Set()
+  for (const a of achs) {
+    if (!a.steam_api_name) continue
+    const k = String(a.steam_api_name).toLowerCase()
+    byName.set(k, a)
+    if (a.unlock_id != null) mine.add(k)
+  }
+  const windows = sessionWindows(db.prepare('SELECT id, started_at, ended_at FROM sessions WHERE game_id = ?').all(g.id))
+  const out = []
+  for (const o of othersUnlocks(files, windows, mine)) {
+    const a = byName.get(o.name)
+    if (!a || a.unlock_id != null) continue
+    out.push({ achievementId: a.id, persona: o.persona, unlockedAt: o.t > 0 ? new Date(o.t * 1000).toISOString() : null })
   }
   return out
 }
@@ -450,8 +549,10 @@ function reviewStored() {
 module.exports = {
   // pure
   accountIdOf, steamIdOf, parseLoginUsers, effectiveMode, sessionWindows, windowAt, countedUnlocks, foreignRows, misfiledRows,
+  libraryCacheUnlocks, mergeEntries, othersUnlocks,
   PRE_MS, POST_MS,
   // this PC
   knownAccounts, accountsForApp, modeOf, connectedId, isConfirmed, listAccounts, forget,
   useAccount, setMode, findForeign, removeForeign, restoreUnlocks, reviewStored, readForeign,
+  accountEntries, othersOnAccount,
 }

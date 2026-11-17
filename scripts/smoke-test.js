@@ -218,6 +218,7 @@ app.whenReady().then(async () => {
   }
 
   if (want('library')) {
+  const db0 = () => require(path.join(root, 'electron', 'db', 'database.js')).getDb()
   // The Library's tabs (Current, Finished, Dropped, Hidden, Removed) replaced three folding rows
   // under the grid, and a game removed with its history kept leaves the Library view.
   const [alphaId, betaId] = seeded
@@ -266,6 +267,20 @@ app.whenReady().then(async () => {
     return out`)
   check('Library: a hidden game gets a Hidden tab', /hidden:false/.test(lib4.tabs) && !lib4.beta && lib4.hiddenCards === 1 && /Still tracked/.test(lib4.note), JSON.stringify(lib4))
   check('Library: an emptied tab closes and Current comes back', lib4.after === 'current:true,finished:false', JSON.stringify(lib4))
+  // On hold has its own tab (the maker's ask): Current is Playing and not started.
+  const holdRowWas = db0().prepare('SELECT id, status FROM game_list WHERE game_id = ?').get(betaId)
+  const libHold = await libEv(`
+    await window.kozo.api.games.update(${betaId}, { completion_status: 'on_hold' }); await wait(1200)
+    const out = { tabs: tabs(), beta: text().includes('Smoke Beta') }
+    document.querySelector('[data-lib-tab=on_hold]')?.click(); await wait(400)
+    out.cards = cards(); out.holdBeta = text().includes('Smoke Beta'); out.status = text().includes('All statuses')
+    await window.kozo.api.games.update(${betaId}, { completion_status: null }); await wait(1200)
+    out.after = tabs()
+    return out`)
+  if (holdRowWas) db0().prepare('UPDATE game_list SET status = ? WHERE id = ?').run(holdRowWas.status, holdRowWas.id)
+  check('Library: an On hold game gets its own tab, not Current', /on_hold:false/.test(libHold.tabs) && libHold.beta === false, JSON.stringify(libHold))
+  check('Library: the On hold tab shows it with the same grid, no status filter', libHold.cards === 1 && libHold.holdBeta && libHold.status === false, JSON.stringify(libHold))
+  check('Library: the On hold tab closes when it empties', libHold.after === 'current:true,finished:false', JSON.stringify(libHold))
   const lib5 = await libEv(`
     if (!(await menuOn('Smoke Alpha'))) return { step: 'no menu' }
     menuItem('Remove from library')?.click(); await wait(300)
@@ -1038,11 +1053,77 @@ app.whenReady().then(async () => {
     const lastErr = await ev(`window.kozo.api.steam.lastSyncError(${gameId})`)
     check('Steam accounts: no privacy warning when this PC has the unlocks', lastErr?.ok && !lastErr.data, JSON.stringify(lastErr))
 
+    // Steam's Library cache is read too: on a rented account in Offline Mode it was written when
+    // the stats file wasn't. An unlock only it holds, during the second session, is yours.
+    db.prepare('INSERT INTO achievements (game_id, steam_api_name, display_name) VALUES (?, ?, ?)').run(gameId, 'shop_cache', 'Smoke SHOP_CACHE')
+    const libDir = path.join(fakeSteam, 'userdata', acct(SHARED), 'config', 'librarycache')
+    fs.mkdirSync(libDir, { recursive: true })
+    fs.writeFileSync(path.join(libDir, `${APP}.json`), JSON.stringify([['achievements', { version: 2, data: {
+      vecHighlight: [{ strID: 'SHOP_CACHE', bAchieved: true, rtUnlocked: sec(t0 + 2 * 86400000 + 600000) }], vecUnachieved: [], vecAchievedHidden: [], nTotal: 6, nAchieved: 4 } }]]))
+    sa.forget()
+    await ev(`window.kozo.api.steam.refresh(${gameId})`)
+    const cached = stored().find(x => x.name === 'shop_cache')
+    check('Steam accounts: an unlock only Steam\'s Library cache holds is read, in its session', cached?.session_id === s2, JSON.stringify(stored()))
+
+    // What someone else unlocked on the shared account: listed on the game page, claim what you did.
+    await go('#/', 400); await go(`#/game/${gameId}`, 1500)
+    await ev(`[...document.querySelectorAll('[role=tab], button')].find(b => /^Achievements/.test(b.innerText.trim()))?.click(); true`); await sleep(700)
+    // textContent: the cards draw lazily (content-visibility), and innerText skips what isn't drawn.
+    const others = await ev(`(() => { const s = document.querySelector('[data-ach-others]'); return s ? s.textContent : '' })()`)
+    check('Achievements: unlocked by someone else on the shared account are listed apart, with why',
+      /Unlocked by someone else on Smoke Shop/i.test(others) && /SHOP_OTHER_1/.test(others) && /SHOP_OTHER_2/.test(others) && /one unlock per account/.test(others) && !/SHOP_MINE/.test(others), others.slice(0, 400))
+    check('Achievements: no long dashes there', !/[–—]/.test(others))
+    await ev(`document.querySelector('[data-claim-start]')?.click(); true`); await sleep(300)
+    await ev(`document.querySelector('[data-claim-pick="${achId('shop_other_1')}"]')?.click(); true`); await sleep(200)
+    await ev(`document.querySelector('[data-claim]')?.click(); true`); await sleep(1500)
+    const claimed = db.prepare(`SELECT au.source FROM achievement_unlocks au WHERE au.achievement_id = ?`).get(achId('shop_other_1'))
+    check('Achievements: "I did these too" makes the ticked one yours', claimed?.source === 'manual' && !db.prepare('SELECT 1 FROM achievement_unlocks WHERE achievement_id = ?').get(achId('shop_other_2')), JSON.stringify(claimed))
+    const left = await ev(`document.querySelector('[data-ach-others]')?.textContent || ''`)
+    check('Achievements: the claimed one leaves the list', /SHOP_OTHER_2/.test(left) && !/SHOP_OTHER_1/.test(left), left.slice(0, 300))
+    sa.findForeign()
+    check('Achievements: a claim is never taken for someone else\'s unlock', !(sa.readForeign()?.games || []).some(g => g.id === gameId), JSON.stringify(sa.readForeign()))
+
+    // Steam writes an unlock while no game is running (an EA game's reach Steam late, Offline
+    // Mode's once online): it counts when the file changes, not at the next start or session.
+    const ssw = require(path.join(root, 'electron', 'services', 'steamStatsWatcher.js'))
+    db.prepare('INSERT INTO achievements (game_id, steam_api_name, display_name) VALUES (?, ?, ?)').run(gameId, 'own_late', 'Smoke OWN_LATE')
+    bits[5] = { name: 'OWN_LATE', bit: 5 }
+    fs.writeFileSync(path.join(stats, `UserGameStatsSchema_${APP}.bin`), kv.encodeBinaryKV({ [APP]: { stats: { 1: { type: 'ACHIEVEMENTS', bits } } } }))
+    ssw.startBackground()
+    await sleep(400)
+    fs.writeFileSync(path.join(stats, `UserGameStats_${acct(OWN)}_${APP}.bin`),
+      kv.encodeBinaryKV({ cache: { 1: { data: 0b100011, AchievementTimes: { 0: sec(t0 - 90 * 86400000), 1: sec(t0 - 80 * 86400000), 5: sec(Date.now()) } } } }))
+    let late = null
+    for (let i = 0; i < 20 && !late; i++) { await sleep(300); late = db.prepare(`SELECT au.source FROM achievement_unlocks au JOIN achievements a ON a.id = au.achievement_id WHERE a.game_id = ? AND a.steam_api_name = 'own_late'`).get(gameId) }
+    check('Steam: an unlock Steam writes while no game is running counts within seconds', late?.source === 'steam_stats', JSON.stringify(stored()))
+    ssw.stopBackground()
+
+    // A game with no launcher, played a while, and nothing from its emulator (Dead Space's saves
+    // no achievements anywhere): the tab says so and the ones earned can be ticked.
+    const quietId = db.prepare("INSERT INTO games (name, exe_name, source, is_cracked, total_playtime_seconds) VALUES ('Smoke Quiet Emu', 'smokequiet.exe', 'cracked', 1, 1500)").run().lastInsertRowid
+    for (const n of ['QUIET_A', 'QUIET_B']) db.prepare('INSERT INTO achievements (game_id, steam_api_name, display_name) VALUES (?, ?, ?)').run(quietId, n.toLowerCase(), 'Smoke ' + n)
+    await go('#/', 400); await go(`#/game/${quietId}`, 1500)
+    await ev(`[...document.querySelectorAll('[role=tab], button')].find(b => /^Achievements/.test(b.innerText.trim()))?.click(); true`); await sleep(700)
+    const quiet = await ev(`document.querySelector('[data-ach-silent]')?.textContent || ''`)
+    check('Achievements: a no-launcher game whose emulator saved nothing says so', /hasn't saved a single achievement/.test(quiet) && /Mark the ones I got/.test(quiet) && !/[–—]/.test(quiet) && !/crack/i.test(quiet), quiet.slice(0, 300))
+    const quietAch = db.prepare("SELECT id FROM achievements WHERE game_id = ? AND steam_api_name = 'quiet_a'").get(quietId).id
+    await ev(`document.querySelector('[data-ach-silent] [data-claim-start]')?.click(); true`); await sleep(300)
+    await ev(`document.querySelector('[data-claim-pick="${quietAch}"]')?.click(); true`); await sleep(200)
+    await ev(`document.querySelector('[data-ach-silent] [data-claim]')?.click(); true`); await sleep(1500)
+    const marked = db.prepare('SELECT source FROM achievement_unlocks WHERE achievement_id = ?').get(quietAch)
+    check('Achievements: "Mark the ones I got" adds the ticked one', marked?.source === 'manual', JSON.stringify(marked))
+    const after = await ev(`document.querySelector('[data-ach-silent]') ? 'shown' : 'gone'`)
+    check('Achievements: once one is in, the note goes', after === 'gone', after)
+    db.prepare('DELETE FROM achievement_unlocks WHERE achievement_id IN (SELECT id FROM achievements WHERE game_id = ?)').run(quietId)
+    db.prepare('DELETE FROM achievements WHERE game_id = ?').run(quietId)
+    db.prepare('DELETE FROM games WHERE id = ?').run(quietId)
+
     Object.assign(steam, real)
     db.prepare('DELETE FROM games WHERE id = ?').run(gameId)
     for (const [k, v] of Object.entries(was)) settings.setSetting(k, v || '')
     for (const f of fs.readdirSync(stats)) fs.rmSync(path.join(stats, f), { force: true })
     fs.rmSync(path.join(fakeSteam, 'config', 'loginusers.vdf'), { force: true })
+    fs.rmSync(path.join(fakeSteam, 'userdata'), { recursive: true, force: true })
     sa.forget(); sync.resetAccountState()
     settings.setSetting('steam_foreign_found', '')
     await go('#/', 600)
@@ -1573,6 +1654,15 @@ app.whenReady().then(async () => {
 
   // Appearance: background color, Light, Match Windows (Settings > Appearance).
   if (want('appearance')) {
+    // The saved look is read before the first render (preload ui.bootLook), so a start never
+    // shows the default purple look first.
+    const boot = await ev(`(async () => {
+      const b = window.kozo.ui.bootLook()
+      const a = (await window.kozo.api.settings.get('appearance'))?.data ?? null
+      const c = (await window.kozo.api.settings.get('accent_color'))?.data ?? null
+      return { got: !!b, appearance: b?.appearance === a, accent: b?.accent === c }
+    })()`)
+    check('Appearance: the saved look and accent are there before the first render', boot.got && boot.appearance && boot.accent, JSON.stringify(boot))
     // Background color
     const lookBefore = await ev(`window.kozo.api.settings.get('appearance').then(r => r?.data ?? null)`)
     await go('#/settings?tab=appearance', 1800)
@@ -1926,6 +2016,85 @@ app.whenReady().then(async () => {
   }
   }
 
+  if (want('suggest')) {
+  // ── Smart suggestions: one corner card at a time (services/suggestions.js), the maker's ask:
+  //    "when I put a game as playing ... ask me if I want to plan it for the month" ──
+  {
+    const db = require(path.join(root, 'electron', 'db', 'database.js')).getDb()
+    const sg = require(path.join(root, 'electron', 'services', 'suggestions.js'))
+    const settingsQ = require(path.join(root, 'electron', 'db', 'queries', 'settings.js'))
+    // The seed finished Smoke Gamma, which rightly asked about the next game in the plan: start clean.
+    for (const q of sg.list()) sg.answer(q.key, 'later')
+    settingsQ.setSetting('suggestions', '{}'); settingsQ.setSetting('suggest_done', '[]')
+    const month = sg.monthKey(), prev = sg.prevMonth(month)
+    const card = () => ev(`(() => { const c = document.querySelector('[data-suggestion]'); return c ? { kind: c.dataset.suggestion, text: c.innerText } : null })()`)
+    const clickIn = (sel) => ev(`(() => { const b = document.querySelector('[data-suggestion] ${sel}'); b?.click(); return !!b })()`)
+    await go('#/', 1000)
+
+    // Set Playing by hand: plan it for this month.
+    const added = await ev(`window.kozo.api.games.add({ name: 'Smoke Plan Me', exe_name: 'SmokePlanMe.exe', install_path: 'C:\\\\SmokeGames\\\\Plan Me', source: 'manual' }).then(r => r?.data?.id)`)
+    await ev(`window.kozo.api.games.update(${added}, { completion_status: 'playing' }).then(() => true)`); await sleep(800)
+    let c = await card()
+    check('suggest: setting a game Playing offers this month\'s plan', c?.kind === 'plan' && c.text.includes('Smoke Plan Me') && c.text.includes(`Plan for ${sg.monthName(month)}`), JSON.stringify(c))
+    check('suggest: no long dashes', !!c && !/[\u2013\u2014]/.test(c.text))
+    await clickIn('[data-suggestion-yes]'); await sleep(800)
+    const planned = db.prepare('SELECT planned_month FROM game_list WHERE game_id = ?').get(added)
+    check('suggest: Plan puts it in this month\'s Play Plan', planned?.planned_month === month, JSON.stringify(planned))
+    check('suggest: answered, the card goes', (await card()) === null)
+
+    // Finish a planned game: the rating window first, then the next Up next game of that month.
+    const upNext = db.prepare(`SELECT id, game_id, name FROM game_list WHERE planned_month = ? AND status = 'want_to_play' AND game_id IS NOT NULL ORDER BY is_favorite DESC, display_order IS NULL, display_order, id LIMIT 1`).get(month)
+    await ev(`window.kozo.api.games.update(${added}, { completion_status: 'finished' }).then(() => true)`); await sleep(900)
+    const underRating = await ev(`(() => { const c = document.querySelector('[data-suggestion]'); return !!document.querySelector('[role=dialog]') && (!c || getComputedStyle(c).display === 'none') })()`)
+    check('suggest: the next-game card waits for the rating window', underRating)
+    await escape(); await sleep(500)
+    c = await card()
+    check('suggest: finishing offers the next Up next game of that month', !!upNext && c?.kind === 'next' && c.text.includes(upNext.name), JSON.stringify({ c, upNext }))
+    await clickIn('[data-suggestion-yes]'); await sleep(800)
+    check('suggest: Set it Playing starts it', db.prepare('SELECT completion_status FROM games WHERE id = ?').get(upNext?.game_id)?.completion_status === 'playing')
+    check('suggest: starting it from the plan asks nothing more', (await card()) === null)
+    if (upNext) db.prepare('UPDATE games SET completion_status = NULL WHERE id = ?').run(upNext.game_id)
+    if (upNext) db.prepare(`UPDATE game_list SET status = 'want_to_play' WHERE id = ?`).run(upNext.id)
+
+    // A new month: last month's unfinished plan. And a game left Playing for a month. Carry first.
+    const carryId = db.prepare(`INSERT INTO game_list (name, status, planned_month) VALUES ('Smoke Carry Over', 'want_to_play', ?)`).run(prev).lastInsertRowid
+    const doneId = db.prepare(`INSERT INTO game_list (name, status, planned_month) VALUES ('Smoke Carry Done', 'finished', ?)`).run(prev).lastInsertRowid
+    db.prepare(`UPDATE games SET completion_status = 'playing', last_played_at = ?, is_archived = 0, is_hidden = 0 WHERE id = ?`).run(new Date(Date.now() - 30 * 86400000).toISOString(), added)
+    await ev(`window.kozo.api.suggestions.check().then(() => true)`); await sleep(800)
+    c = await card()
+    check('suggest: a new month offers last month\'s unfinished games, not finished ones', c?.kind === 'carry' && c.text.includes('Smoke Carry Over') && !c.text.includes('Smoke Carry Done'), JSON.stringify(c))
+    check('suggest: one card at a time, with how many wait', !!c && /1 of 2/.test(c.text), c?.text)
+    await clickIn('[data-suggestion-yes]'); await sleep(800)
+    check('suggest: Move puts them in this month', db.prepare('SELECT planned_month FROM game_list WHERE id = ?').get(carryId)?.planned_month === month &&
+      db.prepare('SELECT planned_month FROM game_list WHERE id = ?').get(doneId)?.planned_month === prev)
+    c = await card()
+    check('suggest: a game left Playing for weeks is offered On hold', c?.kind === 'stale' && c.text.includes('Smoke Plan Me'), JSON.stringify(c))
+    await clickIn('[data-suggestion-yes]'); await sleep(800)
+    check('suggest: Move to On hold', db.prepare('SELECT completion_status FROM games WHERE id = ?').get(added)?.completion_status === 'on_hold')
+    await ev(`document.querySelector('[data-suggestion-undo]')?.click(); true`); await sleep(800)
+    check('suggest: Undo puts it back to Playing', db.prepare('SELECT completion_status FROM games WHERE id = ?').get(added)?.completion_status === 'playing')
+    await ev(`window.kozo.api.suggestions.check().then(() => true)`); await sleep(500)
+    check('suggest: once answered, not asked again', (await card()) === null)
+
+    // Don't ask again turns that kind off (Settings, General turns it back on).
+    db.prepare(`UPDATE games SET completion_status = NULL WHERE id = ?`).run(added)
+    db.prepare(`UPDATE game_list SET planned_month = NULL WHERE game_id = ?`).run(added)
+    settingsQ.setSetting('suggest_done', '[]')   // this game's plan question was answered above
+    await ev(`window.kozo.api.games.update(${added}, { completion_status: 'playing' }).then(() => true)`); await sleep(800)
+    await clickIn('[data-suggestion-off]'); await sleep(600)
+    const prefsNow = await ev(`window.kozo.api.suggestions.prefs().then(r => r.data)`)
+    check('suggest: Don\'t ask again turns that kind off, and says where to turn it on', prefsNow?.plan === false && /Settings, General/.test(await ev(`document.querySelector('[data-suggestion-note]')?.innerText || ''`)), JSON.stringify(prefsNow))
+    await go('#/settings?tab=general', 1200)
+    check('suggest: Settings, General lists the four switches', await ev(`(document.querySelector('[data-settings-suggestions]')?.querySelectorAll('[role=switch], input[type=checkbox], button[aria-pressed]').length || 0) >= 4 || /Plan a game when it becomes Playing/.test(document.querySelector('[data-settings-suggestions]')?.innerText || '')`))
+
+    // Clean up.
+    db.prepare('DELETE FROM game_list WHERE id IN (?, ?)').run(carryId, doneId)
+    await ev(`window.kozo.api.games.delete(${added}).then(() => true)`)
+    settingsQ.setSetting('suggestions', '{}'); settingsQ.setSetting('suggest_done', '[]')
+    await go('#/', 800)
+  }
+  }
+
   if (want('uninstalled')) {
   // ── A game was uninstalled: the corner card asks what to do (the maker: Need for Speed
   //    stayed "Playing" after it was uninstalled) ──
@@ -1966,6 +2135,12 @@ app.whenReady().then(async () => {
     const g2 = db.prepare('SELECT completion_status, is_archived FROM games WHERE id = ?').get(second)
     const l2 = db.prepare('SELECT status FROM game_list WHERE game_id = ?').get(second)
     check('uninstalled: Remove from Library archives it and Playing becomes On hold', g2.is_archived === 1 && g2.completion_status === 'on_hold' && l2?.status === 'on_hold', JSON.stringify([g2, l2]))
+    // A finished game removed from the Library is still a finished game: the Finished page and
+    // Your Year keep it (it vanished from there, while XP still counted it).
+    db.prepare("UPDATE games SET completion_status = 'finished' WHERE id = ?").run(second)
+    const fin2 = require(path.join(root, 'electron', 'db', 'queries', 'games.js')).listFinishedGames().filter(f => f.game_id === second)
+    check('uninstalled: a removed finished game stays on the Finished page, once', fin2.length === 1, JSON.stringify(fin2.map(f => f.name)))
+    db.prepare("UPDATE games SET completion_status = 'on_hold' WHERE id = ?").run(second)
     // Delete from KoZo asks first, then the game and its Game List entry are gone.
     c = await card()
     const third = c?.id
@@ -2095,6 +2270,19 @@ app.whenReady().then(async () => {
     await type(''); await sleep(500)
     n = await names()
     check('Discounts search: clearing shows every deal again', ['Quiet Farm', 'Smoke Racer Deluxe', 'Speedy Puzzle'].every(x => n.includes(x)) && await ev(`!document.querySelector('[data-deals-steam]')`), n.join(' | '))
+    // The window takes a game off the Game List too (the maker's ask), and then offers Add again.
+    const listDb = require(path.join(root, 'electron', 'db', 'database.js')).getDb()
+    require(path.join(root, 'electron', 'db', 'queries', 'gameList.js')).addGameListItem({ steam_app_id: 900001, name: 'Need for Speed™ Heat', status: 'want_to_play' })
+    await ev(`[...document.querySelectorAll('.app-main button[data-gpnav]')].find(b => b.innerText.includes('Need for Speed'))?.click(); true`); await sleep(1200)
+    const listBtns = () => ev(`({ remove: !!document.querySelector('[role=dialog] [data-deals-remove]'), add: !!document.querySelector('[role=dialog] [data-deals-add]') })`)
+    const onList = await listBtns()
+    await ev(`document.querySelector('[role=dialog] [data-deals-remove]')?.click(); true`); await sleep(1000)
+    const offList = await listBtns()
+    const rowLeft = listDb.prepare('SELECT id FROM game_list WHERE steam_app_id = 900001').get()
+    check('Discounts window: a game on your Game List can be removed from there', onList.remove && !onList.add && !rowLeft, JSON.stringify({ onList, rowLeft }))
+    check('Discounts window: then it offers Add to Game List again', offList.add && !offList.remove, JSON.stringify(offList))
+    await escape()
+    listDb.prepare('DELETE FROM game_list WHERE steam_app_id = 900001').run()
     deals.getDeals = realDeals; deals.markSeen = realMark; steamApi.searchGames = realSearch
   }
   }

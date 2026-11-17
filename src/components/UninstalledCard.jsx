@@ -86,7 +86,7 @@ export default function UninstalledCard() {
             <IconArchive size={15} stroke={1.7} />
             <span>
               <b>Remove from Library</b>
-              <small>Keeps its hours and achievements{playing ? ', and sets it On hold' : ''}</small>
+              <small>Keeps its hours and achievements{playing ? ', and sets it On hold' : status === 'finished' ? ', and it stays in Finished' : ''}</small>
             </span>
           </button>
           <button type="button" className={`${s.option} ${s.optionDanger}`} data-gpnav data-uninstalled-delete onClick={() => setConfirmDelete(true)} disabled={!!busy}>

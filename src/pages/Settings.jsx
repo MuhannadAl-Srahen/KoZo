@@ -262,9 +262,44 @@ function GeneralTab() {
         <Message msg={startupMsg} />
       </section>
 
+      <SuggestionsSection />
 
       <GraphicsSection />
     </div>
+  )
+}
+
+// Smart suggestions (electron/services/suggestions.js): the small card in the corner. Each kind
+// on or off; "Don't ask again" on a card turns its kind off here.
+const SUGGESTION_ROWS = [
+  { key: 'plan',  label: 'Plan a game when it becomes Playing', desc: 'Offers to put it in this month\'s Play Plan' },
+  { key: 'next',  label: 'Next game from your plan', desc: 'When you finish a game, offers the next Up next game of that month' },
+  { key: 'carry', label: 'Carry over last month\'s plan', desc: 'When a month starts, offers to move games you didn\'t finish' },
+  { key: 'stale', label: 'Games you stopped playing', desc: 'Games marked Playing that weren\'t played for 3 weeks: offers On hold' },
+]
+let suggestionPrefsCache = null
+function SuggestionsSection() {
+  const [prefs, setPrefs] = useState(suggestionPrefsCache)
+  useEffect(() => {
+    window.kozo?.api?.suggestions?.prefs?.().then(r => { if (r?.ok) { suggestionPrefsCache = r.data; setPrefs(r.data) } })
+  }, [])
+  async function toggle(key, on) {
+    setPrefs(p => ({ ...(p || {}), [key]: on }))
+    const r = await window.kozo?.api?.suggestions?.setPref?.(key, on)
+    if (r?.ok) { suggestionPrefsCache = r.data; setPrefs(r.data) }
+  }
+  return (
+    <section className={s.section} data-settings-suggestions>
+      <div className={s.sectionHeader}>
+        <IconSparkles size={15} stroke={1.6} />
+        <span>Suggestions</span>
+      </div>
+      <div className={s.toggleList}>
+        {SUGGESTION_ROWS.map(r => (
+          <ToggleRow key={r.key} label={r.label} desc={r.desc} checked={prefs ? prefs[r.key] !== false : true} busy={!prefs} onChange={(v) => toggle(r.key, v)} />
+        ))}
+      </div>
+    </section>
   )
 }
 

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
 import { bgTone, bgToneHex } from '../lib/bgTone'
-import { reapplyAccent } from './AccentColorContext'
+import { reapplyAccent, applyAccent, applyBackgroundTint } from './AccentColorContext'
+import { bootLook } from '../lib/bootLook'
 
 // Settings → Appearance beyond the accent color: UI scale, spacing, corners,
 // what game cards show, sidebar order and start page, and a background
@@ -197,11 +198,35 @@ function apply(p) {
   applyZoom()
 }
 
+// The saved prefs from the synchronous boot read (lib/bootLook.js), or null without one
+// (no look saved yet, or a main process older than the preload that reads it).
+let bootPrefsCache
+export function bootPrefs() {
+  if (bootPrefsCache !== undefined) return bootPrefsCache
+  bootPrefsCache = null
+  const raw = bootLook()?.appearance
+  if (raw) { try { bootPrefsCache = normalize(JSON.parse(raw)) } catch {} }
+  return bootPrefsCache
+}
+
+// main.jsx, before React's first render: the saved theme and accent go on <html> at once,
+// so KoZo never opens in the default purple (Midnight with the purple accent, or the
+// Accent tint theme on its fallback purple hue) and then switches. The accent goes first:
+// apply() calls reapplyAccent, which darkens it for the Light theme.
+export function applyBootLook() {
+  const accent = bootLook()?.accent
+  if (accent) { applyAccent(accent); applyBackgroundTint(accent) }
+  const p = bootPrefs()
+  if (p) apply(p)
+}
+
 const AppearanceContext = createContext({ prefs: DEFAULT_APPEARANCE, loaded: false, setPrefs: () => {} })
 
 export function AppearanceProvider({ children }) {
-  const [prefs, setPrefsState] = useState(DEFAULT_APPEARANCE)
-  const [loaded, setLoaded] = useState(false)
+  // With the boot read the saved prefs are there from the first render, so the start page
+  // opens at once instead of after the Library flashed.
+  const [prefs, setPrefsState] = useState(() => bootPrefs() || DEFAULT_APPEARANCE)
+  const [loaded, setLoaded] = useState(() => !!bootPrefs())
 
   useEffect(() => {
     let alive = true

@@ -14,7 +14,8 @@
 //    how close it is to what YOU play (Steam tags of your most played and best
 //    rated games), so the top of the page is the best deal for you, not the
 //    biggest number.
-// Prices come from Steam in your own currency (app.getLocaleCountryCode).
+// Prices come from Steam for the country Steam's store uses for this PC (storeCountry), the
+// price you'd really pay there.
 
 const fs = require('fs')
 const path = require('path')
@@ -29,8 +30,56 @@ const UNKNOWN_TTL = 7 * 24 * 60 * 60 * 1000   // a game CheapShark doesn't list:
 function axios() { return require('axios') }
 function steam() { return require('./steamApi') }
 function settings() { return require('../db/queries/settings') }
-function country() {
+
+// ── Which country's prices ───────────────────────────────────────────────────
+// Steam prices by the country its store gives this PC, not by Windows' region setting: with
+// Windows set to US, Discounts said Sniper Elite 5 was $4.99 (the US price) while Steam sold it
+// to the maker for $2.29 (Jordan's regional price). Steam names that country in the
+// steamCountry cookie on any store page ("JO%7C<hash>"); kept a day in setting
+// `steam_store_cc` ({ cc, at }, per PC). Until Steam has answered once, Windows' region.
+const CC_SETTING = 'steam_store_cc'
+const CC_TTL = 24 * 3600000
+let storeCc = null
+function savedCc() {
+  if (storeCc) return storeCc
+  try { storeCc = JSON.parse(settings().getSetting(CC_SETTING) || 'null') } catch {}
+  return storeCc
+}
+function localeCountry() {
   try { return (require('electron').app.getLocaleCountryCode() || 'US').toUpperCase() } catch { return 'US' }
+}
+function country() {
+  return savedCc()?.cc || localeCountry()
+}
+// Pure: the country in Steam's Set-Cookie headers, or null.
+function ccFromCookies(setCookie) {
+  for (const c of [].concat(setCookie || [])) {
+    const m = /(?:^|;\s*)steamCountry=([A-Za-z]{2})(?=%7C|\||;|$)/.exec(String(c))
+    if (m) return m[1].toUpperCase()
+  }
+  return null
+}
+let ccRun = null
+async function askStoreCountry() {
+  try {
+    // A HEAD of a tiny store page: Steam sets the cookie, nothing is downloaded.
+    const r = await axios().head('https://store.steampowered.com/app/10/', { timeout: 6000, headers: UA, maxRedirects: 0, validateStatus: () => true })
+    const cc = ccFromCookies(r.headers?.['set-cookie'])
+    if (cc) {
+      if (cc !== savedCc()?.cc) logger.info('deals: Steam store country', { cc, windows: localeCountry() })
+      storeCc = { cc, at: Date.now() }
+      try { settings().setSetting(CC_SETTING, JSON.stringify(storeCc)) } catch {}
+    }
+  } catch (e) { logger.warn('deals: could not ask Steam for the store country', { message: e.message }) }
+  return country()
+}
+// Known and under a day old: at once. Known but old: asked again behind, the old one used now.
+// Never asked: waits for Steam (6 s at most), since every price depends on it.
+async function storeCountry() {
+  const s = savedCc()
+  if (s?.cc && Date.now() - (s.at || 0) < CC_TTL) return s.cc
+  if (!ccRun) ccRun = askStoreCountry().finally(() => { ccRun = null })
+  return s?.cc ? s.cc : ccRun
 }
 
 let cache = null      // { at, cc, data }
@@ -383,6 +432,7 @@ function applyAlerts(alerts) {
 // After an alert changes: fresh prices for the alerts only, not the whole page.
 async function refreshAlerts() {
   loadDisk()
+  await storeCountry()
   const rows = targetRows()
   const facts = await priced(rows.map(r => Number(r.appid)))
   const alerts = buildAlerts(rows, facts, ownedIds())
@@ -390,7 +440,7 @@ async function refreshAlerts() {
   if (cache?.data) {
     cache.data = { ...cache.data, alerts }
     saveDisk()
-    broadcast('deals:updated', cache.data)
+    broadcast('deals:updated', view(cache.data))
   }
   markNewSales()
   return alerts
@@ -400,6 +450,7 @@ async function refreshAlerts() {
 // Game List joins it as Want to play. Already at that price: nothing to announce,
 // the window says so itself.
 async function setTarget(appid, cents, meta = {}) {
+  await storeCountry()
   const db = require('../db/database').getDb()
   const id = Number(appid)
   if (!(id > 0)) throw new Error('This game has no Steam page.')
@@ -440,6 +491,7 @@ async function addToList(id, { name, banner_url = null } = {}) {
 // stores, the lowest ever and the alert. Never waits long for CheapShark.
 async function gamePrices(appid) {
   loadDisk()
+  await storeCountry()
   const db = require('../db/database').getDb()
   const id = Number(appid)
   const [facts, lows] = await Promise.all([
@@ -513,6 +565,7 @@ const hasMore = (d) => !(cursorDone(d.cursor.rev, d.totals.rev) && cursorDone(d.
 
 async function compute() {
   loadDisk()
+  await storeCountry()
   const owned = ownedIds()
   const wantIds = wantedIds(owned)
 
@@ -522,7 +575,7 @@ async function compute() {
   if (!specials.ok && cache?.data?.deals?.length) {
     logger.warn('deals: Steam search failed, keeping the last list')
     retryAt = Date.now() + 5 * 60000
-    return cache.data
+    return view(cache.data)
   }
   const depth = depthOf(cache)
   depth.totals = { ...depth.totals, ...Object.fromEntries(Object.entries(specials.totals || {}).filter(([, v]) => v)) }
@@ -569,10 +622,10 @@ async function compute() {
       again.alerts = again.alerts.map(a => ({ ...a, hit: data.alerts.find(x => x.listId === a.listId)?.hit ?? a.hit }))
       cache = { at: Date.now(), cc: again.cc, data: again, more: cache?.more || depth }
       saveDisk()
-      broadcast('deals:updated', again)
+      broadcast('deals:updated', view(again))
     })
   }
-  return data
+  return view(data)
 }
 
 function broadcast(channel, payload) {
@@ -586,16 +639,18 @@ function broadcast(channel, payload) {
 // on sale long before it reached your price.
 function seen() { try { return JSON.parse(settings().getSetting('deals_seen') || '[]') } catch { return [] } }
 function alertKey(appid) { return `alert:${appid}` }
-function reachedKeys() { return (cache?.data?.alerts || []).filter(a => a.state === 'reached').map(a => alertKey(a.appid)) }
+function reachedKeys(v) { return (v?.alerts || []).filter(a => a.state === 'reached').map(a => alertKey(a.appid)) }
 function unseen() {
   loadDisk()
   const s = new Set(seen())
-  return [...(cache?.data?.yours || []).map(g => g.appid), ...reachedKeys()].filter(k => !s.has(k))
+  const v = view(cache?.data)
+  return [...(v?.yours || []).map(g => g.appid), ...reachedKeys(v)].filter(k => !s.has(k))
 }
 function markNewSales() { broadcast('deals:changed', unseen().length) }
 function markSeen() {
   loadDisk()
-  settings().setSetting('deals_seen', JSON.stringify([...(cache?.data?.yours || []).map(g => g.appid), ...reachedKeys()]))
+  const v = view(cache?.data)
+  settings().setSetting('deals_seen', JSON.stringify([...(v?.yours || []).map(g => g.appid), ...reachedKeys(v)]))
   markNewSales()
   return true
 }
@@ -609,7 +664,7 @@ function saleMap() {
   if (!cache?.data || Date.now() - (cache.at || 0) > 2 * 86400000) return {}
   const now = Date.now()
   const out = {}
-  for (const g of cache.data.yours || []) {
+  for (const g of view(cache.data).yours || []) {
     if (!(g.price?.pct > 0)) continue
     if (g.price.endsAt && g.price.endsAt < now) continue   // endsAt is in ms
     out[g.appid] = { pct: g.price.pct, finalText: g.price.finalText || null, originalText: g.price.originalText || null, lowest: g.low === 'lowest' }
@@ -618,18 +673,85 @@ function saleMap() {
 }
 
 // Cached answer at once (memory or disk); refreshed in the background when
-// older than an hour or the country changed. `force` waits for a fresh one.
+// older than an hour. `force`, or prices for another country, wait for a fresh one: another
+// country's prices are wrong prices, not old ones.
 let retryAt = 0
 async function getDeals({ force = false } = {}) {
   loadDisk()
+  await storeCountry()
   const fresh = cache && cache.cc === country() && (Date.now() - cache.at < TTL || Date.now() < retryAt)
-  if (force || !cache) {
+  if (force || !cache || cache.cc !== country()) {
     if (!running) running = compute().finally(() => { running = null })
     return running
   }
   if (!fresh && !running) running = compute().catch(e => logger.warn('deals: refresh failed', { message: e.message })).finally(() => { running = null })
-  // A list saved before the review floor existed still holds small games: drop them now.
-  return { ...cache.data, deals: (cache.data.deals || []).filter(g => wellReviewed(g.reviews)) }
+  // As the Game List is now; and a list saved before the review floor existed loses its small games.
+  return view(cache.data)
+}
+
+// Pure: a stored answer as the Game List is NOW. `want` = the Steam ids you want and don't own,
+// `owned` = in the Library, `alertIds` = Game List rows with a price alert. A game taken off
+// the Game List stayed under "On your Game List" until the hourly refresh; now it leaves at
+// once (and is one of the other deals, if it is one), and a deal you add moves up there.
+function currentView(data, want, owned = new Set(), alertIds = null) {
+  if (!data) return data
+  const yours = [], deals = []
+  const keep = (g) => !owned.has(Number(g.appid))
+  for (const g of data.yours || []) {
+    if (want.has(Number(g.appid))) yours.push(g)
+    else if (keep(g) && wellReviewed(g.reviews)) deals.push({ ...g, mine: false })
+  }
+  for (const g of data.deals || []) {
+    if (want.has(Number(g.appid))) yours.push({ ...g, mine: true })
+    else if (keep(g) && wellReviewed(g.reviews)) deals.push(g)
+  }
+  return {
+    ...data,
+    yours: yours.sort((a, b) => b.score - a.score),
+    deals,
+    wantedCount: want.size,
+    alerts: alertIds ? (data.alerts || []).filter(a => alertIds.has(a.listId)) : (data.alerts || []),
+  }
+}
+function view(data) {
+  if (!data) return data
+  try {
+    const owned = ownedIds()
+    return currentView(data, new Set(wantedIds(owned)), owned, new Set(targetRows().map(r => r.id)))
+  } catch { return data }
+}
+
+// The Game List changed (ipc.js: add, edit, delete, untrack, to the Library): an open
+// Discounts page and the sidebar badge follow at once, from the stored answer.
+function listChanged() {
+  loadDisk()
+  if (!cache?.data) return
+  broadcast('deals:updated', view(cache.data))
+  markNewSales()
+}
+
+// The Discounts window's Add / Remove: is this Steam game on the Game List, or in the Library.
+function listState(appid) {
+  const id = Number(appid)
+  const row = require('../db/database').getDb()
+    .prepare('SELECT id, status, game_id FROM game_list WHERE steam_app_id = ? ORDER BY game_id IS NOT NULL LIMIT 1').get(id)
+  return { onList: !!row, listId: row?.id ?? null, status: row?.status ?? null, owned: ownedIds().has(id) }
+}
+
+// Takes a Steam game off the Game List from the Discounts window (its price alert with it).
+// A row tied to a Library game stays: every Library game keeps its row.
+function removeFromList(appid) {
+  const id = Number(appid)
+  const db = require('../db/database').getDb()
+  const gameListQ = require('../db/queries/gameList')
+  const rows = db.prepare('SELECT id FROM game_list WHERE steam_app_id = ? AND game_id IS NULL').all(id)
+  for (const r of rows) gameListQ.deleteGameListItem(r.id)
+  if (rows.length) {
+    try { require('./autoBackup').markDirty() } catch {}
+    broadcast('game:updated', null)
+    listChanged()
+  }
+  return listState(id)
 }
 
 // The next page of Steam's sales, when Discounts is scrolled to its end. Up to three rounds
@@ -643,6 +765,7 @@ function moreDeals() {
 
 async function fetchMoreDeals() {
   loadDisk()
+  await storeCountry()
   if (!cache?.data) await getDeals({ force: true })
   if (!cache?.data) return { deals: [], more: false }
   const depth = depthOf(cache)
@@ -685,7 +808,7 @@ async function fetchMoreDeals() {
   cache = { ...cache, data, more: depth }
   saveDisk()
   logger.info('deals: more', { added: added.length, cursor: depth.cursor, failed })
-  return { ...data, deals: (data.deals || []).filter(g => wellReviewed(g.reviews)), ...(failed ? { error: 'Steam did not answer. Scroll again in a moment.' } : {}) }
+  return { ...view(data), ...(failed ? { error: 'Steam did not answer. Scroll again in a moment.' } : {}) }
 }
 
 // Background: every 6 hours when no game is running, so the badge appears on
@@ -700,4 +823,5 @@ function start() {
   timer = setInterval(tick, 6 * 60 * 60 * 1000)
 }
 
-module.exports = { getDeals, moreDeals, saleMap, gamePrices, setTarget, refreshAlerts, lowInfo, markSeen, unseen, start, dealScore, wellReviewed, tasteMatch, tasteVector, forgetTaste, lowState, moneyText, targetState, alertChanges, cursorDone, freshIds }
+module.exports = { getDeals, moreDeals, saleMap, gamePrices, setTarget, refreshAlerts, lowInfo, markSeen, unseen, start, dealScore, wellReviewed, tasteMatch, tasteVector, forgetTaste, lowState, moneyText, targetState, alertChanges, cursorDone, freshIds,
+  listChanged, listState, removeFromList, currentView, ccFromCookies, storeCountry }

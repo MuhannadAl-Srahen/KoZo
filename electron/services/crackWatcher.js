@@ -33,8 +33,24 @@ const bootstrapTried = new Map()
 
 // ── Tiny helpers ─────────────────────────────────────────────────────────────
 
+// Pure: text in whatever an emulator wrote. UTF-8 with a BOM made JSON.parse throw (0 unlocks),
+// and a UTF-16 INI (some Windows-built emulators) read as UTF-8 matched nothing.
+function decodeText(buf) {
+  if (!buf) return null
+  if (buf.length >= 2 && buf[0] === 0xFF && buf[1] === 0xFE) return buf.subarray(2).toString('utf16le')
+  if (buf.length >= 2 && buf[0] === 0xFE && buf[1] === 0xFF) {
+    let b = Buffer.from(buf.subarray(2))
+    if (b.length % 2) b = b.subarray(0, b.length - 1)
+    return b.swap16().toString('utf16le')
+  }
+  if (buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) return buf.subarray(3).toString('utf8')
+  // UTF-16 LE with no mark: ASCII text with a zero after every letter.
+  if (buf.length >= 4 && buf[0] !== 0 && buf[1] === 0 && buf[2] !== 0 && buf[3] === 0) return buf.toString('utf16le')
+  return buf.toString('utf8')
+}
+
 function safeRead(p) {
-  try { return fs.readFileSync(p, 'utf8') } catch { return null }
+  try { return decodeText(fs.readFileSync(p)) } catch { return null }
 }
 
 function safeReadBuf(p) {
@@ -79,11 +95,11 @@ function crc32hex(str) {
 //   { "ACH_NAME": { "earned": true, "earned_time": 1700000000 }, ... }
 function parseGoldbergJson(text) {
   try {
-    const data = JSON.parse(text)
+    const data = JSON.parse(String(text).replace(/^﻿/, ''))
     const out = []
     for (const [name, info] of Object.entries(data)) {
-      // earned can be true (bool) or "1" (string)
-      const earned = info?.earned === true || info?.earned === 1 || info?.earned === '1'
+      // earned can be true (bool), 1, "1" or "true"
+      const earned = info?.earned === true || info?.earned === 1 || info?.earned === '1' || info?.earned === 'true'
       if (earned) {
         out.push({ name, unlocktime: parseInt(info.earned_time) || 0 })
       }
@@ -247,6 +263,37 @@ function myDocsDir() {
   return _myDocs
 }
 
+// Folders inside `dir` (names only), kept a minute: the generic emulator roots below list
+// %PUBLIC%\Documents\Steam and %ProgramData%\Steam on every scan.
+const _subdirs = new Map()
+function subdirs(dir) {
+  const hit = _subdirs.get(dir)
+  if (hit && Date.now() - hit.at < 60_000) return hit.names
+  let names = []
+  try { names = fs.readdirSync(dir, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name).slice(0, 60) } catch {}
+  _subdirs.set(dir, { at: Date.now(), names })
+  return names
+}
+
+// Pure: the save folders a Goldberg / GSE (gbe_fork) build was told to use instead of the default
+// %APPDATA%\GSE Saves, read from its own settings (Achievement Watcher and Playnite both scan
+// fixed folders only, so a release that moves its saves loses every achievement there):
+//   steam_settings\configs.user.ini [user::saves] saves_folder_name = a folder in %APPDATA%
+//   steam_settings\configs.user.ini [user::saves] local_save_path   = relative to the dll's folder
+//   classic Goldberg local_save.txt (beside the dll or in steam_settings): its text is that path,
+//   empty means "SAVE".
+// Each base holds <appid>\achievements.json.
+function goldbergSaveBases({ userIni = '', localSaveTxt = null } = {}, dllDir, appdata) {
+  const get = (k) => (String(userIni || '').match(new RegExp(`^[ \\t]*${k}[ \\t]*=[ \\t]*(.*?)[ \\t]*$`, 'im')) || [])[1] || ''
+  const out = []
+  const name = get('saves_folder_name').replace(/^["']|["']$/g, '')
+  if (name && appdata) out.push(path.join(appdata, name))
+  const local = get('local_save_path').replace(/^["']|["']$/g, '')
+  if (local && dllDir) out.push(path.resolve(dllDir, local))
+  if (localSaveTxt != null && dllDir) out.push(path.resolve(dllDir, String(localSaveTxt).trim() || 'SAVE'))
+  return [...new Set(out)]
+}
+
 function buildCandidates(game) {
   const home    = os.homedir()
   const appdata = process.env.APPDATA       || path.join(home, 'AppData', 'Roaming')
@@ -318,6 +365,18 @@ function buildCandidates(game) {
   add(path.join(pub, 'Documents', 'OnlineFix', id, 'Stats', 'Achievements.ini'), I, 'online-fix')
   add(path.join(appdata, 'OnlineFix', id, 'Stats', 'Achievements.ini'),          I, 'online-fix')
 
+  // ── 9b. Any release group, not only the names above ──────────────────────
+  // CODEX-style emulators write %PUBLIC%\Documents\Steam\<group>\<appid> and %ProgramData%\
+  // Steam\<group>\<appid> (CODEX, RUNE, PLAZA, CPY, RLD!, 3DM, and groups that came later):
+  // Achievement Watcher scans every folder there, so a new group's name is never needed.
+  for (const [base, extra] of [[path.join(pub, 'Documents', 'Steam'), []], [path.join(progdata, 'Steam'), ['stats']]]) {
+    // A folder named by digits is an app id itself (the Reloaded layout above), not a group.
+    for (const group of subdirs(base).filter(n => !/^\d+$/.test(n))) {
+      add(path.join(base, group, id, 'achievements.ini'), I, group)
+      for (const sub of extra) add(path.join(base, group, id, sub, 'achievements.ini'), I, group)
+    }
+  }
+
   // ── 10. In-game install folder (various layouts) ──────────────────────────
   if (ip) {
     // Goldberg local save mode — some repacks configure saves inside game folder
@@ -360,9 +419,20 @@ function buildCandidates(game) {
     for (const dir of tenokeDirs(ip)) {
       if (dir !== ip) add(path.join(dir, 'SteamData', 'user_stats.ini'),       parseTenokeIni, 'TENOKE')
     }
+    // Goldberg / GSE told by its own settings to save somewhere else (goldbergSaveBases).
+    for (const root of exists(ip) ? configRoots(ip) : []) {
+      const ss = path.join(root, 'steam_settings')
+      const txt = [path.join(ss, 'local_save.txt'), path.join(root, 'local_save.txt')].find(exists)
+      const userIni = safeRead(path.join(ss, 'configs.user.ini'))
+      if (!txt && !userIni) continue
+      const bases = goldbergSaveBases({ userIni: userIni || '', localSaveTxt: txt ? (safeRead(txt) || '') : null }, root, appdata)
+      for (const b of bases) add(path.join(b, id, 'achievements.json'), J, 'Goldberg')
+    }
   }
 
-  return cands
+  // The same file can come from two rules (a named group and the any-group scan): read once.
+  const seen = new Set()
+  return cands.filter(c => { const k = String(c.path).toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true })
 }
 
 // ── Emulator config detection ────────────────────────────────────────────────
@@ -1434,5 +1504,5 @@ module.exports = {
   buildCandidates, readEmuConfigAppIds, detectEmulator, diagnoseGame, myDocsDir,
   inspectGoldberg, enableGoldbergAchievements, deepScanForAppIds, collectCandidates,
   // Pure parsers — exported for the standalone test script (scripts/test-parsers.js)
-  parseGoldbergJson, parseCodexIni, parseTenokeIni, parseSseBinary,
+  parseGoldbergJson, parseCodexIni, parseTenokeIni, parseSseBinary, goldbergSaveBases, decodeText,
 }

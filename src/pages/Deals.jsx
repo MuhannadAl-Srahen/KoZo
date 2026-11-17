@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   IconDiscount2, IconRefresh, IconThumbUp, IconTrendingDown, IconClock, IconBuildingStore, IconPlus, IconCheck,
-  IconSparkles, IconListCheck, IconBrandSteam, IconBell, IconSearch, IconX, IconLoader2,
+  IconSparkles, IconListCheck, IconBrandSteam, IconBell, IconSearch, IconX, IconLoader2, IconTrash,
 } from '@tabler/icons-react'
 import SteamGameModal from '../components/SteamGameModal'
 import GamePrices, { lowestLine } from '../components/GamePrices'
@@ -48,6 +48,11 @@ function searchKey(v) {
 function matchesSearch(name, term) {
   const k = searchKey(term)
   return !k || searchKey(name).includes(k)
+}
+
+// "Prices for Jordan": the country Steam's store prices this PC for (services/deals.js).
+function regionName(cc) {
+  try { return new Intl.DisplayNames(['en'], { type: 'region' }).of(cc) || cc } catch { return cc }
 }
 
 function scoreTone(n) { return n >= 80 ? 'great' : n >= 65 ? 'good' : 'ok' }
@@ -173,8 +178,9 @@ export default function Deals() {
   const [shown, setShown] = useState(PAGE)
   const [open, setOpen] = useState(null)
   const [openTab, setOpenTab] = useState('overview')
-  const [added, setAdded] = useState(() => new Set())
-  const [adding, setAdding] = useState(null)
+  // The open game's place on the Game List (deals:listState): its window offers Add, or Remove.
+  const [listInfo, setListInfo] = useState(null)   // { appid, onList, owned }
+  const [listBusy, setListBusy] = useState(null)   // 'add' | 'remove' | null
   // Search: filters every section by name, and looks the name up on Steam too, so a game
   // that isn't on sale here can still be opened for its price and an alert.
   const [query, setQuery] = useState('')
@@ -274,11 +280,24 @@ export default function Deals() {
     return () => { alive = false; clearTimeout(t) }
   }, [query])
 
+  const refreshListInfo = useCallback((appid) => {
+    window.kozo?.api?.deals?.listState?.(appid).then(r => { if (r?.ok) setListInfo({ appid, ...r.data }) })
+  }, [])
+  useEffect(() => { setListInfo(null); if (open?.appid) refreshListInfo(open.appid) }, [open?.appid, refreshListInfo])
+
+  // Both update the page by themselves: the main process sends deals:updated with the list as it is now.
   async function addToList(g) {
-    setAdding(g.appid)
-    const res = await window.kozo?.api?.gameList?.add?.({ steam_app_id: g.appid, name: g.name, banner_url: g.portrait2x || g.portrait || null, status: 'want_to_play', rating: null, game_id: null })
-    setAdding(null)
-    if (res?.ok) setAdded(a => new Set(a).add(g.appid))
+    setListBusy('add')
+    await window.kozo?.api?.gameList?.add?.({ steam_app_id: g.appid, name: g.name, banner_url: g.portrait2x || g.portrait || null, status: 'want_to_play', rating: null, game_id: null })
+    setListBusy(null)
+    refreshListInfo(g.appid)
+  }
+  async function removeFromList(g) {
+    setListBusy('remove')
+    const res = await window.kozo?.api?.deals?.removeFromList?.(g.appid)
+    setListBusy(null)
+    if (res?.ok) setListInfo({ appid: g.appid, ...res.data })
+    else refreshListInfo(g.appid)
   }
 
   function openWindow(g, tab = 'overview') { setOpenTab(tab); setOpen(g) }
@@ -313,7 +332,7 @@ export default function Deals() {
         </div>
         <div className={s.spacer} />
         <CardSizeSlider pageKey="deals" view="grid" defaults={{ grid: 260 }} opts={{ min: 200, max: 440 }} />
-        {data?.at && <span className={s.updated}>Prices for {data.cc}, checked {timeAgo(data.at)}</span>}
+        {data?.at && <span className={s.updated} title="The prices Steam's store gives this PC">Prices for {regionName(data.cc)}, checked {timeAgo(data.at)}</span>}
         <button type="button" className={s.ghostBtn} onClick={() => load(true)} disabled={refreshing}>
           <IconRefresh size={14} className={refreshing ? 'spin' : ''} /> {refreshing ? 'Checking…' : 'Check now'}
         </button>
@@ -437,14 +456,23 @@ export default function Deals() {
           extraTab={{
             key: 'prices',
             label: 'Prices',
-            node: <GamePrices appId={open.appid} name={open.name} banner={open.portrait} onAlertChanged={() => setAdded(a => new Set(a).add(open.appid))} />,
+            node: <GamePrices appId={open.appid} name={open.name} banner={open.portrait} onAlertChanged={() => refreshListInfo(open.appid)} />,
           }}
           actions={<>
-            {open.mine || added.has(open.appid)
-              ? <span className={s.addedNote}><IconCheck size={14} /> On your Game List</span>
-              : <button type="button" className={s.ghostBtn} disabled={adding === open.appid} onClick={() => addToList(open)}>
-                  <IconPlus size={14} /> {adding === open.appid ? 'Adding…' : 'Add to Game List'}
-                </button>}
+            {(() => {
+              // Until Steam's answer about the list comes back, the card's own section says it.
+              const info = listInfo?.appid === open.appid ? listInfo : null
+              if (info?.owned) return <span className={s.addedNote}><IconCheck size={14} /> In your Library</span>
+              if (info ? info.onList : open.mine) return <>
+                <span className={s.addedNote}><IconCheck size={14} /> On your Game List</span>
+                <button type="button" className={s.ghostBtn} data-deals-remove disabled={!!listBusy} onClick={() => removeFromList(open)} title="Take it off your Game List (and its price alert)">
+                  {listBusy === 'remove' ? <IconLoader2 size={14} className="spin" /> : <IconTrash size={14} />} {listBusy === 'remove' ? 'Removing…' : 'Remove'}
+                </button>
+              </>
+              return <button type="button" className={s.ghostBtn} data-deals-add disabled={!!listBusy} onClick={() => addToList(open)}>
+                {listBusy === 'add' ? <IconLoader2 size={14} className="spin" /> : <IconPlus size={14} />} {listBusy === 'add' ? 'Adding…' : 'Add to Game List'}
+              </button>
+            })()}
             {open.elsewhere && (
               <button type="button" className={s.ghostBtn} onClick={() => window.kozo?.api?.shell?.openExternal?.(open.elsewhere.url)}>
                 <IconBuildingStore size={14} /> {open.elsewhere.store}

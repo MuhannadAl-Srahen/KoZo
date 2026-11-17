@@ -407,7 +407,12 @@ Close any program that may be using it and start KoZo again.`)
   try { require('./services/crackWatcher').myDocsDir?.() } catch {}
   const steamPathReady = Promise.resolve().then(() => require('./services/steamStatsWatcher').warmSteamPath?.()).catch(() => null)
 
-  steamPathReady.finally(() => watcher.start())
+  steamPathReady.finally(() => {
+    watcher.start()
+    // Unlocks Steam writes while no game is running (an EA game's arrive late, Offline Mode's
+    // once online): read when the file changes, not at the next start or session.
+    try { require('./services/steamStatsWatcher').startBackground() } catch {}
+  })
   // Discord Rich Presence (off unless enabled in Settings; idle costs nothing).
   try { require('./services/discordPresence').start() } catch {}
 
@@ -558,6 +563,9 @@ Close any program that may be using it and start KoZo again.`)
   // "It's out now!" — notify when a tracked upcoming game's release date passes.
   try { require('./services/releaseWatch').start() } catch {}
   try { require('./services/deals').start() } catch {}
+  // Smart suggestions: carry over last month's plan, games you stopped playing (once a day).
+  try { require('./services/suggestions').start() } catch {}
+  setTimeout(() => { watcher.runWhenIdle('suggestionsCheck', () => require('./services/suggestions').check()) }, 60000)
 
   // Auto-update from GitHub Releases (packaged builds only; silent when the
   // release repo isn't configured yet).
@@ -601,6 +609,7 @@ function flushOnExit() {
   _exitFlushed = true
   try { require('./services/processWatcher').stop() } catch {}
   try { require('./services/crackWatcher').stopWatching() } catch {}
+  try { require('./services/steamStatsWatcher').stopBackground() } catch {}
   try { require('./services/controllerWake').stop() } catch {}
   try { require('./services/discordPresence').stop() } catch {}
   try { require('./services/autoBackup').flush() } catch {}

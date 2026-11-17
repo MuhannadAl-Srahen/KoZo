@@ -29,6 +29,7 @@ import UpdateBanner from './components/UpdateBanner'
 import DriveNewsBar from './components/DriveNewsBar'
 import LaunchMissCard from './components/LaunchMissCard'
 import UninstalledCard from './components/UninstalledCard'
+import SuggestionCard from './components/SuggestionCard'
 import KeptOnListPrompt from './components/KeptOnListPrompt'
 import QuickSearch from './components/QuickSearch'
 import GamepadHints from './components/GamepadHints'
@@ -282,6 +283,7 @@ export default function App() {
         <UnknownGamePrompt />
         <LaunchMissCard />
         <UninstalledCard />
+        <SuggestionCard />
         <KeptOnListPrompt />
         <QuickSearch />
         <LevelUpCelebration />

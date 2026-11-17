@@ -899,6 +899,11 @@ function endSession(gameId, session, forcedEndAt) {
   // Auto-snapshot this game's save files (no-op unless the user enabled it).
   try { require('./autoSaveBackup').backupGameAfterSession(game, ended || session) } catch {}
   sendToRenderer('session:ended', { session: ended, game_name: game?.name })
+  // The session made it Playing (statusSync.onSessionStarted, quietly): now that it was a real
+  // session, offer to plan it for this month (services/suggestions.js).
+  if (game?.completion_status === 'playing' && session.before && session.before.completion_status !== 'playing') {
+    try { require('./suggestions').askPlan({ gameId: game.id }) } catch {}
+  }
   try {
     require('./notifications').notifySessionEnded({
       gameName: game?.name || 'Game',
