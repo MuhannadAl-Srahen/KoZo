@@ -338,15 +338,16 @@ function hasGameIndicator(gamePath) {
   return false
 }
 
-// Early-exit check: is there any game .exe within `maxDepth` levels of `dir`?
-function hasExeWithin(dir, maxDepth) {
+// Early-exit check: is there any game .exe within `maxDepth` levels of `dir`? Names in
+// `ignore` (lowercase) don't count.
+function hasExeWithin(dir, maxDepth, ignore = null) {
   const stack = [[dir, 0]]
   while (stack.length) {
     const [d, dep] = stack.pop()
     let entries
     try { entries = fs.readdirSync(d, { withFileTypes: true }) } catch { continue }
     for (const e of entries) {
-      if (e.isFile()) { if (isGameExe(e.name)) return true; continue }
+      if (e.isFile()) { if (isGameExe(e.name) && !ignore?.has(e.name.toLowerCase())) return true; continue }
       if (dep < maxDepth) {
         const lower = e.name.toLowerCase()
         if (NESTED_SKIP.has(lower) || SKIP_FOLDERS.has(lower)) continue
@@ -359,15 +360,22 @@ function hasExeWithin(dir, maxDepth) {
 
 // How many of `dir`'s immediate (non-structural) child subtrees contain a
 // launcher. ≥2 means `dir` is a library of separate games, not one game.
+// Two kinds of subfolder are part of the game in `dir`, never games of their own: installer
+// folders ("_Redist" holds a checksum tool), and folders whose programs are only copies of a
+// game file sitting in `dir` itself (a repack's "NoDVD\0xZeOn\Dead Space.exe" and
+// "NoDVD\voices38\Dead Space.exe" beside "Dead Space.exe"). Counting them made Dead Space a
+// library of games, and its crack copies new games named "0xZeOn" and "voices38".
 function gameBearingChildCount(dir, cap = 2) {
   let entries
   try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return 0 }
+  const own = new Set(entries.filter(e => e.isFile() && isGameExe(e.name)).map(e => e.name.toLowerCase()))
   let n = 0
   for (const e of entries) {
     if (!e.isDirectory()) continue
     const lower = e.name.toLowerCase()
     if (SKIP_FOLDERS.has(lower) || STRUCT_FOLDERS.has(lower)) continue
-    if (hasExeWithin(path.join(dir, e.name), 4)) { n++; if (n >= cap) return n }
+    if (NESTED_SKIP.has(lower) || INSTALLER_FOLDER_RE.test(lower)) continue
+    if (hasExeWithin(path.join(dir, e.name), 4, own)) { n++; if (n >= cap) return n }
   }
   return n
 }

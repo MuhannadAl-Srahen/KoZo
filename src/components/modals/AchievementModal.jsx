@@ -14,7 +14,9 @@ import s from './AchievementModal.module.css'
 // broadcast triggers.
 const OPTIMISTIC_UNLOCK_ID = -1
 
-export default function AchievementModal({ achievement: initialAch, game, onClose, onToggle }) {
+// `other` ({ persona, unlockedAt }): unlocked on a shared Steam account by someone else, so Steam
+// never showed it to this player. The button then reads "I did this too".
+export default function AchievementModal({ achievement: initialAch, game, onClose, onToggle, other = null }) {
   const [ach, setAch] = useState(initialAch)
   const [busy, setBusy] = useState(false)
   // Unlocked is the presence of an unlock row — unlocked_at is display-only and
@@ -71,7 +73,7 @@ export default function AchievementModal({ achievement: initialAch, game, onClos
         >
           {unlocked
             ? <><IconLock size={13} stroke={1.8} /> Mark as Locked</>
-            : <><IconCheck size={13} stroke={2.5} /> Mark as Unlocked</>
+            : <><IconCheck size={13} stroke={2.5} /> {other ? 'I did this too' : 'Mark as Unlocked'}</>
           }
         </button>
       }
@@ -128,6 +130,12 @@ export default function AchievementModal({ achievement: initialAch, game, onClos
             </span>
           )}
         </div>
+
+        {!unlocked && other && (
+          <p className={s.descHidden} data-ach-other>
+            Unlocked on {other.persona || 'the shared account'} by someone else{other.unlockedAt ? ` (${formatDateTime(other.unlockedAt)})` : ''}. Steam keeps one unlock per account, so it showed you nothing when you got here.
+          </p>
+        )}
 
         {unlocked && (
           <div className={s.unlockedAt}>

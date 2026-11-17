@@ -8,6 +8,7 @@ import {
   IconChevronRight, IconAlertTriangle, IconDeviceGamepad2,
   IconLayoutDashboard, IconSparkles, IconLayoutSidebarRight, IconMovie, IconTarget, IconChartBar,
   IconInfoCircle, IconBrandSteam, IconClock, IconRepeat, IconTrash, IconPencil, IconBook, IconBrandYoutube, IconSearch,
+  IconUsers, IconLoader2,
 } from '@tabler/icons-react'
 import { exeLooksLikeTool, getBannerBg, getBannerIcon, formatPlaytime, formatDate, formatDateTime, fileUrl, isSteamTracked, launcherLabel, localDayKey, rarityColor, timeAgo } from '../lib/utils'
 import { STATUS_META } from '../components/GameCard'
@@ -33,6 +34,10 @@ import { useSteamArt } from '../lib/steamArt'
 import s from './GameDetail.module.css'
 
 const STEAM_PRIVACY_URL = 'https://steamcommunity.com/my/edit/settings'
+
+// Played this long with no launcher and not one unlock from the emulator: the Achievements tab
+// says the emulator may not save them, and offers to tick them by hand.
+const EMU_SILENT_SEC = 20 * 60
 
 // toggleManual doesn't return the new unlock row's id, and only its presence
 // decides "unlocked" — the real id arrives with the reload its game:updated
@@ -101,7 +106,9 @@ function isUnlocked(ach) {
 // tile, which turned a 50-achievement game into a wall of text — it now lives
 // in the row's tooltip, where it is there when you want it and silent when you
 // don't.
-function AchCard({ ach, onClick, onQuickToggle, onGuide }) {
+// `other` = unlocked on a shared Steam account by someone else ({ persona, unlockedAt }); with
+// `onPick` the card is in "I did these too" mode: a click ticks it instead of opening it.
+function AchCard({ ach, onClick, onQuickToggle, onGuide, other, onPick, picked }) {
   // unlock_id is the row's existence; unlocked_at can legitimately be NULL when
   // Steam reported no date (unlocktime 0). The unlocked_at half stays as a
   // safety net for any patch that forgets the id.
@@ -113,6 +120,24 @@ function AchCard({ ach, onClick, onQuickToggle, onGuide }) {
   // never follow the accent. No global % → the CSS falls back to the accent
   // via var(--rar, var(--a)).
   const achRarity = rarityColor(ach.global_unlock_percent)
+
+  if (onPick) {
+    return (
+      <div
+        className={`${s.achCard} ${s.achCardLocked} ${picked ? s.achCardPicked : ''}`}
+        onClick={() => onPick(ach)} role="checkbox" aria-checked={!!picked} data-gpnav data-claim-pick={ach.id}
+      >
+        <span className={`${s.achPick} ${picked ? s.achPickOn : ''}`}>{picked && <IconCheck size={13} stroke={3} />}</span>
+        <div className={`${s.achIcon} ${s.achIconLocked}`}>
+          <AchImg src={ach.icon_url} loading="lazy" decoding="async" fallback={<IconTrophy size={20} stroke={1.4} />} />
+        </div>
+        <div className={s.achBody}>
+          <div className={s.achName}>{ach.display_name}</div>
+          {hint && <div className={s.achDesc}>{hint}</div>}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div
@@ -132,6 +157,11 @@ function AchCard({ ach, onClick, onQuickToggle, onGuide }) {
         {unlocked && (
           <div className={s.achDate}>
             {ach.unlocked_at ? formatDate(ach.unlocked_at) : 'No date'}
+          </div>
+        )}
+        {!unlocked && other && (
+          <div className={s.achOther} title={`Unlocked on ${other.persona || 'the shared account'}${other.unlockedAt ? ` ${formatDate(other.unlockedAt)}` : ''}, not during your play`}>
+            By someone else{other.unlockedAt ? `, ${formatDate(other.unlockedAt)}` : ''}
           </div>
         )}
       </div>
@@ -281,6 +311,13 @@ export default function GameDetail() {
   const [reviews, setReviews]       = useState(null)
   const [isLive, setIsLive]         = useState(false)
   const [selectedAch, setSelectedAch] = useState(null)
+  // Played on a shared (rented) Steam account: what someone else unlocked there first. Steam keeps
+  // one unlock per account, so it never showed those to you (steamAccounts.othersOnAccount).
+  const [others, setOthers]           = useState(() => new Map())   // achievement id -> { persona, unlockedAt }
+  const [claimPick, setClaimPick]     = useState(null)              // null, or the Set ticked in "I did these too"
+  const [pickScope, setPickScope]     = useState('others')          // which section is ticking: 'others' or 'locked'
+  useEffect(() => { setClaimPick(null) }, [id])                     // another game's page: nothing ticked
+  const [claimBusy, setClaimBusy]     = useState(false)
   const [guideMenu, setGuideMenu] = useState(null)   // { x, y, ach }: where to find how to unlock it
   const [pickedDay, setPickedDay]   = useState(null)   // the chart bar picked: the list under the bars shows that day
   const [openSessionId, setOpenSessionId] = useState(null)
@@ -387,15 +424,17 @@ export default function GameDetail() {
 
   const load = useCallback(async () => {
     if (!window.kozo?.api || !id) return
-    const [gRes, aRes, sRes, activeRes, privRes, ptRes] = await Promise.all([
+    const [gRes, aRes, sRes, activeRes, privRes, ptRes, othersRes] = await Promise.all([
       window.kozo.api.games.get(Number(id)),
       window.kozo.api.achievements.listForGame(Number(id)),
       window.kozo.api.sessions.getForGame(Number(id)),
       window.kozo.api.sessions.active(),
       window.kozo.api.steam?.lastSyncError?.(Number(id)),
       window.kozo.api.games.playthroughs?.(Number(id)),
+      window.kozo.api.achievements.othersOnAccount?.(Number(id)),
     ])
     setPlaythroughs(ptRes?.ok ? (ptRes.data || []) : [])
+    setOthers(new Map((othersRes?.ok ? othersRes.data || [] : []).map(o => [o.achievementId, o])))
     if (gRes?.ok) setGame(gRes.data)
     if (aRes?.ok) setAch(aRes.data ?? [])
     if (sRes?.ok) setSessions(sRes.data ?? [])
@@ -904,6 +943,20 @@ export default function GameDetail() {
           lines,
         })
     }
+  }
+
+  // Ticked by hand, then added as yours: "I did these too" (unlocked on the shared account by
+  // someone else) or "Mark the ones I got" (an emulator that saves no achievements).
+  async function claimPicked() {
+    if (!claimPick?.size) return
+    setClaimBusy(true)
+    await window.kozo?.api?.achievements?.claim?.(Number(id), [...claimPick])
+    setClaimBusy(false)
+    setClaimPick(null)
+    load()
+  }
+  function togglePick(ach) {
+    setClaimPick(prev => { const n = new Set(prev || []); if (n.has(ach.id)) n.delete(ach.id); else n.add(ach.id); return n })
   }
 
   // One-click manual unlock toggle on an achievement row (checkmark/lock icon).
@@ -1443,16 +1496,79 @@ export default function GameDetail() {
                     // what is left are two different questions.
                     (() => {
                       const unlockedAchs = achievements.filter(isUnlocked)
-                      const lockedAchs   = achievements.filter(a => !isUnlocked(a))
+                      // Locked for you but unlocked on the shared account by someone else: their own
+                      // section, so you can tick the ones you've done (a boss, a story moment).
+                      const otherAchs    = achievements.filter(a => !isUnlocked(a) && others.has(a.id))
+                      const lockedAchs   = achievements.filter(a => !isUnlocked(a) && !others.has(a.id))
+                      const card = (a) => <AchCard key={a.id} ach={a} other={others.get(a.id)} onClick={setSelectedAch} onQuickToggle={quickToggleAch} onGuide={(e, ach) => setGuideMenu({ x: e.clientX, y: e.clientY, ach })} />
                       const section = (label, list) => list.length > 0 && (
                         <div className={s.achSection}>
                           <div className={s.achSectionHead}>{label}<span className={s.achSectionCount}>{list.length}</span></div>
-                          <div className={s.achGrid}>
-                            {list.map(a => <AchCard key={a.id} ach={a} onClick={setSelectedAch} onQuickToggle={quickToggleAch} onGuide={(e, ach) => setGuideMenu({ x: e.clientX, y: e.clientY, ach })} />)}
-                          </div>
+                          <div className={s.achGrid}>{list.map(card)}</div>
                         </div>
                       )
-                      return <>{section('Unlocked', unlockedAchs)}{section('Locked', lockedAchs)}</>
+                      const persona = others.get(otherAchs[0]?.id)?.persona
+                      // A game with no launcher, played a while, and not one unlock from its emulator:
+                      // some emulators never save achievements (Dead Space's: nothing on the PC holds
+                      // them), so say so instead of a silent 0 of 47, and let them be ticked.
+                      const emuSilent = !!game.is_cracked && unlockedAchs.length === 0 && (game.total_playtime_seconds || 0) >= EMU_SILENT_SEC
+                      // The ticking, for whichever section started it.
+                      const picking = (scope) => claimPick && pickScope === scope
+                      const pickActions = (scope, label, extra) => (
+                        picking(scope) ? (
+                          <span className={s.othersActions}>
+                            <button type="button" className={s.othersBtn} onClick={() => setClaimPick(null)} disabled={claimBusy}>Cancel</button>
+                            <button type="button" className={`${s.othersBtn} ${s.othersBtnPrimary}`} data-claim onClick={claimPicked} disabled={claimBusy || !claimPick.size}>
+                              {claimBusy ? <IconLoader2 size={13} className="spin" /> : <IconCheck size={13} stroke={2.5} />} {claimPick.size ? `Add ${claimPick.size}` : 'Tick some'}
+                            </button>
+                          </span>
+                        ) : (
+                          <span className={s.othersActions}>
+                            {extra}
+                            <button type="button" className={`${s.othersBtn} ${s.othersBtnPrimary}`} data-claim-start onClick={() => { setPickScope(scope); setClaimPick(new Set()) }}>
+                              <IconCheck size={13} stroke={2.5} /> {label}
+                            </button>
+                          </span>
+                        )
+                      )
+                      const cards = (scope, list) => picking(scope)
+                        ? list.map(a => <AchCard key={a.id} ach={a} onPick={togglePick} picked={claimPick.has(a.id)} />)
+                        : list.map(card)
+                      return <>
+                        {section('Unlocked', unlockedAchs)}
+                        {otherAchs.length > 0 && (
+                          <div className={s.achSection} data-ach-others>
+                            <div className={s.achSectionHead}>
+                              Unlocked by someone else{persona ? ` on ${persona}` : ''}<span className={s.achSectionCount}>{otherAchs.length}</span>
+                            </div>
+                            <div className={s.othersNote}>
+                              <IconUsers size={15} stroke={1.8} className={s.othersNoteIcon} />
+                              <span>
+                                You play this on a shared Steam account. Someone else unlocked these there before you got to them, and Steam keeps one unlock per account, so it never showed them to you. Tick the ones you've done.
+                              </span>
+                              {pickActions('others', 'I did these too')}
+                            </div>
+                            <div className={s.achGrid}>{cards('others', otherAchs)}</div>
+                          </div>
+                        )}
+                        {emuSilent && lockedAchs.length > 0 ? (
+                          <div className={s.achSection} data-ach-silent>
+                            <div className={s.achSectionHead}>Locked<span className={s.achSectionCount}>{lockedAchs.length}</span></div>
+                            <div className={s.othersNote}>
+                              <IconInfoCircle size={15} stroke={1.8} className={s.othersNoteIcon} />
+                              <span>
+                                {`In ${formatPlaytime(game.total_playtime_seconds)} of play, this game's emulator hasn't saved a single achievement to this PC. If the game showed you some, its emulator doesn't save them, so KoZo can't see them. Tick the ones you've earned.`}
+                              </span>
+                              {pickActions('locked', 'Mark the ones I got', (
+                                <button type="button" className={s.othersBtn} onClick={handleCrackFiles} disabled={crackScanning}>
+                                  {crackScanning ? <IconLoader2 size={13} className="spin" /> : null} Check achievements
+                                </button>
+                              ))}
+                            </div>
+                            <div className={s.achGrid}>{cards('locked', lockedAchs)}</div>
+                          </div>
+                        ) : section(otherAchs.length ? 'Locked on the account too' : 'Locked', lockedAchs)}
+                      </>
                     })()
                   )}
                 </>
@@ -1563,6 +1679,7 @@ export default function GameDetail() {
         <AchievementModal
           achievement={selectedAch}
           game={game}
+          other={others.get(selectedAch.id) || null}
           onClose={() => setSelectedAch(null)}
           onToggle={(updated) => {
             // The modal already patches unlock_id (the truth) and unlocked_at

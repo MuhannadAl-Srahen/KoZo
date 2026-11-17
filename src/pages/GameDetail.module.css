@@ -515,6 +515,38 @@ button.monthPicked { background: color-mix(in srgb, var(--a) 12%, transparent); 
 .achCardLocked { background: transparent; border-color: var(--border-subtle); }
 .achCardLocked .achName { color: var(--text-muted); }
 
+/* Unlocked on a shared Steam account by someone else (GameDetail "I did these too"). */
+.achOther { font-size: var(--fs-sm); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.othersNote {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-8) var(--sp-12);
+  margin-bottom: var(--sp-12); padding: var(--sp-10) var(--sp-12);
+  border-radius: var(--r-input); border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--a) 6%, transparent);
+  color: var(--text-secondary); font-size: var(--fs-md); line-height: var(--lh-snug);
+}
+.othersNote > span:nth-child(2) { flex: 1 1 320px; min-width: 0; }
+.othersNoteIcon { flex-shrink: 0; color: var(--a); }
+.othersActions { display: inline-flex; gap: var(--sp-6); flex-shrink: 0; }
+.othersBtn {
+  composes: btn from '../styles/controls.module.css';
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 var(--sp-12); border-radius: var(--r-pill);
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary);
+  font-size: var(--fs-sm); font-weight: 600; cursor: pointer;
+}
+.othersBtn:hover:not(:disabled) { background: var(--surface-3); }
+.othersBtn:disabled { opacity: 0.55; cursor: default; }
+.othersBtnPrimary { background: var(--a); border-color: transparent; color: var(--accent-ink, #0b0b0f); }
+.othersBtnPrimary:hover:not(:disabled) { background: color-mix(in srgb, var(--a) 86%, white); }
+.achCardPicked { border-color: var(--a); background: color-mix(in srgb, var(--a) 8%, transparent); }
+.achCardPicked .achName { color: var(--text-primary); }
+.achPick {
+  flex-shrink: 0; display: grid; place-items: center;
+  width: 20px; height: 20px; border-radius: var(--r-xs);
+  border: 1.5px solid var(--border-strong, var(--border)); color: var(--accent-ink, #0b0b0f);
+}
+.achPickOn { background: var(--a); border-color: var(--a); }
+
 .achCard:hover {
   border-color: var(--border-accent-soft);
   background: var(--surface-3);

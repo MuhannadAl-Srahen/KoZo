@@ -85,6 +85,12 @@ function setGameStatus(gameId, status, { announce = true } = {}) {
   try { require('./autoBackup').markDirty() } catch {}
   broadcast('game:updated', gameId)
 
+  // Set Playing by hand: offer to put it in this month's Play Plan (services/suggestions.js).
+  // A session's own Playing asks after the session instead (processWatcher.endSession).
+  if (value === 'playing' && announce) {
+    try { require('./suggestions').askPlan({ gameId }) } catch {}
+  }
+
   // Finishing a game is worth XP — surface a level-up right away if it caused one.
   if (value === 'finished') {
     try { require('./xpTracker').check({ reason: 'finished', gameName: game.name }) } catch {}
@@ -133,7 +139,9 @@ function onSessionStarted(gameId) {
   const game = db().prepare('SELECT completion_status FROM games WHERE id = ?').get(gameId)
   if (!game) return
   if (game.completion_status == null || game.completion_status === 'on_hold') {
-    setGameStatus(gameId, 'playing')
+    // Quiet: a launch under a minute takes this back, so the plan question waits for a real
+    // session to end (processWatcher.endSession).
+    setGameStatus(gameId, 'playing', { announce: false })
   }
 }
 
@@ -187,6 +195,8 @@ function announceFinished({ gameId = null, listId = null }) {
       coverUrl: row?.banner_url || game?.banner_url || null,
       rating: row?.rating ?? null,
     })
+    // The next Up next game in that month's Play Plan (the card waits for the rating window).
+    try { require('./suggestions').askNext({ gameId: game?.id ?? null, listId: row?.id ?? null }) } catch {}
   } catch (e) { logger.warn('statusSync: finished announce failed', { message: e.message }) }
 }
 

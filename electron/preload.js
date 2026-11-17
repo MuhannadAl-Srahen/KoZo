@@ -4,9 +4,12 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 39,
+  rev: 41,
   // Settings → Appearance → UI scale.
   ui: {
+    // The saved look ({ appearance, accent }), read at once before the first render, so
+    // KoZo never opens in the default purple (src/lib/bootLook.js).
+    bootLook: () => { try { return ipcRenderer.sendSync('look:boot') } catch { return null } },
     setZoom: (factor) => { try { webFrame.setZoomFactor(Math.min(1.5, Math.max(0.75, Number(factor) || 1))) } catch {} },
     getZoom: () => { try { return webFrame.getZoomFactor() } catch { return 1 } },
     // Frees pictures the page no longer shows (App.jsx, after leaving a page full of them).
@@ -56,6 +59,8 @@ contextBridge.exposeInMainWorld('kozo', {
       addUnlock: (data) => ipcRenderer.invoke('achievements:addUnlock', data),
       removeUnlock: (achievementId) => ipcRenderer.invoke('achievements:removeUnlock', achievementId),
       toggleManual: (achievementId) => ipcRenderer.invoke('achievements:toggleManual', achievementId),
+      othersOnAccount: (gameId) => ipcRenderer.invoke('achievements:othersOnAccount', gameId),
+      claim: (gameId, achievementIds) => ipcRenderer.invoke('achievements:claim', gameId, achievementIds),
       autoImport: (gameId) => ipcRenderer.invoke('achievements:autoImport', gameId),
     },
     gameList: {
@@ -229,6 +234,16 @@ contextBridge.exposeInMainWorld('kozo', {
       unseen: () => ipcRenderer.invoke('deals:unseen'),
       gamePrices: (appid) => ipcRenderer.invoke('deals:gamePrices', appid),
       setTarget: (appid, cents, meta) => ipcRenderer.invoke('deals:setTarget', appid, cents, meta),
+      listState: (appid) => ipcRenderer.invoke('deals:listState', appid),
+      removeFromList: (appid) => ipcRenderer.invoke('deals:removeFromList', appid),
+    },
+    // Smart suggestions (services/suggestions.js): the corner card and Settings > General.
+    suggestions: {
+      list: () => ipcRenderer.invoke('suggestions:list'),
+      answer: (key, action) => ipcRenderer.invoke('suggestions:answer', key, action),
+      prefs: () => ipcRenderer.invoke('suggestions:prefs'),
+      setPref: (kind, on) => ipcRenderer.invoke('suggestions:setPref', kind, on),
+      check: () => ipcRenderer.invoke('suggestions:check'),
     },
     pack: {
       exportAll: () => ipcRenderer.invoke('pack:export'),
@@ -327,6 +342,7 @@ contextBridge.exposeInMainWorld('kozo', {
       onAchievementUnlocked: sub('achievement:unlocked', pass),
       onGameUpdated: sub('game:updated', pass),
       onGameFinished: sub('game:finished', pass),
+      onSuggestionsChanged: sub('suggestions:changed', pass),
       onScanProgress: sub('scanner:progress', pass),
       onBannerRefreshProgress: sub('banners:refreshProgress', pass),
       // Steam refused (or resumed allowing) a player-unlock read — library-wide,

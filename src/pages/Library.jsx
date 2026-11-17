@@ -78,16 +78,16 @@ const VIEW_KEY = 'kozo:view:library'
 
 // The tabs under the toolbar (lib/libraryTabs.js). A tab shows only while it holds a game.
 const TAB_META = {
-  current:  { label: 'Current',  color: 'var(--a)', hint: 'Playing, on hold and not started yet' },
+  current:  { label: 'Current',  color: 'var(--a)', hint: 'Playing and not started yet' },
+  on_hold:  { label: 'On hold',  color: 'var(--status-onhold)' },
   finished: { label: 'Finished', color: 'var(--status-finished)' },
   dropped:  { label: 'Dropped',  color: 'var(--status-dropped)' },
   hidden:   { label: 'Hidden',   Icon: IconEyeOff, color: 'var(--text-muted)', hint: 'Hidden games are still tracked and still count in your stats' },
   removed:  { label: 'Removed',  Icon: IconArchive, color: 'var(--text-muted)', hint: 'Not in your Library. Hours, sessions and achievements are kept' },
 }
-// The status dropdown on Current (Finished and Dropped are tabs).
+// The status dropdown on Current (On hold, Finished and Dropped are tabs).
 const CURRENT_STATUSES = [
   { value: 'playing', label: 'Playing' },
-  { value: 'on_hold', label: 'On hold' },
   { value: 'none',    label: 'No status' },
 ]
 const CURRENT_STATUS_VALUES = new Set(CURRENT_STATUSES.map(o => o.value))
@@ -126,7 +126,7 @@ export default function Library() {
     const saved = localStorage.getItem('kozo:sort:library')
     return SORT_VALUES.has(saved) ? saved : 'last_played'
   })
-  // Which tab is shown: Current, Finished, Dropped, Hidden or Removed.
+  // Which tab is shown: Current, On hold, Finished, Dropped, Hidden or Removed.
   const [tab, setTabState] = useState(() => {
     let savedStatus = ''
     try { savedStatus = localStorage.getItem('kozo:status:library') || '' } catch {}
@@ -135,7 +135,7 @@ export default function Library() {
   const [statusFilter, setStatusFilter] = useState(() => {
     try { const v = localStorage.getItem('kozo:status:library') || ''; return CURRENT_STATUS_VALUES.has(v) ? v : '' } catch { return '' }
   })
-  // Once: the old folding rows' saved state goes, and an old Finished / Dropped filter is a tab now.
+  // Once: the old folding rows' saved state goes, and an old On hold / Finished / Dropped filter is a tab now.
   useEffect(() => {
     try {
       localStorage.removeItem('kozo:library-shelves')
@@ -546,7 +546,7 @@ export default function Library() {
           />
           </div>
 
-          {/* Status filter, on Current only: Finished and Dropped are tabs */}
+          {/* Status filter, on Current only: On hold, Finished and Dropped are tabs */}
           {tab === 'current' && (
           <div className={s.selectSlot} style={{ '--slot': '140px' }}>
           <SearchableSelect
@@ -795,12 +795,12 @@ export default function Library() {
           />
         )}
 
-        {/* Every game is finished, dropped, hidden or removed */}
+        {/* Every game is on hold, finished, dropped, hidden or removed */}
         {!loading && games.length > 0 && gamesWithLive.length === 0 && !elsewhere.length && tab === 'current' && !q && !statusFilter && (
           <EmptyState
             Icon={IconDeviceGamepad2}
             title="Nothing left to play"
-            desc="Every game here is finished, dropped, hidden or removed. Scan your PC or add a game."
+            desc="Every game here is on hold, finished, dropped, hidden or removed. Scan your PC or add a game."
             action={{ label: 'Scan PC', Icon: IconScan, onClick: runScan }}
           />
         )}

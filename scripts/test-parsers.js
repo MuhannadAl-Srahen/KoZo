@@ -60,6 +60,44 @@ console.log('\nparseGoldbergJson')
   check('earned:false excluded', !r.some(u => u.name === 'ACH_D'))
   check('exactly 3 unlocks', r.length === 3, `got ${r.length}`)
   check('malformed JSON → []', cw.parseGoldbergJson('{oops').length === 0)
+  check('a file that starts with a BOM still reads', cw.parseGoldbergJson('\uFEFF' + JSON.stringify({ ACH_A: { earned: 'true', earned_time: 5 } })).length === 1)
+  // Emulator files in any text encoding Windows tools write.
+  const ini = '[ACH_A]\r\nAchieved=1\r\nUnlockTime=1700000000\r\n'
+  const le = Buffer.concat([Buffer.from([0xFF, 0xFE]), Buffer.from(ini, 'utf16le')])
+  const be = Buffer.from(le); be[0] = 0xFE; be[1] = 0xFF; be.subarray(2).swap16()
+  check('text: UTF-16 with a mark, both byte orders', cw.decodeText(le) === ini && cw.decodeText(be) === ini)
+  check('text: UTF-16 with no mark, and UTF-8 with or without a BOM', cw.decodeText(Buffer.from(ini, 'utf16le')) === ini &&
+    cw.decodeText(Buffer.concat([Buffer.from([0xEF, 0xBB, 0xBF]), Buffer.from(ini)])) === ini && cw.decodeText(Buffer.from(ini)) === ini)
+  check('text: a UTF-16 INI gives its unlock', cw.parseCodexIni(cw.decodeText(le)).some(u => u.name === 'ACH_A' && u.unlocktime === 1700000000))
+  // Goldberg / GSE told by its own settings where to save.
+  const gb = (o, dir) => cw.goldbergSaveBases(o, dir, 'C:\\Users\\X\\AppData\\Roaming')
+  check('saves: GSE saves_folder_name is a folder in AppData', gb({ userIni: '[user::saves]\r\nsaves_folder_name=My Saves\r\n' }, 'D:\\G').join() === 'C:\\Users\\X\\AppData\\Roaming\\My Saves')
+  check('saves: GSE local_save_path is beside the game', gb({ userIni: '[user::saves]\nlocal_save_path=./saves\n' }, 'D:\\G').join() === 'D:\\G\\saves')
+  check('saves: a commented-out setting is ignored', gb({ userIni: '# local_save_path=./x\n#saves_folder_name=Y\n' }, 'D:\\G').length === 0)
+  check('saves: classic local_save.txt, empty means SAVE', gb({ localSaveTxt: '' }, 'D:\\G').join() === 'D:\\G\\SAVE' && gb({ localSaveTxt: 'MySave\r\n' }, 'D:\\G').join() === 'D:\\G\\MySave')
+  // On a pretend disk: a release group KoZo has no name for, and a game whose GSE settings move its saves.
+  {
+    const fsx = require('fs'), os = require('os')
+    const tmp = fsx.mkdtempSync(path.join(os.tmpdir(), 'kozo-cw-'))
+    const mk = (rel, text = '') => { const f = path.join(tmp, rel); fsx.mkdirSync(path.dirname(f), { recursive: true }); fsx.writeFileSync(f, text); return f }
+    mk('Public/Documents/Steam/NEWGROUP/777/achievements.ini', '[A]\nAchieved=1\n')
+    mk('ProgramData/Steam/3DMGAME/777/stats/achievements.ini', '[A]\nAchieved=1\n')
+    mk('ProgramData/Steam/777/achievements.ini', '')
+    mk('Game/steam_settings/configs.user.ini', '[user::saves]\nlocal_save_path=./mysaves\n')
+    const env = { PUBLIC: process.env.PUBLIC, PROGRAMDATA: process.env.PROGRAMDATA }
+    process.env.PUBLIC = path.join(tmp, 'Public'); process.env.PROGRAMDATA = path.join(tmp, 'ProgramData')
+    let paths = []
+    try { paths = cw.buildCandidates({ steam_app_id: 777, install_path: path.join(tmp, 'Game') }).map(c => c.path.toLowerCase()) } finally {
+      process.env.PUBLIC = env.PUBLIC; process.env.PROGRAMDATA = env.PROGRAMDATA
+      fsx.rmSync(tmp, { recursive: true, force: true })
+    }
+    const has = (rel) => paths.includes(path.join(tmp, rel).toLowerCase())
+    check('emulators: any release group under Public Documents\\Steam', has('Public/Documents/Steam/NEWGROUP/777/achievements.ini'))
+    check('emulators: any group under ProgramData\\Steam, its stats folder too', has('ProgramData/Steam/3DMGAME/777/stats/achievements.ini'))
+    check('emulators: an app id folder is not taken for a group', !paths.some(p => p.includes(path.join('steam', '777', '777').toLowerCase())))
+    check('emulators: GSE local_save_path from the game\'s own settings', has('Game/mysaves/777/achievements.json'))
+    check('emulators: every path once', new Set(paths).size === paths.length)
+  }
 }
 
 // ── parseCodexIni ─────────────────────────────────────────────────────────────
@@ -329,6 +367,38 @@ console.log('\nupcoming top bar')
 console.log('\nsteam accounts')
 {
   const sa = require(path.join(__dirname, '..', 'electron', 'services', 'steamAccounts.js'))
+  // Steam's Library cache (userdata\<account>\config\librarycache\<appid>.json), trimmed from a real
+  // rented account's Phantom Blade Zero: [key, { version, data }] pairs.
+  const libJson = JSON.stringify([
+    ['achievements', { version: 2, data: {
+      vecHighlight: [{ strID: 'ACH_064', bAchieved: true, rtUnlocked: 1794569277 }, { strID: 'ACH_001', bAchieved: true, rtUnlocked: 1793370786 }],
+      vecUnachieved: [{ strID: 'ACH_038', bAchieved: false, rtUnlocked: 0 }],
+      vecAchievedHidden: [{ strID: 'ACH_066', bAchieved: true, rtUnlocked: 0 }],
+      nTotal: 66, nAchieved: 64 } }],
+    ['descriptions', { version: 1, data: { strSnippet: 'x' } }],
+  ])
+  const lib = sa.libraryCacheUnlocks(libJson)
+  check('library cache: unlocked ones with their time, lowercase names', lib.size === 3 && lib.get('ach_064') === 1794569277 && lib.get('ach_066') === 0 && !lib.has('ach_038'), JSON.stringify([...lib]))
+  check('library cache: anything else is nothing', sa.libraryCacheUnlocks('not json') === null && sa.libraryCacheUnlocks('[]') === null && sa.libraryCacheUnlocks('{}') === null)
+  const merged = sa.mergeEntries(new Map([['a', 200], ['b', 0]]), new Map([['a', 100], ['b', 50], ['c', 7]]))
+  check('two sources: every name, the earliest time, a time beats none', merged.get('a') === 100 && merged.get('b') === 50 && merged.get('c') === 7 && sa.mergeEntries(null, null) === null)
+  // Someone else on a rented account got there first: outside every session, not yours yet.
+  const wins = sa.sessionWindows([{ id: 384, started_at: '2026-10-29T14:29:50Z', ended_at: '2026-10-29T15:35:48Z' }])
+  const at = (iso) => Math.floor(Date.parse(iso) / 1000)
+  const files = [
+    { mode: 'shared', steamId: 'S', persona: 'Shop RPG', entries: new Map([['ach_001', at('2026-10-29T14:33:06Z')], ['ach_003', at('2026-11-01T11:50:20Z')], ['ach_064', at('2026-11-13T11:27:57Z')], ['ach_066', 0]]) },
+    { mode: 'mine', steamId: 'M', persona: 'Me', entries: new Map([['ach_099', 5]]) },
+  ]
+  const others = sa.othersUnlocks(files, wins, new Set(['ach_064']))
+  check('others: unlocked on the shared account outside your sessions, not ones you have', others.map(o => o.name).sort().join() === 'ach_003,ach_066' && others[0].persona === 'Shop RPG', JSON.stringify(others))
+  check('others: an unlock during your session is yours, and your own account is never "someone else"', !others.some(o => o.name === 'ach_001' || o.name === 'ach_099'))
+  // The folders watched for unlocks Steam writes while no game runs: which game a file is about.
+  const ssw = require(path.join(__dirname, '..', 'electron', 'services', 'steamStatsWatcher.js'))
+  check('background watch: a stats file names its game', ssw.appidFromSteamFile('stats', 'UserGameStats_1839772499_1222680.bin') === 1222680)
+  check('background watch: the schema and other files in the stats folder are not unlocks',
+    ssw.appidFromSteamFile('stats', 'UserGameStatsSchema_1222680.bin') === null && ssw.appidFromSteamFile('stats', 'UserGameStats_1839772499_1222680.bin.tmp') === null && ssw.appidFromSteamFile('stats', '') === null)
+  check('background watch: a Library cache file names its game, nothing else there does',
+    ssw.appidFromSteamFile('library', '4115450.json') === 4115450 && ssw.appidFromSteamFile('library', 'see_all_4115450.json') === null && ssw.appidFromSteamFile('library', '4115450.json.tmp') === null)
   // The shape seen on a real PC: small "timestamp", no "MostRecent", a name in another alphabet.
   const vdf = '"users"\n{\n\t"76561190000000001"\n\t{\n\t\t"AccountName"\t\t"shared_shop"\n\t\t"PersonaName"\t\t"Shop RPG"\n\t\t"timestamp"\t\t"1794405977"\n\t}\n' +
     '\t"76561190000000002"\n\t{\n\t\t"AccountName"\t\t"own_acc"\n\t\t"PersonaName"\t\t"Крим"\n\t\t"Timestamp"\t\t"1793592873"\n\t\t"MostRecent"\t\t"1"\n\t}\n}\n'
@@ -441,14 +511,15 @@ console.log('\nlibraryTabs')
   check('tabs: removed wins over hidden and the status', tabOf({ is_archived: 1, is_hidden: 1, completion_status: 'finished' }) === 'removed')
   check('tabs: hidden wins over the status', tabOf({ is_hidden: 1, completion_status: 'finished' }) === 'hidden')
   check('tabs: finished and dropped have their own', tabOf({ completion_status: 'finished' }) === 'finished' && tabOf({ completion_status: 'dropped' }) === 'dropped')
-  check('tabs: playing, on hold and no status are current',
-    ['playing', 'on_hold', null, undefined].every(st => tabOf({ completion_status: st }) === 'current'))
+  check('tabs: playing and no status are current',
+    ['playing', null, undefined].every(st => tabOf({ completion_status: st }) === 'current'))
+  check('tabs: on hold has its own (the maker asked)', tabOf({ completion_status: 'on_hold' }) === 'on_hold' && tabOf({ completion_status: 'on_hold', is_hidden: 1 }) === 'hidden')
   const lib = [
     { name: 'A' }, { name: 'B', completion_status: 'playing' }, { name: 'C', completion_status: 'finished' },
     { name: 'D', completion_status: 'finished', is_hidden: 1 }, { name: 'E', is_archived: 1 },
   ]
   const counts = countTabs(lib)
-  check('tabs: every game is counted once', JSON.stringify(counts) === JSON.stringify({ current: 2, finished: 1, dropped: 0, hidden: 1, removed: 1 }), JSON.stringify(counts))
+  check('tabs: every game is counted once', JSON.stringify(counts) === JSON.stringify({ current: 2, on_hold: 0, finished: 1, dropped: 0, hidden: 1, removed: 1 }), JSON.stringify(counts))
   check('tabs: counting only what a search matches', countTabs(lib, g => g.name === 'C').finished === 1 && countTabs(lib, g => g.name === 'C').current === 0)
   check('tabs: a tab shows only with games, Current always', shownTabs(counts).join() === 'current,finished,hidden,removed' && shownTabs({ current: 0 }).join() === 'current')
   check('tabs: an emptied tab goes back to Current', settleTab('removed', { removed: 0 }) === 'current' && settleTab('finished', { finished: 3 }) === 'finished' && settleTab('bogus', counts) === 'current')
@@ -456,10 +527,10 @@ console.log('\nlibraryTabs')
   check('tabs: a tab turned off goes back to Current', settleTab('removed', counts, ['removed']) === 'current' && settleTab('hidden', counts, ['removed']) === 'hidden')
   check('tabs: a link wins, then the tab used before, then an old status filter',
     startTab({ show: 'hidden', remembered: 'finished' }) === 'hidden' && startTab({ remembered: 'finished', savedStatus: 'dropped' }) === 'finished' &&
-    startTab({ savedStatus: 'dropped' }) === 'dropped' && startTab({ savedStatus: 'playing' }) === 'current' && startTab() === 'current')
+    startTab({ savedStatus: 'dropped' }) === 'dropped' && startTab({ savedStatus: 'on_hold' }) === 'on_hold' && startTab({ savedStatus: 'playing' }) === 'current' && startTab() === 'current')
   check('tabs: the status filter on Current', matchesStatus({ completion_status: 'on_hold' }, '') && matchesStatus({}, 'none') &&
     !matchesStatus({ completion_status: 'playing' }, 'none') && matchesStatus({ completion_status: 'on_hold' }, 'on_hold') && !matchesStatus({}, 'playing'))
-  check('tabs: five of them, in order', LIBRARY_TABS.join() === 'current,finished,dropped,hidden,removed')
+  check('tabs: six of them, in order', LIBRARY_TABS.join() === 'current,on_hold,finished,dropped,hidden,removed')
 }
 
 // src/lib/pickForMe.js is an ES module; load it as a plain function body.
@@ -605,10 +676,51 @@ console.log('\nendless lists')
   check('deals more: only ids not seen yet', freshIds([1, 2, 2, 3, 0], new Set([2])).join() === '1,3')
 }
 
+// Smart suggestions (electron/services/suggestions.js): the rules behind the corner card.
+console.log('\nsuggestions')
+{
+  const sg = require(path.join(__dirname, '..', 'electron', 'services', 'suggestions.js'))
+  check('suggest: the month key is local, and the month before wraps the year', sg.monthKey(new Date(2026, 10, 30, 23, 59)) === '2026-11' && sg.prevMonth('2026-01') === '2025-12' && sg.monthName('2026-11') === 'November')
+  check('suggest plan: already planned this month says nothing', sg.planAsk('2026-11', '2026-11') === null)
+  check('suggest plan: not planned asks to plan, planned for another month asks to move', sg.planAsk(null, '2026-11')?.move === null && sg.planAsk('2026-12', '2026-11')?.move === '2026-12')
+  const rows = [
+    { id: 1, status: 'finished', display_order: 0 }, { id: 2, status: 'playing', display_order: 1 },
+    { id: 3, status: 'dropped', display_order: 2 }, { id: 4, status: 'want_to_play', display_order: 4 },
+    { id: 5, status: 'want_to_play', display_order: 3 }, { id: 6, status: 'want_to_play', display_order: null, is_favorite: 1 },
+  ]
+  check('suggest next: the plan\'s own order, favorites first', sg.nextUpNext(rows, 1)?.id === 6)
+  check('suggest next: never Playing, Finished, Dropped or the one just finished', sg.nextUpNext(rows.filter(r => r.id !== 6), 1)?.id === 5 && sg.nextUpNext([{ id: 9, status: 'want_to_play' }], 9) === null)
+  check('suggest carry: everything not Finished or Dropped', sg.carryRows(rows).map(r => r.id).join() === '2,4,5,6')
+  const now = Date.parse('2026-11-17T12:00:00Z'), daysAgo = (n) => new Date(now - n * 86400000).toISOString()
+  const games = [
+    { id: 1, completion_status: 'playing', last_played_at: daysAgo(30) },
+    { id: 2, completion_status: 'playing', last_played_at: daysAgo(3) },
+    { id: 3, completion_status: 'playing', last_played_at: null, completion_status_at: daysAgo(40) },
+    { id: 4, completion_status: 'playing', last_played_at: daysAgo(60), is_hidden: 1 },
+    { id: 5, completion_status: 'playing', last_played_at: daysAgo(60), is_archived: 1 },
+    { id: 6, completion_status: 'on_hold', last_played_at: daysAgo(90) },
+  ]
+  check('suggest stale: Playing, not played for 3 weeks (or set Playing that long ago)', sg.stalePlaying(games, now).map(g => g.id).join() === '1,3')
+  check('suggest: names read as a sentence', sg.namesText(['A']) === 'A' && sg.namesText(['A', 'B']) === 'A and B' && sg.namesText(['A', 'B', 'C', 'D', 'E']) === 'A, B, C and 2 more')
+}
+
 // Discounts: the deal score and the price-history verdict.
 console.log('\ndeals')
 {
-  const { dealScore, lowState, tasteMatch, wellReviewed } = require(path.join(__dirname, '..', 'electron', 'services', 'deals.js'))
+  const { dealScore, lowState, tasteMatch, wellReviewed, ccFromCookies, currentView } = require(path.join(__dirname, '..', 'electron', 'services', 'deals.js'))
+  // Prices for the country Steam's store uses for this PC, not Windows' region: Sniper Elite 5
+  // said $4.99 (US) while Steam sold it for $2.29 (Jordan).
+  check('deals country: read from Steam\'s cookie', ccFromCookies(['browserid=1; path=/', 'steamCountry=JO%7C251dc4134a23; path=/; secure']) === 'JO' && ccFromCookies('steamCountry=us|x') === 'US')
+  check('deals country: nothing when Steam gave none', ccFromCookies(['sessionid=abc']) === null && ccFromCookies(undefined) === null && ccFromCookies(['steamCountry=JOR%7C']) === null)
+  // On your Game List as the list is now.
+  const fine = { count: 900, pct: 90 }
+  const stored = { yours: [{ appid: 1, score: 50, mine: true, reviews: fine }, { appid: 2, score: 60, mine: true, reviews: { count: 3, pct: 100 } }],
+    deals: [{ appid: 3, score: 70, reviews: fine }, { appid: 4, score: 40, reviews: fine }], alerts: [{ listId: 7, appid: 1 }, { listId: 8, appid: 9 }], wantedCount: 2 }
+  const now = currentView(stored, new Set([2, 3]), new Set([4]), new Set([7]))
+  check('deals view: a game taken off the Game List leaves "On your Game List" at once', !now.yours.some(g => g.appid === 1) && now.deals.some(g => g.appid === 1 && g.mine === false))
+  check('deals view: a deal added to the Game List moves up there', now.yours.map(g => g.appid).join() === '3,2' && now.yours[0].mine === true && !now.deals.some(g => g.appid === 3))
+  check('deals view: owned games and thinly reviewed ones never join the deals', !now.deals.some(g => g.appid === 4) && currentView(stored, new Set(), new Set()).deals.every(g => g.appid !== 2))
+  check('deals view: counts and alerts follow the list', now.wantedCount === 2 && now.alerts.map(a => a.listId).join() === '7' && currentView(null, new Set()) === null)
   check('deals: 500+ reviews at 80%+ show', wellReviewed({ count: 500, pct: 80 }) === true)
   check('deals: 100% of a dozen reviews is hidden', wellReviewed({ count: 12, pct: 100 }) === false)
   check('deals: 50,000 reviews at 79% is hidden', wellReviewed({ count: 50000, pct: 79 }) === false)
@@ -1424,6 +1536,27 @@ console.log('\ngame file check')
     put('direct-one/bin/Good.exe', fakeExe(['d3d9.dll']))
     const [direct] = scanner.scanFolder(path.join(root, 'direct-one'))
     check('scan: a tool in the folder does not beat the game further in', direct?.exe_name === 'Good.exe', direct?.exe_name)
+
+    // Dead Space (a repack): the game file, plus two crack copies of it under NoDVD and a
+    // checksum tool under _Redist. It came out as a library of games, and the copies as new
+    // games named "0xZeOn" and "voices38".
+    const ds = (rel, buf) => put('Games/Dead Space/' + rel, buf)
+    ds('Dead Space.exe', fakeExe(['d3d12.dll', 'steam_api64.dll'], 4096)); ds('steam_api64.dll'); ds('unins000.exe', fakeExe(['KERNEL32.dll']))
+    ds('steam_settings/steam_appid.txt', Buffer.from('1693980'))
+    ds('NoDVD/0xZeOn/Dead Space.exe', fakeExe(['d3d12.dll', 'steam_api64.dll'], 4096)); ds('NoDVD/0xZeOn/steam_settings/steam_appid.txt', Buffer.from('1941540'))
+    ds('NoDVD/voices38/Dead Space.exe', fakeExe(['d3d12.dll', 'steam_api64.dll'], 4096)); ds('NoDVD/voices38/steam_settings/steam_appid.txt', Buffer.from('1693980'))
+    ds('_Redist/QuickSFV.EXE', fakeExe(['KERNEL32.dll'])); ds('_Redist/dxwebsetup.exe', fakeExe(['KERNEL32.dll']))
+    ds('x64/D3D12Core.dll')
+    put('Games/Other Game/Other Game.exe', fakeExe(['d3d11.dll']))
+    const dsScan = scanner.scanFolder(path.join(root, 'Games'))
+    const dsGame = dsScan.find(g => /Dead Space/.test(g.install_path))
+    check('scan: crack copies inside a game folder are that game, not new ones',
+      dsScan.filter(g => /Dead Space/.test(g.install_path)).length === 1 && !dsScan.some(g => /voices38|0xZeOn|NoDVD|_Redist/i.test(g.name + g.install_path)),
+      JSON.stringify(dsScan.map(g => [g.name, g.install_path])))
+    check('scan: and it has the game\'s own name, file and Steam id',
+      dsGame?.name === 'Dead Space' && dsGame.exe_name === 'Dead Space.exe' && dsGame.install_path === path.join(root, 'Games', 'Dead Space') && dsGame.steam_app_id === '1693980',
+      JSON.stringify(dsGame && [dsGame.name, dsGame.exe_name, dsGame.install_path, dsGame.steam_app_id]))
+    check('scan: a folder of games beside it is still a folder of games', dsScan.some(g => g.name === 'Other Game') && dsScan.length === 2, JSON.stringify(dsScan.map(g => g.name)))
 
     // Same game?
     const same = scanner.sameGameFolder

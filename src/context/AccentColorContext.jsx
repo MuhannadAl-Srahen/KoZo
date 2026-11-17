@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
+import { bootLook } from '../lib/bootLook'
 
 const AccentColorContext = createContext(null)
 
@@ -112,7 +113,8 @@ export function applyBackgroundTint(accentHex) {
 }
 
 export function AccentColorProvider({ children }) {
-  const [accent, setAccentState] = useState('#a78bfa')
+  // The saved accent from the first render (main.jsx already applied it), not the default purple.
+  const [accent, setAccentState] = useState(() => bootLook()?.accent || '#a78bfa')
 
   useEffect(() => {
     const load = async () => {

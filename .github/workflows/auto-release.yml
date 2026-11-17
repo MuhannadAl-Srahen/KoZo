@@ -1,0 +1,48 @@
+name: Release on merge
+
+# A pull request that raises the version in package.json (with build/release-notes.md written
+# for that version) releases KoZo when it is merged into main: this tags v<version> and starts
+# release.yml on that tag (tests, build, publish, notes). A tag pushed with GITHUB_TOKEN starts no
+# workflow by itself, so release.yml is started with workflow_dispatch, which GitHub allows.
+# A version that already has its tag does nothing, and a tag pushed by hand still works as before.
+
+on:
+  push:
+    branches: [main]
+    paths: [package.json]
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  tag-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Tag the new version and start the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          tag="v${version}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" > /dev/null; then
+            echo "${tag} already exists, nothing to release"
+            exit 0
+          fi
+          if ! head -n 1 build/release-notes.md | tr -d '\r' | grep -q "^KoZo ${version}\$"; then
+            echo "::error::build/release-notes.md is not for ${version}: write its notes first (first line 'KoZo ${version}')"
+            exit 1
+          fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            tag -a "${tag}" -m "KoZo ${version}" "${GITHUB_SHA}"
+          git push origin "${tag}"
+          gh workflow run release.yml --ref "${tag}"
+          echo "Started the release of KoZo ${version}" >> "$GITHUB_STEP_SUMMARY"

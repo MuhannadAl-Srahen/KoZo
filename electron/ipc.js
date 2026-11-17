@@ -1072,6 +1072,35 @@ handle('achievements:removeUnlock', (id) => { achievementsQ.removeUnlock(id); bk
 // Manual unlock toggle — the fallback for cracks whose emulator never persists
 // unlocks to disk. Unlocking routes through emitNewUnlocks so the overlay toast,
 // notification and XP check all fire exactly like a real detected unlock.
+// A game played on a shared (rented) Steam account: what someone else unlocked there first, so
+// Steam never showed it to you (steamAccounts.othersOnAccount; files only, no network).
+handle('achievements:othersOnAccount', (gameId) => require('./services/steamAccounts').othersOnAccount(gameId))
+// "I did these too": the ticked ones become yours, like Mark as Unlocked (source manual), dated
+// now and tied to no session (when you got there isn't known), with one toast and the XP check.
+handle('achievements:claim', (gameId, achievementIds) => {
+  const db = require('./db/database').getDb()
+  const game = gamesQ.getGame(Number(gameId))
+  if (!game) throw new Error('Game not found')
+  const unlocked_at = new Date().toISOString()
+  const getAch = db.prepare('SELECT * FROM achievements WHERE id = ? AND game_id = ?')
+  const claimed = []
+  db.transaction(() => {
+    for (const id of new Set((achievementIds || []).map(Number))) {
+      const ach = getAch.get(id, game.id)
+      if (!ach) continue
+      if (achievementsQ.addUnlock({ achievement_id: ach.id, session_id: null, unlocked_at, source: 'manual' }) > 0) claimed.push({ ...ach, unlocked_at })
+    }
+  })()
+  if (claimed.length) {
+    // Ticked by hand: unlocked first by someone else on a shared account, or earned with an
+    // emulator that saves nothing.
+    logger.info(`achievements: ${claimed.length} marked by hand for "${game.name}"`)
+    try { require('./services/achievementSync').emitNewUnlocks(game, claimed) } catch (e) { logger.warn('claim emit failed', { message: e.message }) }
+    bk()
+    broadcast('game:updated', game.id)
+  }
+  return { claimed: claimed.length }
+})
 handle('achievements:toggleManual', (achievementId) => {
   const db = require('./db/database').getDb()
   const ach = db.prepare('SELECT * FROM achievements WHERE id = ?').get(achievementId)
@@ -1179,7 +1208,7 @@ handle('gameList:add', async (data) => {
       require('./services/steamApi').runGenreBackfill().catch(() => {})
     }
   }
-  const r = gameListQ.addGameListItem(data); bk(); return r
+  const r = gameListQ.addGameListItem(data); bk(); dealsListChanged(); return r
 })
 handle('gameList:update', (id, data) => {
   if (data?.status || data?.rating !== undefined) require('./services/steamApi').clearTasteProfile()
@@ -1191,6 +1220,11 @@ handle('gameList:update', (id, data) => {
   if (data?.status && data.status !== prev?.status) {
     try { require('./services/statusSync').syncFromGameList(id, data.status) } catch (e) { logger.warn('statusSync from game list failed', { message: e.message }) }
     if (data.status === 'finished') require('./services/statusSync').announceFinished({ listId: id })
+    // Set Playing on the Game List: offer to plan it for this month (services/suggestions.js).
+    if (data.status === 'playing') {
+      const linked = gameListQ.getGameListItem(id)?.game_id
+      try { require('./services/suggestions').askPlan(linked ? { gameId: linked } : { listId: id }) } catch {}
+    }
   }
   // Newly marked "upcoming" with no stored release date → fetch it right away so
   // the Upcoming tab shows the countdown immediately (not on the next backfill).
@@ -1205,9 +1239,12 @@ handle('gameList:update', (id, data) => {
       } catch {}
     })
   }
-  bk(); broadcast('game:updated', null); return r
+  bk(); broadcast('game:updated', null); if (data?.status) dealsListChanged(); return r
 })
-handle('gameList:delete', (id) => { gameListQ.deleteGameListItem(id); bk(); return true })
+handle('gameList:delete', (id) => { gameListQ.deleteGameListItem(id); bk(); dealsListChanged(); return true })
+// Discounts' "On your Game List" follows the Game List at once (services/deals.js listChanged):
+// a game taken off the list stayed there until the hourly refresh.
+function dealsListChanged() { try { require('./services/deals').listChanged() } catch {} }
 // Game List → Library. Each row links to its library game when one exists
 // (archived ones come back), otherwise a new library game is created from the
 // row; Steam games get art/genres/achievements like a normal add. Non-Steam
@@ -1253,7 +1290,7 @@ handle('gameList:moveToLibrary', async (ids) => {
       needsExe: !game.exe_name,
     })
   }
-  bk()
+  bk(); dealsListChanged()
   return moved
 })
 handle('gameList:plannedMonths', () => gameListQ.plannedMonths())
@@ -1317,6 +1354,14 @@ handle('genres:distinct', () => gameListQ.distinctGenres())
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 handle('settings:get', (key) => settingsQ.getSetting(key))
+// The saved look, read before the first paint (preload ui.bootLook, src/main.jsx). Read
+// later through settings:get, the first frame showed the default purple accent and the
+// tint theme's default purple hue until the answer came. Sync on purpose: two small
+// SQLite reads, nothing else is waited on.
+ipcMain.on('look:boot', (e) => {
+  try { e.returnValue = { appearance: settingsQ.getSetting('appearance') || null, accent: settingsQ.getSetting('accent_color') || null } }
+  catch { e.returnValue = null }
+})
 handle('settings:set', (key, value) => {
   const was = key === 'steam_user_id' ? settingsQ.getSetting(key) : null
   settingsQ.setSetting(key, value)
@@ -1817,11 +1862,17 @@ handle('scanner:scan', async (paths) => {
     const taken = new Set()
     const fixes = []
     for (const g of results) {
-      const hit = plan.matchRow(g, rows, taken)
+      let hit = plan.matchRow(g, rows, taken)
+      // Another copy of a game matched above (a second game file inside that game's own
+      // folder, the same Steam id, or the same name): it's in the Library, with nothing to add
+      // or change. Each row is matched once, so this one used to show as a NEW game, named
+      // after its folder (Dead Space's crack copy "voices38").
+      const copy = !hit && g.alreadyInLibrary
+      if (copy) hit = plan.matchRow(g, rows)
       if (!hit) continue
       const row = hit.row
       taken.add(row.id)
-      const { auto, offer } = plan.planChanges(g, row, { exists, driveGone })
+      const { auto, offer } = copy ? { auto: {}, offer: {} } : plan.planChanges(g, row, { exists, driveGone })
       if (auto.installed) fixes.push({ row, g, set: { is_installed: 1 } })
       if (auto.folder) fixes.push({ row, g, set: { install_path: auto.folder.to, is_installed: 1, ...(auto.folder.exe ? { exe_name: auto.folder.exe } : {}) }, from: auto.folder.from })
       g.alreadyInLibrary = true
@@ -2128,6 +2179,15 @@ handle('deals:saleMap', () => require('./services/deals').saleMap())
 handle('deals:unseen', () => require('./services/deals').unseen())
 handle('deals:gamePrices', (appid) => require('./services/deals').gamePrices(appid))
 handle('deals:setTarget', (appid, cents, meta) => require('./services/deals').setTarget(appid, cents, meta))
+// Smart suggestions: the corner card (services/suggestions.js, components/SuggestionCard.jsx).
+handle('suggestions:list', () => require('./services/suggestions').list())
+handle('suggestions:answer', (key, action) => require('./services/suggestions').answer(key, action))
+handle('suggestions:prefs', () => require('./services/suggestions').prefs())
+handle('suggestions:setPref', (kind, on) => require('./services/suggestions').setPref(kind, on))
+handle('suggestions:check', () => { require('./services/suggestions').check({ force: true }); return true })
+// The Discounts window's Add / Remove for the Game List.
+handle('deals:listState', (appid) => require('./services/deals').listState(appid))
+handle('deals:removeFromList', (appid) => require('./services/deals').removeFromList(appid))
 
 // Steam wishlist into the Game List (services/wishlist.js).
 handle('gameList:wishlistPreview', () => require('./services/wishlist').preview())
@@ -2270,7 +2330,7 @@ handle('gameList:untrack', (id) => {
   if (!row) return false
   if (row.status === 'upcoming') gameListQ.deleteGameListItem(row.id)
   else db.prepare('UPDATE game_list SET release_watch = 0 WHERE id = ?').run(row.id)
-  bk(); broadcast('game:updated', null)
+  bk(); broadcast('game:updated', null); dealsListChanged()
   return true
 })
 
@@ -2861,7 +2921,7 @@ handle('overlay:test', () => {
 // Paths are per-machine (a restore on a new PC must keep the folders just set up there) and
 // the API key is never exported: keep the local values.
 const LOCAL_SETTINGS = new Set(['steam_foreign_found', 'sync_folder', 'auto_backup_dir', 'saves_backup_dir', 'backup_base', 'backup_copy_dir', 'backup_copy_error', 'steam_api_key', 'steamgriddb_key',
-  'gdrive_token', 'gdrive_folder_id', 'gdrive_email', 'gdrive_last_sync', 'gdrive_last_result', 'gdrive_error', 'gdrive_client_id', 'gdrive_client_secret', 'install_id', 'backup_defaults_v1', 'drive_news_seen', 'launch_miss_dismissed'])
+  'gdrive_token', 'gdrive_folder_id', 'gdrive_email', 'gdrive_last_sync', 'gdrive_last_result', 'gdrive_error', 'gdrive_client_id', 'gdrive_client_secret', 'install_id', 'backup_defaults_v1', 'drive_news_seen', 'launch_miss_dismissed', 'steam_store_cc'])
 
 // Profile, look and preferences from a backup, on a PC that had nothing.
 function importSettings(rows) {

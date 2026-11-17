@@ -109,22 +109,7 @@ function statsFilesFor(appid) {
 function hasLocalStats(appid) {
   const files = statsFilesFor(appid)
   if (!files) return false
-  return files.accounts.some(a => { try { return fs.statSync(a.statsFile).size > 0 } catch { return false } })
-}
-
-// Parse both files → Map<apiName, unlockUnixSeconds|0>, or null if either file
-// is missing/unparseable (caller decides on the Web API fallback).
-function readUnlockedSet(files) {
-  const { parseBinaryKV, unlockedWithTimes } = require('./binaryKV')
-  let statsBuf, schemaBuf
-  try {
-    statsBuf = fs.readFileSync(files.statsFile)
-    schemaBuf = fs.readFileSync(files.schemaFile)
-  } catch { return null }
-  const statsRoot = parseBinaryKV(statsBuf)
-  const schemaRoot = parseBinaryKV(schemaBuf)
-  if (!statsRoot || !schemaRoot) return null
-  return unlockedWithTimes(schemaRoot, statsRoot)
+  return files.accounts.some(a => [a.statsFile, a.libraryFile].some(f => { try { return !!f && fs.statSync(f).size > 0 } catch { return false } }))
 }
 
 // Web API fallback when the local parse fails: sync now, then a short burst —
@@ -165,7 +150,9 @@ async function scanGame(gameId, entry) {
   let unlockedSet = null             // lowercase api name -> { t, sessionId }, the earliest per name
   const report = []
   for (const acc of accounts) {
-    const set = readUnlockedSet({ statsFile: acc.statsFile, schemaFile: entry.schemaFile })
+    // The stats file and Steam's Library cache together (steamAccounts.accountEntries): on a
+    // rented account in Offline Mode the cache was written when the stats file wasn't.
+    const set = sa.accountEntries(acc, entry.schemaFile)
     if (set === null) continue
     if (!unlockedSet) unlockedSet = new Map()
     const counted = sa.countedUnlocks(set, acc.mode, windows)
@@ -265,8 +252,9 @@ function watchGame(gameId, sessionId) {
   try {
     // Watch the exact file (chokidar handles it appearing later). Steam rewrites
     // it atomically on unlock, so awaitWriteFinish avoids reading a half-write.
-    // Every account's file: the game may be played on any of them.
-    watcher = chokidar.watch(files.accounts.map(a => a.statsFile), {
+    // Every account's file: the game may be played on any of them. Each account's Steam
+    // Library cache too, which Steam writes on its own schedule (steamAccounts.libraryCacheUnlocks).
+    watcher = chokidar.watch(files.accounts.flatMap(a => [a.statsFile, a.libraryFile].filter(Boolean)), {
       ignoreInitial: true,
       awaitWriteFinish: { stabilityThreshold: 250, pollInterval: 100 },
     })
@@ -365,6 +353,95 @@ async function scanAllSteamGames({ quiet = false } = {}) {
   return { totalAdded, gamesScanned: games.length }
 }
 
+// ── Unlocks Steam writes while no game is running ────────────────────────────
+// Steam doesn't always write an unlock while the game runs. An EA game's reach Steam through EA
+// later (Need for Speed Heat: an unlock written at 12:08, KoZo's last session of it ended at
+// 9:25), Offline Mode sends them once Steam is online, and another PC's come down when Steam
+// refreshes the account's stats. KoZo only read the files at its start and at a session of that
+// game, so such an unlock waited for one of those. Now the folders themselves are watched (one
+// handle each, no polling) and a changed file is read at once; while another game runs, after it.
+const bg = { watchers: new Map(), sigs: new Map(), timers: new Map(), recheck: null }
+
+// The app id a file in Steam's stats folder ('stats') or an account's Library cache ('library')
+// is about, or null for any other file.
+function appidFromSteamFile(kind, name) {
+  const s = String(name || '')
+  const m = kind === 'stats' ? /^UserGameStats_\d+_(\d+)\.bin$/i.exec(s) : /^(\d+)\.json$/i.exec(s)
+  return m ? Number(m[1]) : null
+}
+
+function backgroundDirs(steam) {
+  const out = [{ dir: path.join(steam, 'appcache', 'stats'), kind: 'stats' }]
+  try {
+    for (const d of fs.readdirSync(path.join(steam, 'userdata'), { withFileTypes: true })) {
+      if (d.isDirectory() && /^\d+$/.test(d.name) && d.name !== '0') {
+        out.push({ dir: path.join(steam, 'userdata', d.name, 'config', 'librarycache'), kind: 'library' })
+      }
+    }
+  } catch {}
+  return out
+}
+
+function scanAppInBackground(appid) {
+  let row
+  try {
+    row = require('../db/database').getDb()
+      .prepare('SELECT id FROM games WHERE steam_app_id = ? AND IFNULL(is_cracked,0) != 1').get(appid)
+  } catch { return }
+  // Not in the Library, or being played: its session's own watcher reads it.
+  if (!row || watchers.has(row.id)) return
+  const run = () => { scanGameOnce(row.id).catch(() => {}) }
+  try { require('./processWatcher').runWhenIdle(`steamStatsBg:${row.id}`, run) } catch { run() }
+}
+
+function onSteamFile(dir, kind, name) {
+  const appid = appidFromSteamFile(kind, name)
+  if (!appid) return
+  const file = path.join(dir, String(name))
+  // Windows reports a file being read as a change too (KoZo reads these itself): only a new
+  // time or size counts.
+  let st
+  try { st = fs.statSync(file) } catch { return }
+  const sig = `${st.mtimeMs}:${st.size}`
+  if (bg.sigs.get(file) === sig) return
+  bg.sigs.set(file, sig)
+  // Steam writes the stats file and the Library cache close together: one read for both.
+  clearTimeout(bg.timers.get(appid))
+  bg.timers.set(appid, setTimeout(() => { bg.timers.delete(appid); scanAppInBackground(appid) }, 2000))
+}
+
+function armBackground(steam) {
+  for (const { dir, kind } of backgroundDirs(steam)) {
+    if (bg.watchers.has(dir)) continue
+    try {
+      const w = fs.watch(dir, { persistent: false }, (_event, name) => { if (name) onSteamFile(dir, kind, name) })
+      // The folder went away (Steam cleared its cache): the next check watches it again.
+      w.on('error', () => { try { w.close() } catch {} bg.watchers.delete(dir) })
+      bg.watchers.set(dir, w)
+    } catch {}   // not there yet (an account with no Library cache): the next check tries again
+  }
+}
+
+function startBackground() {
+  stopBackground()
+  const steam = module.exports.getSteamPath()
+  if (!steam) return
+  armBackground(steam)
+  // A new account signed in, or a folder Steam made again.
+  bg.recheck = setInterval(() => armBackground(steam), 30 * 60 * 1000)
+  bg.recheck.unref?.()
+  logger.info('steamStatsWatcher: watching Steam\'s stats folders for unlocks written outside a session', { folders: bg.watchers.size })
+}
+
+function stopBackground() {
+  clearInterval(bg.recheck)
+  bg.recheck = null
+  for (const w of bg.watchers.values()) { try { w.close() } catch {} }
+  bg.watchers.clear()
+  for (const t of bg.timers.values()) clearTimeout(t)
+  bg.timers.clear()
+}
+
 // Read the logged-in Steam account (SteamID64 + persona name) from Steam's
 // local loginusers.vdf — picks the MostRecent account, falling back to the
 // newest Timestamp. Used for silent auto-setup so nobody types their ID.
@@ -406,4 +483,7 @@ module.exports = {
   isWatching,
   watchGame, unwatchGame, unwatchAll, rewatchActive, scanGame, scanGameOnce, scanAllSteamGames,
   getSteamPath, warmSteamPath, detectLoggedInUser, hasLocalStats, statsFilesFor,
+  startBackground, stopBackground,
+  // pure, for scripts/test-parsers.js
+  appidFromSteamFile,
 }

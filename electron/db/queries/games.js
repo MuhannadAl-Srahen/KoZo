@@ -78,6 +78,9 @@ function getLibraryStats() {
 
 // Every finished game: Library games, plus Game List games only marked finished
 // there. The Finished page and Your year both read this, so they always agree.
+// A game removed from the Library (archived, history kept) is still a game you
+// finished, and XP and badges still count it: it used to vanish from here when the
+// Uninstalled card's "Remove from Library" was pressed on a finished game.
 function listFinishedGames() {
   const db = getDb()
   const lib = db.prepare(`
@@ -90,7 +93,7 @@ function listFinishedGames() {
            g.first_played_at, g.hero_local_path,
            gl.id AS list_id, gl.rating, gl.banner_url AS list_banner
     FROM games g LEFT JOIN game_list gl ON gl.game_id = g.id
-    WHERE g.completion_status = 'finished' AND g.is_archived = 0
+    WHERE g.completion_status = 'finished'
     GROUP BY g.id
   `).all()
   const listOnly = db.prepare(`
