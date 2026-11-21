@@ -214,6 +214,36 @@ console.log('\nbuildCandidates')
 }
 
 // ── Launcher import (Epic / GOG / Xbox) ───────────────────────────────────────
+// ── Level names: one for every level (the maker's ask), Mythic II and on past 60 ──
+{
+  const xpSvc = require(path.join(__dirname, '..', 'electron', 'services', 'xp.js'))
+  const names = Array.from({ length: 60 }, (_, i) => xpSvc.tierForLevel(i + 1))
+  check('levels: every level from 1 to 60 has its own name', new Set(names).size === 60, names.join(','))
+  check('levels: the old names keep their levels', [[1, 'Rookie'], [3, 'Apprentice'], [7, 'Adept'], [12, 'Seasoned'], [18, 'Veteran'], [25, 'Master'], [40, 'Legend'], [45, 'Grandmaster'], [60, 'Mythic']].every(([l, n]) => xpSvc.tierForLevel(l) === n))
+  check('levels: past 60 it counts on', xpSvc.tierForLevel(61) === 'Mythic II' && xpSvc.tierForLevel(64) === 'Mythic V' && xpSvc.tierForLevel(69) === 'Mythic X', [61, 64, 69].map(xpSvc.tierForLevel).join(','))
+  const nx = xpSvc.nextTierInfo(40)
+  check("levels: the next level's name", nx.level === 41 && nx.name === 'Myth-Forged', JSON.stringify(nx))
+  check('levels: no long dashes in a name', !names.some(n => /[–—]/.test(n)))
+}
+
+// ── Looking for a new KoZo by itself (the maker had to press Check in Settings) ──
+{
+  const up = require(path.join(__dirname, '..', 'electron', 'services', 'appUpdater.js'))
+  const MIN = 60 * 1000
+  const now = 10_000_000
+  check('update: the first look always goes', up.shouldCheck({ now, lastAt: 0, state: 'idle', checking: false, gap: 20 * MIN }))
+  check('update: opening the window looks again after 20 minutes, not sooner',
+    up.shouldCheck({ now, lastAt: now - 21 * MIN, state: 'idle', checking: false, gap: 20 * MIN })
+    && !up.shouldCheck({ now, lastAt: now - 5 * MIN, state: 'idle', checking: false, gap: 20 * MIN }))
+  check('update: no second look while one runs', !up.shouldCheck({ now, lastAt: 0, state: 'idle', checking: true }))
+  check('update: no look once a new version is downloading or ready',
+    !up.shouldCheck({ now, lastAt: 0, state: 'downloading', checking: false }) && !up.shouldCheck({ now, lastAt: 0, state: 'ready', checking: false }))
+  check('update: a download that failed is looked for again', up.shouldCheck({ now, lastAt: now - 2 * MIN, state: 'failed', checking: false, gap: 0 }))
+  check('update: a failed look is tried again in 1, 5, then every 15 minutes',
+    up.retryDelay(1) === MIN && up.retryDelay(2) === 5 * MIN && up.retryDelay(3) === 15 * MIN && up.retryDelay(9) === 15 * MIN,
+    [1, 2, 3, 9].map(up.retryDelay).join(','))
+}
+
 const li = require(path.join(__dirname, '..', 'electron', 'services', 'launcherImport.js'))
 console.log('\nlauncherImport')
 {
@@ -2094,7 +2124,106 @@ function xpRuleTests() {
   check('xp: the guide gets every rule', xp.RULES.rarity.length === 5 && xp.RULES.hourMilestones.length === 4 && xp.RULES.finish === 250 && xp.RULES.replayMinHours === 1)
 }
 
+// ── This round: progress counters, game folders for sizes, cheaper stores, the calendar's controls ──
+function roundFourTests() {
+  // Achievement progress from Steam's schema and stats files (Severed Steel's shape on a real PC).
+  const kv = require(path.join(__dirname, '..', 'electron', 'services', 'binaryKV.js'))
+  const schema = { 1227690: { stats: {
+    2: { name: 'HEADSHOTS', type: 'INT' },
+    4: { name: 'LEVEL', type: 'INT' },
+    7: { name: 'ACCURACY', type: 'FLOAT' },
+    1: { type: 'ACHIEVEMENTS', bits: {
+      0: { name: '50_HEADSHOTS', bit: 0, progress: { min_val: 0, max_val: 50, value: { operation: 'statvalue', operand1: 'HEADSHOTS' } } },
+      1: { name: 'FIREFIGHT10', bit: 1, progress: { min_val: 0, max_val: 10, value: { operation: 'statvalue', operand1: 'LEVEL' } } },
+      2: { name: 'ONE_SHOT', bit: 2, progress: { min_val: 0, max_val: 1, value: { operation: 'statvalue', operand1: 'HEADSHOTS' } } },
+      3: { name: 'SHARP', bit: 3, progress: { min_val: 0, max_val: 90, value: { operation: 'statvalue', operand1: 'ACCURACY' } } },
+      4: { name: 'NO_STAT', bit: 4 },
+    } },
+  } } }
+  const floatBits = (() => { const b = Buffer.alloc(4); b.writeFloatLE(42.5); return b.readInt32LE(0) })()
+  const stats = { cache: { 2: { data: 31 }, 7: { data: floatBits } } }
+  const prog = kv.achievementProgress(schema, stats)
+  check('progress: a counted achievement reads its stat', prog.get('50_headshots')?.cur === 31 && prog.get('50_headshots')?.max === 50, JSON.stringify([...prog]))
+  check('progress: a stat never set is 0', prog.get('firefight10')?.cur === 0 && prog.get('firefight10')?.max === 10)
+  check('progress: a 0 to 1 target says nothing and is left out', !prog.has('one_shot') && !prog.has('no_stat'))
+  check('progress: a float stat kept as its raw bits reads as the number', prog.get('sharp')?.cur === 42, JSON.stringify(prog.get('sharp')))
+  check('progress: no schema, nothing', kv.achievementProgress(null, stats).size === 0)
+
+  // The folder a game's size is counted from.
+  const gs = require(path.join(__dirname, '..', 'electron', 'services', 'gameSizes.js'))
+  check('size root: a Steam game is its steamapps\\common folder',
+    gs.sizeRoot('D:\\SteamLibrary\\steamapps\\common\\Crimson Desert\\bin64') === 'D:\\SteamLibrary\\steamapps\\common\\Crimson Desert' &&
+    gs.sizeRoot('C:\\Program Files (x86)\\Steam\\steamapps\\common\\PBZ\\steam') === 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\PBZ')
+  check('size root: build folders come off', gs.sizeRoot('C:\\Games\\007 First Light\\Retail') === 'C:\\Games\\007 First Light' && gs.sizeRoot('C:\\Games\\Cyberpunk 2077\\bin\\x64') === 'C:\\Games\\Cyberpunk 2077')
+  check('size root: an Unreal game goes past its project when the engine is beside it',
+    gs.sizeRoot('M:\\Games\\Khazan\\BBQ\\Binaries\\Win64', (p) => p === 'M:\\Games\\Khazan\\Engine') === 'M:\\Games\\Khazan' &&
+    gs.sizeRoot('M:\\Games\\Khazan\\BBQ\\Binaries\\Win64', () => false) === 'M:\\Games\\Khazan\\BBQ')
+  check('size root: never a drive', gs.sizeRoot('D:\\bin64') === 'D:\\bin64' && gs.sizeRoot('') === null)
+  const shared = gs.dedupe([
+    { id: 1, name: 'Call of Duty HQ', root: 'C:\\Call of Duty\\sp26' },
+    { id: 2, name: 'Modern Warfare 4', root: 'C:\\Call of Duty' },
+    { id: 3, name: 'Dead Space', root: 'D:\\Games\\Dead Space' },
+  ])
+  check('size root: a game inside another\'s folder is counted once, under the outer one',
+    shared[0].inside === 'Modern Warfare 4' && !shared[1].inside && !shared[2].inside)
+  const grouped = gs.group([{ drive: 'C:', free: 1, size: 100 }], [{ id: 1, name: 'A', install_path: 'C:\\X', size: 40 }, { id: 2, name: 'B', install_path: 'C:\\X\\Y', size: 40, inside: 'A' }])
+  check('size root: the drive total leaves the inner one out', grouped[0].gamesBytes === 40 && grouped[0].games[1].inside === 'A')
+
+  // Steam's manifest: name and size (Need for Speed Unbound installs to "Excalibur").
+  const ic = require(path.join(__dirname, '..', 'electron', 'services', 'installCheck.js'))
+  const acf = ic.parseAcf('"AppState"\n{\n\t"appid"\t\t"1846380"\n\t"name"\t\t"Need for Speed™ Unbound"\n\t"StateFlags"\t\t"4"\n\t"installdir"\t\t"Excalibur"\n\t"SizeOnDisk"\t\t"37539827450"\n}\n')
+  check('Steam manifest: the game\'s name and size', acf.name === 'Need for Speed™ Unbound' && acf.installdir === 'Excalibur' && acf.sizeOnDisk === 37539827450)
+  const { steamNameFor, pickBestExe, isHelperExe, isJunkFolder } = require(path.join(__dirname, '..', 'electron', 'services', 'pcScanner.js'))
+  // Scan PC picked EA's overlay injector for Need for Speed Unbound (folder "Excalibur"), and
+  // offered the EA app itself as a game.
+  check('scan: a codename folder\'s game file is found by Steam\'s name, not its overlay tool or its trial',
+    pickBestExe([{ name: 'NeedForSpeedUnboundTrial.exe', size: 5, looksGame: false }, { name: 'NeedForSpeedUnbound.exe', size: 4, looksGame: false }, { name: 'overlayinjector.exe', size: 1, looksGame: true }], 'Excalibur', 'Need for Speed™ Unbound') === 'NeedForSpeedUnbound.exe')
+  check('scan: a trial copy only when nothing else carries the name', pickBestExe([{ name: 'GameTrial.exe', size: 9 }, { name: 'Game.exe', size: 3 }], 'Game Thing') === 'Game.exe')
+  check('scan: helpers are never the game',
+    ['EALaunchHelper.exe', 'UE4PrereqSetup_x64.exe', 'unins000.exe', 'Uninstall.exe', 'SteamErrorReporter.exe', 'overlayinjector.exe', 'Touchup.exe'].every(isHelperExe) &&
+    !['Dead Space.exe', 'NeedForSpeedUnbound.exe', 'GTA5.exe', 'PBZ.exe', 'Overlord.exe', 'NSUNSC.exe'].some(isHelperExe))
+  check('scan: a store\'s own app is no game, its games folder is',
+    isJunkFolder('C:\\Program Files\\Electronic Arts\\EA Desktop\\13.8\\EA Desktop') && isJunkFolder('C:\\Program Files (x86)\\Battle.net') &&
+    !isJunkFolder('C:\\Program Files (x86)\\GOG Galaxy\\Games\\Witcher 3') && !isJunkFolder('C:\\Program Files (x86)\\Ubisoft\\Ubisoft Game Launcher\\games\\Far Cry 6'))
+  check('Steam names: a codename folder takes Steam\'s name, a plain one keeps its own',
+    steamNameFor('Excalibur', 'Need for Speed™ Unbound') === 'Need for Speed™ Unbound' && steamNameFor('Crimson Desert', 'Crimson Desert Enhanced') === null &&
+    steamNameFor('Need for Speed Heat', 'Need for Speed™ Heat ') === null && steamNameFor('SeveredSteel', 'Severed Steel') === null && steamNameFor('PBZ', '') === null)
+
+  // Prices: another store under yours, both in US dollars.
+  const deals = require(path.join(__dirname, '..', 'electron', 'services', 'deals.js'))
+  check('prices: US dollars are told apart', deals.isUsd('$2.29') && deals.isUsd(' $14.84 USD') && !deals.isUsd('CDN$ 2.99') && !deals.isUsd('A$ 3.95') && !deals.isUsd('2,29€') && !deals.isUsd(''))
+  const stores = [
+    { store: 'Steam', storeID: '1', price: 1.99, url: 's' },
+    { store: 'GOG', storeID: '7', price: 9.99, url: 'g' },
+    { store: 'Fanatical', storeID: '15', price: 8.49, url: 'f' },
+  ]
+  const ch = deals.cheaperStore(stores, 1484)
+  check('prices: the cheapest other store under your Steam price', ch?.store === 'Fanatical' && ch.cents === 849 && ch.save === 43, JSON.stringify(ch))
+  check('prices: Steam itself is never "another store", and nothing under yours is nothing', deals.cheaperStore(stores, 800) === null && deals.cheaperStore([], 1484) === null && deals.cheaperStore(stores, 0) === null)
+  check('prices: lowest-price alert is the deepest discount in your money',
+    deals.lowestTarget({ original: 2299, finalText: '$2.29' }, { lowest: 2.99, steamRetail: 29.99 }) === 229 &&
+    deals.lowestTarget({ original: 4999, finalText: '$9.99' }, { lowest: 4.99, steamRetail: null }) === 499 &&
+    deals.lowestTarget({ original: 4999, finalText: '49,99€' }, { lowest: 4.99 }) === null &&
+    deals.lowestTarget({ original: 4999 }, { lowest: null }) === null)
+
+  // Upcoming: the Steam layout's controls on every layout.
+  const src = require('fs').readFileSync(path.join(__dirname, '..', 'src', 'lib', 'upcomingPick.js'), 'utf8').replace(/export (function|const)/g, '$1')
+  const { calendarKeep } = new Function(src + '; return { calendarKeep }')()
+  const games = [
+    { appid: 1, calOrder: 1, tagIds: [19] },
+    { appid: 2, calOrder: 2, tagIds: [21], early: true },
+    { appid: 3, calOrder: 3, tagIds: [19], owned: true },
+    { appid: 4, popRank: 5 },
+    { appid: 5, calOrder: 9, onWishlist: true },
+  ]
+  const ids = (o) => [...calendarKeep(games, o)].sort((a, b) => a - b).join()
+  check('calendar controls: Game count keeps the best ranked, wishlisted always', ids({ count: 2 }) === '1,2,5', ids({ count: 2 }))
+  check('calendar controls: a feed-only game comes after the calendar\'s', ids({ count: 4 }) === '1,2,3,4,5' && ids({ count: 3 }) === '1,2,3,5')
+  check('calendar controls: tag, Early Access, owned and wishlist only', ids({ count: 0, tag: 19 }) === '1,3' && ids({ count: 0, hideEarly: true, hideOwned: true }) === '1,4,5' && ids({ count: 0, wish: 'only' }) === '5')
+}
+
 ;(async () => {
+  roundFourTests()
   xpRuleTests()
   settingsPathTests()
   gpuTrimTests()

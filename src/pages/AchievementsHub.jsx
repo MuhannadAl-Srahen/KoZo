@@ -4,7 +4,7 @@ import { IconTrophy, IconDiamond, IconTargetArrow, IconHistory } from '@tabler/i
 import { fileUrl, formatDate, rarityLabel, rarityColor, timeAgo } from '../lib/utils'
 import Modal from '../components/ui/Modal'
 import EmptyState from '../components/ui/EmptyState'
-import { Skeleton, RowSkeleton } from '../components/ui/Skeleton'
+import { Skeleton, widthAt } from '../components/ui/Skeleton'
 import useCardZoom from '../lib/useCardZoom'
 import s from './AchievementsHub.module.css'
 
@@ -67,9 +67,15 @@ export default function AchievementsHub() {
     return () => off?.()
   }, [])
 
-  // First load: ghost the real layout (stat row + a list of rows) instead of a
-  // bare spinner, so nothing shifts when the data lands.
+  // First load: the real layout with its headings, the numbers and rows shimmering, so nothing
+  // shifts when the data lands.
   if (!data) {
+    const lines = (i, w1, w2) => (
+      <span className={s.progressInfo}>
+        <Skeleton w={widthAt(w1, i)} h={13} />
+        <Skeleton w={widthAt(w2, i)} h={10} />
+      </span>
+    )
     return (
       <div className={s.page}>
         <div className={s.toolbar}>
@@ -77,15 +83,55 @@ export default function AchievementsHub() {
         </div>
         <div className={s.content}>
           <div className={s.inner}>
-            <div className={s.statsBar}>
-              {Array.from({ length: 4 }, (_, i) => (
-                <div key={i} className={s.statCard}>
-                  <Skeleton w="55%" h={10} />
-                  <Skeleton w="35%" h={18} />
+            <div aria-busy="true" aria-label="Loading">
+              <div className={s.statsBar}>
+                {['Unlocked', 'Completion', 'Perfect games', 'Rarest trophy'].map((label, i) => (
+                  <div key={label} className={s.statCard}>
+                    <span className={s.statLabel}>{label}</span>
+                    <Skeleton w={widthAt([86, 54, 34, 62], i)} h={24} style={{ marginTop: 3 }} />
+                  </div>
+                ))}
+              </div>
+              <section className={s.section}>
+                <div className={s.sectionTitle}><IconTargetArrow size={14} stroke={1.7} /> Closest to 100%</div>
+                <div className={s.progressList}>
+                  {[0, 1, 2].map(i => (
+                    <div key={i} className={s.progressRow}>
+                      <Skeleton w={30} h={42} />
+                      <span className={s.progressInfo}>
+                        <Skeleton w={widthAt(['36%', '28%', '44%'], i)} h={13} />
+                        <span className={s.progressBar} />
+                      </span>
+                      <Skeleton w={78} h={12} />
+                    </div>
+                  ))}
                 </div>
-              ))}
+              </section>
+              <section className={s.section}>
+                <div className={s.sectionTitle}><IconDiamond size={14} stroke={1.7} /> Your rarest trophies</div>
+                <div className={s.rareGrid} style={zoomStyle}>
+                  {[0, 1, 2, 3].map(i => (
+                    <div key={i} className={s.rareCard}>
+                      <Skeleton w={44} h={44} r="var(--r-md)" />
+                      {lines(i, ['70%', '56%', '78%'], ['46%', '38%', '52%'])}
+                      <Skeleton w={34} h={12} />
+                    </div>
+                  ))}
+                </div>
+              </section>
+              <section className={s.section}>
+                <div className={s.sectionTitle}><IconHistory size={14} stroke={1.7} /> Recent unlocks</div>
+                <div className={s.feed}>
+                  {[0, 1, 2, 3].map(i => (
+                    <div key={i} className={s.feedRow}>
+                      <Skeleton w={34} h={34} r="var(--r-md)" />
+                      {lines(i, ['30%', '24%', '36%'], ['18%', '14%', '22%'])}
+                      <Skeleton w={44} h={11} />
+                    </div>
+                  ))}
+                </div>
+              </section>
             </div>
-            <RowSkeleton count={5} height={58} />
           </div>
         </div>
       </div>
@@ -110,21 +156,21 @@ export default function AchievementsHub() {
         <div className={s.inner}>
           {/* Stats */}
           <div className={s.statsBar}>
-            <div className={s.statCard}>
+            <div className={s.statCard} data-rise="" style={{ '--i': 0 }}>
               <span className={s.statLabel}>Unlocked</span>
               <span className={s.statValue} title={`${totals.unlocked} of ${totals.total}`}>
                 {totals.unlocked}<span className={s.statDim}>/{totals.total}</span>
               </span>
             </div>
-            <div className={s.statCard}>
+            <div className={s.statCard} data-rise="" style={{ '--i': 1 }}>
               <span className={s.statLabel}>Completion</span>
               <span className={s.statValue}>{pct}%</span>
             </div>
-            <div className={s.statCard}>
+            <div className={s.statCard} data-rise="" style={{ '--i': 2 }}>
               <span className={s.statLabel}>Perfect games</span>
               <span className={s.statValue}>{perfect}</span>
             </div>
-            <div className={s.statCard}>
+            <div className={s.statCard} data-rise="" style={{ '--i': 3 }}>
               <span className={s.statLabel}>Rarest trophy</span>
               <span className={s.statValue}>{rarestPct != null ? `${Number(rarestPct).toFixed(1)}%` : 'None'}</span>
             </div>
@@ -140,7 +186,7 @@ export default function AchievementsHub() {
 
           {/* Closest to 100% */}
           {inProgress.length > 0 && (
-            <section className={s.section}>
+            <section className={s.section} data-fade="">
               <div className={s.sectionTitle}><IconTargetArrow size={14} stroke={1.7} /> Closest to 100%</div>
               <div className={s.progressList}>
                 {inProgress.map(g => {
@@ -165,7 +211,7 @@ export default function AchievementsHub() {
 
           {/* Rarest trophies */}
           {rarest.length > 0 && (
-            <section className={s.section}>
+            <section className={s.section} data-fade="">
               <div className={s.sectionTitle}><IconDiamond size={14} stroke={1.7} /> Your rarest trophies</div>
               <div className={s.rareGrid} style={zoomStyle}>
                 {rarestKeyed.map(({ a, key }) => (
@@ -189,7 +235,7 @@ export default function AchievementsHub() {
           {/* Recent unlocks — newest 10 only; the full feed opens in a popup so
               the page never turns into an endless scroll. */}
           {recent.length > 0 && (
-            <section className={s.section}>
+            <section className={s.section} data-fade="">
               <div className={s.sectionTitle}><IconHistory size={14} stroke={1.7} /> Recent unlocks</div>
               <div className={s.feed}>
                 {recentKeyed.slice(0, 10).map(({ a, key }) => <FeedRow key={key} a={a} navigate={navigate} />)}

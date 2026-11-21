@@ -432,6 +432,40 @@ function othersOnAccount(gameId) {
   return out
 }
 
+// How far along each counted achievement is ("Kill 50 enemies": 31 / 50), from Steam's files on
+// this PC: the schema says which stat each one counts, the account's stats file holds the value.
+// Your own account first, else the shared one the game was played on last (its numbers are the
+// account's, so they say whose). [{ achievementId, cur, max, persona }]. Steam games only: an
+// emulator keeps no such schema (Dead Space's saves nothing at all).
+function progressFor(gameId) {
+  const db = require('../db/database').getDb()
+  const g = db.prepare('SELECT id, steam_app_id, is_cracked, source FROM games WHERE id = ?').get(gameId)
+  if (!g?.steam_app_id || g.is_cracked === 1) return []
+  try { if (require('./achievementSync').isForeignLauncher(g)) return [] } catch {}
+  const steam = steamPath()
+  if (!steam) return []
+  const { parseBinaryKV, achievementProgress } = require('./binaryKV')
+  let schema
+  try { schema = parseBinaryKV(fs.readFileSync(path.join(steam, 'appcache', 'stats', `UserGameStatsSchema_${g.steam_app_id}.bin`))) } catch { return [] }
+  const accs = accountsForApp(g.steam_app_id)
+    .map(a => { try { return { ...a, mtime: fs.statSync(a.statsFile).mtimeMs } } catch { return null } })
+    .filter(Boolean)
+    .sort((a, b) => (b.mode === 'mine') - (a.mode === 'mine') || b.mtime - a.mtime)
+  for (const acc of accs) {
+    let stats
+    try { stats = parseBinaryKV(fs.readFileSync(acc.statsFile)) } catch { continue }
+    const prog = achievementProgress(schema, stats)
+    if (!prog.size) return []
+    const out = []
+    for (const r of db.prepare('SELECT id, steam_api_name FROM achievements WHERE game_id = ?').all(g.id)) {
+      const p = prog.get(String(r.steam_api_name || '').toLowerCase())
+      if (p) out.push({ achievementId: r.id, cur: p.cur, max: p.max, persona: acc.mode === 'mine' ? null : (acc.persona || 'a shared account') })
+    }
+    return out
+  }
+  return []
+}
+
 // Look through the stored Steam unlocks for ones other people earned on a shared account.
 // Nothing is removed here: the answer goes to the Steam accounts window, which asks.
 function findForeign() {
@@ -554,5 +588,5 @@ module.exports = {
   // this PC
   knownAccounts, accountsForApp, modeOf, connectedId, isConfirmed, listAccounts, forget,
   useAccount, setMode, findForeign, removeForeign, restoreUnlocks, reviewStored, readForeign,
-  accountEntries, othersOnAccount,
+  accountEntries, othersOnAccount, progressFor,
 }

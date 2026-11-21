@@ -119,6 +119,15 @@ export function calendarShown(items, { count = 100, wish = 'show', tag = null, h
   return [...keep, ...rest]
 }
 
+// The same controls on the other layouts (Strip, Week, Month): the app ids of the page's games
+// that calendarShown keeps. A game from Steam's calendar has its rank (calOrder); one only the
+// coming-soon feeds list goes after them by its place there (popRank), and has no tags, so a
+// chosen tag leaves it out.
+export function calendarKeep(entries, opts = {}) {
+  const items = (entries || []).map(g => ({ ...g, order: g.calOrder ?? 100000 + popRank(g), tagIds: g.tagIds || [] }))
+  return new Set(calendarShown(items, opts).map(g => Number(g.appid)))
+}
+
 // One day's games: wishlisted and listed first, then by rank (Steam's own order on its calendar).
 export function calendarDay(list) {
   return [...(list || [])].sort((a, b) =>

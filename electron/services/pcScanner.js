@@ -84,7 +84,7 @@ function isGameExe(name) {
 const NESTED_SKIP = new Set([
   'redist','redistributable','redistributables','_redist','_commonredist',
   'commonredist','directx','dotnet','vcredist','dxsetup','support',
-  'dependencies','prerequisites','node_modules','.git','__installer',
+  'dependencies','prerequisites','node_modules','.git','__installer','__overlay',
   'crashreportclient','engine',
 ])
 // "RedistInstallers", "__Prerequisites": folders like these can't all be listed by name.
@@ -186,7 +186,20 @@ function detectSteamAppId(folderPath) {
   return null
 }
 
-function lookupAcfAppId(gamePath) {
+// Pure: Steam's name for a game when its folder is a codename, else null. EA's folders are
+// codenames ("Excalibur" is Need for Speed Unbound); most folders are a form of the name, and Steam's
+// can carry an edition or a trademark ("Crimson Desert Enhanced", "Need for Speed™ Heat "), so those
+// keep the folder's plain name.
+function steamNameFor(folderName, steamName) {
+  const norm = (s) => String(s || '').toLowerCase().replace(/[™®©]/g, '').replace(/[^a-z0-9]+/g, ' ').trim()
+  const f = norm(folderName), n = norm(steamName)
+  if (!f || !n || n.includes(f) || f.includes(n) || n.replace(/ /g, '').includes(f.replace(/ /g, ''))) return null
+  return String(steamName).trim()
+}
+
+// The app id and Steam's own name for a game in a Steam library, from its appmanifest. The folder
+// name isn't the game's: EA installs Need for Speed Unbound to "Excalibur", and KoZo called it that.
+function lookupAcf(gamePath) {
   // gamePath is "...\steamapps\common\<installdir>" — the appmanifest_*.acf
   // files live in "...\steamapps", i.e. two levels up, not one.
   const steamapps = path.dirname(path.dirname(gamePath))
@@ -198,7 +211,7 @@ function lookupAcfAppId(gamePath) {
         const txt = fs.readFileSync(path.join(steamapps, e), 'utf8')
         const dir = (txt.match(/"installdir"\s+"([^"]+)"/i) || [])[1]
         const aid = (txt.match(/"appid"\s+"(\d+)"/i) || [])[1]
-        if (dir && aid && dir.toLowerCase() === folderName) return aid
+        if (dir && aid && dir.toLowerCase() === folderName) return { appid: aid, name: (txt.match(/"name"\s+"([^"]+)"/i) || [])[1] || null }
       } catch {}
     }
   } catch {}
@@ -218,9 +231,14 @@ const JUNK_NAME_RE = new RegExp([
     'downloads?|crashreport(s|er)?|prerequisites|support|tools?)$',
 ].join('|'), 'i')
 
+// A store's own app, never a game: Scan PC offered "EA Desktop" (Program Files\Electronic Arts\
+// EA Desktop) as one. Only the apps' folders: their game folders (GOG Galaxy\Games, Ubisoft Game
+// Launcher\games) stay.
+const LAUNCHER_APP_RE = /[\\/](electronic arts[\\/]ea desktop|epic games[\\/]launcher|ubisoft game launcher(?![\\/]games)|battle\.net|riot client|rockstar games[\\/]launcher|gog galaxy(?![\\/]games))[\\/]/i
+
 function isJunkFolder(fullPath) {
   const name = path.basename(fullPath || '')
-  return JUNK_NAME_RE.test(name) || JUNK_PATH_RE.test(String(fullPath || '') + path.sep)
+  return JUNK_NAME_RE.test(name) || JUNK_PATH_RE.test(String(fullPath || '') + path.sep) || LAUNCHER_APP_RE.test(String(fullPath || '') + path.sep)
 }
 
 // Turn a messy repack folder name into a clean game title, e.g.
@@ -257,8 +275,9 @@ const HELPER_EXE_RE = new RegExp([
   '^crs[-_. ]',                                  // Crash Reporting Service: crs-handler, crs-uploader
   '[-_. ](handler|uploader|helper)[-_. 0-9]*\\.exe$',   // Options_INI_Helper.exe
   '^(updater|update|patcher|installer|setup|service|helper|daemon|' +
-    'watchdog|telemetry|activation|cleanup|redist\\w*|prereq\\w*)[-_. 0-9]*\\.exe$',
-  'anticheat|battleye|vcredist|dxsetup|dotnetfx',
+    'watchdog|telemetry|activation|cleanup|touchup|redist\\w*|prereq\\w*)[-_. 0-9]*\\.exe$',
+  'anticheat|battleye|vcredist|dxsetup|dotnetfx|overlay[-_. ]?injector',   // EA's __overlay\\overlayinjector.exe
+  'helper[-_. 0-9]*\\.exe$|prereq|^unins\\d*\\.exe$|uninstall|error[-_. ]?report',   // EALaunchHelper, UE4PrereqSetup_x64, unins000
   '[-_. ](installer|setup)[-_. 0-9]*\\.exe$',          // CnCNet5_YR_Installer.exe
   '(^|[-_. ])(map|level|world)[-_. ]?(editor|edit|builder)[-_. 0-9]*\\.exe$',   // WorldBuilder.exe
   '(^|[-_. ])editor[-_. 0-9]*\\.exe$|modkit|modtools',
@@ -290,7 +309,14 @@ function namesTheGame(exeName, folderName) {
   return acro.length >= 2 && base === acro
 }
 
-function pickBestExe(exes, folderName) {
+// A trial, demo or benchmark copy beside the game (Need for Speed Unbound ships NeedForSpeedUnbound.exe
+// and NeedForSpeedUnboundTrial.exe): only when nothing else carries the name.
+const COPY_EXE_RE = /(trial|demo|benchmark|playtest)\.exe$/i
+
+// steamName: Steam's own name for the game, from its manifest, when the folder is a codename
+// ("Excalibur" holds NeedForSpeedUnbound.exe; the folder rule found nothing, and EA's overlay
+// injector, which loads graphics parts, won).
+function pickBestExe(exes, folderName, steamName = null) {
   if (!exes.length) return null
   if (exes.length === 1) return exes[0].name
   // Helpers are only ever a last resort. Without this the size fallback below
@@ -299,10 +325,20 @@ function pickBestExe(exes, folderName) {
   const real = exes.filter(e => !isHelperExe(e.name))
   const pool = real.length ? real : exes
   if (pool.length === 1) return pool[0].name
+  const base = (e) => alnum(e.name.replace(/\.exe$/i, ''))
 
-  const slug = alnum(folderName).slice(0, 8)
-  const match = slug && pool.find(e => alnum(e.name.replace(/\.exe$/i, '')).startsWith(slug))
-  if (match) return match.name
+  // The game's whole name, exactly: Steam's, then the folder's.
+  for (const n of [steamName, folderName]) {
+    const full = alnum(n)
+    const exact = full && pool.find(e => base(e) === full)
+    if (exact) return exact.name
+  }
+  for (const n of [folderName, steamName]) {
+    const slug = alnum(n).slice(0, 8)
+    const matches = slug ? pool.filter(e => base(e).startsWith(slug)) : []
+    const match = matches.find(e => !COPY_EXE_RE.test(e.name)) || matches[0]
+    if (match) return match.name
+  }
 
   // Studios routinely abbreviate: StellarBlade ships SB.exe, Lies of P ships
   // LOP.exe. Checked before size, since these launchers are usually tiny.
@@ -319,7 +355,8 @@ function pickBestExe(exes, folderName) {
   // What loads a game's parts beats what is merely big: gamemd-spawn.exe is 5 MB, and the
   // installer beside it 104 MB.
   const games = pool.filter(e => e.looksGame)
-  return (games.length ? games : pool).slice().sort((a, b) => b.size - a.size)[0].name
+  const ranked = (games.length ? games : pool).slice().sort((a, b) => b.size - a.size)
+  return (ranked.find(e => !COPY_EXE_RE.test(e.name)) || ranked[0]).name
 }
 
 // Does the folder (within 2 levels) carry a file that proves it's a game?
@@ -437,11 +474,13 @@ function buildEntry(gamePath, lenient) {
   const folderName = path.basename(gamePath)
   const type = detectType(gamePath)
   let appid = null
-  if (type === 'Steam') appid = lookupAcfAppId(gamePath) || detectSteamAppId(gamePath)
+  const acf = type === 'Steam' ? lookupAcf(gamePath) : null
+  if (type === 'Steam') appid = acf?.appid || detectSteamAppId(gamePath)
   else appid = detectSteamAppId(gamePath)
 
-  // Steam/GOG/Epic installdirs are already clean; only de-cruft cracked repacks.
-  const name = type === 'Cracked' ? cleanGameName(folderName) : folderName
+  // Steam names its own games (the folder can be a codename); other stores' folders are already
+  // clean; only de-cruft cracked repacks.
+  const name = steamNameFor(folderName, acf?.name) || (type === 'Cracked' ? cleanGameName(folderName) : folderName)
 
   // A store starts its own games. In a folder of files, a tool is never taken for want of
   // anything better: Play would open it and playtime would count it. With no game file the
@@ -454,7 +493,7 @@ function buildEntry(gamePath, lenient) {
   }
   const usable = real.length ? real : exes
   for (const e of usable) e.looksGame = looksLikeGame(path.join(e.dir, e.name))
-  const isSure = (e) => e.looksGame || namesTheGame(e.name, folderName) || /-shipping\.exe$/i.test(e.name)
+  const isSure = (e) => e.looksGame || namesTheGame(e.name, folderName) || (acf?.name && namesTheGame(e.name, acf.name)) || /-shipping\.exe$/i.test(e.name)
 
   // A file directly in the game folder is the real start, unless only a file further in
   // shows any sign of being the game.
@@ -462,7 +501,7 @@ function buildEntry(gamePath, lenient) {
   const pool = directExes.some(isSure) ? directExes
     : usable.some(isSure) ? usable.filter(isSure)
     : directExes.length ? directExes : usable
-  const bestName = pickBestExe(pool, folderName)
+  const bestName = pickBestExe(pool, folderName, acf?.name)
   const bestExe  = pool.find(e => e.name === bestName) || pool[0]
 
   // Store games keep the game-root install path (they launch via the client and
@@ -541,7 +580,7 @@ function scanFolder(folderPath) {
     const base = path.basename(dir).toLowerCase()
     // Temp/download-cache trees hold no games — don't even descend (unless the
     // user pointed the scan straight at this folder).
-    if (depth > 0 && JUNK_PATH_RE.test(dir + path.sep)) return
+    if (depth > 0 && (JUNK_PATH_RE.test(dir + path.sep) || LAUNCHER_APP_RE.test(dir + path.sep))) return
 
     // 1) Pure library / drive folder → recurse, never import it.
     if (isDriveRoot(dir) || CONTAINER_NAMES.has(base)) { descend(dir, depth); return }
@@ -593,4 +632,4 @@ function getDefaultScanPaths() {
   return [...new Set(found)]
 }
 
-module.exports = { scanFolder, getDefaultScanPaths, pickBestExe, isGameExe, isHelperExe, isJunkFolder, cleanGameName, tidyFolderName, collectExes, sameGameFolder, namesTheGame, exeChoices }
+module.exports = { steamNameFor, scanFolder, getDefaultScanPaths, pickBestExe, isGameExe, isHelperExe, isJunkFolder, cleanGameName, tidyFolderName, collectExes, sameGameFolder, namesTheGame, exeChoices }

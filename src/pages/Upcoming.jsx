@@ -8,17 +8,23 @@ import s from './Upcoming.module.css'
 // listed under its "Tracked" shelf; tracking is a release watch on the Game
 // List row (game_list.release_watch), so it survives status changes: a tracked
 // game set to Want to play still gets its "Out now" alert.
+// The tracked rows from the last visit, so Tracked paints at once and only shows its skeleton
+// the first time (it said "You aren't tracking any releases yet" until the list came in).
+let trackedCache = null
+
 export default function Upcoming() {
   // Game List rows with a Steam appid: appid → { id, status, watch }.
   const [byAppId, setByAppId] = useState(() => new Map())
-  const [tracked, setTracked] = useState([])   // release-watched rows (any status)
+  const [tracked, setTracked] = useState(() => trackedCache || [])   // release-watched rows (any status)
+  const [trackedLoaded, setTrackedLoaded] = useState(() => trackedCache != null)
 
   async function load() {
     const [all, watched] = await Promise.all([
       window.kozo?.api?.gameList?.list?.({ limit: 100000, offset: 0 }),
       window.kozo?.api?.gameList?.tracked?.(),
     ])
-    if (watched?.ok) setTracked(watched.data || [])
+    if (watched?.ok) { trackedCache = watched.data || []; setTracked(trackedCache) }
+    setTrackedLoaded(true)
     if (all?.ok) {
       const watchIds = new Set((watched?.ok ? watched.data : []).map(r => r.id))
       setByAppId(new Map((all.data?.items || [])
@@ -87,7 +93,7 @@ export default function Upcoming() {
       <div className={s.content}>
         <div className={s.inner}>
           <ReleasedPanel onChanged={load} />
-          <SteamCalendar byAppId={byAppId} trackedRows={tracked} onTrack={trackGame} onUntrack={untrackGame} onWant={wantGame} />
+          <SteamCalendar byAppId={byAppId} trackedRows={tracked} trackedLoaded={trackedLoaded} onTrack={trackGame} onUntrack={untrackGame} onWant={wantGame} />
         </div>
       </div>
     </div>

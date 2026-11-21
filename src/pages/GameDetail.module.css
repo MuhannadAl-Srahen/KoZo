@@ -962,3 +962,17 @@ button.monthPicked { background: color-mix(in srgb, var(--a) 12%, transparent); 
   cursor: pointer;
 }
 .achGuide:hover { border-color: var(--ab); color: var(--a); background: var(--ad); }
+
+/* A counted achievement's progress on its card ("31 / 50"). */
+.achProg { display: flex; align-items: center; gap: var(--sp-8); margin-top: 4px; min-width: 0; }
+.achProgBar { flex: 1; min-width: 40px; height: 4px; border-radius: var(--r-pill); background: var(--surface-3); overflow: hidden; }
+.achProgBar > span { display: block; height: 100%; border-radius: inherit; background: var(--a); }
+.achProgNum { flex-shrink: 0; font-size: var(--fs-2xs); font-weight: 600; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+
+/* A white or pale accent is the text's own color: the chosen one also gets a clear fill, a thin
+   outline and bold text, or it looked like the rest (AccentColorContext isPale). */
+:global(html[data-accent-pale]) button.monthPicked, :global(html[data-accent-pale]) .achCardPicked {
+  background: var(--ad);
+  box-shadow: inset 0 0 0 1px var(--ab);
+  font-weight: 700;
+}

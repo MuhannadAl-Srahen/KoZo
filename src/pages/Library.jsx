@@ -770,7 +770,7 @@ export default function Library() {
             when a status filter matched nothing — a blank page with no
             explanation and no way back out. */}
         {loading && (
-          <CardSkeletonGrid gridClassName={gridClass} count={view === 'list' ? 6 : 12} />
+          <CardSkeletonGrid gridClassName={gridClass} count={view === 'list' ? 7 : 12} list={view === 'list'} />
         )}
 
         {!loading && games.length === 0 && (

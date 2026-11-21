@@ -113,6 +113,18 @@ function coverError(e, remote) {
 // A year of play, Monday-first columns, for the profile heatmap. `daily` is
 // stats.dailyActivity ([{ day: 'YYYY-MM-DD' local, seconds }]).
 const HEAT_WEEKS = 52
+// The two date formats, made once: toLocaleDateString builds a new formatter on every call, and
+// the heatmap's 364 labels took about 70 ms of each Profile visit in the development build.
+const HEAT_MONTH = new Intl.DateTimeFormat(undefined, { month: 'short' })
+const HEAT_LABEL = new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+// Built once per answer and day, so a revisit (the page cache paints the same stats) costs nothing.
+let heatMemo = null
+function heatmapFor(daily) {
+  const today = localDayKey(new Date())
+  if (heatMemo && heatMemo.daily === daily && heatMemo.today === today) return heatMemo.heat
+  heatMemo = { daily, today, heat: buildHeatmap(daily) }
+  return heatMemo.heat
+}
 function buildHeatmap(daily) {
   const byDay = new Map((daily || []).map(d => [d.day, d.seconds || 0]))
   const today = new Date(); today.setHours(0, 0, 0, 0)
@@ -128,9 +140,9 @@ function buildHeatmap(daily) {
       const future = dt > today
       const seconds = future ? 0 : (byDay.get(localDayKey(dt)) || 0)
       if (seconds) { total += seconds; daysPlayed++ }
-      if (d === 0 && dt.getMonth() !== lastMonth) { month = dt.toLocaleDateString(undefined, { month: 'short' }); lastMonth = dt.getMonth() }
+      if (d === 0 && dt.getMonth() !== lastMonth) { month = HEAT_MONTH.format(dt); lastMonth = dt.getMonth() }
       const level = !seconds ? 0 : seconds < 1800 ? 1 : seconds < 3600 ? 2 : seconds < 7200 ? 3 : 4
-      days.push({ seconds, level, future, date: new Date(dt), label: dt.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) })
+      days.push({ seconds, level, future, date: new Date(dt), label: HEAT_LABEL.format(dt) })
     }
     weeks.push({ month, days })
   }
@@ -545,7 +557,7 @@ export default function Profile() {
 
   const topGames = (stats?.topGames || []).slice(0, 5)
   const topMax = topGames[0]?.seconds || 1
-  const heat = buildHeatmap(stats?.dailyActivity)
+  const heat = heatmapFor(stats?.dailyActivity)
   const entries = mergeXpHistory(xpHistory)
 
   return (
@@ -728,8 +740,8 @@ export default function Profile() {
 
           {/* Stat strip: one even row */}
           <div className={s.statGrid}>
-            {STAT_CARDS.map(({ Icon, label, value, color }) => (
-              <div key={label} className={s.statCard}>
+            {STAT_CARDS.map(({ Icon, label, value, color }, i) => (
+              <div key={label} className={s.statCard} data-rise="" style={{ '--i': i }}>
                 <div className={s.statIcon} style={{ color, background: tint(color, 12), borderColor: tint(color, 24) }}>
                   <Icon size={16} stroke={1.7} />
                 </div>
@@ -748,7 +760,7 @@ export default function Profile() {
                 const R = 52, C = 2 * Math.PI * R
                 const dash = C * Math.min(1, (xp.progress || 0) / 100)
                 return (
-                  <div className={s.xpCard}>
+                  <div className={s.xpCard} data-fade="">
                     <div className={s.xpHero}>
                       <div className={s.xpRing}>
                         <svg width="120" height="120" viewBox="0 0 120 120">
@@ -783,14 +795,15 @@ export default function Profile() {
                         </div>
                         <div className={s.xpHook}>
                           <strong>{(xp.toNextLevel ?? 0).toLocaleString()} XP</strong> to Level {xp.level + 1}
+                          {/* Every level has its own name: the next one is what this level up brings. */}
                           {xp.nextTier && (
-                            <span className={s.xpHookTier}>
+                            <span className={s.xpHookTier} data-xp-next-name="">
                               <IconChevronRight size={12} stroke={2} />
-                              {xp.nextTier.level - xp.level} {xp.nextTier.level - xp.level === 1 ? 'level' : 'levels'} to {xp.nextTier.name}
+                              {xp.nextTier.name}
                             </span>
                           )}
                         </div>
-                        <div className={s.xpBarTrack}><div className={s.xpBarFill} style={{ width: `${xp.progress}%` }} /></div>
+                        <div className={s.xpBarTrack}><div className={s.xpBarFill} data-grow="x" style={{ width: `${xp.progress}%` }} /></div>
                       </div>
 
                       <div className={s.xpStreaks}>
@@ -811,8 +824,8 @@ export default function Profile() {
                         { Icon: IconCircleCheckFilled, label: 'Finished', value: xp.breakdown.finished, color: TINT_GAMES, sub: `${xp.finishedCount} game${xp.finishedCount === 1 ? '' : 's'}${xp.replayCount ? `, ${xp.replayCount} again` : ''}` },
                         { Icon: IconTargetArrow, label: 'Milestones', value: xp.breakdown.milestones || 0, color: TINT_SESS, sub: milestoneSub(xp.milestones) },
                         { Icon: IconFlame, label: 'Streaks', value: xp.breakdown.streak, color: TINT_FIRE, sub: `best ${xp.longestStreak}d` },
-                      ].map(b => (
-                        <div key={b.label} className={s.xpSource}>
+                      ].map((b, i) => (
+                        <div key={b.label} className={s.xpSource} data-rise="" style={{ '--i': i + 1 }}>
                           <b.Icon size={15} stroke={1.7} style={{ color: b.color }} />
                           <span className={s.xpSourceVal}>+{b.value.toLocaleString()}</span>
                           <span className={s.xpSourceLabel} title={b.label}>{b.label}</span>
@@ -824,8 +837,8 @@ export default function Profile() {
                     {/* Unlocks by rarity, and what each is worth: rarer is worth much more. */}
                     {xp.byRarity && (
                       <div className={s.xpRarity} data-xp-rarity="">
-                        {RARITY_ROWS.map(row => ({ ...row, xp: xp.rules?.rarity?.find(b => b.key === row.key)?.xp ?? row.xp })).map(r => (
-                          <div key={r.key} className={s.xpRarityItem} style={{ '--rar': r.color }}
+                        {RARITY_ROWS.map(row => ({ ...row, xp: xp.rules?.rarity?.find(b => b.key === row.key)?.xp ?? row.xp })).map((r, i) => (
+                          <div key={r.key} className={s.xpRarityItem} data-rise="" style={{ '--rar': r.color, '--i': i + 3 }}
                             title={`${r.name}: ${r.xp} XP each`}>
                             <span className={s.xpRarityDot} />
                             <span className={s.xpRarityName}>{r.name}</span>
@@ -842,7 +855,7 @@ export default function Profile() {
               <BadgesCard />
 
               {/* Play heatmap: the last 52 weeks, one square per day */}
-              <div className={s.card}>
+              <div className={s.card} data-rise="panel" style={{ '--i': 3 }}>
                 <div className={s.cardHead}>
                   <span className={s.cardTitle}><IconChartBar size={14} stroke={1.8} /> Last 12 months</span>
                   <span className={s.cardNote}>{heat.daysPlayed} {heat.daysPlayed === 1 ? 'day' : 'days'} played · {formatPlaytime(heat.total)}</span>
@@ -850,7 +863,9 @@ export default function Profile() {
                 <div className={s.heatMonths} style={{ '--weeks': heat.weeks.length }}>
                   {heat.weeks.map((w, i) => <span key={i}>{w.month || ''}</span>)}
                 </div>
-                <div className={s.heat} style={{ '--weeks': heat.weeks.length }}>
+                {/* data-still: the days are controller targets, but only the card comes in (364 squares each
+                    played the card entrance). */}
+                <div className={s.heat} style={{ '--weeks': heat.weeks.length }} data-still="">
                   {heat.weeks.flatMap((w, wi) => w.days.map((d, di) => (d.seconds ? (
                     <button key={`${wi}-${di}`} type="button"
                       className={`${s.heatCell} ${s.heatBtn}`}
@@ -874,7 +889,7 @@ export default function Profile() {
 
               {/* Recent XP: same-day sessions merged per game */}
               {entries.length > 0 && (
-                <div className={s.card}>
+                <div className={s.card} data-rise="panel" style={{ '--i': 4 }}>
                   <div className={s.cardHead}>
                     <span className={s.cardTitle}><IconHistory size={14} stroke={1.8} /> Recent XP</span>
                     {entries.length > 6 && (
@@ -892,7 +907,7 @@ export default function Profile() {
 
             <div className={s.colSide}>
               {/* Showcase: four slots, the first is the favorite */}
-              <div className={s.card}>
+              <div className={s.card} data-fade="">
                 <div className={s.cardHead}>
                   <span className={s.cardTitle}><IconStar size={14} stroke={1.8} /> Showcase</span>
                 </div>
@@ -929,7 +944,7 @@ export default function Profile() {
 
               {/* Most played: top 5 by time, with a bar each */}
               {topGames.length > 0 && (
-                <div className={s.card}>
+                <div className={s.card} data-fade="">
                   <div className={s.cardHead}>
                     <span className={s.cardTitle}><IconDeviceGamepad2 size={14} stroke={1.8} /> Most played</span>
                   </div>
@@ -948,7 +963,7 @@ export default function Profile() {
                               <span className={s.topName} title={t.name}>{t.name}</span>
                               <span className={s.topTime}>{formatPlaytime(t.seconds)}</span>
                             </div>
-                            <div className={s.bar}><div className={s.barFill} style={{ width: `${Math.max(4, (t.seconds / topMax) * 100)}%` }} /></div>
+                            <div className={s.bar}><div className={s.barFill} data-grow="x" style={{ width: `${Math.max(4, (t.seconds / topMax) * 100)}%`, '--i': i }} /></div>
                           </div>
                         </div>
                       )
@@ -959,15 +974,15 @@ export default function Profile() {
 
               {/* Top genres: what you actually play, weighted by playtime */}
               {topGenres.length > 0 && (
-                <div className={s.card}>
+                <div className={s.card} data-rise="panel" style={{ '--i': 5 }}>
                   <div className={s.cardHead}>
                     <span className={s.cardTitle}><IconCategory size={14} stroke={1.8} /> Top genres</span>
                   </div>
                   <div className={s.genreList}>
-                    {topGenres.map(([gName, sec]) => (
+                    {topGenres.map(([gName, sec], i) => (
                       <div key={gName} className={s.genreRow}>
                         <span className={s.genreName}>{gName}</span>
-                        <div className={s.bar}><div className={s.barFill} style={{ width: `${Math.max(4, (sec / genreMax) * 100)}%` }} /></div>
+                        <div className={s.bar}><div className={s.barFill} data-grow="x" style={{ width: `${Math.max(4, (sec / genreMax) * 100)}%`, '--i': i }} /></div>
                         <span className={s.genreTime}>{formatPlaytime(sec)}</span>
                       </div>
                     ))}

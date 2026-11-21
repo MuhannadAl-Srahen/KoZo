@@ -100,28 +100,40 @@ function levelForXp(totalXp) {
   }
 }
 
-// Creative tier names by level band — flair shown next to the level number.
-const TIER_BANDS = [
-  { level: 3,  name: 'Apprentice' },
-  { level: 7,  name: 'Adept' },
-  { level: 12, name: 'Seasoned' },
-  { level: 18, name: 'Veteran' },
-  { level: 25, name: 'Master' },
-  { level: 35, name: 'Legend' },
-  { level: 45, name: 'Grandmaster' },
-  { level: 60, name: 'Mythic' },
+// A name for every level, shown next to its number (the maker: "change the name of each level
+// when the user got more xp"). Names used to come in bands: every level from 35 to 44 was Legend
+// and every level from 60 on was Mythic, so a level up rarely changed the name. The old names keep
+// their levels (Rookie 1, Apprentice 3, Adept 7, Seasoned 12, Veteran 18, Master 25, Grandmaster 45,
+// Mythic 60) except Legend, now 40; past 60 it goes Mythic II, Mythic III and on. site/js/game.js
+// and site/js/sections.js show the same names.
+const LEVEL_NAMES = [
+  'Rookie', 'Novice', 'Apprentice', 'Explorer', 'Wanderer', 'Scout', 'Adept', 'Pathfinder', 'Adventurer', 'Challenger',
+  'Contender', 'Seasoned', 'Ranger', 'Tactician', 'Vanguard', 'Gladiator', 'Sentinel', 'Veteran', 'Elite', 'Ace',
+  'Specialist', 'Expert', 'Virtuoso', 'Commander', 'Master', 'Strategist', 'Sharpshooter', 'Conqueror', 'Hero', 'Warden',
+  'Vindicator', 'Titan', 'Mastermind', 'Warmaster', 'Elder', 'Renowned', 'Dreadnought', 'Warlord', 'Champion', 'Legend',
+  'Myth-Forged', 'Paragon', 'Sovereign', 'Ascendant', 'Grandmaster', 'Archon', 'Exalted', 'Phantom', 'Celestial', 'Immortal',
+  'Eternal', 'Starborn', 'Voidwalker', 'Demigod', 'Oracle', 'Transcendent', 'Apex', 'Worldbreaker', 'Godlike', 'Mythic',
 ]
 
-function tierForLevel(level) {
-  let name = 'Rookie'
-  for (const b of TIER_BANDS) { if (level >= b.level) name = b.name }
-  return name
+function roman(n) {
+  let out = ''
+  for (const [v, s] of [[1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'], [100, 'C'], [90, 'XC'], [50, 'L'], [40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']]) {
+    while (n >= v) { out += s; n -= v }
+  }
+  return out
 }
 
-// The next tier the user will unlock — drives the "X levels to <Tier>" hook.
+// Pure: the name of a level. Level 61 is Mythic II.
+function tierForLevel(level) {
+  const lv = Math.max(1, Math.floor(Number(level) || 1))
+  if (lv <= LEVEL_NAMES.length) return LEVEL_NAMES[lv - 1]
+  return `${LEVEL_NAMES[LEVEL_NAMES.length - 1]} ${roman(lv - LEVEL_NAMES.length + 1)}`
+}
+
+// The name the next level brings: Profile's "to Level 41, Myth-Forged".
 function nextTierInfo(level) {
-  for (const b of TIER_BANDS) { if (level < b.level) return { name: b.name, level: b.level } }
-  return null   // already Mythic
+  const next = Math.max(1, Math.floor(Number(level) || 1)) + 1
+  return { name: tierForLevel(next), level: next }
 }
 
 // The local play days (for the streaks) only change when the ended sessions do, but turning
@@ -279,7 +291,7 @@ function computeXp() {
     totalXp,
     level: lv.level,
     tier: tierForLevel(lv.level),
-    nextTier,                              // { name, level } or null at the top
+    nextTier,                              // the next level and its name: { name, level }
     intoLevel: lv.intoLevel,
     levelSpan: lv.levelSpan,
     nextLevelTotal: lv.nextLevelTotal,

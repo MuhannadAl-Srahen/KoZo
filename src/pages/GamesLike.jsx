@@ -6,6 +6,10 @@ import {
 import SteamGameModal from '../components/SteamGameModal'
 import EmptyState from '../components/ui/EmptyState'
 import GeneratedCover from '../components/GeneratedCover'
+import ContextMenu from '../components/ui/ContextMenu'
+import UndoBar from '../components/ui/UndoBar'
+import InfoModal from '../components/ui/InfoModal'
+import { storeMenuItems, alertAtLowest } from '../components/storeMenu'
 import { CardSkeletonGrid } from '../components/ui/Skeleton'
 import useCardZoom from '../lib/useCardZoom'
 import { rankResults } from '../lib/searchRank'
@@ -126,6 +130,11 @@ export function GamesLikeGrid({ appId, pageKey = 'like', compact = false }) {
   const [open, setOpen] = useState(null)
   const [added, setAdded] = useState(() => new Set())
   const [adding, setAdding] = useState(null)
+  // Right-click on a card (components/storeMenu.js), and what "Tell me at its lowest price" did.
+  const navigate = useNavigate()
+  const [menu, setMenu] = useState(null)        // { x, y, g }
+  const [undo, setUndo] = useState(null)
+  const [menuError, setMenuError] = useState(null)
   const zoomStyle = useCardZoom(pageKey, 'grid', { grid: 230 }, { min: 170, max: 420 })
 
   useEffect(() => { loadOwned().then(setOwned) }, [])
@@ -174,6 +183,20 @@ export function GamesLikeGrid({ appId, pageKey = 'like', compact = false }) {
     if (res?.ok) { setAdded(a => new Set(a).add(g.appid)); forgetOwned() }
   }
 
+  async function removeFromList(g) {
+    const res = await window.kozo?.api?.deals?.removeFromList?.(g.appid)
+    if (res?.ok) {
+      setAdded(a => { const n = new Set(a); n.delete(g.appid); return n })
+      forgetOwned()
+      loadOwned().then(setOwned)
+    }
+  }
+  async function alertLowest(g) {
+    const r = await alertAtLowest(g)
+    if (r.error) setMenuError(r.error)
+    else { setUndo(r.undo); setAdded(a => new Set(a).add(g.appid)); forgetOwned() }
+  }
+
   function badge(g) {
     if (owned?.library.has(g.appid)) return { Icon: IconBooks, text: 'In Library' }
     if (owned?.listed.has(g.appid) || added.has(g.appid)) return { Icon: IconListCheck, text: 'On Game List' }
@@ -216,6 +239,7 @@ export function GamesLikeGrid({ appId, pageKey = 'like', compact = false }) {
             const b = badge(g)
             return (
               <button key={g.appid} type="button" className={s.card} data-gpnav onClick={() => setOpen(g)}
+                onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, g }) }}
                 data-like-card={g.appid} style={{ '--i': Math.min(i % CHUNK, 8) }}>
                 <div className={s.art}>
                   {g.header || g.capsule ? <img src={g.header || g.capsule} alt="" loading="lazy" decoding="async" /> : null}
@@ -275,6 +299,24 @@ export function GamesLikeGrid({ appId, pageKey = 'like', compact = false }) {
           )}
         />
       )}
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          header={{ cover: menu.g.portrait || menu.g.capsule || menu.g.header || null, name: menu.g.name, sub: menu.g.soon ? (menu.g.release?.text || 'Coming soon') : `${menu.g.pct}% like ${data?.seed?.name || 'this game'}` }}
+          items={storeMenuItems(menu.g, {
+            onOpen: (g) => setOpen(g),
+            onList: !!(owned?.listed.has(menu.g.appid) || added.has(menu.g.appid)),
+            onAdd: owned?.library.has(menu.g.appid) ? null : addToList,
+            onRemove: owned?.library.has(menu.g.appid) ? null : removeFromList,
+            onAlert: menu.g.soon || owned?.library.has(menu.g.appid) ? null : alertLowest,
+            onLike: Number(menu.g.appid) === Number(appId) ? null : (g) => navigate(`/like?app=${g.appid}`),
+          })}
+        />
+      )}
+      <UndoBar undo={undo} onDone={() => setUndo(null)} />
+      {menuError && <InfoModal variant="error" title="Couldn't set the alert" message={menuError} onClose={() => setMenuError(null)} />}
     </div>
   )
 }

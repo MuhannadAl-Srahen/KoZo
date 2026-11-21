@@ -1194,3 +1194,8 @@
 .dayHead { display: flex; align-items: center; gap: var(--sp-6); margin-top: var(--sp-8); color: var(--text-secondary); font-size: var(--fs-sm); font-weight: 700; }
 .dayAchs { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--sp-6); }
 .dayAch img, .dayAchBlank { width: 36px; height: 36px; border-radius: var(--r-sm); flex-shrink: 0; background: var(--surface-3); }
+
+/* ── Motion (Settings → Appearance → Animations, styles/motion.css) ──
+   The level ring fills from empty when the page opens; the cards rise through data-rise. */
+@keyframes xpRingIn { from { stroke-dasharray: 0 400; } }
+:global(html[data-motion="soft"]) .xpRingFill, :global(html[data-motion="heavy"]) .xpRingFill { animation: xpRingIn 0.5s var(--ease-out) backwards; }

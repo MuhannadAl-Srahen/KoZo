@@ -528,7 +528,9 @@ async function syncAfterSession(gameId, sessionId) {
     const { getPlayerAchievements } = require('./steamApi')
 
     const game    = getDb().prepare('SELECT * FROM games WHERE id = ?').get(gameId)
-    if (!game?.steam_app_id || isForeignLauncher(game)) return
+    // A game with no launcher: its unlocks come from the emulator, and Steam's website answers
+    // "private" for a game that isn't on the account (Dead Space asked six times per session).
+    if (!game?.steam_app_id || game.is_cracked === 1 || isForeignLauncher(game)) return
 
     const apiKey  = settingsQ.getSetting('steam_api_key')
     const steamId = settingsQ.getSetting('steam_user_id')
@@ -602,6 +604,7 @@ async function syncPlayerUnlocks(gameId) {
   const game = getDb().prepare('SELECT * FROM games WHERE id = ?').get(gameId)
   if (!game?.steam_app_id) return { added: 0, total: 0, reason: 'no_steam_app_id' }
   if (isForeignLauncher(game)) return { added: 0, total: 0, reason: 'foreign_launcher' }
+  if (game.is_cracked === 1) return { added: 0, total: 0, reason: 'no_launcher' }
 
   const apiKey  = settingsQ.getSetting('steam_api_key')
   const steamId = settingsQ.getSetting('steam_user_id')

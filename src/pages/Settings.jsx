@@ -12,7 +12,7 @@ import {
   IconPlugConnected, IconBrandGoogleDrive,
 } from '@tabler/icons-react'
 import { useAccentColor } from '../context/AccentColorContext'
-import { useAppearance, DEFAULT_APPEARANCE, FONTS, bgTone, bgToneHex, windowsIsLight } from '../context/AppearanceContext'
+import { useAppearance, DEFAULT_APPEARANCE, FONTS, bgTone, bgToneHex, windowsIsLight, groupNav, NAV_GROUP_ORDER } from '../context/AppearanceContext'
 import ColorPicker from '../components/ui/ColorPicker'
 import GameCard from '../components/GameCard'
 import { NAV_ITEMS } from '../components/Sidebar'
@@ -25,6 +25,7 @@ import StorageTab from '../components/StorageTab'
 import DriveSetupModal, { DriveBlockedHint } from '../components/DriveSetupModal'
 import SteamAccountsModal from '../components/modals/SteamAccountsModal'
 import WhatsNewModal from '../components/WhatsNewModal'
+import { Skeleton } from '../components/ui/Skeleton'
 import s from './Settings.module.css'
 
 // ── Shared bits ──────────────────────────────────────────────────────────────
@@ -732,6 +733,9 @@ function SteamTab() {
   const [detectMsg, setDetectMsg]   = useState(null)   // { type, text }
   const [signingIn, setSigningIn]   = useState(false)
   const [steamPersona, setSteamPersona] = useState(steamTabCache?.steamPersona ?? '')
+  // Until the settings are read the row doesn't say "Not connected": it said so for a moment
+  // to someone who was connected.
+  const [steamKnown, setSteamKnown] = useState(() => steamTabCache != null)
   // Persisted by achievementSync whenever Steam refuses to hand over unlocks.
   // Library-wide, so it belongs here rather than only on one game's page.
   const [privacyError, setPrivacyError] = useState('')
@@ -775,6 +779,7 @@ function SteamTab() {
     async function load() {
       if (!window.kozo?.api) return
       const res = await window.kozo.api.settings.getAll()
+      setSteamKnown(true)   // even when it failed, so the row never shimmers for ever
       if (res?.ok) {
         const key = res.data?.steam_api_key || ''
         const sid = res.data?.steam_user_id || ''
@@ -976,7 +981,8 @@ function SteamTab() {
             icon={profile?.avatar ? <img src={profile.avatar} alt="" /> : <IconBrandSteam size={20} />}
             name="Steam"
             tone={needsPick || (acct?.state?.confirmed && acct?.foreign?.total > 0) ? 'warn' : steamUserId ? 'ok' : 'muted'}
-            status={needsPick ? <>{acct.state.accounts} Steam accounts on this PC. Which one is yours?</>
+            status={!steamKnown && !steamUserId ? <Skeleton w={260} h={11} style={{ display: 'inline-block', verticalAlign: 'middle' }} />
+              : needsPick ? <>{acct.state.accounts} Steam accounts on this PC. Which one is yours?</>
               : acct?.state?.confirmed && acct?.foreign?.total > 0 ? <>{acct.foreign.total} achievements came from other people on shared accounts</>
               : steamUserId ? <>Connected as <b>{steamPersona || profile?.persona_name || steamUserId}</b></>
               : 'Not connected. Sign in with your browser, the Steam app is not needed.'}>
@@ -1768,13 +1774,30 @@ function AppearanceCustomize() {
   }, [])
   const setCard = (k, v) => setPrefs(p => ({ ...p, cards: { ...p.cards, [k]: v } }))
   const setBg = (patch) => setPrefs(p => ({ ...p, bg: { ...p.bg, ...patch } }))
-  function moveNav(i, d) {
+  // Up or down within its group; past the group's edge it moves into the next group (the first
+  // of DISCOVER going up becomes the last of PLAY), so the titles always stay over their tabs.
+  function moveNav(path, d) {
     setPrefs(p => {
-      const nav = [...p.nav]
-      const j = i + d
-      if (j < 0 || j >= nav.length) return p
-      ;[nav[i], nav[j]] = [nav[j], nav[i]]
-      return { ...p, nav }
+      const nav = groupNav(p.nav)
+      const i = nav.findIndex(n => n.path === path)
+      if (i < 0) return p
+      const gi = NAV_GROUP_ORDER.indexOf(nav[i].group)
+      const same = nav.filter(n => n.group === nav[i].group)
+      const k = same.findIndex(n => n.path === path)
+      const edge = d < 0 ? k === 0 : k === same.length - 1
+      if (!edge) {
+        const j = nav.findIndex(n => n.path === same[k + d].path)
+        ;[nav[i], nav[j]] = [nav[j], nav[i]]
+        return { ...p, nav }
+      }
+      const to = NAV_GROUP_ORDER[gi + d]
+      if (!to) return p
+      const [it] = nav.splice(i, 1)
+      const moved = { ...it, group: to }
+      // Up: the end of the group above; down: the start of the group below.
+      const at = d < 0 ? nav.map(n => n.group).lastIndexOf(to) + 1 : nav.findIndex(n => n.group === to)
+      nav.splice(at < 0 ? nav.length : at, 0, moved)
+      return { ...p, nav: groupNav(nav) }
     })
   }
   const toggleNav = (path) => setPrefs(p => ({ ...p, nav: p.nav.map(n => (n.path === path ? { ...n, hidden: !n.hidden } : n)) }))
@@ -1792,26 +1815,42 @@ function AppearanceCustomize() {
         </div>
         <Segmented label="Style" value={prefs.sidebar || 'full'} onChange={v => setPrefs({ sidebar: v })}
           options={[{ value: 'full', label: 'Full' }, { value: 'rail', label: 'Slim (icons only)' }]} />
-        <p className={s.sectionDesc}>Reorder the sidebar tabs or hide the ones you don't use. Library always stays.</p>
-        <div className={s.navList}>
-          {prefs.nav.map((n, i) => {
-            const item = NAV_ITEMS.find(x => x.path === n.path)
-            if (!item) return null
-            return (
-              <div key={n.path} className={`${s.navRow} ${n.hidden ? s.navRowHidden : ''}`}>
-                <item.Icon size={16} stroke={1.6} />
-                <span className={s.navRowLabel}>{item.label}</span>
-                <button type="button" className={s.navRowBtn} onClick={() => moveNav(i, -1)} disabled={i === 0}
-                  aria-label={`Move ${item.label} up`}><IconArrowUp size={14} /></button>
-                <button type="button" className={s.navRowBtn} onClick={() => moveNav(i, 1)} disabled={i === prefs.nav.length - 1}
-                  aria-label={`Move ${item.label} down`}><IconArrowDown size={14} /></button>
-                <button type="button" className={s.navRowBtn} onClick={() => toggleNav(n.path)} disabled={n.path === '/'}
-                  aria-label={n.hidden ? `Show ${item.label}` : `Hide ${item.label}`} title={n.hidden ? 'Show' : 'Hide'}>
-                  {n.hidden ? <IconEyeOff size={14} /> : <IconEye size={14} />}
-                </button>
-              </div>
-            )
-          })}
+        <p className={s.sectionDesc}>Reorder the sidebar tabs or hide the ones you don't use. Move a tab past a title to put it in that group. Library always stays.</p>
+        <div className={s.navList} data-nav-order="">
+          {(() => {
+            const nav = groupNav(prefs.nav)
+            return NAV_GROUP_ORDER.map((group, gi) => {
+              const rows = nav.filter(n => n.group === group)
+              return (
+                <React.Fragment key={group}>
+                  <div className={s.navGroupHead}>{group}</div>
+                  {!rows.length && <div className={s.navGroupEmpty}>No tabs here yet. Move one in with the arrows.</div>}
+                  {rows.map((n, k) => {
+                    const item = NAV_ITEMS.find(x => x.path === n.path)
+                    if (!item) return null
+                    const upTo = k === 0 ? NAV_GROUP_ORDER[gi - 1] : null
+                    const downTo = k === rows.length - 1 ? NAV_GROUP_ORDER[gi + 1] : null
+                    const firstAll = gi === 0 && k === 0
+                    const lastAll = gi === NAV_GROUP_ORDER.length - 1 && k === rows.length - 1
+                    return (
+                      <div key={n.path} className={`${s.navRow} ${n.hidden ? s.navRowHidden : ''}`}>
+                        <item.Icon size={16} stroke={1.6} />
+                        <span className={s.navRowLabel}>{item.label}</span>
+                        <button type="button" className={s.navRowBtn} onClick={() => moveNav(n.path, -1)} disabled={firstAll}
+                          aria-label={upTo ? `Move ${item.label} to ${upTo}` : `Move ${item.label} up`} title={upTo ? `Move to ${upTo}` : 'Up'}><IconArrowUp size={14} /></button>
+                        <button type="button" className={s.navRowBtn} onClick={() => moveNav(n.path, 1)} disabled={lastAll}
+                          aria-label={downTo ? `Move ${item.label} to ${downTo}` : `Move ${item.label} down`} title={downTo ? `Move to ${downTo}` : 'Down'}><IconArrowDown size={14} /></button>
+                        <button type="button" className={s.navRowBtn} onClick={() => toggleNav(n.path)} disabled={n.path === '/'}
+                          aria-label={n.hidden ? `Show ${item.label}` : `Hide ${item.label}`} title={n.hidden ? 'Show' : 'Hide'}>
+                          {n.hidden ? <IconEyeOff size={14} /> : <IconEye size={14} />}
+                        </button>
+                      </div>
+                    )
+                  })}
+                </React.Fragment>
+              )
+            })
+          })()}
         </div>
         <Segmented label="Start page" value={prefs.startPage || '/'} onChange={v => setPrefs({ startPage: v })}
           options={START_PAGES} wrap />
@@ -1952,7 +1991,7 @@ const FEATURE_GROUPS = [
     title: 'Personalize',
     items: [
       { Icon: IconUser,      name: 'Your profile', go: '/profile',  desc: 'A profile page with a cropped avatar & banner, banner themes, a title, and a showcase of your favorite games.' },
-      { Icon: IconBolt,      name: 'XP & levels', go: '/profile',   desc: 'Earn XP from playtime, rare achievements, play streaks and finished games, level up through tiers from Rookie to Mythic, shown on your profile.' },
+      { Icon: IconBolt,      name: 'XP & levels', go: '/profile',   desc: 'Earn XP from playtime, rare achievements, play streaks and finished games, and a new title at every level from Rookie to Mythic, shown on your profile.' },
       { Icon: IconPalette,   name: 'Custom accent', go: 'tab:appearance', desc: 'Pick any accent (presets or custom hex), it themes the whole app, badges, and the live overlay.' },
     ],
   },

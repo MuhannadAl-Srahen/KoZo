@@ -1,97 +1,114 @@
-/* The sweep is transform-only so it stays on the compositor — no per-frame
-   repaint while a whole grid of ghosts is on screen. */
+/* Loading placeholders. A block is a soft tint of the text color laid over whatever box it
+   sits in (a card, the page), so it reads in every theme and on every surface. The old ones
+   were the card color with a border: they looked like empty input boxes and were nearly
+   invisible (the maker: "this is not good skeleton").
+   The sweep is transform-only so it stays on the compositor: no repaint per frame while a
+   whole grid of them is on screen. With Animations off it stays still. */
 .sk {
+  --sk-fill: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  --sk-shine: color-mix(in srgb, var(--text-primary) 9%, transparent);
   position: relative;
   overflow: hidden;
-  background: var(--surface-2);
-  border: 1px solid var(--border-subtle);
+  background: var(--sk-fill);
   border-radius: var(--r-sm);
   flex-shrink: 0;
 }
-
 .sk::after {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.045), transparent);
+  background: linear-gradient(100deg, transparent 15%, var(--sk-shine) 50%, transparent 85%);
   transform: translateX(-100%);
-  animation: skSweep 1.2s var(--ease) infinite;
+  animation: skSweep 1.6s ease-in-out infinite;
 }
-
 @keyframes skSweep {
-  to { transform: translateX(100%); }
+  60%, 100% { transform: translateX(100%); }
 }
-
+/* A block inside another (a name on a cover) is a step lighter, like text on art. */
+.sk .sk { --sk-fill: color-mix(in srgb, var(--text-primary) 11%, transparent); }
+.sk .sk::after { display: none; }
+:global(:root[data-theme="light"]) .sk { --sk-fill: color-mix(in srgb, var(--text-primary) 7%, transparent); --sk-shine: rgba(255, 255, 255, 0.7); }
 :global(html[data-motion="off"]) .sk::after { animation: none; opacity: 0; }
 
-/* ── Card ghost ──────────────────────────────────────────────────────── */
+/* ── Cards ───────────────────────────────────────────────────────────── */
 .card {
+  display: flex;
+  flex-direction: column;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--r-card);
   overflow: hidden;
+  min-width: 0;
 }
-
 .cardArt {
+  position: relative;
   width: 100%;
   aspect-ratio: 2 / 3;
-  border: none;
   border-radius: 0;
-}
-
-.cardArtWide {
-  width: 100%;
-  aspect-ratio: 16 / 7;
-  border: none;
-  border-radius: 0;
-}
-
-.cardBody {
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
   gap: var(--sp-6);
   padding: var(--sp-10);
 }
+.cardArtWide {
+  width: 100%;
+  aspect-ratio: 460 / 215;
+  border-radius: 0;
+}
+.cardBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  padding: var(--sp-10) var(--sp-12) var(--sp-12);
+}
+/* The stats strip under a Library card: three short values spread out. */
+.cardFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-8);
+  padding: var(--sp-10);
+  border-top: 1px solid var(--border-subtle);
+}
+.chips { display: flex; gap: var(--sp-6); }
 
-/* ── Row ghost ───────────────────────────────────────────────────────── */
+/* ── Rows ────────────────────────────────────────────────────────────── */
 .rows {
   display: flex;
   flex-direction: column;
   gap: var(--sp-6);
 }
-
 .row {
   display: flex;
   align-items: center;
   gap: var(--sp-12);
-  padding: 0 var(--sp-12);
+  padding: var(--sp-8) var(--sp-16) var(--sp-8) var(--sp-8);
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--r-card);
 }
-
 .rowThumb {
-  width: 42px;
-  height: 63px;
+  height: 100%;
+  aspect-ratio: 2 / 3;
   border-radius: var(--r-md);
 }
-
 .rowBody {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-6);
+  gap: var(--sp-8);
 }
+.rowEnd { display: flex; align-items: center; gap: var(--sp-16); }
 
-/* ── Panel ghost ─────────────────────────────────────────────────────── */
+/* ── Panel lines (a name and a value) ────────────────────────────────── */
 .panel {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-12);
-  padding: var(--sp-4) 0;
+  gap: var(--sp-14, 14px);
+  padding: var(--sp-6) 0;
 }
-
 .panelLine {
   display: flex;
   align-items: center;
@@ -99,19 +116,17 @@
   gap: var(--sp-12);
 }
 
-/* ── Hero ghost ──────────────────────────────────────────────────────── */
-.hero {
-  position: relative;
-  width: 100%;
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border);
+/* ── Chart: bars of different heights on a base line ─────────────────── */
+.chart {
   display: flex;
   align-items: flex-end;
+  gap: 6px;
+  width: 100%;
+  border-bottom: 1px solid var(--border);
+  padding-top: var(--sp-8);
 }
-
-.heroBottom {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-10);
-  padding: 0 var(--gutter) var(--sp-16);
+.chartBar {
+  flex: 1;
+  min-width: 0;
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
 }

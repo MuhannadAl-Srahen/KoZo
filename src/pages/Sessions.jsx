@@ -3,11 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import {
   IconHistory, IconTrophy, IconDeviceGamepad2, IconClock, IconFilterOff, IconExternalLink, IconPlayerPlayFilled,
 } from '@tabler/icons-react'
-import { getBannerBg, formatPlaytime, fileUrl, localDayKey } from '../lib/utils'
+import { getBannerBg, formatPlaytime, fileUrl, localDayKey, fmtDate } from '../lib/utils'
 import SearchableSelect from '../components/ui/SearchableSelect'
 import EmptyState from '../components/ui/EmptyState'
 import ContextMenu from '../components/ui/ContextMenu'
-import { RowSkeleton } from '../components/ui/Skeleton'
+import { Skeleton, widthAt } from '../components/ui/Skeleton'
 import DatePicker from '../components/ui/DatePicker'
 import s from './Sessions.module.css'
 
@@ -17,7 +17,7 @@ const PAGE_SIZE = 60
 function sessionTimeRange(startedAt, endedAt, durationSeconds) {
   const start = new Date(startedAt)
   const end   = endedAt ? new Date(endedAt) : new Date(start.getTime() + (durationSeconds || 0) * 1000)
-  const fmt   = d => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const fmt   = d => fmtDate(d, { hour: '2-digit', minute: '2-digit' })
   return `${fmt(start)} to ${fmt(end)}`
 }
 
@@ -187,7 +187,37 @@ export default function Sessions() {
             </div>
           )}
 
-          {loading && sessions.length === 0 && <RowSkeleton count={7} height={85} />}
+          {/* Loading: the summary strip and days of session rows, in the real boxes. */}
+          {loading && sessions.length === 0 && (
+            <div aria-busy="true" aria-label="Loading">
+              <div className={s.summaryStrip}>
+                {[0, 1, 2].map(i => (
+                  <React.Fragment key={i}>
+                    {i > 0 && <div className={s.summaryDivider} />}
+                    <div className={s.summaryItem}><Skeleton w={widthAt([36, 64, 28], i)} h={20} /><Skeleton w={widthAt([56, 84, 72], i)} h={10} /></div>
+                  </React.Fragment>
+                ))}
+              </div>
+              {[3, 2, 2].map((count, gi) => (
+                <div key={gi} className={s.dayGroup}>
+                  <div className={s.dayHeader}><Skeleton w={gi ? 150 : 56} h={11} /><Skeleton w={48} h={13} /></div>
+                  <div className={s.dayRows}>
+                    {Array.from({ length: count }, (_, i) => (
+                      <div key={i} className={s.sessionRow}>
+                        <Skeleton w={42} h={63} r="var(--r-md)" />
+                        <div className={s.sessionInfo}>
+                          <Skeleton w={widthAt(['34%', '26%', '40%'], gi + i)} h={14} style={{ marginBottom: 7 }} />
+                          <Skeleton w={widthAt(['16%', '13%', '18%'], i)} h={11} />
+                        </div>
+                        <Skeleton w={58} h={14} />
+                        <Skeleton w={30} h={14} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {!loading && sessions.length === 0 && (
             <EmptyState
@@ -201,7 +231,7 @@ export default function Sessions() {
           )}
 
           {/* Timeline groups */}
-          {sortedDays.map(day => {
+          {(() => { let n = 0; return sortedDays.map(day => {
             const daySessions = groups[day]
             const dayPlaytime = daySessions.reduce((a, x) => a + (x.duration_seconds || 0), 0)
             return (
@@ -212,8 +242,8 @@ export default function Sessions() {
                 </div>
 
                 <div className={s.dayRows}>
-                  {daySessions.map(session => (
-                    <div key={session.id} className={s.sessionRow} onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, session }) }}>
+                  {daySessions.map(session => { const i = n++; return (
+                    <div key={session.id} className={s.sessionRow} data-rise={i < 16 ? '' : undefined} style={i < 16 ? { '--i': i } : undefined} onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, session }) }}>
                       <SessionThumb session={session} />
 
                       {/* Game + time range */}
@@ -237,11 +267,11 @@ export default function Sessions() {
                         {session.achievements_unlocked > 0 ? session.achievements_unlocked : 0}
                       </div>
                     </div>
-                  ))}
+                  ) })}
                 </div>
               </div>
             )
-          })}
+          }) })()}
 
           {hasMore && (
             <div className={s.loadMore}>

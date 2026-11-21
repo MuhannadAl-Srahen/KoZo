@@ -30,7 +30,19 @@ function remember(el) {
   } catch {}
 }
 
-function VideoPlayer({ video, poster, className }) {
+// Steam serves its trailers from 360p to 1080p. hls.js starts from a guess of the connection
+// (500 kbps by default, so 360p) and climbs slowly, and a trailer in full screen stayed blurry for
+// most of its length (the maker). It now guesses 5 Mbps, and a big player (the lightbox, or full
+// screen) asks for the sharpest picture that fits the screen at once; a small one stays capped at
+// its own size. A trailer with no HLS uses Steam's biggest file when big.
+function sharpestFor(levels) {
+  const h = Math.round((window.screen?.height || 1080) * (window.devicePixelRatio || 1))
+  let best = -1
+  ;(levels || []).forEach((l, i) => { if (l.height <= h && (best < 0 || l.height > levels[best].height)) best = i })
+  return best >= 0 ? best : (levels?.length ? levels.length - 1 : -1)
+}
+
+function VideoPlayer({ video, poster, className, big = false }) {
   const ref = useRef(null)
   useEffect(() => {
     const el = ref.current
@@ -38,18 +50,38 @@ function VideoPlayer({ video, poster, className }) {
     el.volume = startVolume()
     el.muted = startMuted()    // React's `muted` prop doesn't reach the DOM property reliably
     let hls = null, dead = false
+    const file = () => (big ? video.mp4Max || video.webmMax : null) || video.mp4 || video.webm || ''
+    // Full screen, or back: the sharpest level now, or the player's own size again.
+    const sharp = (on) => {
+      // A trailer with no HLS keeps its file: changing it would load again (the lightbox, `big`,
+      // starts on the biggest one instead).
+      if (!hls) return
+      // nextLevel, never currentLevel: currentLevel throws away what is loaded and starts again,
+      // and the trailer showed loading both going full screen and coming back (the maker). The
+      // switch happens at the next piece of video, with no pause, and leaving full screen changes
+      // nothing (a sharper picture in a small player costs nothing to keep).
+      if (on) {
+        hls.capLevelToPlayerSize = false
+        hls.autoLevelCapping = -1
+        const i = sharpestFor(hls.levels)
+        if (i >= 0 && i !== hls.currentLevel) hls.nextLevel = i
+      }
+    }
+    const onFull = () => sharp(document.fullscreenElement === el || !!document.fullscreenElement?.contains?.(el))
+    document.addEventListener('fullscreenchange', onFull)
     if (video.hls) {
       import('hls.js').then(({ default: Hls }) => {
         if (dead) return
         if (Hls.isSupported()) {
-          hls = new Hls({ capLevelToPlayerSize: true, maxBufferLength: 20 })
+          hls = new Hls({ capLevelToPlayerSize: !big, maxBufferLength: 20, abrEwmaDefaultEstimate: 5_000_000 })
           hls.loadSource(video.hls)
           hls.attachMedia(el)
-        } else el.src = video.mp4 || video.webm || ''
-      }).catch(() => { el.src = video.mp4 || video.webm || '' })
-    } else el.src = video.mp4 || video.webm || ''
-    return () => { dead = true; hls?.destroy() }
-  }, [video.hls, video.mp4])
+          if (big) hls.on(Hls.Events.MANIFEST_PARSED, () => sharp(true))
+        } else el.src = file()
+      }).catch(() => { el.src = file() })
+    } else el.src = file()
+    return () => { dead = true; document.removeEventListener('fullscreenchange', onFull); hls?.destroy() }
+  }, [video.hls, video.mp4, big])
   // Nobody is watching while KoZo is hidden or behind a game (html[data-inactive]),
   // and decoding video is real work. It carries on when KoZo is back in front.
   useEffect(() => {
@@ -223,7 +255,7 @@ export function Lightbox({ items, index, onIndex, onClose }) {
     <div className={s.lightbox} onClick={onClose}>
       <div className={s.lbStage}>
         {cur.video
-          ? <VideoPlayer key={cur.video.hls || cur.video.mp4} video={cur.video} poster={cur.thumb} className={s.lbVideo} />
+          ? <VideoPlayer key={cur.video.hls || cur.video.mp4} video={cur.video} poster={cur.thumb} className={s.lbVideo} big />
           : <ProgressiveImg key={cur.full || cur.thumb} item={cur} fit="contain" onClick={(e) => e.stopPropagation()} />}
       </div>
       {items.length > 1 && (

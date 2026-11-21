@@ -11,6 +11,23 @@ import { bootLook } from '../lib/bootLook'
 // zoom factor.
 
 export const NAV_PATHS = ['/', '/game-list', '/plan', '/finished', '/upcoming', '/like', '/deals', '/activity']
+// The sidebar's groups, always titled. Each tab starts in its group here and keeps the one it is
+// moved into in Settings (prefs.nav[].group). The titles used to show only while the tab order
+// kept each group together, so a custom order lost PLAY and DISCOVER (the maker liked them: without
+// them "it looks like too much menu options").
+export const NAV_GROUP_ORDER = ['Play', 'Discover']
+export const NAV_GROUPS = {
+  '/': 'Play', '/game-list': 'Play', '/plan': 'Play', '/finished': 'Play',
+  '/upcoming': 'Discover', '/like': 'Discover', '/deals': 'Discover', '/activity': 'Discover',
+}
+export function navGroupOf(n) {
+  return NAV_GROUP_ORDER.includes(n?.group) ? n.group : (NAV_GROUPS[n?.path] || NAV_GROUP_ORDER[0])
+}
+// Every tab with its group, the groups in their order, each keeping its tabs' saved order.
+export function groupNav(nav) {
+  return (nav || []).map(n => ({ ...n, group: navGroupOf(n) }))
+    .sort((a, b) => NAV_GROUP_ORDER.indexOf(a.group) - NAV_GROUP_ORDER.indexOf(b.group))
+}
 
 // Big Picture's own look (its Customize panel, components/BigPictureCustomize.jsx). The
 // defaults are the look it always had.
@@ -32,7 +49,7 @@ export const DEFAULT_APPEARANCE = {
   density: 'comfortable',         // 'comfortable' | 'compact'
   corners: 'default',             // 'sharp' | 'default' | 'round'
   cards: { genres: true, stats: true, progress: true, statusDot: true, planChip: true },
-  nav: NAV_PATHS.map(path => ({ path, hidden: false })),
+  nav: NAV_PATHS.map(path => ({ path, hidden: false, group: NAV_GROUPS[path] })),
   startPage: '/',
   sidebar: 'full',                // 'full' | 'rail' (icons only; the button by the logo switches)
   motion: 'soft',                 // 'heavy' | 'soft' | 'off' (styles/motion.css)
@@ -112,7 +129,9 @@ function normalize(saved) {
     const at = before ? nav.findIndex(n => n.path === before) + 1 : 0
     nav.splice(at, 0, { path, hidden: false })
   })
-  p.nav = nav
+  // An order saved before groups gives each tab its usual group (a mixed order is sorted back
+  // into PLAY and DISCOVER, each keeping its own order).
+  p.nav = groupNav(nav)
   p.nav = p.nav.map(n => (n.path === '/' ? { ...n, hidden: false } : n))   // Library always shows
   return p
 }

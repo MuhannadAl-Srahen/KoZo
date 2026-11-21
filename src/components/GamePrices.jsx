@@ -146,6 +146,14 @@ export default function GamePrices({ appId, name, banner, onAlertChanged }) {
     <div className={s.wrap}>
       <section className={s.panel}>
         <div className={s.head}><IconBuildingStore size={14} /> Where to buy</div>
+        {/* Another store under your Steam price, both in US dollars: said first (deals.cheaperStore). */}
+        {data.cheaper && (
+          <button type="button" className={s.cheaper} data-prices-cheaper title="The store's US price, through CheapShark"
+            onClick={() => window.kozo?.api?.shell?.openExternal?.(data.cheaper.url)}>
+            <IconTrendingDown size={15} />
+            <span>Cheapest now: <b>${data.cheaper.price.toFixed(2)}</b> at {data.cheaper.store}, {data.cheaper.save}% under Steam</span>
+          </button>
+        )}
         <div className={s.rows}>
           {data.price && (
             <StoreRow

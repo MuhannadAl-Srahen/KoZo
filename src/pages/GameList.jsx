@@ -742,7 +742,8 @@ export default function GameList() {
         {loading && (
           <CardSkeletonGrid
             gridClassName={view === 'list' ? s.list : (view === 'big' ? s.bigGrid : s.grid)}
-            count={view === 'list' ? 6 : 12}
+            count={view === 'list' ? 7 : 12}
+            list={view === 'list'}
           />
         )}
 

@@ -87,29 +87,73 @@ async function askToRestart(info) {
   }
 }
 
-// Startup check, then every 4 hours (KoZo can sit in the tray for days, and the sidebar's
-// Update button should still appear). Never while a game runs. Fire-and-forget.
-const RECHECK_MS = 4 * 60 * 60 * 1000
+// When KoZo looks for a new version by itself. It used to look 15 s after start and then every
+// 4 hours, skipping any look that fell during a game, and a look that failed (KoZo starts with
+// Windows, often before the network is up) waited the whole 4 hours. A release that came out while
+// KoZo sat in the tray was only found from Settings (the maker: "it's need to go to settings to
+// check for update, not the application will found it"). Now it looks 15 s after start, again 1, 5
+// and then every 15 minutes while looking fails, every hour, and each time the window is opened or
+// comes to the front (at most every 20 minutes); a look that falls in a game waits for it to close.
+// checkForUpdates, not checkForUpdatesAndNotify: that one shows Windows' own toast.
+const HOURLY_MS = 60 * 60 * 1000
+const ON_SHOW_GAP_MS = 20 * 60 * 1000
+const RETRY_MS = [60 * 1000, 5 * 60 * 1000, 15 * 60 * 1000]
+// Pure: look now? Not while a look runs, not once a new version is downloading or downloaded (a
+// download that failed is looked for again), and not sooner than `gap` after the last look.
+function shouldCheck({ now, lastAt, state, checking, gap = 0 }) {
+  if (checking) return false
+  if (state === 'downloading' || state === 'ready') return false
+  return !lastAt || now - lastAt >= gap
+}
+// Pure: how long after the Nth failed look in a row to look again.
+function retryDelay(fails) {
+  return RETRY_MS[Math.min(Math.max(1, fails), RETRY_MS.length) - 1]
+}
+
+let lastCheckAt = 0
+let checking = false
+let fails = 0
+let retryTimer = null
+function autoCheck(reason, gap = 0) {
+  const { app } = require('electron')
+  if (!app.isPackaged) return false
+  if (!shouldCheck({ now: Date.now(), lastAt: lastCheckAt, state: _state.state, checking, gap })) return false
+  const watcher = require('./processWatcher')
+  if (watcher.isSessionActive()) {
+    watcher.runWhenIdle('updateCheck', () => autoCheck(`${reason}, after a game`, gap))
+    return false
+  }
+  checking = true
+  lastCheckAt = Date.now()
+  clearTimeout(retryTimer)
+  Promise.resolve()
+    .then(() => getAutoUpdater().checkForUpdates())
+    .then((r) => {
+      fails = 0
+      // A download that breaks off is reported by the 'error' event; nothing else waits on it.
+      r?.downloadPromise?.catch?.(() => {})
+      logger.info('appUpdater: looked for a new version', { reason, latest: r?.updateInfo?.version || null })
+    })
+    .catch((e) => {
+      fails++
+      const wait = retryDelay(fails)
+      logger.warn('appUpdater: looking for a new version failed', { reason, message: e?.message, againInMin: Math.round(wait / 60000) })
+      retryTimer = setTimeout(() => autoCheck('again after a failed look'), wait)
+      retryTimer.unref?.()
+    })
+    .finally(() => { checking = false })
+  return true
+}
+
+// main.js calls this when the window is shown or comes to the front.
+function checkOnShow() { return autoCheck('window opened', ON_SHOW_GAP_MS) }
+
 function setupAutoUpdate() {
   const { app } = require('electron')
   if (!app.isPackaged) return
-  setInterval(() => {
-    try {
-      if (_state.state !== 'idle' || require('./processWatcher').isSessionActive()) return
-      getAutoUpdater().checkForUpdates().catch((e) => logger.warn('appUpdater: check failed', { message: e?.message }))
-    } catch {}
-  }, RECHECK_MS).unref?.()
-  setTimeout(() => {
-    try {
-      // checkForUpdates, NOT checkForUpdatesAndNotify — the latter fires a
-      // native OS toast on download (§6: overlay/dialog are the only surfaces).
-      getAutoUpdater().checkForUpdates().catch((e) => {
-        logger.warn('appUpdater: startup check failed', { message: e?.message })
-      })
-    } catch (e) {
-      logger.warn('appUpdater: setup failed', { message: e.message })
-    }
-  }, 15000)
+  setTimeout(() => autoCheck('start'), 15000).unref?.()
+  // A minute of slack, so a look the window just made doesn't make the hourly one wait an hour more.
+  setInterval(() => autoCheck('hourly', HOURLY_MS - 60 * 1000), HOURLY_MS).unref?.()
 }
 
 // Plain GitHub Releases lookup — works in dev AND packaged, needs no
@@ -160,6 +204,7 @@ async function checkForUpdates() {
       updateAvailable: !!(rel.latest && isNewer(rel.latest, app.getVersion())),
     }
   }
+  lastCheckAt = Date.now()
   try {
     const result = await Promise.race([
       getAutoUpdater().checkForUpdates(),
@@ -273,4 +318,4 @@ async function notesFor(version) {
   return (await fetchReleaseNotes(version).catch(() => null)) || { version, notes: '' }
 }
 
-module.exports = { setupAutoUpdate, checkForUpdates, fetchLatestRelease, isNewer, getState, setState, installUpdate, fetchReleaseNotes, localReleaseNotes, notesFor, getAutoUpdater }
+module.exports = { setupAutoUpdate, checkOnShow, shouldCheck, retryDelay, checkForUpdates, fetchLatestRelease, isNewer, getState, setState, installUpdate, fetchReleaseNotes, localReleaseNotes, notesFor, getAutoUpdater }

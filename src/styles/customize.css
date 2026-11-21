@@ -167,6 +167,14 @@
   --glow-1: 0 0 30px -4px color-mix(in srgb, var(--a) 65%, transparent);
   --glow-2: 0 0 48px -4px color-mix(in srgb, var(--a) 80%, transparent);
 }
+/* A white or pale accent (AccentColorContext isPale) glows as a white haze that spreads over its
+   neighbors (the maker: "a bad glow between the tabs"). Its glow is a thin edge instead. */
+:root[data-accent-pale]:not([data-glow="off"]) {
+  --glow-1: 0 0 0 1px color-mix(in srgb, var(--a) 22%, transparent);
+  --glow-2: 0 0 0 1px color-mix(in srgb, var(--a) 30%, transparent);
+  --elev-accent: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --card-hover-glow: 0 10px 26px -10px rgba(0, 0, 0, 0.7);
+}
 
 /* Light: glows and shadows. An accent glow made for black looked like a blurry green
    halo on white, and black shadows like dirt (the maker: "the glowing effect"). On white

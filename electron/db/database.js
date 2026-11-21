@@ -155,6 +155,9 @@ function runMigrations() {
     // Settings > Data > Storage (services/gameSizes.js): the game folder's size, and when it was counted.
     try { db.exec('ALTER TABLE games ADD COLUMN size_bytes INTEGER') } catch (_) {}
     try { db.exec('ALTER TABLE games ADD COLUMN size_at TEXT') } catch (_) {}
+    // The folder a size was counted from (gameSizes.sizeRoot): sizes from before it were the game
+    // file's folder only (Crimson Desert's bin64), so a different root counts again.
+    try { db.exec('ALTER TABLE games ADD COLUMN size_root TEXT') } catch (_) {}
     // One-time: a session that was thrown away used to leave its date behind, so a game
     // with no play said "last played 2d ago".
     try {

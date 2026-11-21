@@ -15,7 +15,7 @@ import {
 } from '@tabler/icons-react'
 import HoneycombLogo from './HoneycombLogo'
 import { fileUrl } from '../lib/utils'
-import { useAppearance } from '../context/AppearanceContext'
+import { useAppearance, groupNav } from '../context/AppearanceContext'
 import s from './Sidebar.module.css'
 
 function initials(name) {
@@ -73,23 +73,21 @@ function UpdateButton() {
 }
 
 export const NAV_ITEMS = [
-  { path: '/',              label: 'Library',      Icon: IconLayoutGrid,    group: 'Play' },
-  { path: '/game-list',     label: 'Game List',    Icon: IconList,          group: 'Play' },
-  { path: '/plan',          label: 'Play Plan',    Icon: IconCalendarEvent, group: 'Play' },
-  { path: '/finished',      label: 'Finished',     Icon: IconFlag,          group: 'Play' },
-  { path: '/upcoming',      label: 'Upcoming',     Icon: IconCalendar,      group: 'Discover' },
-  { path: '/like',          label: 'Games like',   Icon: IconSparkles,      group: 'Discover' },
-  { path: '/deals',         label: 'Discounts',    Icon: IconDiscount2,     group: 'Discover' },
+  { path: '/',              label: 'Library',      Icon: IconLayoutGrid },
+  { path: '/game-list',     label: 'Game List',    Icon: IconList },
+  { path: '/plan',          label: 'Play Plan',    Icon: IconCalendarEvent },
+  { path: '/finished',      label: 'Finished',     Icon: IconFlag },
+  { path: '/upcoming',      label: 'Upcoming',     Icon: IconCalendar },
+  { path: '/like',          label: 'Games like',   Icon: IconSparkles },
+  { path: '/deals',         label: 'Discounts',    Icon: IconDiscount2 },
   // Statistics, Sessions and Achievements live together under Activity.
-  { path: '/activity',      label: 'Activity',     Icon: IconChartBar,      group: 'Discover' },
+  { path: '/activity',      label: 'Activity',     Icon: IconChartBar },
 ]
 
-// Group titles show only while each group's tabs sit together (a custom tab
-// order that mixes them just drops the titles).
+// A title over each group's first tab. The groups (PLAY, DISCOVER) and which tab is in which come
+// from Settings > Appearance (AppearanceContext groupNav), so the titles stay with any order.
 function withGroups(items) {
-  const runs = items.reduce((n, it, i) => n + (i === 0 || items[i - 1].group !== it.group ? 1 : 0), 0)
-  const groups = new Set(items.map(i => i.group)).size
-  return items.map((it, i) => ({ ...it, head: runs === groups && (i === 0 || items[i - 1].group !== it.group) ? it.group : null }))
+  return items.map((it, i) => ({ ...it, head: i === 0 || items[i - 1].group !== it.group ? it.group : null }))
 }
 
 function formatSessionTime(startedAt, idleSeconds = 0) {
@@ -121,9 +119,9 @@ function LiveElapsed({ startedAt, idleSeconds, idle }) {
 export default function Sidebar() {
   // Tab order and hidden tabs come from Settings → Appearance.
   const { prefs, setPrefs } = useAppearance()
-  const navItems = withGroups(prefs.nav
+  const navItems = withGroups(groupNav(prefs.nav)
     .filter(n => !n.hidden)
-    .map(n => NAV_ITEMS.find(i => i.path === n.path))
+    .map(n => { const item = NAV_ITEMS.find(i => i.path === n.path); return item && { ...item, group: n.group } })
     .filter(Boolean))
   const rail = prefs.sidebar === 'rail'
   const [activeSession, setActiveSession] = useState(null)
