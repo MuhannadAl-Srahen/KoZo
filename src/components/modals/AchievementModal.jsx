@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import {
   IconTrophy, IconLock, IconCheck, IconStar,
-  IconBulb, IconBook, IconSearch, IconExternalLink, IconBrandYoutube,
+  IconBulb, IconBook, IconSearch, IconBrandYoutube, IconBrandGoogle,
 } from '@tabler/icons-react'
 import { guideLinks, openGuide } from '../../lib/achGuides'
 import Modal from '../ui/Modal'
@@ -16,7 +16,7 @@ const OPTIMISTIC_UNLOCK_ID = -1
 
 // `other` ({ persona, unlockedAt }): unlocked on a shared Steam account by someone else, so Steam
 // never showed it to this player. The button then reads "I did this too".
-export default function AchievementModal({ achievement: initialAch, game, onClose, onToggle, other = null }) {
+export default function AchievementModal({ achievement: initialAch, game, onClose, onToggle, other = null, progress = null }) {
   const [ach, setAch] = useState(initialAch)
   const [busy, setBusy] = useState(false)
   // Unlocked is the presence of an unlock row — unlocked_at is display-only and
@@ -29,7 +29,7 @@ export default function AchievementModal({ achievement: initialAch, game, onClos
   // so guides still work for them.
   const achName = ach.display_name || ach.steam_api_name || ''
   const guides = guideLinks(game, ach)
-  const GUIDE_ICON = { steam: IconBook, youtube: IconBrandYoutube, web: IconSearch }
+  const GUIDE_ICON = { steam: IconBook, youtube: IconBrandYoutube, web: IconBrandGoogle }
   const open = openGuide
 
   async function toggle() {
@@ -64,7 +64,7 @@ export default function AchievementModal({ achievement: initialAch, game, onClos
       title={ach.display_name}
       icon={<IconTrophy size={16} stroke={1.6} />}
       onClose={onClose}
-      width={420}
+      width={460}
       footer={
         <button
           className={unlocked ? s.btnLock : s.btnUnlock}
@@ -107,9 +107,8 @@ export default function AchievementModal({ achievement: initialAch, game, onClos
               {guides.map(g => {
                 const Icon = GUIDE_ICON[g.key] || IconSearch
                 return (
-                  <button key={g.key} className={s.howToBtn} onClick={() => open(g.url)} data-guide={g.key}>
+                  <button key={g.key} className={s.howToBtn} onClick={() => open(g.url)} data-guide={g.key} title={`Opens ${g.label} in your browser`}>
                     <Icon size={13} stroke={1.8} /> {g.label}
-                    <IconExternalLink size={11} stroke={1.8} className={s.howToExt} />
                   </button>
                 )
               })}
@@ -130,6 +129,17 @@ export default function AchievementModal({ achievement: initialAch, game, onClos
             </span>
           )}
         </div>
+
+        {!unlocked && progress && (
+          <div className={s.progress} data-ach-progress>
+            <div className={s.progressHead}>
+              <span>Progress</span>
+              <span className={s.progressNum}>{Math.min(progress.cur, progress.max).toLocaleString()} of {progress.max.toLocaleString()}</span>
+            </div>
+            <span className={s.progressBar}><span style={{ width: `${Math.round((Math.min(progress.cur, progress.max) / progress.max) * 100)}%` }} /></span>
+            {progress.persona && <span className={s.progressNote}>Counted on {progress.persona}, so it may include other people's play.</span>}
+          </div>
+        )}
 
         {!unlocked && other && (
           <p className={s.descHidden} data-ach-other>

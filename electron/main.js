@@ -192,11 +192,17 @@ function createWindow() {
     // Cheap DB-only pass, so a release that passed while KoZo sat in the tray
     // shows up the moment the window opens.
     try { require('./services/releaseWatch').check() } catch {}
+    // A new KoZo released while it sat in the tray is found when the window opens, not only from
+    // Settings (appUpdater, at most every 20 minutes).
+    try { require('./services/appUpdater').checkOnShow() } catch {}
     checkInstalled()
     armFastInstallCheck({ now: true, steam: 'force' })
   })
   // Back from uninstalling or installing something: the card says so at once.
-  mainWindow.on('focus', () => { checkInstalled(); armFastInstallCheck({ now: true, steam: 'force' }) })
+  mainWindow.on('focus', () => {
+    checkInstalled(); armFastInstallCheck({ now: true, steam: 'force' })
+    try { require('./services/appUpdater').checkOnShow() } catch {}
+  })
   // destroy() (the unload-in-tray path below) skips 'close' but still fires
   // 'closed' — clear the module ref so getOrCreateMainWindow knows to recreate.
   // The graphics process keeps what this window drew; services/gpuTrim.js frees it.
@@ -514,6 +520,8 @@ Close any program that may be using it and start KoZo again.`)
       require('./services/steamStatsWatcher').scanAllSteamGames().catch(() => {})
       // Unlocks filed under the wrong session (once), and ones other people earned on shared accounts.
       try { require('./services/steamAccounts').reviewStored() } catch {}
+      // A Steam game still called by its folder ("Excalibur") takes Steam's name for it.
+      require('./services/installCheck').steamNamesFromManifests().catch(() => {})
       // Steam Web: new achievements in a game's list, and unlocks earned on
       // another PC (the stats files above only know this one).
       require('./services/achievementSync').sweepSteamGames().catch(() => {})

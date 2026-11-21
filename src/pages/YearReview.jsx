@@ -6,7 +6,7 @@ import {
 import Modal, { modalStyles as ms } from '../components/ui/Modal'
 import AchImg from '../components/ui/AchImg'
 import EmptyState from '../components/ui/EmptyState'
-import { Skeleton } from '../components/ui/Skeleton'
+import { Skeleton, widthAt } from '../components/ui/Skeleton'
 import GeneratedCover from '../components/GeneratedCover'
 import { fileUrl, formatDate, formatPlaytime } from '../lib/utils'
 import s from './YearReview.module.css'
@@ -207,9 +207,47 @@ export default function YearReview() {
 
       <div className={s.content}>
         {!d ? (
-          <div className={s.skel}>
-            <Skeleton w="100%" h={140} r={14} />
-            <div className={s.twoCols}><Skeleton w="100%" h={220} r={14} /><Skeleton w="100%" h={220} r={14} /></div>
+          // Loading: the year's own boxes (the hours, the numbers, Most played, the months), their
+          // values shimmering. It was three blank boxes.
+          <div className={s.skel} aria-busy="true" aria-label="Loading">
+            <section className={s.hero}>
+              <div className={s.heroMain}>
+                <Skeleton w={96} h={11} />
+                <Skeleton w={200} h={42} style={{ margin: '8px 0 6px' }} />
+                <Skeleton w={52} h={11} />
+              </div>
+              <div className={s.heroStats}>
+                {[0, 1, 2, 3].map(i => (
+                  <div key={i} className={s.heroStat}><Skeleton w={widthAt([44, 30, 38, 26], i)} h={22} /><Skeleton w={widthAt([72, 58, 86, 64], i)} h={10} style={{ marginTop: 4 }} /></div>
+                ))}
+              </div>
+            </section>
+            <div className={s.twoCols}>
+              <section className={s.panel}>
+                <div className={s.panelHead}><IconTrophy size={14} /> Most played</div>
+                <div className={s.games}>
+                  {[0, 1, 2, 3, 4].map(i => (
+                    <div key={i} className={s.game}>
+                      <span className={s.rank}>{i + 1}</span>
+                      <Skeleton w={30} h={40} />
+                      <span className={s.gameInfo}><Skeleton w={widthAt(['52%', '40%', '60%', '34%', '46%'], i)} h={12} /><span className={s.gameBar} /></span>
+                      <Skeleton w={44} h={11} />
+                    </div>
+                  ))}
+                </div>
+              </section>
+              <section className={s.panel}>
+                <div className={s.panelHead}><IconClock size={14} /> Hours per month</div>
+                <div className={s.chart}>
+                  {[30, 55, 40, 72, 48, 85, 62, 38, 66, 50, 78, 44].map((h, i) => (
+                    <div key={i} className={s.col}>
+                      <div className={s.barArea}><Skeleton w="min(100%, 22px)" h={`${h}%`} r="4px 4px 0 0" /></div>
+                      <span className={s.axis}>{monthShort(i)[0]}</span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
           </div>
         ) : !hasAnything ? (
           <EmptyState
@@ -219,22 +257,22 @@ export default function YearReview() {
           />
         ) : (
           <>
-            <section className={s.hero}>
+            <section className={s.hero} data-fade="">
               <div className={s.heroMain}>
                 <div className={s.heroLabel}>{isNow ? `${year} so far` : year}</div>
                 <div className={s.heroValue} data-year-hours>{d.seconds > 0 ? formatPlaytime(d.seconds) : 'No play'}</div>
                 {d.seconds > 0 && <div className={s.heroSub}>played</div>}
               </div>
               <div className={s.heroStats}>
-                {statsOf(d).map(x => (
-                  <div key={x.label} className={s.heroStat}><b>{x.value.toLocaleString()}</b><span>{x.label}</span></div>
+                {statsOf(d).map((x, i) => (
+                  <div key={x.label} className={s.heroStat} data-rise="" style={{ '--i': i + 1 }}><b>{x.value.toLocaleString()}</b><span>{x.label}</span></div>
                 ))}
               </div>
             </section>
 
             {(d.topGames.length > 0 || d.seconds > 0) && (
               <div className={s.twoCols}>
-                <section className={s.panel}>
+                <section className={s.panel} data-rise="panel" style={{ '--i': 3 }}>
                   <div className={s.panelHead}><IconTrophy size={14} /> Most played</div>
                   <div className={s.games}>
                     {d.topGames.map((g, i) => (
@@ -250,7 +288,7 @@ export default function YearReview() {
                     ))}
                   </div>
                 </section>
-                <section className={s.panel}>
+                <section className={s.panel} data-rise="panel" style={{ '--i': 4 }}>
                   <div className={s.panelHead}><IconClock size={14} /> Hours per month</div>
                   <MonthChart months={d.months} busiest={d.busiestMonth} />
                 </section>

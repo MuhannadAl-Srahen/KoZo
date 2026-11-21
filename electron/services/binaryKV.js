@@ -227,6 +227,54 @@ function unlockedWithTimes(schemaRoot, statsRoot) {
   return unlocked
 }
 
+// Achievements that count toward a number ("Kill 50 enemies with headshots"). Steam's schema names
+// the stat each one counts (bits.<n>.progress = { min_val, max_val, value: { operation: 'statvalue',
+// operand1: '<stat name>' } }) and the stats file holds that stat's value. Read on a real PC:
+// Severed Steel 50_HEADSHOTS 351 / 50, Phantom Blade Zero ACH_041 10 / 10. Need for Speed Heat marks
+// every achievement 0 to 1, which says nothing, so only a target over 1 counts.
+// Map(lowercase api name -> { cur, max }); a stat never set is 0.
+function achievementProgress(schemaRoot, statsRoot) {
+  const out = new Map()
+  const statsNode = findSchemaStatsNode(schemaRoot)
+  if (!statsNode) return out
+  const byName = new Map()   // lowercase stat name -> { id, float }
+  for (const [statKey, stat] of Object.entries(statsNode)) {
+    if (!stat || typeof stat !== 'object' || isAchievementStat(child(stat, 'type'))) continue
+    const name = child(stat, 'name')
+    if (typeof name !== 'string') continue
+    const type = String(child(stat, 'type') ?? '').trim().toUpperCase()
+    byName.set(name.toLowerCase(), { id: String(statKey), float: ['FLOAT', 'AVGRATE', '2', '3'].includes(type) })
+  }
+  const values = extractStatValues(statsRoot)
+  for (const stat of Object.values(statsNode)) {
+    if (!stat || typeof stat !== 'object' || !isAchievementStat(child(stat, 'type'))) continue
+    const bits = child(stat, 'bits')
+    if (!bits || typeof bits !== 'object') continue
+    for (const bitNode of Object.values(bits)) {
+      if (!bitNode || typeof bitNode !== 'object') continue
+      const apiName = child(bitNode, 'name')
+      const prog = child(bitNode, 'progress')
+      if (typeof apiName !== 'string' || !prog || typeof prog !== 'object') continue
+      const max = Number(child(prog, 'max_val'))
+      const value = child(prog, 'value')
+      const statName = value && typeof value === 'object' ? child(value, 'operand1') : null
+      if (!(max > 1) || typeof statName !== 'string') continue
+      const s = byName.get(statName.toLowerCase())
+      if (!s) continue
+      let cur = values[s.id]
+      if (typeof cur !== 'number' || !Number.isFinite(cur)) cur = 0
+      // A float stat may come as its raw 32 bits in an int (1.0 reads 1065353216).
+      if (s.float && Number.isInteger(cur) && Math.abs(cur) > 1e8) {
+        const b = Buffer.alloc(4); b.writeInt32LE(cur | 0)
+        const f = b.readFloatLE(0)
+        cur = Number.isFinite(f) ? f : 0
+      }
+      out.set(apiName.toLowerCase(), { cur: Math.max(0, Math.floor(cur)), max })
+    }
+  }
+  return out
+}
+
 /** Set-only view of unlockedWithTimes, for callers that don't need timestamps. */
 function unlockedApiNames(schemaRoot, statsRoot) {
   const m = unlockedWithTimes(schemaRoot, statsRoot)
@@ -252,5 +300,5 @@ function encodeBinaryKV(obj) {
 
 module.exports = {
   parseBinaryKV, extractAchievementBits, extractStatValues,
-  extractAchievementTimes, unlockedWithTimes, unlockedApiNames, encodeBinaryKV,
+  extractAchievementTimes, unlockedWithTimes, unlockedApiNames, encodeBinaryKV, achievementProgress,
 }

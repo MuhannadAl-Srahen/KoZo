@@ -254,6 +254,7 @@ async function lowInfo(appIds) {
           lowest: g.cheapestPriceEver ? Number(g.cheapestPriceEver.price) : null,
           lowestDate: g.cheapestPriceEver?.date ? g.cheapestPriceEver.date * 1000 : null,
           steamUsd: steamDeal ? steamDeal.price : null,
+          steamRetail: steamDeal ? steamDeal.retail : null,
           best: best && steamDeal && best.price < steamDeal.price - 0.01
             ? { store: best.store, price: best.price, save: Math.round((1 - best.price / steamDeal.price) * 100), url: dealUrl(best.dealID) }
             : null,
@@ -487,6 +488,40 @@ async function addToList(id, { name, banner_url = null } = {}) {
   }
 }
 
+// "Tell me at its lowest price" from a right-click: a price alert at the deepest discount the game
+// has had (lowestTarget), through setTarget, which tells you once when Steam's price gets there.
+async function alertAtLowest(appid, meta = {}) {
+  const p = await gamePrices(appid)
+  if (p.lowestTarget == null) throw new Error("KoZo doesn't know this game's lowest price yet.")
+  await setTarget(appid, p.lowestTarget, meta)
+  return { target: p.lowestTarget, text: p.lowestTargetText }
+}
+
+// Pure: is a price Steam wrote in US dollars? "$2.29" (the US, Jordan and other countries Steam sells
+// to in dollars), not "CDN$ 2.99", "A$ 3.95" or "2,29€".
+function isUsd(text) { return /^\$\s?\d/.test(String(text || '').trim()) }
+
+// Pure: the cheapest other store under your own Steam price, both in US dollars (CheapShark lists
+// the stores' US prices). Shown instead of Steam's, the maker's call: "if there is a price lower than
+// Steam's, display it instead". stores: [{ store, storeID, price, url }], steamCents: your price.
+function cheaperStore(stores, steamCents) {
+  if (!(steamCents > 0)) return null
+  const best = (stores || []).filter(s => String(s.storeID) !== '1' && s.price > 0).sort((a, b) => a.price - b.price)[0]
+  if (!best) return null
+  const cents = Math.round(best.price * 100)
+  if (cents >= steamCents) return null
+  return { store: best.store, price: best.price, cents, save: Math.round((1 - cents / steamCents) * 100), url: best.url }
+}
+
+// Pure: "tell me at its lowest price", in your money. CheapShark's lowest ever is a US price, so its
+// share of Steam's US full price is the deepest discount the game has had; that share of your full
+// price is the alert. In US dollars with no US full price known, the lowest ever itself.
+function lowestTarget(price, info) {
+  if (!price?.original || info?.lowest == null) return null
+  if (info.steamRetail > 0) return Math.max(1, Math.round(price.original * Math.min(1, info.lowest / info.steamRetail)))
+  return isUsd(price.finalText) ? Math.round(info.lowest * 100) : null
+}
+
 // One game's prices, for its window: Steam's in this PC's currency, the other
 // stores, the lowest ever and the alert. Never waits long for CheapShark.
 async function gamePrices(appid) {
@@ -502,12 +537,14 @@ async function gamePrices(appid) {
   const info = lows.get(id) || null
   const row = db.prepare('SELECT id, price_target_cents AS target, price_target_cc AS targetCc FROM game_list WHERE steam_app_id = ?').get(id)
   const cc = country(), us = cc === 'US'
-  const lowCents = us && info?.lowest != null ? Math.round(info.lowest * 100) : null
+  const lowCents = lowestTarget(price, info)
   const offer = (label, cents) => ({ label, cents, text: moneyText(cents, price?.finalText) })
   return {
     cc, us, price, owned: ownedIds().has(id), onList: !!row,
     lowest: info?.lowest ?? null, lowestDate: info?.lowestDate ?? null,
     stores: (info?.stores || []).filter(s => s.storeID !== '1'),
+    cheaper: price && isUsd(price.finalText) ? cheaperStore(info?.stores, price.final) : null,
+    lowestTarget: lowCents, lowestTargetText: lowCents != null ? moneyText(lowCents, price?.finalText) : null,
     target: row?.target ?? null,
     targetText: row?.target != null && price?.finalText ? moneyText(row.target, price.finalText) : null,
     targetState: targetState({ final: price ? price.final : null, target: row?.target ?? null, targetCc: row?.targetCc, cc }),
@@ -528,9 +565,9 @@ function shape(f, extra) {
   }
 }
 
-// One card's data. ctx = { facts, lows, vec, names, us }.
+// One card's data. ctx = { facts, lows, vec, names }.
 function buildDeal(ctx, id, mine) {
-  const { facts, lows, vec, names, us } = ctx
+  const { facts, lows, vec, names } = ctx
   const f = facts.get(id)
   const info = lows.get(id) || null
   const low = lowState(info)
@@ -542,7 +579,7 @@ function buildDeal(ctx, id, mine) {
     match: Math.round(match * 100),
     score: dealScore({ pct: f.price.pct, reviews: f.reviews, match, low }),
     low, lowest: info?.lowest ?? null, lowestDate: info?.lowestDate ?? null,
-    elsewhere: us ? (info?.best || null) : null,
+    elsewhere: isUsd(f.price?.finalText) ? cheaperStore(info?.stores, f.price?.final) : null,
     tags: tagNames.slice(0, 4), why,
   })
 }
@@ -824,4 +861,5 @@ function start() {
 }
 
 module.exports = { getDeals, moreDeals, saleMap, gamePrices, setTarget, refreshAlerts, lowInfo, markSeen, unseen, start, dealScore, wellReviewed, tasteMatch, tasteVector, forgetTaste, lowState, moneyText, targetState, alertChanges, cursorDone, freshIds,
-  listChanged, listState, removeFromList, currentView, ccFromCookies, storeCountry }
+  listChanged, listState, removeFromList, currentView, ccFromCookies, storeCountry,
+  alertAtLowest, isUsd, cheaperStore, lowestTarget }

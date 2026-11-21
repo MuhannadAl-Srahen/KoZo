@@ -27,7 +27,7 @@ export function timeAgo(iso) {
   const diffD = Math.floor(diffH / 24)
   if (diffD === 1) return 'Yesterday'
   if (diffD < 7) return `${diffD}d ago`
-  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  return fmtDate(iso, { month: 'short', day: 'numeric' })
 }
 
 // Rarity token for a global-unlock %, on the same bands as rarityLabel(). The
@@ -97,7 +97,7 @@ export function storeRelease(r, fallback) {
     const y = d.getUTCFullYear(), m = d.getUTCMonth()
     return {
       ts: new Date(y, m, 1).getTime(), until: new Date(y, m + 1, 1).getTime(), vague: true, precision: 'month',
-      label: new Date(y, m, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
+      label: fmtDate(new Date(y, m, 1), { month: 'long', year: 'numeric' }),
     }
   }
   if ((r.display === 'date_quarter' || r.display === 'date_year') && r.ts) {
@@ -122,10 +122,26 @@ export function countdownTo(rel, now = Date.now()) {
 export function monthKey(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
 }
+// Dates as text, with one formatter kept per language and options. toLocaleDateString builds a
+// new formatter on every call, and pages that draw many dates (Upcoming's day boxes and capsules,
+// Statistics' bars, the Profile heatmap) spent most of their own time there. Same text.
+const DATE_FMTS = new Map()
+export function dateFmt(locale, opts) {
+  const k = JSON.stringify([locale ?? null, opts])
+  let f = DATE_FMTS.get(k)
+  if (!f) { f = new Intl.DateTimeFormat(locale, opts); DATE_FMTS.set(k, f) }
+  return f
+}
+export function fmtDate(d, opts, locale) {
+  const dt = d instanceof Date ? d : new Date(d)
+  if (Number.isNaN(dt.getTime())) return 'Invalid Date'
+  return dateFmt(locale, opts).format(dt)
+}
+
 export function formatMonthKey(key, month = 'short') {
   const m = /^(\d{4})-(\d{2})$/.exec(key || '')
   if (!m) return ''
-  return new Date(Number(m[1]), Number(m[2]) - 1, 1).toLocaleDateString(undefined, { month, year: 'numeric' })
+  return fmtDate(new Date(Number(m[1]), Number(m[2]) - 1, 1), { month, year: 'numeric' })
 }
 
 export function getBannerBg(id) {
@@ -171,7 +187,7 @@ export function formatDate(ts) {
   if (diff === 0) return 'Today'
   if (diff === 1) return 'Yesterday'
   if (diff > 1 && diff < 7) return `${diff}d ago`
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: diff > 365 ? 'numeric' : undefined })
+  return fmtDate(d, { month: 'short', day: 'numeric', year: diff > 365 ? 'numeric' : undefined }, 'en-US')
 }
 
 // Local calendar day key, "YYYY-MM-DD". started_at is stored as a UTC ISO
@@ -190,8 +206,8 @@ export function localDayKey(d = new Date()) {
 export function formatDateTime(ts) {
   if (!ts) return 'Never'
   const d = new Date(ts)
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
-    ' · ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+  return fmtDate(d, { month: 'short', day: 'numeric' }, 'en-US') +
+    ' · ' + fmtDate(d, { hour: '2-digit', minute: '2-digit' }, 'en-US')
 }
 
 // Convert a local absolute path to a secure kozo:// URL the renderer can load
@@ -310,8 +326,9 @@ export const HELPER_EXE_RE = new RegExp([
   '^crs[-_. ]',                                  // Crash Reporting Service: crs-handler, crs-uploader
   '[-_. ](handler|uploader|helper)[-_. 0-9]*\\.exe$',   // anything-handler.exe, Options_INI_Helper.exe
   '^(launcher|updater|update|patcher|installer|setup|service|helper|daemon|' +
-    'watchdog|telemetry|activation|cleanup|redist\\w*|prereq\\w*)[-_. 0-9]*\\.exe$',
-  'anticheat|battleye|vcredist|dxsetup|dotnetfx',
+    'watchdog|telemetry|activation|cleanup|touchup|redist\\w*|prereq\\w*)[-_. 0-9]*\\.exe$',
+  'anticheat|battleye|vcredist|dxsetup|dotnetfx|overlay[-_. ]?injector',   // EA's __overlay\\overlayinjector.exe
+  'helper[-_. 0-9]*\\.exe$|prereq|^unins\\d*\\.exe$|uninstall|error[-_. ]?report',   // EALaunchHelper, UE4PrereqSetup_x64, unins000
   '[-_. ](installer|setup)[-_. 0-9]*\\.exe$',          // CnCNet5_YR_Installer.exe
   '(^|[-_. ])(map|level|world)[-_. ]?(editor|edit|builder)[-_. 0-9]*\\.exe$',   // WorldBuilder.exe
   '(^|[-_. ])editor[-_. 0-9]*\\.exe$|modkit|modtools',

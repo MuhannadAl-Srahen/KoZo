@@ -5,11 +5,14 @@ name: Release on merge
 # release.yml on that tag (tests, build, publish, notes). A tag pushed with GITHUB_TOKEN starts no
 # workflow by itself, so release.yml is started with workflow_dispatch, which GitHub allows.
 # A version that already has its tag does nothing, and a tag pushed by hand still works as before.
+# It can also be started by hand: Actions > Release on merge > Run workflow, on main. That releases
+# the version package.json has on main, the same way (for a merge that didn't start it).
 
 on:
   push:
     branches: [main]
     paths: [package.json]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -31,6 +34,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::Run it on main: a release is made from main only"
+            exit 1
+          fi
           version="$(node -p "require('./package.json').version")"
           tag="v${version}"
           if git ls-remote --exit-code --tags origin "refs/tags/${tag}" > /dev/null; then

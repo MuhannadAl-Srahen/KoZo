@@ -348,13 +348,29 @@ async function getReviews(appId) {
   return data
 }
 
+// The country Steam's store sells to on this PC (deals.storeCountry, the one Discounts prices for).
+// appdetails without `cc` picks a country from the connection: the maker, in Jordan, saw Kingdom
+// Come: Deliverance II at "83,66 zł" in a game's window while its button said $14.84 on Steam.
+async function storeCc() {
+  try { return String(await require('./deals').storeCountry() || '').toUpperCase() || null } catch { return null }
+}
+
 const _detailsCache = new Map()
 async function getStoreDetails(appId) {
-  const hit = _detailsCache.get(appId)
+  const cc = await storeCc()
+  const key = `${appId}:${cc || ''}`
+  const hit = _detailsCache.get(key)
   if (hit && Date.now() - hit.at < 60 * 60_000) return hit.result
   let result = null
   try {
-    const data = await getJSON('https://store.steampowered.com/api/appdetails', { appids: appId, l: 'en' })
+    let data = await getJSON('https://store.steampowered.com/api/appdetails', { appids: appId, l: 'en', ...(cc ? { cc } : {}) })
+    // Not sold in that country: the details still come, from anywhere, but never a price in
+    // another country's money.
+    let priced = true
+    if (cc && !data?.[appId]?.success) {
+      data = await getJSON('https://store.steampowered.com/api/appdetails', { appids: appId, l: 'en' })
+      priced = false
+    }
     const d = data?.[appId]?.success ? data[appId].data : null
     if (d) {
       result = {
@@ -371,7 +387,7 @@ async function getStoreDetails(appId) {
         media: (d.screenshots || [])
           .map(sc => ({ thumb: sc.path_thumbnail, full: sc.path_full || sc.path_thumbnail }))
           .filter(m => m.thumb),
-        price: d.is_free ? 'Free to play' : (d.price_overview?.final_formatted || null),
+        price: d.is_free ? 'Free to play' : (priced ? d.price_overview?.final_formatted || null : null),
         categories: (d.categories || []).map(c => c.description).filter(Boolean).slice(0, 6),
         website: d.website || null,
         trailer: trailerOf(d.movies),
@@ -381,6 +397,9 @@ async function getStoreDetails(appId) {
           hls: m.hls_h264 || null,
           mp4: m.mp4?.['480'] || m.mp4?.max || null,
           webm: m.webm?.['480'] || m.webm?.max || null,
+          // The biggest file, for the lightbox and full screen (MediaGallery's big player).
+          mp4Max: m.mp4?.max || null,
+          webmMax: m.webm?.max || null,
         })).filter(v => v.hls || v.mp4 || v.webm),
         about: d.about_the_game || d.detailed_description || null,
         requirements: {
@@ -400,7 +419,7 @@ async function getStoreDetails(appId) {
   } catch (e) {
     logger.warn(`getStoreDetails failed for ${appId}`, { message: e.message })
   }
-  capSet(_detailsCache, appId, { at: Date.now(), result })
+  capSet(_detailsCache, key, { at: Date.now(), result })
   return result
 }
 
@@ -1205,21 +1224,29 @@ async function refreshGameData(gameId) {
     achievementsQ.bulkUpsertAchievements(gameId, achievements)
   }
 
-  // Portrait banner (library card)
-  try {
-    const bannerPath = await downloadBanner(game.steam_app_id, gameId)
-    getDb().prepare('UPDATE games SET banner_local_path = ? WHERE id = ?').run(bannerPath, gameId)
-  } catch (e) {
-    logger.warn(`Banner download failed for game ${gameId}`, { message: e.message })
-    await storeRemoteFallback(gameId, game.steam_app_id)
+  // Portrait banner (library card) and hero (the game page), only when the game has none. This
+  // runs every time a Steam game's page opens, and it wrote Steam's art over a cover the maker had
+  // picked ("sometimes it goes back to the old one"). Refresh images (refreshBanners) still
+  // replaces them on purpose.
+  const haveFile = (p) => { try { return !!p && fs.statSync(p).size > 0 } catch { return false } }
+  if (!haveFile(game.banner_local_path)) {
+    try {
+      const bannerPath = await downloadBanner(game.steam_app_id, gameId)
+      getDb().prepare('UPDATE games SET banner_local_path = ? WHERE id = ?').run(bannerPath, gameId)
+    } catch (e) {
+      logger.warn(`Banner download failed for game ${gameId}`, { message: e.message })
+      await storeRemoteFallback(gameId, game.steam_app_id)
+    }
   }
 
   // Hero banner (wide landscape, used in GameDetail)
-  try {
-    await downloadHero(game.steam_app_id, gameId)
-    logger.info(`Hero banner downloaded for game ${gameId}`)
-  } catch (e) {
-    logger.warn(`Hero banner download failed for game ${gameId}`, { message: e.message })
+  if (!haveFile(game.hero_local_path)) {
+    try {
+      await downloadHero(game.steam_app_id, gameId)
+      logger.info(`Hero banner downloaded for game ${gameId}`)
+    } catch (e) {
+      logger.warn(`Hero banner download failed for game ${gameId}`, { message: e.message })
+    }
   }
 
   // Steam store genres (auto-grouping) — refresh fills them for older rows too.
@@ -1647,11 +1674,11 @@ function parseComingSoonHtml(html) {
 }
 
 const comingSoonRuns = new Map()   // key → the request in flight, so a page is only asked for once
-function fetchComingSoon(key, filter, p) {
+function fetchComingSoon(key, filter, p, cc = 'US') {
   if (comingSoonRuns.has(key)) return comingSoonRuns.get(key)
   const adult = adultSearchOpts()
   const run = getAxios().get('https://store.steampowered.com/search/results/', {
-    params: { ...adult.params, filter, infinite: 1, start: p * COMING_SOON_PAGE, count: COMING_SOON_PAGE, cc: 'us', l: 'english', category1: 998 },
+    params: { ...adult.params, filter, infinite: 1, start: p * COMING_SOON_PAGE, count: COMING_SOON_PAGE, cc: cc.toLowerCase(), l: 'english', category1: 998 },
     timeout: 15000,
     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', ...adult.headers },
   }).then((res) => {
@@ -1669,14 +1696,17 @@ async function getComingSoon(feed = 'soon', page = 0) {
   loadUpcomingDisk()
   const filter = COMING_SOON_FEEDS[feed] || COMING_SOON_FEEDS.soon
   const p = Math.max(0, Math.floor(Number(page) || 0))
-  const key = `${filter}:${p}:${showAdult() ? 'adult' : 'safe'}`
+  // Prices on Upcoming's cards are the country Steam sells to here, like Discounts (they were the
+  // US's: cc 'us'), so the answers are kept per country.
+  const cc = (await storeCc()) || 'US'
+  const key = `${filter}:${p}:${showAdult() ? 'adult' : 'safe'}:${cc}`
   const answer = (e) => ({ items: e.items, total: e.total, page: p, pageSize: COMING_SOON_PAGE })
   const hit = comingSoonCache.get(key)
   if (hit && Date.now() - hit.at < UPCOMING_MAX_AGE_MS) {
-    if (Date.now() - hit.at >= COMING_SOON_TTL_MS) fetchComingSoon(key, filter, p).catch(e => logger.debug('getComingSoon refresh failed', { message: e.message }))
+    if (Date.now() - hit.at >= COMING_SOON_TTL_MS) fetchComingSoon(key, filter, p, cc).catch(e => logger.debug('getComingSoon refresh failed', { message: e.message }))
     return answer(hit)
   }
-  return answer(await fetchComingSoon(key, filter, p))
+  return answer(await fetchComingSoon(key, filter, p, cc))
 }
 
 module.exports = {

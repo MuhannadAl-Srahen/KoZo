@@ -345,7 +345,9 @@ function parseAcf(text) {
   const get = (k) => t.match(new RegExp(`"${k}"\\s*"([^"]*)"`, 'i'))?.[1]
   const appid = get('appid'), installdir = get('installdir')
   if (!appid && !installdir) return null
-  return { appid: appid || '', installdir: installdir || '', stateFlags: Number(get('StateFlags')) }
+  // name and SizeOnDisk: Steam's own name for the game (EA's folders are codenames: Need for
+  // Speed Unbound installs to "Excalibur") and its size, for Scan PC and Settings > Storage.
+  return { appid: appid || '', installdir: installdir || '', stateFlags: Number(get('StateFlags')), name: get('name') || '', sizeOnDisk: Number(get('SizeOnDisk')) || 0 }
 }
 
 // Bit 4 = fully installed: 4 and 6 (an update is waiting) can be played, 1026 is still downloading.
@@ -491,7 +493,36 @@ async function doRecheck({ reason = '', steam } = {}) {
   return { found: found.length, moved: moved.length }
 }
 
+// A Steam game still called by its folder takes Steam's own name for it. EA's folders are codenames:
+// Need for Speed Unbound installs to "Excalibur", and Scan PC named it that (Scan PC now reads the
+// manifest's name). Only a name that is exactly the folder's is changed, never one picked by hand.
+// A few small manifest reads, at the idle start.
+async function steamNamesFromManifests() {
+  const db = require('../db/database').getDb()
+  const rows = db.prepare(`SELECT id, name, install_path, steam_app_id FROM games
+    WHERE steam_app_id IS NOT NULL AND IFNULL(is_cracked, 0) = 0 AND install_path LIKE '%steamapps%common%'`).all()
+  let renamed = 0
+  for (const g of rows) {
+    const sf = steamFolderOf(g.install_path)
+    if (!sf || String(g.name).trim().toLowerCase() !== sf.installdir.toLowerCase()) continue
+    let acf = null
+    try { acf = parseAcf(await fs.promises.readFile(path.join(sf.steamapps, `appmanifest_${g.steam_app_id}.acf`), 'utf8')) } catch {}
+    if (!acf?.name || acf.installdir.toLowerCase() !== sf.installdir.toLowerCase()) continue
+    const name = require('./pcScanner').steamNameFor(sf.installdir, acf.name)
+    if (!name || name === g.name) continue
+    db.prepare('UPDATE games SET name = ? WHERE id = ?').run(name, g.id)
+    logger.info(`installCheck: "${g.name}" is Steam's "${name}", renamed`)
+    renamed++
+  }
+  if (renamed) {
+    try { require('./autoBackup').markDirty() } catch {}
+    try { for (const w of require('electron').BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send('game:updated', null) } catch {}
+  }
+  return renamed
+}
+
 module.exports = {
+  steamNamesFromManifests,
   reconcile, findNewLocation, hasGameFile, fromSteamManifest, steamLibraries,
   recheckMissing, announce, steamState, steamDest, isSteamManaged,
   pickRecheck, fastDelay, throttleDelay, steamFolderOf, parseAcf, isFullyInstalled, splitGameFolder,

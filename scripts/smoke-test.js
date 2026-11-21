@@ -1313,7 +1313,7 @@ app.whenReady().then(async () => {
       }
       await sleep(300)
     }
-    const caps = () => ev(`[...document.querySelectorAll('.app-main [class*=steamCapHit]')].map(b => b.title).sort().join()`)
+    const caps = () => ev(`[...document.querySelectorAll('.app-main [data-cap] > button[title]')].map(b => b.title).sort().join()`)
     const active = () => ev(`document.querySelector('[data-pick][class*=viewBtnActive]')?.dataset.pick`)
     const press = async (pick) => { await ev(`document.querySelector('[data-pick=${pick}]').click(); true`); await sleep(350) }
 
@@ -1406,9 +1406,10 @@ app.whenReady().then(async () => {
       return {
         heads: [...document.querySelectorAll('[data-steam-weeks] [class*=calWeekHead] span')].map(s => s.textContent.trim()).join(','),
         solo: caps('Smoke Cal Solo'), pair: caps('Smoke Cal Pair A'), busy: caps('Smoke Cal Wished'),
-        busyMore: busy?.querySelector('[class*=calMore]')?.innerText || '',
+        // textContent: a week off screen isn't drawn (content-visibility), and innerText skips it.
+        busyMore: busy?.querySelector('[class*=calMore]')?.textContent || '',
         firstInBusy: busy?.querySelector('[data-cap] button')?.title || '',
-        wishTag: /on wishlist/i.test(busy?.innerText || ''),   // drawn in capitals
+        wishTag: /on wishlist/i.test(busy?.textContent || ''),
         monday: cell('Smoke Cal Monday') ? getComputedStyle(cell('Smoke Cal Monday')).opacity : 'none',
         hero: !!document.querySelector('[data-upcoming-hero]'), pickBar: !!document.querySelector('[data-pick]'),
         text: document.querySelector('[data-steam-weeks]')?.innerText || '',
@@ -1438,18 +1439,69 @@ app.whenReady().then(async () => {
       await ev(`document.querySelector('[data-steam-weeks] [role=switch][aria-label="Hide Early Access"]').getAttribute('aria-checked') === 'true'`))
     await ev(`['count', 'wish', 'tag', 'noEa', 'noOwned'].forEach(k => localStorage.removeItem('kozo:calendar:' + k)); true`)
 
-    // Strip shows the calendar's games too, and All shows every game of a day (it stopped at 8).
-    await ev(`localStorage.setItem('kozo:calendar:view', 'strip'); localStorage.setItem('kozo:calendar:pick', 'all'); location.hash = '#/upcoming'; location.reload(); true`)
-    for (let i = 0; i < 60; i++) { await sleep(120); if (await ev(`!!document.querySelector('.app-main [class*=chipCount]')`).catch(() => false)) break }
-    const strip = await ev(`(async () => {
-      const chip = [...document.querySelectorAll('.app-main [class*=chipCount]')].find(c => c.textContent.trim() === '10')
-      if (!chip) return { chip: false, counts: [...document.querySelectorAll('.app-main [class*=chipCount]')].map(c => c.textContent.trim()).join() }
-      chip.closest('button').click()
-      await new Promise(r => setTimeout(r, 300))
-      return { chip: true, cards: document.querySelectorAll('.app-main [class*=wideHit]').length, showAll: /Show all \\d+ releases/.test(document.querySelector('.app-main').innerText) }
-    })()`)
-    check("Upcoming Strip: Steam's calendar games are there", strip.chip, JSON.stringify(strip))
-    check('Upcoming Strip: All shows every game of the day', strip.cards === 10 && !strip.showAll, JSON.stringify(strip))
+    // Tracked: a click anywhere on a game opens it (the maker: "I can't click anywhere").
+    {
+      const db = require(path.join(root, 'electron', 'db', 'database.js')).getDb()
+      const day = (ts) => { const d = new Date(ts); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') }
+      const rowIds = [
+        db.prepare("INSERT INTO game_list (name, steam_app_id, status, release_watch, release_date) VALUES ('Smoke Tracked Soon', 9100102, 'upcoming', 1, ?)").run(day(at(1, 1))).lastInsertRowid,
+        db.prepare("INSERT INTO game_list (name, steam_app_id, status, release_watch, release_date) VALUES ('Smoke Tracked Later', 9100103, 'upcoming', 1, '2027')").run().lastInsertRowid,
+      ]
+      // The three buttons on top switch, by a real click (they threw once and nothing changed).
+      await open()
+      const tab = async (name) => {
+        await ev(`[...document.querySelectorAll('[aria-label="Calendar layout"] [role=tab]')].find(b => b.innerText.trim().startsWith(${JSON.stringify(name)})).click(); true`)
+        await sleep(400)
+        return ev(`[...document.querySelectorAll('[aria-label="Calendar layout"] [role=tab][aria-selected=true]')].map(b => b.innerText.trim().split(/\\s/)[0]).join()`)
+      }
+      const errs = errors.length
+      const went = [await tab('TBA'), await tab('Steam'), await tab('Tracked')]
+      check('Upcoming: Steam, TBA and Tracked switch when clicked', went.join() === 'TBA,Steam,Tracked' && errors.length === errs, JSON.stringify([went, errors.slice(errs)]))
+      check('Upcoming: the one picked is remembered', await ev(`localStorage.getItem('kozo:calendar:view') === 'tracked'`))
+      for (let i = 0; i < 60; i++) { await sleep(120); if (await ev(`document.querySelectorAll('[data-tracked] [data-cap]').length === 2`).catch(() => false)) break }
+      await sleep(300)
+      // The maker's pick: the Steam capsules in a grid, grouped by when they land, a countdown on the picture.
+      const probe = await ev(`(() => {
+        const card = document.querySelector('[data-tracked] [data-cap]')
+        if (!card) return { cards: 0 }
+        const hit = (sel) => { const el = card.querySelector(sel); if (!el) return 'missing'; const r = el.getBoundingClientRect(); const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return e && card.contains(e) ? 'card' : String(e?.className || e?.tagName).slice(0, 60) }
+        return { cards: document.querySelectorAll('[data-tracked] [data-cap]').length,
+          groups: [...document.querySelectorAll('[data-track-group]')].map(g => g.dataset.trackGroup).join(),
+          heads: [...document.querySelectorAll('[data-track-group] > :first-child')].map(h => h.textContent.trim()).join('|'),
+          chip: card.querySelector('[class*=capWhen]')?.textContent || '', name: card.querySelector('[class*=capName]')?.textContent || '',
+          pic: hit('[class*=calCapHit]'), caption: hit('[class*=capCaption]') }
+      })()`)
+      check('Tracked: every tracked game is a capsule, grouped by when it lands', probe.cards === 2 && probe.groups === 'month,later' && /^this month1\|later1$/i.test(probe.heads), JSON.stringify(probe))
+      check('Tracked: the name under it and how long until it on the picture', probe.name === 'Smoke Tracked Soon' && /^in \d+ days$/.test(probe.chip), JSON.stringify(probe))
+      check('Tracked: nothing covers a game', probe.pic === 'card' && probe.caption === 'card', JSON.stringify(probe))
+      const opened = async (sel) => {
+        await ev(`document.querySelector('[data-tracked] [data-cap] ${sel}').click(); true`)
+        let ok = false
+        for (let i = 0; i < 20; i++) { await sleep(100); if (await ev(`!!document.querySelector('[role=dialog]')`)) { ok = true; break } }
+        await ev(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); true`); await sleep(300)
+        return ok
+      }
+      check('Tracked: a click on the picture opens the game', await opened('[class*=calCapHit]'))
+      check('Tracked: a click on the name opens the game', await opened('[class*=capCaption]'))
+      // SMOKE_SHOT_DIR=<folder>: a picture of Tracked with a few more games and real Steam art, to look at.
+      if (process.env.SMOKE_SHOT_DIR) {
+        const real = { 9100101: 1245620, 9100102: 1091500, 9100103: 2050650, 9100104: 1086940, 9100110: 2358720, 9100111: 1174180 }
+        steam.getAppAssets = async (ids) => Object.fromEntries(ids.filter(id => real[id]).map(id => [id, { capsule: `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${real[id]}/capsule_616x353.jpg` }]))
+        rowIds.push(...[['Smoke Tracked Out', 9100101, day(Date.now() - 3 * 86400000)], ['Smoke Tracked Week', 9100104, day(Date.now() + 3 * 86400000)],
+          ['Smoke Tracked Year', 9100110, '2027'], ['Smoke Tracked TBA', 9100111, null]]
+          .map(([n, id, d]) => db.prepare("INSERT INTO game_list (name, steam_app_id, status, release_watch, release_date) VALUES (?, ?, 'upcoming', 1, ?)").run(n, id, d).lastInsertRowid))
+        await ev(`location.reload(); true`); await sleep(4000)
+        fs.writeFileSync(path.join(process.env.SMOKE_SHOT_DIR, 'tracked.png'), (await wc.capturePage()).toPNG())
+        steam.getAppAssets = async () => ({})
+      }
+      db.prepare(`DELETE FROM game_list WHERE id IN (${rowIds.join(',')})`).run()
+    }
+
+    // Strip, Week and Month are gone (the maker likes the Steam view only): a saved one opens Steam's.
+    await ev(`localStorage.setItem('kozo:calendar:view', 'strip'); location.hash = '#/upcoming'; location.reload(); true`)
+    for (let i = 0; i < 60; i++) { await sleep(120); if (await ev(`!!document.querySelector('[data-steam-weeks]')`).catch(() => false)) break }
+    const views = await ev(`[...document.querySelectorAll('[aria-label="Calendar layout"] [role=tab]')].map(b => b.innerText.trim()).join()`)
+    check('Upcoming: only the Steam layout, and a saved Strip opens it', /^Steam,TBA/.test(views) && !/Strip|Week|Month/.test(views) && await ev(`!!document.querySelector('[data-steam-weeks]')`), views)
     await ev(`localStorage.setItem('kozo:calendar:view', 'steam'); localStorage.removeItem('kozo:calendar:pick'); true`)
 
     Object.assign(steam, real)
@@ -1494,6 +1546,12 @@ app.whenReady().then(async () => {
 
     await go('#/activity?tab=overview', 2000)
     check('Statistics: Longest sessions say when', await ev(`document.querySelectorAll('.app-main [class*=rankDate]').length > 0`))
+    // All time's month bars are clickable like the days: the sections below focus on the month.
+    await ev(`[...document.querySelectorAll('.app-main button')].find(b => b.innerText.trim() === 'All time')?.click(); true`); await sleep(900)
+    const monthKey = new Date().toISOString().slice(0, 7)
+    await ev(`document.querySelector('[data-stats-month="${monthKey}"]')?.click(); true`); await sleep(900)
+    const monthPill = await ev(`document.querySelector('[data-stats-month-pill]')?.innerText || ''`)
+    check('Statistics: a month bar focuses the page on that month', /\d{4}/.test(monthPill) && await ev(`/Playtime by Game ·/i.test(document.querySelector('.app-main').innerText)`), monthPill)
 
     await go(`#/game/${g}`, 1500)
     const status = await ev(`[...document.querySelectorAll('.app-main button')].map(b => b.innerText.trim()).find(t => /^Status:/.test(t)) || ''`)
@@ -2394,7 +2452,7 @@ app.whenReady().then(async () => {
     check('guide: a locked achievement has a Guide button', await ev(`!!document.querySelector('[data-ach-guide="${lockedId}"]')`))
     await ev(`document.querySelector('[data-ach-guide="${lockedId}"]')?.click(); true`); await sleep(400)
     const menu = await ev(`[...document.querySelectorAll('[role=menu] [role=menuitem], [role=menu] button')].map(b => b.innerText.trim()).join(' | ')`)
-    check('guide: it offers YouTube and the web', /YouTube/.test(menu) && /Search the web/.test(menu), menu || await ev(`document.querySelectorAll('[data-ach-guide]').length + ' guides, ' + document.querySelectorAll('[role=menu]').length + ' menus, hash ' + location.hash + ', dialogs ' + document.querySelectorAll('[role=dialog]').length`))
+    check('guide: it offers YouTube and Google', /YouTube/.test(menu) && /Google/.test(menu), menu || await ev(`document.querySelectorAll('[data-ach-guide]').length + ' guides, ' + document.querySelectorAll('[role=menu]').length + ' menus, hash ' + location.hash + ', dialogs ' + document.querySelectorAll('[role=dialog]').length`))
     await ev(`[...document.querySelectorAll('[role=menu] [role=menuitem], [role=menu] button')].find(b => /YouTube/.test(b.innerText))?.click(); true`); await sleep(400)
     shell.openExternal = realOpen
     check('guide: YouTube searches for the game and the achievement', opened.some(u => /youtube\.com\/results/.test(u) && /Smoke%20Locked%20One/.test(u)), JSON.stringify(opened))

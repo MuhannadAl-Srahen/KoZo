@@ -357,7 +357,8 @@
   ;(document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(function () { sizeRail(); requestTick() })
 
   // ── Rookie to Mythic ────────────────────────────────────────────────────────
-  var TIER_ROW = [[1, 'Rookie'], [3, 'Apprentice'], [7, 'Adept'], [12, 'Seasoned'], [18, 'Veteran'], [25, 'Master'], [35, 'Legend'], [45, 'Grandmaster'], [60, 'Mythic']]
+  // A few of the app's level names (every level has one: electron/services/xp.js LEVEL_NAMES).
+  var TIER_ROW = [[1, 'Rookie'], [3, 'Apprentice'], [7, 'Adept'], [12, 'Seasoned'], [18, 'Veteran'], [25, 'Master'], [40, 'Legend'], [45, 'Grandmaster'], [60, 'Mythic']]
   $('tier-row').innerHTML = TIER_ROW.map(function (t, i) {
     return '<li class="tier" data-level="' + t[0] + '" style="--n:' + i + '"><div class="tier-hex">' + HEX + '<b>' + t[0] + '</b></div><span>' + t[1] + '</span></li>'
   }).join('')

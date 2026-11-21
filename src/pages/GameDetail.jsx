@@ -7,7 +7,7 @@ import {
   IconCircleCheck, IconCircleOff, IconEye, IconEyeOff, IconChevronDown,
   IconChevronRight, IconAlertTriangle, IconDeviceGamepad2,
   IconLayoutDashboard, IconSparkles, IconLayoutSidebarRight, IconMovie, IconTarget, IconChartBar,
-  IconInfoCircle, IconBrandSteam, IconClock, IconRepeat, IconTrash, IconPencil, IconBook, IconBrandYoutube, IconSearch,
+  IconInfoCircle, IconBrandSteam, IconClock, IconRepeat, IconTrash, IconPencil, IconBook, IconBrandYoutube, IconSearch, IconBrandGoogle,
   IconUsers, IconLoader2,
 } from '@tabler/icons-react'
 import { exeLooksLikeTool, getBannerBg, getBannerIcon, formatPlaytime, formatDate, formatDateTime, fileUrl, isSteamTracked, launcherLabel, localDayKey, rarityColor, timeAgo } from '../lib/utils'
@@ -22,7 +22,7 @@ import SaveManagerModal from '../components/modals/SaveManagerModal'
 import InfoModal, { PrivacyHelp } from '../components/ui/InfoModal'
 import { steamCheckMessage } from '../lib/steamCheck'
 import EmptyState from '../components/ui/EmptyState'
-import { HeroSkeleton, PanelSkeleton } from '../components/ui/Skeleton'
+import { Skeleton, PanelSkeleton } from '../components/ui/Skeleton'
 import GeneratedCover from '../components/GeneratedCover'
 import UndoBar from '../components/ui/UndoBar'
 import SteamGameModal, { StoreSections } from '../components/SteamGameModal'
@@ -108,7 +108,19 @@ function isUnlocked(ach) {
 // don't.
 // `other` = unlocked on a shared Steam account by someone else ({ persona, unlockedAt }); with
 // `onPick` the card is in "I did these too" mode: a click ticks it instead of opening it.
-function AchCard({ ach, onClick, onQuickToggle, onGuide, other, onPick, picked }) {
+// How far along a counted achievement is ("Kill 50 enemies": 31 / 50), from Steam's own files.
+// On a shared account the number is the account's, so it says whose.
+function AchProgress({ p }) {
+  const cur = Math.min(p.cur, p.max)
+  return (
+    <div className={s.achProg} data-ach-progress title={p.persona ? `On ${p.persona}: the account's count, which may include other people's play` : undefined}>
+      <span className={s.achProgBar}><span style={{ width: `${Math.round((cur / p.max) * 100)}%` }} /></span>
+      <span className={s.achProgNum}>{cur.toLocaleString()} / {p.max.toLocaleString()}</span>
+    </div>
+  )
+}
+
+function AchCard({ ach, onClick, onQuickToggle, onGuide, other, onPick, picked, progress }) {
   // unlock_id is the row's existence; unlocked_at can legitimately be NULL when
   // Steam reported no date (unlocktime 0). The unlocked_at half stays as a
   // safety net for any patch that forgets the id.
@@ -159,6 +171,7 @@ function AchCard({ ach, onClick, onQuickToggle, onGuide, other, onPick, picked }
             {ach.unlocked_at ? formatDate(ach.unlocked_at) : 'No date'}
           </div>
         )}
+        {!unlocked && progress && <AchProgress p={progress} />}
         {!unlocked && other && (
           <div className={s.achOther} title={`Unlocked on ${other.persona || 'the shared account'}${other.unlockedAt ? ` ${formatDate(other.unlockedAt)}` : ''}, not during your play`}>
             By someone else{other.unlockedAt ? `, ${formatDate(other.unlockedAt)}` : ''}
@@ -314,6 +327,7 @@ export default function GameDetail() {
   // Played on a shared (rented) Steam account: what someone else unlocked there first. Steam keeps
   // one unlock per account, so it never showed those to you (steamAccounts.othersOnAccount).
   const [others, setOthers]           = useState(() => new Map())   // achievement id -> { persona, unlockedAt }
+  const [progress, setProgress]       = useState(() => new Map())   // achievement id -> { cur, max, persona }
   const [claimPick, setClaimPick]     = useState(null)              // null, or the Set ticked in "I did these too"
   const [pickScope, setPickScope]     = useState('others')          // which section is ticking: 'others' or 'locked'
   useEffect(() => { setClaimPick(null) }, [id])                     // another game's page: nothing ticked
@@ -424,7 +438,7 @@ export default function GameDetail() {
 
   const load = useCallback(async () => {
     if (!window.kozo?.api || !id) return
-    const [gRes, aRes, sRes, activeRes, privRes, ptRes, othersRes] = await Promise.all([
+    const [gRes, aRes, sRes, activeRes, privRes, ptRes, othersRes, progRes] = await Promise.all([
       window.kozo.api.games.get(Number(id)),
       window.kozo.api.achievements.listForGame(Number(id)),
       window.kozo.api.sessions.getForGame(Number(id)),
@@ -432,9 +446,11 @@ export default function GameDetail() {
       window.kozo.api.steam?.lastSyncError?.(Number(id)),
       window.kozo.api.games.playthroughs?.(Number(id)),
       window.kozo.api.achievements.othersOnAccount?.(Number(id)),
+      window.kozo.api.achievements.progress?.(Number(id)),
     ])
     setPlaythroughs(ptRes?.ok ? (ptRes.data || []) : [])
     setOthers(new Map((othersRes?.ok ? othersRes.data || [] : []).map(o => [o.achievementId, o])))
+    setProgress(new Map((progRes?.ok ? progRes.data || [] : []).map(p => [p.achievementId, p])))
     if (gRes?.ok) setGame(gRes.data)
     if (aRes?.ok) setAch(aRes.data ?? [])
     if (sRes?.ok) setSessions(sRes.data ?? [])
@@ -592,10 +608,8 @@ export default function GameDetail() {
     setStatusMenuOpen(false)
     await window.kozo?.api?.games?.update(Number(id), { completion_status: status })
     await load()
-    if (status === 'finished' && game.completion_status !== 'finished') {
-      setInfo({ variant: 'success', title: 'Marked as finished',
-        message: `Nice! ${game.name} counts toward your XP now. Find it on your Profile.` })
-    }
+    // Finished opens the rating window (App.jsx, game:finished), which says it counts toward XP.
+    // A "Marked as finished" box stacked on top of it looked bad.
   }
 
   // Hide/unhide from the Library grid. Time, achievements, and XP keep counting.
@@ -983,15 +997,62 @@ export default function GameDetail() {
     }
   }
 
-  // A ghost hero + panel, not a bare "Loading…": the real layout lands without a
-  // reflow, and the page never reads as empty while the four queries resolve.
+  // Loading: the page's own layout in either look (the art, the cover and name, the buttons, the
+  // tabs, the content and the side panel), shimmering, with Back already working. It was a blank
+  // band and six grey lines.
   if (loading) {
+    const skLayout = prefs.gamePage === 'cinematic' ? 'cinematic' : 'store'
+    const head = (
+      <>
+        <Skeleton w="min(440px, 70%)" h={38} />
+        <div className={s.chipRow}><Skeleton w={66} h={22} r={11} /><Skeleton w={86} h={22} r={11} /><Skeleton w={58} h={22} r={11} /></div>
+        <div className={s.actions}><Skeleton w={120} h={44} r={22} /><Skeleton w={152} h={44} r={22} /><Skeleton w={44} h={44} r="50%" /></div>
+      </>
+    )
+    const card = (lines, w) => (
+      <div className={s.card}>
+        <Skeleton w={w} h={12} style={{ marginBottom: 16 }} />
+        <PanelSkeleton lines={lines} />
+      </div>
+    )
     return (
-      <div className={s.page}>
-        <HeroSkeleton height={240} />
-        <div className={s.content}>
-          <div className={s.contentInner}>
-            <PanelSkeleton lines={6} />
+      <div className={s.page} data-layout={skLayout} aria-busy="true" aria-label="Loading">
+        <div className={s.scroll}>
+          <div className={s.hero}>
+            <div className={s.heroArt}><Skeleton w="100%" h="100%" r={0} /></div>
+            <div className={`${s.frame} ${s.topBar}`}>
+              <button className={s.backBtn} onClick={() => navigate('/')} title="Back to Library">
+                <IconChevronLeft size={15} stroke={2} />
+                Library
+              </button>
+            </div>
+            {skLayout === 'cinematic' && <div className={`${s.frame} ${s.cineInfo}`}>{head}</div>}
+          </div>
+          {skLayout === 'store' && (
+            <div className={`${s.frame} ${s.storeHead}`}>
+              <div className={s.cover}><Skeleton w="100%" h="100%" r={0} /></div>
+              <div className={s.headText}>{head}</div>
+            </div>
+          )}
+          <div className={s.frame}>
+            <div className={s.tabs}>
+              <Skeleton w={112} h={34} r={17} /><Skeleton w={150} h={34} r={17} /><Skeleton w={110} h={34} r={17} />
+            </div>
+            <div className={s.body}>
+              <div className={s.main}>
+                <div className={s.overview}>{card(4, 130)}{card(4, 110)}</div>
+              </div>
+              {skLayout === 'store' && (
+                <aside className={s.side}>
+                  <div className={s.card}>
+                    <Skeleton w={90} h={12} style={{ marginBottom: 14 }} />
+                    <Skeleton w={130} h={30} />
+                    <Skeleton w={96} h={11} style={{ margin: '8px 0 16px' }} />
+                    <PanelSkeleton lines={3} />
+                  </div>
+                </aside>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -1500,7 +1561,7 @@ export default function GameDetail() {
                       // section, so you can tick the ones you've done (a boss, a story moment).
                       const otherAchs    = achievements.filter(a => !isUnlocked(a) && others.has(a.id))
                       const lockedAchs   = achievements.filter(a => !isUnlocked(a) && !others.has(a.id))
-                      const card = (a) => <AchCard key={a.id} ach={a} other={others.get(a.id)} onClick={setSelectedAch} onQuickToggle={quickToggleAch} onGuide={(e, ach) => setGuideMenu({ x: e.clientX, y: e.clientY, ach })} />
+                      const card = (a) => <AchCard key={a.id} ach={a} other={others.get(a.id)} progress={progress.get(a.id)} onClick={setSelectedAch} onQuickToggle={quickToggleAch} onGuide={(e, ach) => setGuideMenu({ x: e.clientX, y: e.clientY, ach })} />
                       const section = (label, list) => list.length > 0 && (
                         <div className={s.achSection}>
                           <div className={s.achSectionHead}>{label}<span className={s.achSectionCount}>{list.length}</span></div>
@@ -1669,7 +1730,7 @@ export default function GameDetail() {
           header={{ name: guideMenu.ach.display_name, sub: 'How to unlock it' }}
           items={guideLinks(game, guideMenu.ach).map(g => ({
             label: g.label,
-            Icon: g.key === 'steam' ? IconBrandSteam : g.key === 'youtube' ? IconBrandYoutube : IconSearch,
+            Icon: g.key === 'steam' ? IconBrandSteam : g.key === 'youtube' ? IconBrandYoutube : IconBrandGoogle,
             onClick: () => openGuide(g.url),
           }))}
         />
@@ -1680,6 +1741,7 @@ export default function GameDetail() {
           achievement={selectedAch}
           game={game}
           other={others.get(selectedAch.id) || null}
+          progress={progress.get(selectedAch.id) || null}
           onClose={() => setSelectedAch(null)}
           onToggle={(updated) => {
             // The modal already patches unlock_id (the truth) and unlocked_at

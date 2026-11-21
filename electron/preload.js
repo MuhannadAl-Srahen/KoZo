@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('kozo', {
   // Bumped with every preload/IPC change. The renderer compares it to its own
   // copy (src/components/UpdateBanner.jsx) to spot a main process that is
   // older than the UI it is showing (a dev session that was never restarted).
-  rev: 41,
+  rev: 43,
   // Settings → Appearance → UI scale.
   ui: {
     // The saved look ({ appearance, accent }), read at once before the first render, so
@@ -60,6 +60,7 @@ contextBridge.exposeInMainWorld('kozo', {
       removeUnlock: (achievementId) => ipcRenderer.invoke('achievements:removeUnlock', achievementId),
       toggleManual: (achievementId) => ipcRenderer.invoke('achievements:toggleManual', achievementId),
       othersOnAccount: (gameId) => ipcRenderer.invoke('achievements:othersOnAccount', gameId),
+      progress: (gameId) => ipcRenderer.invoke('achievements:progress', gameId),
       claim: (gameId, achievementIds) => ipcRenderer.invoke('achievements:claim', gameId, achievementIds),
       autoImport: (gameId) => ipcRenderer.invoke('achievements:autoImport', gameId),
     },
@@ -190,6 +191,7 @@ contextBridge.exposeInMainWorld('kozo', {
       get: (period, includeHidden) => ipcRenderer.invoke('stats:get', period, includeHidden),
       dayActivity: (day, includeHidden) => ipcRenderer.invoke('stats:dayActivity', day, includeHidden),
       hourActivity: (hour, includeHidden) => ipcRenderer.invoke('stats:hourActivity', hour, includeHidden),
+      monthActivity: (month, includeHidden) => ipcRenderer.invoke('stats:monthActivity', month, includeHidden),
       xp: () => ipcRenderer.invoke('stats:xp'),
       xpHistory: (limit) => ipcRenderer.invoke('stats:xpHistory', limit),
       badges: () => ipcRenderer.invoke('stats:badges'),
@@ -234,6 +236,7 @@ contextBridge.exposeInMainWorld('kozo', {
       unseen: () => ipcRenderer.invoke('deals:unseen'),
       gamePrices: (appid) => ipcRenderer.invoke('deals:gamePrices', appid),
       setTarget: (appid, cents, meta) => ipcRenderer.invoke('deals:setTarget', appid, cents, meta),
+      alertAtLowest: (appid, meta) => ipcRenderer.invoke('deals:alertAtLowest', appid, meta),
       listState: (appid) => ipcRenderer.invoke('deals:listState', appid),
       removeFromList: (appid) => ipcRenderer.invoke('deals:removeFromList', appid),
     },

@@ -59,7 +59,7 @@ function getAchievementSyncMs(gameId) {
 // session-end sync still runs once (that's where a fixed setting is noticed).
 const PERMANENT_SYNC_REASONS = new Set([
   'private', 'private_profile', 'profile_not_found', 'invalid_key',
-  'no_stats_for_game', 'no_steam_id', 'no_steam_app_id', 'foreign_launcher',
+  'no_stats_for_game', 'no_steam_id', 'no_steam_app_id', 'foreign_launcher', 'no_launcher',
 ])
 const syncParked = new Map()   // gameId → reason
 

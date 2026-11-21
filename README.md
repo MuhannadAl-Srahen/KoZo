@@ -38,7 +38,7 @@ Track playtime, sessions and achievements for every game you play — including 
 
 ### 📊 Insights & profile
 - **Statistics** — playtime trends with an hourly 24-hour view, daily/monthly charts, and click-a-day (or hour) to focus it; playtime by game, longest sessions, recent unlocks.
-- **Profile, XP & levels** — earn XP from playtime, rare unlocks, day streaks and finished games; level up through tiers from Rookie to Mythic, with a customizable profile (avatar, banner, title, favorite-game showcase).
+- **Profile, XP & levels** — earn XP from playtime, rare unlocks, day streaks and finished games; a new title at every level from Rookie to Mythic, with a customizable profile (avatar, banner, title, favorite-game showcase).
 
 ### 🎨 The app itself
 - Runs quietly in the **system tray**, can **launch on startup**, and start minimized.

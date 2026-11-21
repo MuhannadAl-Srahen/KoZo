@@ -8,6 +8,7 @@ import Modal, { modalStyles as ms } from './ui/Modal'
 import { DriveBlockedHint } from './DriveSetupModal'
 import DriveOffer from './DriveOffer'
 import { fileUrl, timeAgo } from '../lib/utils'
+import { Skeleton } from './ui/Skeleton'
 import b from './BackupsTab.module.css'
 
 // Settings → Backups. KoZo finds every game's saves and backs them up before
@@ -56,10 +57,14 @@ export default function BackupsTab({ onManageSaves }) {
   const [offPcOpen, setOffPcOpen] = useState(false)
   const [getBackOpen, setGetBackOpen] = useState(false)
 
-  const loadCopy = () => api()?.backup?.copyStatus?.().then(r => { if (r?.ok) setCopy(r.data) })
+  // Whether the copy folder and Google Drive have answered once (even with an error): until then
+  // "Off this PC" doesn't say "Not set up", which it said for a moment to people who had set it up.
+  const [placesKnown, setPlacesKnown] = useState({ copy: false, drive: false })
+  const known = (k) => () => setPlacesKnown(p => (p[k] ? p : { ...p, [k]: true }))
+  const loadCopy = () => Promise.resolve(api()?.backup?.copyStatus?.()).then(r => { if (r?.ok) setCopy(r.data) }).catch(() => {}).finally(known('copy'))
   const loadOverview = () => api()?.saves?.overview?.().then(r => { if (r?.ok) setOverview(r.data) })
   const loadStorage = () => api()?.saves?.storage?.().then(r => { if (r?.ok) setStorage(r.data) })
-  const loadDrive = () => api()?.drive?.status?.().then(r => { if (r?.ok) setDrive(r.data) })
+  const loadDrive = () => Promise.resolve(api()?.drive?.status?.()).then(r => { if (r?.ok) setDrive(r.data) }).catch(() => {}).finally(known('drive'))
 
   useEffect(() => {
     loadOverview(); loadStorage(); loadDrive(); loadCopy()
@@ -183,9 +188,10 @@ export default function BackupsTab({ onManageSaves }) {
       <section className={`${b.card} ${b.status} ${warn ? b.statusWarn : ''}`}>
         <div className={b.statusTop}>
           <span className={b.shield}>{warn ? <IconAlertTriangle size={26} /> : backedUp.length ? <IconShieldCheck size={26} /> : <IconShield size={26} />}</span>
+          {/* Until the saves are counted the card doesn't say "Ready": it may not be. */}
           <div className={b.statusText}>
-            <h3>{title}</h3>
-            <p>{sub}</p>
+            {overview || !auto || lowSpace ? <><h3>{title}</h3><p>{sub}</p></>
+              : <><Skeleton w={170} h={20} /><Skeleton w="min(360px, 90%)" h={12} style={{ marginTop: 8 }} /></>}
           </div>
           <Switch on={auto} onChange={toggleAuto} label="Back up automatically" />
         </div>
@@ -195,14 +201,24 @@ export default function BackupsTab({ onManageSaves }) {
             <span className={b.placeIcon}><IconDeviceDesktop size={17} /></span>
             <div className={b.placeText}>
               <strong>This PC</strong>
-              <span title={storage?.base || ''}>{storage ? `${fmtSize(storage.bytes)} used${storage.free != null ? `, ${fmtSize(storage.free)} free` : ''}` : '…'}</span>
+              {storage ? <span title={storage.base || ''}>{`${fmtSize(storage.bytes)} used${storage.free != null ? `, ${fmtSize(storage.free)} free` : ''}`}</span>
+                : <Skeleton w={150} h={11} style={{ marginTop: 3 }} />}
             </div>
             <button type="button" className={b.btn} onClick={() => storage?.base && api()?.shell?.openPath?.(storage.base)} disabled={!storage}>
               <IconExternalLink size={14} /> Open
             </button>
           </div>
 
-          {!copy?.configured && !drive?.connected && (
+          {!(placesKnown.copy && placesKnown.drive) && !copy?.configured && !drive?.connected && (
+            <div className={b.place}>
+              <span className={b.placeIcon}><IconCloudUp size={17} /></span>
+              <div className={b.placeText}>
+                <strong>Off this PC</strong>
+                <Skeleton w={250} h={11} style={{ marginTop: 3 }} />
+              </div>
+            </div>
+          )}
+          {placesKnown.copy && placesKnown.drive && !copy?.configured && !drive?.connected && (
             <div className={`${b.place} ${drive?.error === 'signed_out' ? b.placeWarn : ''}`}>
               <span className={b.placeIcon}><IconCloudUp size={17} /></span>
               <div className={b.placeText}>

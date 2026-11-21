@@ -1,4 +1,5 @@
 .body {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -52,6 +53,7 @@
 
 /* ── Description ── */
 .desc {
+  overflow-wrap: anywhere;
   font-size: var(--fs-md);
   color: var(--text-secondary);
   text-align: center;
@@ -87,8 +89,10 @@
   color: var(--text-muted);
 }
 
+/* Steam guides, YouTube, Google: one even row (a third button alone on its own line looked off). */
 .howToActions {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   gap: var(--sp-8);
 }
 
@@ -97,7 +101,7 @@
 }
 
 .howToBtn.howToBtn {
-  flex: 1;
+  min-width: 0;
   padding: var(--sp-6) var(--sp-10);
   background: var(--surface-2);
 }
@@ -176,3 +180,30 @@
 .btnLock {
   composes: btn btnSecondary btnMd from '../../styles/controls.module.css';
 }
+
+/* ── Progress (a counted achievement: "31 of 50") ── */
+.progress {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+.progressHead {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+.progressNum { color: var(--text-primary); text-transform: none; letter-spacing: 0; }
+.progressBar {
+  display: block;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.progressBar > span { display: block; height: 100%; border-radius: inherit; background: var(--a); }
+.progressNote { font-size: var(--fs-xs); color: var(--text-muted); }

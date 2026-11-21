@@ -44,6 +44,31 @@ html[data-motion="soft"] .app-main [data-gpnav]:nth-child(8),  html[data-motion=
 html[data-motion="soft"] .app-main [data-gpnav]:nth-child(9),  html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(9)  { animation-delay: 115ms; }
 html[data-motion="soft"] .app-main [data-gpnav]:nth-child(10), html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(10) { animation-delay: 120ms; }
 html[data-motion="soft"] .app-main [data-gpnav]:nth-child(n+11), html[data-motion="heavy"] .app-main [data-gpnav]:nth-child(n+11) { animation-delay: 120ms; }
+/* Only the first 30 come in on their own: the rest are below the window, and with a big Library
+   every card started its own animation on each visit (the maker: "when I'm switching between the
+   tabs there is some kind of lag"). They still come in with the page. */
+html[data-motion] .app-main [data-gpnav]:nth-child(n+31) { animation: none; }
+/* data-still: a box whose targets don't come in one by one (the Profile heatmap's 364 days). */
+html[data-motion] .app-main [data-still] [data-gpnav] { animation: none; }
+
+/* ── Cards that give their own place: data-rise, with --i = 0, 1, 2… (the wait stops at the 8th) ──
+   For cards that aren't controller targets, or whose place isn't their order among siblings
+   (Upcoming's day boxes come in as a wave across the weeks). Upcoming, Activity and Profile had
+   no entrance at all and only appeared (the maker: "why is there no animation in Upcoming").
+   data-rise="panel" is for wide boxes: they slide up without the scale, which looked big there. */
+@keyframes kzPanelHv { from { opacity: 0; transform: translateY(18px); } }
+html[data-motion="soft"] .app-main [data-rise] { animation: kzRiseSoft 0.26s var(--ease-out) backwards; animation-delay: calc(min(var(--i, 0), 8) * 15ms); }
+html[data-motion="heavy"] .app-main [data-rise] { animation: kzRise 0.34s var(--ease-spring) backwards; animation-delay: calc(min(var(--i, 0), 8) * 15ms); }
+html[data-motion="heavy"] .app-main [data-rise="panel"] { animation-name: kzPanelHv; animation-timing-function: var(--ease-out); }
+/* A view switched in place (Upcoming's Steam, TBA, Tracked) fades in; its cards rise on their own. */
+html[data-motion="soft"] .app-main [data-fade], html[data-motion="heavy"] .app-main [data-fade] { animation: kzFade 0.2s ease backwards; }
+/* Bars grow from their base: data-grow="y" for columns, "x" for rows, --i spreads them a little. */
+@keyframes kzGrowY { from { transform: scaleY(0); } }
+@keyframes kzGrowX { from { transform: scaleX(0); } }
+.app-main [data-grow="y"] { transform-origin: 50% 100%; }
+.app-main [data-grow="x"] { transform-origin: 0 50%; }
+html[data-motion="soft"] .app-main [data-grow="y"], html[data-motion="heavy"] .app-main [data-grow="y"] { animation: kzGrowY 0.4s var(--ease-out) backwards; animation-delay: calc(min(var(--i, 0), 30) * 4ms); }
+html[data-motion="soft"] .app-main [data-grow="x"], html[data-motion="heavy"] .app-main [data-grow="x"] { animation: kzGrowX 0.45s var(--ease-out) backwards; animation-delay: calc(min(var(--i, 0), 12) * 20ms); }
 
 /* ── Dialogs and menus ── */
 html[data-motion="heavy"] [role="dialog"] { animation: kzPopHv 0.38s var(--ease-spring) backwards; }

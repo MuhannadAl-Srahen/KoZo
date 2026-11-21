@@ -60,3 +60,23 @@
   font-size: var(--fs-sm); color: var(--text-secondary); font-variant-numeric: tabular-nums;
 }
 .lowest svg { color: var(--success); flex-shrink: 0; }
+
+/* "Cheapest now: $9.99 at GOG": another store under your Steam price. */
+.cheaper {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  width: 100%;
+  margin-bottom: var(--sp-8);
+  padding: var(--sp-8) var(--sp-12);
+  border: 1px solid color-mix(in srgb, var(--status-finished, #4ade80) 40%, transparent);
+  border-radius: var(--r-input);
+  background: color-mix(in srgb, var(--status-finished, #4ade80) 12%, transparent);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.cheaper svg { flex-shrink: 0; color: var(--status-finished, #4ade80); }
+.cheaper:hover { background: color-mix(in srgb, var(--status-finished, #4ade80) 20%, transparent); }

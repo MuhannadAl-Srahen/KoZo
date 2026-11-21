@@ -3,9 +3,9 @@ import {
   IconTrophy, IconClock, IconHistory, IconDeviceGamepad2, IconFlame, IconLoader2, IconX,
   IconChartBar, IconEye, IconEyeOff,
 } from '@tabler/icons-react'
-import { formatDate, formatPlaytime, localDayKey } from '../lib/utils'
+import { formatDate, formatPlaytime, localDayKey, fmtDate } from '../lib/utils'
 import EmptyState from '../components/ui/EmptyState'
-import { Skeleton, PanelSkeleton } from '../components/ui/Skeleton'
+import { Skeleton, PanelSkeleton, ChartSkeleton } from '../components/ui/Skeleton'
 import s from './Statistics.module.css'
 
 const PERIODS = [
@@ -78,19 +78,20 @@ const LABEL_EVERY = { '30d': 5 }
 
 function prettyDay(key) {
   const d = new Date(key + 'T12:00:00')
-  return `${DOW[d.getDay()]}, ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
+  return `${DOW[d.getDay()]}, ${fmtDate(d, { month: 'short', day: 'numeric' })}`
 }
 function prettyShort(key) {
   const d = new Date(key + 'T12:00:00')
-  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+  return fmtDate(d, { weekday: 'short', month: 'short', day: 'numeric' })
 }
 
 // Daily bars (7d / 30d / all). Clicking a bar selects that day so the sections
 // below re-scope to it. Hover/selection highlight the BAR itself, not a box.
 // Label mode is by PERIOD so it's predictable: 7d → 2-letter weekday on every bar,
 // 30d → 1-letter weekday every 5th bar, all → month abbrev per month bar.
-function DailyChart({ data, period, selectedDay, onSelectDay }) {
-  // All-time → monthly bars (display-only) so the axis shows month names.
+function DailyChart({ data, period, selectedDay, onSelectDay, selectedMonth, onSelectMonth }) {
+  // All-time → monthly bars so the axis shows month names. A month is clickable like a day
+  // (the maker wanted the bars clickable like the game page's): the sections below focus on it.
   if (period === 'all') {
     const months = buildMonths(data)
     const maxSec  = Math.max(...months.map(m => m.seconds), 1)
@@ -98,19 +99,21 @@ function DailyChart({ data, period, selectedDay, onSelectDay }) {
     return (
       <div className={s.chartWrap}>
         <div className={s.chart}>
-          {months.map(m => {
+          {months.map((m, mi) => {
             const pct     = m.seconds > 0 ? Math.max((m.seconds / maxSec) * 100, 6) : 0
             const hasData = m.seconds > 0
             const isNow   = m.key === curKey
+            const isSel   = m.key === selectedMonth
             return (
-              <div key={m.key} className={`${s.chartCol} ${s.chartColStatic}`}
-                title={`${MONTHS[m.monthIdx]} ${m.year}: ${m.seconds ? formatPlaytime(m.seconds) : 'No activity'}`}>
+              <button type="button" key={m.key} className={s.chartCol} aria-pressed={isSel} data-stats-month={m.key}
+                title={`${MONTHS[m.monthIdx]} ${m.year}: ${m.seconds ? formatPlaytime(m.seconds) : 'No activity'}`}
+                onClick={() => onSelectMonth(isSel ? null : m.key)}>
                 <div className={s.chartBarArea}>
-                  <div className={[s.chartBar, hasData ? '' : s.chartBarEmpty, isNow ? s.chartBarToday : ''].join(' ')}
-                    style={{ height: hasData ? `${pct}%` : undefined }} />
+                  <div className={[s.chartBar, hasData ? '' : s.chartBarEmpty, isNow ? s.chartBarToday : '', isSel ? s.chartBarSel : ''].join(' ')}
+                    data-grow="y" style={{ height: hasData ? `${pct}%` : undefined, '--i': mi }} />
                 </div>
-                <div className={`${s.chartLabel} ${isNow ? s.chartLabelToday : ''}`}>{MONTHS[m.monthIdx]}</div>
-              </div>
+                <div className={`${s.chartLabel} ${isNow ? s.chartLabelToday : ''} ${isSel ? s.chartLabelSel : ''}`}>{MONTHS[m.monthIdx]}</div>
+              </button>
             )
           })}
         </div>
@@ -158,7 +161,7 @@ function DailyChart({ data, period, selectedDay, onSelectDay }) {
                     isToday ? s.chartBarToday : '',
                     isSel ? s.chartBarSel : '',
                   ].join(' ')}
-                  style={{ height: hasData ? `${pct}%` : undefined }}
+                  data-grow="y" style={{ height: hasData ? `${pct}%` : undefined, '--i': idx }}
                 />
               </div>
               <div className={`${s.chartLabel} ${isToday ? s.chartLabelToday : ''} ${isSel ? s.chartLabelSel : ''}`}>
@@ -211,7 +214,7 @@ function HourlyChart({ data, selectedHour, onSelectHour }) {
               <div className={s.chartBarArea}>
                 <div
                   className={[s.chartBar, hasData ? '' : s.chartBarEmpty, isNow ? s.chartBarToday : '', isSel ? s.chartBarSel : ''].join(' ')}
-                  style={{ height: hasData ? `${pct}%` : undefined }}
+                  data-grow="y" style={{ height: hasData ? `${pct}%` : undefined, '--i': h.hour }}
                 />
               </div>
               <div className={`${s.chartLabel} ${isNow ? s.chartLabelToday : ''} ${isSel ? s.chartLabelSel : ''}`}>
@@ -246,7 +249,7 @@ function StatsGhost() {
 
         <div className={s.section}>
           <div className={s.ghostHead}><Skeleton w={110} h={10} /></div>
-          <Skeleton h={140} r="var(--r-input)" />
+          <ChartSkeleton bars={24} height={140} />
         </div>
 
         <div className={s.section}>
@@ -280,6 +283,9 @@ export default function Statistics() {
   const [dayDetail, setDayDetail] = useState(null)
   const [dayLoading, setDayLoading] = useState(false)
   const [selectedHour, setSelectedHour] = useState(null)   // 24h view
+  const [selectedMonth, setSelectedMonth] = useState(null) // All time view: 'YYYY-MM'
+  const [monthDetail, setMonthDetail] = useState(null)
+  const [monthLoading, setMonthLoading] = useState(false)
   const [hourDetail, setHourDetail] = useState(null)
   const [hourLoading, setHourLoading] = useState(false)
   // Games hidden from the Library are excluded by default so these numbers
@@ -329,6 +335,21 @@ export default function Statistics() {
     return () => { cancelled = true }
   }, [selectedDay, includeHidden])
 
+  // The same for a month bar (All time).
+  useEffect(() => {
+    if (!selectedMonth) { setMonthDetail(null); return }
+    let cancelled = false
+    setMonthLoading(true)
+    Promise.resolve(window.kozo?.api?.stats?.monthActivity?.(selectedMonth, includeHidden))
+      .then(res => {
+        if (cancelled) return
+        setMonthDetail(res?.ok ? res.data : EMPTY_DETAIL)
+        setMonthLoading(false)
+      })
+      .catch(() => { if (!cancelled) { setMonthDetail(EMPTY_DETAIL); setMonthLoading(false) } })
+    return () => { cancelled = true }
+  }, [selectedMonth, includeHidden])
+
   // Fetch the per-hour breakdown whenever an hour bar is selected (24h view).
   useEffect(() => {
     if (selectedHour == null) { setHourDetail(null); return }
@@ -344,7 +365,7 @@ export default function Statistics() {
     return () => { cancelled = true }
   }, [selectedHour, includeHidden])
 
-  function handlePeriod(p) { setPeriod(p); setSelectedDay(null); setSelectedHour(null); load(p) }
+  function handlePeriod(p) { setPeriod(p); setSelectedDay(null); setSelectedHour(null); setSelectedMonth(null); load(p) }
 
   const playtime    = stats?.playtime?.seconds ?? 0
   const sessions    = stats?.sessionCount?.count ?? 0
@@ -365,11 +386,14 @@ export default function Statistics() {
   // scroll panel — the data lands in the sections the user already reads.
   const dayScoped    = !!selectedDay && period !== '1d'
   const hourScoped   = period === '1d' && selectedHour != null
-  const scoped       = dayScoped || hourScoped
-  const detail       = dayScoped ? dayDetail : hourDetail
-  const scopeLoadingNow = scoped && ((dayScoped ? dayLoading : hourLoading) || !detail)
+  const monthScoped  = period === 'all' && !!selectedMonth
+  const scoped       = dayScoped || hourScoped || monthScoped
+  const detail       = dayScoped ? dayDetail : monthScoped ? monthDetail : hourDetail
+  const scopeLoadingNow = scoped && ((dayScoped ? dayLoading : monthScoped ? monthLoading : hourLoading) || !detail)
+  const monthName = (key) => fmtDate(new Date(`${key}-15T12:00:00`), { month: 'long', year: 'numeric' })
   const scopeSuffix  = dayScoped
     ? ` · ${prettyShort(selectedDay)}`
+    : monthScoped ? ` · ${monthName(selectedMonth)}`
     : hourScoped ? ` · ${fmtHour(selectedHour)} to ${fmtHour((selectedHour + 1) % 24)}` : ''
   const topGames  = scoped ? (detail?.games || [])        : (stats?.topGames || [])
   const recentAch = scoped ? (detail?.achievements || []) : (stats?.recentAchievements || [])
@@ -418,10 +442,10 @@ export default function Statistics() {
           <div className={s.inner}>
             {/* Highlight row */}
             <div className={s.highlights}>
-              {HIGHLIGHTS.map(({ Icon, label, value, color }) => (
+              {HIGHLIGHTS.map(({ Icon, label, value, color }, i) => (
                 // --hl-color lives on the CARD so the icon tile, the value and
                 // the hover border all derive from the same hue.
-                <div key={label} className={s.hlCard} style={{ '--hl-color': color }}>
+                <div key={label} className={s.hlCard} data-rise="" style={{ '--hl-color': color, '--i': i }}>
                   <div className={s.hlIcon}>
                     <Icon size={18} stroke={1.6} />
                   </div>
@@ -434,9 +458,18 @@ export default function Statistics() {
             </div>
 
             {/* Activity chart — hourly for 24h, daily otherwise */}
-            <div className={s.section}>
+            <div className={s.section} data-rise="panel" style={{ '--i': 3 }}>
               <div className={s.sectionHead}>
-                <div className={s.sectionTitle}>{period === '1d' ? "Today's Activity" : 'Daily Activity'}</div>
+                <div className={s.sectionTitle}>{period === '1d' ? "Today's Activity" : period === 'all' ? 'Monthly Activity' : 'Daily Activity'}</div>
+                {monthScoped && (
+                  <button type="button" className={s.dayPill} onClick={() => setSelectedMonth(null)} data-stats-month-pill>
+                    {monthName(selectedMonth)}{monthDetail?.totalSeconds ? ` · ${formatPlaytime(monthDetail.totalSeconds)}` : ''}
+                    <IconX size={12} stroke={2.2} />
+                  </button>
+                )}
+                {period === 'all' && !monthScoped && (
+                  <span className={s.sectionHint}>Click a month to focus it</span>
+                )}
                 {dayScoped && (
                   <button type="button" className={s.dayPill} onClick={() => setSelectedDay(null)}>
                     {prettyDay(selectedDay)}
@@ -463,11 +496,13 @@ export default function Statistics() {
                     period={period}
                     selectedDay={selectedDay}
                     onSelectDay={setSelectedDay}
+                    selectedMonth={selectedMonth}
+                    onSelectMonth={setSelectedMonth}
                   />}
             </div>
 
             {/* Playtime by Game — full width with rank + bar combined */}
-            <div className={s.section}>
+            <div className={s.section} data-rise="panel" style={{ '--i': 4 }}>
               <div className={s.sectionTitle}>Playtime by Game{scopeSuffix}</div>
               {scopeLoadingNow
                 ? <PanelSkeleton lines={5} />
@@ -490,7 +525,7 @@ export default function Statistics() {
                                 <span className={`${s.hbarTime} ${i === 0 ? s.hbarTimeTop : ''}`}>{formatPlaytime(g.seconds)}</span>
                               </div>
                               <div className={s.hbarTrack}>
-                                <div className={s.hbarFill} style={{ width: `${(g.seconds / max) * 100}%` }} />
+                                <div className={s.hbarFill} data-grow="x" style={{ width: `${(g.seconds / max) * 100}%`, '--i': i }} />
                               </div>
                             </div>
                           ))}
@@ -502,7 +537,7 @@ export default function Statistics() {
 
             {/* Achievements + Sessions — scoped to the selected day, else the period */}
             <div className={s.bottomGrid}>
-              <div className={s.section}>
+              <div className={s.section} data-rise="panel" style={{ '--i': 5 }}>
                 <div className={s.sectionTitle}>{scoped ? 'Achievements Unlocked' : 'Recent Achievements'}{scopeSuffix}</div>
                 {scopeLoadingNow
                   ? <PanelSkeleton lines={4} />
@@ -533,7 +568,7 @@ export default function Statistics() {
                 }
               </div>
 
-              <div className={s.section}>
+              <div className={s.section} data-rise="panel" style={{ '--i': 6 }}>
                 <div className={s.sectionTitle}>Longest Sessions{scopeSuffix}</div>
                 {scopeLoadingNow
                   ? <PanelSkeleton lines={4} />

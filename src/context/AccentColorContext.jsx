@@ -84,8 +84,27 @@ export function applyAccent(rawHex) {
   // The dark themes' accent, for what stays dark in Light (customize.css .kz-dark).
   root.style.setProperty('--a-bright', ensureMinContrast(rawHex))
   root.style.setProperty('--a', hex)
-  root.style.setProperty('--ad', hexToRgba(hex, 0.10))
-  root.style.setProperty('--ab', hexToRgba(hex, 0.22))
+  // A white or near-white accent (the maker's is #ffffff) is the same color as the text, so an
+  // active button (accent text on a 10% tint) looked just like an inactive one. Its tint and
+  // border are made stronger, and html[data-accent-pale] lets the styles mark active by more
+  // than color (customize.css).
+  const pale = isPale(hex)
+  root.style.setProperty('--ad', hexToRgba(hex, pale ? 0.22 : 0.10))
+  root.style.setProperty('--ab', hexToRgba(hex, pale ? 0.45 : 0.22))
+  if (pale) root.setAttribute('data-accent-pale', '')
+  else root.removeAttribute('data-accent-pale')
+}
+
+// Pure: white, pale grey or a washed-out pastel: saturation under 15%, lightness over 80%.
+export function isPale(hex) {
+  if (!/^#[0-9A-Fa-f]{6}$/.test(hex)) return false
+  const r = parseInt(hex.slice(1, 3), 16) / 255
+  const g = parseInt(hex.slice(3, 5), 16) / 255
+  const b = parseInt(hex.slice(5, 7), 16) / 255
+  const max = Math.max(r, g, b), min = Math.min(r, g, b)
+  const l = (max + min) / 2
+  const sat = max === min ? 0 : (l > 0.5 ? (max - min) / (2 - max - min) : (max - min) / (max + min))
+  return l > 0.8 && sat < 0.15
 }
 
 function hexHue(hex) {

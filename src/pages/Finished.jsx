@@ -13,6 +13,7 @@ import ContextMenu from '../components/ui/ContextMenu'
 import InfoModal from '../components/ui/InfoModal'
 import useCardZoom from '../lib/useCardZoom'
 import CardSizeSlider from '../components/ui/CardSizeSlider'
+import { Skeleton, CardSkeletonGrid } from '../components/ui/Skeleton'
 import { ratingColor } from '../components/ui/RatingPicker'
 import s from './Finished.module.css'
 
@@ -171,6 +172,13 @@ export default function Finished() {
       </div>
 
       <div className={s.content}>
+        {/* Loading: a year heading and cover cards, where the real ones go (it was a blank page). */}
+        {games === null && (
+          <section className={s.section}>
+            <div className={s.sectionHead}><Skeleton w={64} h={20} /></div>
+            <CardSkeletonGrid gridClassName={s.grid} style={zoomStyle} count={8} />
+          </section>
+        )}
         {games && games.length === 0 && (
           <EmptyState Icon={IconFlag} title="No finished games yet"
             desc="Mark a game as Finished in the Library or the Game List and it shows up here with your rating." />

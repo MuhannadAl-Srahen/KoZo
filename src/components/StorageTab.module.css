@@ -37,3 +37,16 @@
   color: var(--text-secondary); font: inherit; font-size: var(--fs-xs); cursor: pointer;
 }
 .open:hover { color: var(--a); border-color: color-mix(in srgb, var(--a) 50%, var(--neutral-border)); }
+
+/* ── Motion (Settings → Appearance → Animations, styles/motion.css) ──
+   Each disk slides up, one after another, and its bar fills from the left. */
+@keyframes stUp { from { opacity: 0; transform: translateY(10px); } }
+@keyframes stUpHv { from { opacity: 0; transform: translateY(18px); } }
+@keyframes stFill { from { transform: scaleX(0); } }
+:global(html[data-motion="soft"]) .drive { animation: stUp 0.24s var(--ease-out) backwards; }
+:global(html[data-motion="heavy"]) .drive { animation: stUpHv 0.3s var(--ease-out) backwards; }
+:global(html[data-motion]) .drive:nth-of-type(2) { animation-delay: 30ms; }
+:global(html[data-motion]) .drive:nth-of-type(3) { animation-delay: 60ms; }
+:global(html[data-motion]) .drive:nth-of-type(n+4) { animation-delay: 90ms; }
+.bar { transform-origin: 0 50%; }
+:global(html[data-motion="soft"]) .bar, :global(html[data-motion="heavy"]) .bar { animation: stFill 0.45s var(--ease-out) 0.08s backwards; }

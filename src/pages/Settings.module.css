@@ -804,6 +804,14 @@
   background: var(--surface-2);
 }
 .navRow + .navRow { border-top: 1px solid var(--border-subtle); }
+/* The sidebar's group titles, over the tabs in each group (the same look as in the sidebar). */
+.navGroupHead {
+  padding: var(--sp-10) var(--sp-12) var(--sp-6);
+  font-size: var(--fs-2xs); font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--text-muted); background: var(--surface-1);
+}
+.navRow + .navGroupHead, .navGroupEmpty + .navGroupHead { border-top: 1px solid var(--border); }
+.navGroupEmpty { padding: var(--sp-8) var(--sp-12); font-size: var(--fs-sm); color: var(--text-muted); background: var(--surface-2); }
 .navRowHidden { color: var(--text-muted); }
 .navRowLabel { flex: 1; font-size: var(--fs-md); }
 .navRowBtn {
@@ -1132,3 +1140,22 @@
 .connActions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .advField { display: flex; flex-direction: column; gap: 6px; margin-top: var(--sp-12); }
 .advLabel { font-size: var(--fs-xs); font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.06em; }
+
+/* A white or pale accent is the text's own color: the chosen one also gets a clear fill, a thin
+   outline and bold text, or it looked like the rest (AccentColorContext isPale). */
+:global(html[data-accent-pale]) .chipToggleOn {
+  background: var(--ad);
+  box-shadow: inset 0 0 0 1px var(--ab);
+  font-weight: 700;
+}
+
+/* ── Motion (Settings → Appearance → Animations, styles/motion.css) ──
+   A tab's sections slide up one after another, on opening Settings and on every tab; before,
+   a tab's content only appeared. Short, like the page change. */
+@keyframes setUp { from { opacity: 0; transform: translateY(10px); } }
+@keyframes setUpHv { from { opacity: 0; transform: translateY(18px); } }
+:global(html[data-motion="soft"]) .section { animation: setUp 0.24s var(--ease-out) backwards; }
+:global(html[data-motion="heavy"]) .section { animation: setUpHv 0.3s var(--ease-out) backwards; }
+:global(html[data-motion]) .section:nth-of-type(2) { animation-delay: 30ms; }
+:global(html[data-motion]) .section:nth-of-type(3) { animation-delay: 60ms; }
+:global(html[data-motion]) .section:nth-of-type(n+4) { animation-delay: 90ms; }

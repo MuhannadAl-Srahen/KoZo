@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { IconFolder, IconLoader2, IconRefresh, IconDeviceDesktop } from '@tabler/icons-react'
+import { Skeleton, widthAt } from './ui/Skeleton'
 import s from './StorageTab.module.css'
 
 // Settings > Data > Storage: each disk (used and free), and the games on it by size
@@ -46,7 +47,28 @@ export default function StorageTab() {
           </button>
         )}
       </div>
-      {!data && <div className={s.muted}>Loading…</div>}
+      {/* Loading: disks with their bar and games, shimmering (it said "Loading…"). */}
+      {!data && [4, 2].map((count, di) => (
+        <section key={di} className={s.drive} aria-busy="true" aria-label="Loading">
+          <div className={s.driveHead}>
+            <IconDeviceDesktop size={16} stroke={1.6} />
+            <Skeleton w={26} h={14} />
+            <Skeleton w={150} h={11} style={{ marginLeft: 'auto' }} />
+          </div>
+          <Skeleton w="100%" h={10} r={999} />
+          <div className={s.legend}><Skeleton w={90} h={10} /><Skeleton w={110} h={10} /><Skeleton w={80} h={10} /></div>
+          <ul className={s.list}>
+            {Array.from({ length: count }, (_, i) => (
+              <li key={i} className={s.row}>
+                <Skeleton w={widthAt(['48%', '36%', '56%', '30%'], i)} h={12} />
+                <Skeleton w={widthAt(['90%', '60%', '40%', '25%'], i)} h={6} r={999} />
+                <Skeleton w={56} h={12} style={{ justifySelf: 'end' }} />
+                <Skeleton w={96} h={26} r={13} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
       {data && !drives.length && <div className={s.muted}>No games with a folder on this PC yet.</div>}
       {drives.map(d => {
         const used = Math.max(0, d.size - d.free)
@@ -76,12 +98,16 @@ export default function StorageTab() {
               <ul className={s.list}>
                 {d.games.map(g => (
                   <li key={g.id} className={s.row}>
-                    <span className={s.name} title={g.install_path}>{g.name}</span>
+                    <span className={s.name} title={g.root || g.install_path}>{g.name}</span>
+                    {g.inside ? (
+                      <span className={s.size} data-storage-inside>In {g.inside}'s folder</span>
+                    ) : <>
                     {g.size != null && d.gamesBytes > 0 && (
-                      <span className={s.share}><span style={{ width: `${Math.max(2, (g.size / Math.max(...d.games.map(x => x.size || 0), 1)) * 100)}%` }} /></span>
+                      <span className={s.share}><span style={{ width: `${Math.max(2, (g.size / Math.max(...d.games.filter(x => !x.inside).map(x => x.size || 0), 1)) * 100)}%` }} /></span>
                     )}
                     <span className={s.size}>{g.size != null ? bytesText(g.size) : 'Counting…'}</span>
-                    <button type="button" className={s.open} onClick={() => window.kozo?.api?.shell?.openPath?.(g.install_path)} title="Open the game's folder">
+                    </>}
+                    <button type="button" className={s.open} onClick={() => window.kozo?.api?.shell?.openPath?.(g.root || g.install_path)} title="Open the game's folder">
                       <IconFolder size={14} /> Open folder
                     </button>
                   </li>

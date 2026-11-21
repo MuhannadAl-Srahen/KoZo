@@ -77,3 +77,11 @@
 }
 .addBtn:hover { border-color: var(--ab); color: var(--a); }
 .added { display: inline-flex; align-items: center; gap: 6px; color: var(--success); font-size: var(--fs-sm); font-weight: 700; }
+
+/* A white or pale accent is the text's own color: the chosen one also gets a clear fill, a thin
+   outline and bold text, or it looked like the rest (AccentColorContext isPale). */
+:global(html[data-accent-pale]) .rowOn {
+  background: var(--ad);
+  box-shadow: inset 0 0 0 1px var(--ab);
+  font-weight: 700;
+}

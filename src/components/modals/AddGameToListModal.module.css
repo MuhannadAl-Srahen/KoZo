@@ -54,3 +54,11 @@
 .matchText { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .matchText small { font-size: var(--fs-2xs); color: var(--text-muted); }
 .matchBtns { display: flex; gap: 8px; align-self: flex-end; }
+
+/* A white or pale accent is the text's own color: the chosen one also gets a clear fill, a thin
+   outline and bold text, or it looked like the rest (AccentColorContext isPale). */
+:global(html[data-accent-pale]) .pickRowOn {
+  background: var(--ad);
+  box-shadow: inset 0 0 0 1px var(--ab);
+  font-weight: 700;
+}

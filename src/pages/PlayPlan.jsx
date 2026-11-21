@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   IconCalendarEvent, IconPlus, IconSearch, IconCalendarOff, IconCheck, IconChevronLeft, IconChevronRight,
   IconPlayerPlayFilled, IconListCheck, IconDeviceGamepad2, IconFlag, IconStarFilled, IconClock,
@@ -18,6 +19,7 @@ import RateGameModal from '../components/modals/RateGameModal'
 import useCardZoom from '../lib/useCardZoom'
 import SearchableSelect from '../components/ui/SearchableSelect'
 import { ratingColor } from '../components/ui/RatingPicker'
+import { Skeleton, widthAt } from '../components/ui/Skeleton'
 import s from './PlayPlan.module.css'
 
 // Play Plan: what you mean to play, month by month, in six views (saved per
@@ -436,7 +438,9 @@ function AddToMonthModal({ month, onClose, onAdded }) {
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search your Game List" autoFocus />
       </div>
       <div className={s.pickList}>
-        {items === null && <div className={s.muted}>Loading…</div>}
+        {items === null && [0, 1, 2, 3, 4].map(i => (
+          <div key={i} className={s.skPick} aria-hidden="true"><Skeleton w={30} h={45} /><Skeleton w={widthAt(['52%', '40%', '60%'], i)} h={13} /></div>
+        ))}
         {items && !shown.length && <div className={s.muted}>No unplanned games match.</div>}
         {shown.map(i => (
           <button key={i.id} type="button" className={`${s.pickRow} ${picked.has(i.id) ? s.pickRowOn : ''}`} onClick={() => toggle(i.id)}>
@@ -453,17 +457,18 @@ function AddToMonthModal({ month, onClose, onAdded }) {
 
 
 // Month header shared by the views: name, "This month", numbers, Add games.
-function MonthTitle({ m, model, isNow, onAdd, small }) {
+function MonthTitle({ m, model, isNow, onAdd, small, loading }) {
   return (
     <div className={`${s.mtitle} ${small ? s.mtitleSmall : ''}`}>
-      {!small && <Ring pct={model.pct} />}
+      {!small && (loading ? <Skeleton w={44} h={44} r="50%" /> : <Ring pct={model.pct} />)}
       <div className={s.mtitleText}>
         <span className={s.mname}>
           <span className={s.cap}>{formatMonthKey(m, 'long')}</span>
           {isNow && <span className={s.nowTag}>This month</span>}
         </span>
         <span className={s.mstats}>
-          {model.total
+          {loading ? <Skeleton w={120} h={11} />
+            : model.total
             ? <>{model.done} of {model.total} done{model.playedSec > 0 && <> · <IconClock size={12} /> {formatPlaytime(model.playedSec)}</>}</>
             : 'Nothing planned'}
         </span>
@@ -471,6 +476,78 @@ function MonthTitle({ m, model, isNow, onAdd, small }) {
       <button type="button" className={s.addBtn} onClick={() => onAdd(m)} title="Add games to this month">
         <IconPlus size={14} stroke={2} />{!small && ' Add'}
       </button>
+    </div>
+  )
+}
+
+// Loading: each view's own shape. Every month said "Nothing planned" and "Loading…" until its games
+// came in (the maker asked for better skeletons on every page).
+function SkLines({ i }) {
+  return (
+    <span className={s.skText}>
+      <Skeleton w={widthAt(['78%', '60%', '70%', '54%'], i)} h={13} />
+      <Skeleton w={widthAt(['46%', '36%', '52%'], i)} h={10} />
+    </span>
+  )
+}
+function PlanSkeleton({ kind, zoomStyle, count }) {
+  const busy = { 'aria-busy': 'true', 'aria-label': 'Loading' }
+  const n = (most, fallback) => Array.from({ length: Math.min(most, count || fallback) }, (_, i) => i)
+  if (kind === 'posters') {
+    return (
+      <div className={s.posterGrid} style={zoomStyle} {...busy}>
+        {n(6, 5).map(i => <div key={i} className={s.skPoster}><Skeleton h={null} className={s.skPosterArt} /><SkLines i={i} /></div>)}
+      </div>
+    )
+  }
+  if (kind === 'mini') {
+    return <div className={s.miniList} {...busy}>{n(4, 3).map(i => <div key={i} className={s.skMini}><Skeleton w={34} h={51} /><SkLines i={i} /></div>)}</div>
+  }
+  if (kind === 'wall') {
+    return (
+      <div className={s.wlGrid} {...busy}>
+        {['big', '', '', 'small', 'small', ''].slice(0, Math.min(6, count || 6)).map((k, i) => <Skeleton key={i} h={null} className={`${s.skTile} ${k === 'big' ? s.skTileBig : k === 'small' ? s.skTileSmall : ''}`} />)}
+      </div>
+    )
+  }
+  if (kind === 'list') {
+    return (
+      <div className={s.ltable} {...busy}>
+        {n(6, 4).map(i => (
+          <div key={i} className={s.skLrow}>
+            <Skeleton w={34} h={51} />
+            <SkLines i={i} />
+            <Skeleton w={70} h={20} r={10} />
+            <Skeleton w={52} h={12} />
+          </div>
+        ))}
+      </div>
+    )
+  }
+  if (kind === 'focus') {
+    return (
+      <div className={s.fo} {...busy}>
+        <Skeleton h={null} className={s.skFocusHero} />
+        <aside className={s.foQueue}>
+          <div className={s.foQueueHead}><IconListCheck size={16} /> Up next</div>
+          <div className={s.qList}>
+            {[0, 1, 2, 3].map(i => <div key={i} className={s.skRowCard}><Skeleton w={38} h={57} /><SkLines i={i} /></div>)}
+          </div>
+        </aside>
+      </div>
+    )
+  }
+  // Board: the three columns with their names, cards shimmering in them.
+  return (
+    <div className={s.bd} {...busy}>
+      {LANES.map((lane, li) => (
+        <section key={lane.key} className={`${s.bdCol} ${s['bdCol_' + lane.key]}`}>
+          <div className={s.bdHead}><lane.Icon size={16} /> {lane.label}</div>
+          <div className={s.bdList}>
+            {Array.from({ length: [3, 1, 2][li] }, (_, i) => <div key={i} className={s.skRowCard}><Skeleton w={44} h={66} /><SkLines i={i + li} /></div>)}
+          </div>
+        </section>
+      ))}
     </div>
   )
 }
@@ -484,6 +561,7 @@ function EmptyMonth({ m, onAdd }) {
 }
 
 export default function PlayPlan() {
+  const navigate = useNavigate()
   const thisMonth = monthKey(new Date())
   const [view, setViewRaw] = useState(() => {
     try { const v = localStorage.getItem(VIEW_KEY); return VIEWS.some(x => x.key === v) ? v : 'timeline' } catch { return 'timeline' }
@@ -492,6 +570,7 @@ export default function PlayPlan() {
   // A new view starts at its top (and the controller ring with it).
   const setView = (v) => { setViewRaw(v); try { localStorage.setItem(VIEW_KEY, v) } catch {} ; contentRef.current?.scrollTo({ top: 0 }) }
   const [summary, setSummary] = useState({})   // 'YYYY-MM' → { total, done }
+  const [summaryLoaded, setSummaryLoaded] = useState(false)
   const [boards, setBoards] = useState({})     // 'YYYY-MM' → rows (play order)
   const [opened, setOpened] = useState([])     // earlier months shown on request
   const [rmStart, setRmStart] = useState(thisMonth)
@@ -526,6 +605,7 @@ export default function PlayPlan() {
   async function loadSummary() {
     const r = await window.kozo?.api?.gameList?.planSummary?.()
     if (r?.ok) setSummary(Object.fromEntries((r.data || []).map(m => [m.month, { total: m.total, done: m.done }])))
+    setSummaryLoaded(true)
   }
   async function loadBoard(m) {
     const r = await window.kozo?.api?.gameList?.planBoard?.(m, ...monthBounds(m))
@@ -619,8 +699,11 @@ export default function PlayPlan() {
     },
   })
 
+  // A game in the Library opens its own page (the maker's call); one that's only on the Game
+  // List opens its window. The menu's Edit still opens the window for either.
+  const openItem = (it) => { if (it?.game_id) navigate(`/game/${it.game_id}`); else setEdit(it) }
   const h = {
-    open: setEdit,
+    open: openItem,
     ctx: (e, it) => setCtx({ x: e.clientX, y: e.clientY, item: it }),
     play,
     start: (it) => setStatus(it, 'playing'),
@@ -661,6 +744,11 @@ export default function PlayPlan() {
     ]
   }
 
+  // Still loading this month's games? Once the counts are in, a month with nothing planned is
+  // simply empty (it showed five shimmering posters, then shrank to "Drop a game here").
+  const pending = (m) => boards[m] === undefined && !(summaryLoaded && !summary[m]?.total)
+  const planned = (m) => summary[m]?.total
+
   // ── Views ──
   function timeline() {
     return (
@@ -670,8 +758,8 @@ export default function PlayPlan() {
           return (
             <section key={m} className={`${s.tlMonth} ${m === thisMonth ? s.tlNow : ''} ${m < thisMonth ? s.tlPast : ''} ${dropOn === m ? s.isDrop : ''}`} {...monthDrop(m)}>
               <span className={s.tlDot} aria-hidden="true" />
-              <MonthTitle m={m} model={model} isNow={m === thisMonth} onAdd={openAdd} />
-              {boards[m] === undefined ? <div className={s.muted}>Loading…</div>
+              <MonthTitle m={m} model={model} isNow={m === thisMonth} onAdd={openAdd} loading={pending(m)} />
+              {pending(m) ? <PlanSkeleton kind="posters" zoomStyle={zoomStyle} count={planned(m)} />
                 : model.total ? (
                   <div className={s.posterGrid} style={zoomStyle} data-axis="x">
                     {model.order.map(i => <PlanPoster key={i.id} item={i} n={model.num(i)} maxSec={model.maxSec} dropMark={markOf(i)} h={h} />)}
@@ -709,7 +797,7 @@ export default function PlayPlan() {
     return (
       <>
         <MonthNav m={m} thisMonth={thisMonth} onChange={setOneMonth} summary={summary} />
-        {boards[m] === undefined ? <div className={s.muted}>Loading…</div> : (
+        {pending(m) ? <PlanSkeleton kind="focus" zoomStyle={zoomStyle} count={planned(m)} /> : (
           <div className={`${s.fo} ${dropOn === m ? s.isDrop : ''}`} {...monthDrop(m)}>
             <FocusHero item={hero} n={hero ? model.num(hero) : 0} model={model} h={h} others={playing} onPick={setFocusId} drop={drop} />
             <aside className={s.foQueue}>
@@ -757,7 +845,7 @@ export default function PlayPlan() {
     return (
       <>
         <MonthNav m={m} thisMonth={thisMonth} onChange={setOneMonth} summary={summary} />
-        {boards[m] === undefined ? <div className={s.muted}>Loading…</div> : (
+        {pending(m) ? <PlanSkeleton kind="board" zoomStyle={zoomStyle} count={planned(m)} /> : (
           <div className={s.bd}>
             {[LANES[0], LANES[1], LANES[2]].map(lane => {
               const items = model.lanes[lane.key]
@@ -787,8 +875,8 @@ export default function PlayPlan() {
           const model = monthModel(boards[m])
           return (
             <section key={m} className={`${s.wallMonth} ${dropOn === m ? s.isDrop : ''}`} {...monthDrop(m)}>
-              <MonthTitle m={m} model={model} isNow={m === thisMonth} onAdd={openAdd} />
-              {boards[m] === undefined ? <div className={s.muted}>Loading…</div>
+              <MonthTitle m={m} model={model} isNow={m === thisMonth} onAdd={openAdd} loading={pending(m)} />
+              {pending(m) ? <PlanSkeleton kind="wall" zoomStyle={zoomStyle} count={planned(m)} />
                 : model.total ? (
                   <div className={s.wlGrid} data-axis="x">
                     {model.order.map(i => <WallTile key={i.id} item={i} n={model.num(i)} dropMark={markOf(i)} h={h} />)}
@@ -816,9 +904,9 @@ export default function PlayPlan() {
             const wide = idx === 0
             return (
               <section key={m} className={`${s.rmCol} ${wide ? s.rmWide : ''} ${m === thisMonth ? s.rmNow : ''} ${dropOn === m ? s.isDrop : ''}`} {...monthDrop(m)}>
-                <MonthTitle m={m} model={model} isNow={m === thisMonth} onAdd={openAdd} small={!wide} />
+                <MonthTitle m={m} model={model} isNow={m === thisMonth} onAdd={openAdd} loading={pending(m)} small={!wide} />
                 {!wide && model.total > 0 && <div className={s.rmBar}><span style={{ width: `${model.pct}%` }} /></div>}
-                {boards[m] === undefined ? <div className={s.muted}>Loading…</div>
+                {pending(m) ? <PlanSkeleton kind={wide ? 'posters' : 'mini'} zoomStyle={zoomStyle} count={planned(m)} />
                   : !model.total ? <EmptyMonth m={m} onAdd={openAdd} />
                   : wide ? (
                     <div className={s.posterGrid} style={zoomStyle} data-axis="x">
@@ -844,8 +932,8 @@ export default function PlayPlan() {
           const model = monthModel(boards[m])
           return (
             <section key={m} className={`${s.lgroup} ${m === thisMonth ? s.lgroupNow : ''} ${dropOn === m ? s.isDrop : ''}`} {...monthDrop(m)}>
-              <MonthTitle m={m} model={model} isNow={m === thisMonth} onAdd={openAdd} />
-              {boards[m] === undefined ? <div className={s.muted}>Loading…</div>
+              <MonthTitle m={m} model={model} isNow={m === thisMonth} onAdd={openAdd} loading={pending(m)} />
+              {pending(m) ? <PlanSkeleton kind="list" zoomStyle={zoomStyle} count={planned(m)} />
                 : model.total ? (
                   <div className={s.ltable}>
                     <div className={s.lhead} aria-hidden="true">
@@ -938,7 +1026,7 @@ export default function PlayPlan() {
               unplannedCount ? (
                 <div className={s.unplannedGrid}>
                   {unplanned.map(i => (
-                    <div key={i.id} className={s.uCard} {...dragProps(i)} onClick={() => setEdit(i)}
+                    <div key={i.id} className={s.uCard} {...dragProps(i)} onClick={() => openItem(i)}
                       onContextMenu={(e) => { e.preventDefault(); h.ctx(e, i) }} data-gpnav="" title={i.name}>
                       <span className={s.uCover}><Thumb item={i} /></span>
                       <span className={s.uName}>{i.name}</span>

@@ -843,3 +843,20 @@
 .wl { composes: kz-dark from global; }
 /* The Focus banner is a picture: stays dark in the Light theme (customize.css .kz-dark). */
 .foHero { composes: kz-dark from global; }
+
+/* ── Loading: each view's own shape (PlanSkeleton in PlayPlan.jsx) ─────────── */
+.skPoster { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.skPosterArt { width: 100%; aspect-ratio: 2 / 3; border-radius: var(--r-card); }
+.skText { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.skRowCard {
+  display: flex; align-items: center; gap: var(--sp-10); padding: var(--sp-8);
+  border-radius: var(--r-md); background: var(--surface-1, var(--surface-2)); border: 1px solid var(--neutral-border);
+}
+.skMini { display: flex; align-items: center; gap: var(--sp-8); padding: 5px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-3); }
+.skTile { grid-column: span 2; border-radius: var(--r-card); }
+.skTileBig { grid-row: span 2; }
+.skTileSmall { grid-column: span 1; }
+.skLrow { display: flex; align-items: center; gap: var(--sp-12); padding: 8px 14px; border-bottom: 1px solid var(--border); }
+.skLrow:last-child { border-bottom: none; }
+.skFocusHero { grid-area: hero; min-height: 380px; border-radius: var(--r-card); }
+.skPick { display: flex; align-items: center; gap: var(--sp-10); padding: 6px 8px; }

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   IconDiscount2, IconRefresh, IconThumbUp, IconTrendingDown, IconClock, IconBuildingStore, IconPlus, IconCheck,
   IconSparkles, IconListCheck, IconBrandSteam, IconBell, IconSearch, IconX, IconLoader2, IconTrash,
@@ -6,6 +7,10 @@ import {
 import SteamGameModal from '../components/SteamGameModal'
 import GamePrices, { lowestLine } from '../components/GamePrices'
 import GeneratedCover from '../components/GeneratedCover'
+import ContextMenu from '../components/ui/ContextMenu'
+import UndoBar from '../components/ui/UndoBar'
+import InfoModal from '../components/ui/InfoModal'
+import { storeMenuItems, alertAtLowest } from '../components/storeMenu'
 import EmptyState from '../components/ui/EmptyState'
 import { Skeleton } from '../components/ui/Skeleton'
 import useCardZoom from '../lib/useCardZoom'
@@ -75,12 +80,16 @@ function endsIn(ts) {
   return `Ends in ${Math.floor(h / 24)}d`
 }
 
-function DealCard({ g, i, us, alert, onOpen }) {
+// Another store's price under yours, in US dollars: shown instead of Steam's (the maker's call).
+const usd = (n) => `$${Number(n).toFixed(2)}`
+
+function DealCard({ g, i, us, alert, onOpen, onMenu }) {
   const ends = endsIn(g.price?.endsAt)
   const taste = tasteWord(g.match)
   const low = lowestLine(g.lowest, g.lowestDate, us)
   return (
-    <button type="button" className={s.card} data-gpnav onClick={() => onOpen(g)} style={{ '--i': Math.min(i, 18) }}>
+    <button type="button" className={s.card} data-gpnav onClick={() => onOpen(g)} style={{ '--i': Math.min(i, 18) }}
+      onContextMenu={onMenu ? (e) => { e.preventDefault(); onMenu(e, g) } : undefined} data-deal-card={g.appid}>
       <div className={s.art}>
         {(g.header || g.capsule) && <img src={g.header || g.capsule} alt="" loading="lazy" decoding="async" />}
         <span className={s.pct}>-{g.price.pct}%</span>
@@ -92,8 +101,13 @@ function DealCard({ g, i, us, alert, onOpen }) {
         <div className={s.nameRow}>
           <span className={s.name} title={g.name}>{g.name}</span>
           <span className={s.prices}>
-            {g.price.originalText && g.price.original > g.price.final && <s className={s.was}>{g.price.originalText}</s>}
-            <b className={s.now}>{g.price.finalText}</b>
+            {g.elsewhere ? <>
+              <s className={s.was} title="Steam's price">{g.price.finalText}</s>
+              <b className={s.now} title={`${g.elsewhere.store}'s price (the store's US price, through CheapShark)`} data-deal-cheaper>{usd(g.elsewhere.price)}</b>
+            </> : <>
+              {g.price.originalText && g.price.original > g.price.final && <s className={s.was}>{g.price.originalText}</s>}
+              <b className={s.now}>{g.price.finalText}</b>
+            </>}
           </span>
         </div>
         <div className={s.meta}>
@@ -105,7 +119,7 @@ function DealCard({ g, i, us, alert, onOpen }) {
           {g.low === 'lowest' && <span className={`${s.badge} ${s.badgeLow}`}><IconTrendingDown size={12} /> Lowest price ever</span>}
           {g.low === 'near' && <span className={`${s.badge} ${s.badgeNear}`}><IconTrendingDown size={12} /> Near its lowest</span>}
           {g.low === 'above' && <span className={`${s.badge} ${s.badgeAbove}`} title="This game has been cheaper before">Was cheaper before</span>}
-          {g.elsewhere && <span className={`${s.badge} ${s.badgeStore}`}><IconBuildingStore size={12} /> {g.elsewhere.save}% less at {g.elsewhere.store}</span>}
+          {g.elsewhere && <span className={`${s.badge} ${s.badgeStore}`}><IconBuildingStore size={12} /> At {g.elsewhere.store}, {g.elsewhere.save}% under Steam</span>}
         </div>
         {low && <div className={s.lowLine} title="The lowest price at any store CheapShark follows, in US dollars"><IconTrendingDown size={12} /> {low}</div>}
         {g.why?.length > 0 && <div className={s.why}>Because you play {g.why.join(', ')}</div>}
@@ -178,6 +192,11 @@ export default function Deals() {
   const [shown, setShown] = useState(PAGE)
   const [open, setOpen] = useState(null)
   const [openTab, setOpenTab] = useState('overview')
+  const navigate = useNavigate()
+  // Right-click on a card (components/storeMenu.js), and what "Tell me at its lowest price" did.
+  const [menu, setMenu] = useState(null)        // { x, y, g }
+  const [undo, setUndo] = useState(null)
+  const [menuError, setMenuError] = useState(null)
   // The open game's place on the Game List (deals:listState): its window offers Add, or Remove.
   const [listInfo, setListInfo] = useState(null)   // { appid, onList, owned }
   const [listBusy, setListBusy] = useState(null)   // 'add' | 'remove' | null
@@ -301,6 +320,12 @@ export default function Deals() {
   }
 
   function openWindow(g, tab = 'overview') { setOpenTab(tab); setOpen(g) }
+  const openMenu = useCallback((e, g) => setMenu({ x: e.clientX, y: e.clientY, g }), [])
+  async function alertLowest(g) {
+    const r = await alertAtLowest(g, () => load())
+    if (r.error) setMenuError(r.error)
+    else setUndo(r.undo)
+  }
 
   const searching = !!query.trim()
   const yours = (data?.yours || []).filter(g => matchesSearch(g.name, query))
@@ -376,7 +401,7 @@ export default function Deals() {
                 </p>
               ) : (
                 <div className={s.grid} style={zoomStyle}>
-                  {yours.map((g, i) => <DealCard key={g.appid} g={g} i={i} us={us} onOpen={openWindow} />)}
+                  {yours.map((g, i) => <DealCard key={g.appid} g={g} i={i} us={us} onOpen={openWindow} onMenu={openMenu} />)}
                 </div>
               )}
             </section>}
@@ -405,7 +430,7 @@ export default function Deals() {
               ) : (
                 <>
                   <div className={s.grid} style={zoomStyle} data-deals-grid>
-                    {visibleDeals.map((g, i) => <DealCard key={g.appid} g={g} i={Math.min(i % CHUNK, 8)} us={us} onOpen={openWindow} />)}
+                    {visibleDeals.map((g, i) => <DealCard key={g.appid} g={g} i={Math.min(i % CHUNK, 8)} us={us} onOpen={openWindow} onMenu={openMenu} />)}
                   </div>
                   {!dealsEnd && (
                     <div ref={endRef} className={s.loadMore} data-deals-more>
@@ -474,16 +499,38 @@ export default function Deals() {
               </button>
             })()}
             {open.elsewhere && (
-              <button type="button" className={s.ghostBtn} onClick={() => window.kozo?.api?.shell?.openExternal?.(open.elsewhere.url)}>
-                <IconBuildingStore size={14} /> {open.elsewhere.store}
+              <button type="button" className={s.buyBtn} title={`${open.elsewhere.store}'s price (the store's US price, through CheapShark)`}
+                onClick={() => window.kozo?.api?.shell?.openExternal?.(open.elsewhere.url)} data-deal-buy-cheaper>
+                <IconBuildingStore size={14} /> {usd(open.elsewhere.price)} at {open.elsewhere.store}
               </button>
             )}
-            <button type="button" className={s.buyBtn} onClick={() => window.kozo?.api?.shell?.openExternal?.(`https://store.steampowered.com/app/${open.appid}`)}>
+            <button type="button" className={open.elsewhere ? s.ghostBtn : s.buyBtn} onClick={() => window.kozo?.api?.shell?.openExternal?.(`https://store.steampowered.com/app/${open.appid}`)}>
               <IconBrandSteam size={14} /> {open.price ? `${open.price.finalText} on Steam` : 'On Steam'}
             </button>
           </>}
         />
       )}
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          header={{ cover: menu.g.portrait || menu.g.capsule || null, name: menu.g.name, sub: menu.g.price?.finalText ? `${menu.g.price.finalText} on Steam` : null }}
+          items={storeMenuItems(menu.g, {
+            onOpen: (g) => openWindow(g),
+            onList: !!menu.g.mine,
+            onAdd: (g) => addToList(g),
+            onRemove: (g) => removeFromList(g),
+            alertSet: (data?.alerts || []).some(a => Number(a.appid) === Number(menu.g.appid)),
+            onAlert: alertLowest,
+            onUnalert: async (g) => { await window.kozo?.api?.deals?.setTarget?.(g.appid, null); load() },
+            onLike: (g) => navigate(`/like?app=${g.appid}`),
+            cheaper: menu.g.elsewhere,
+          })}
+        />
+      )}
+      <UndoBar undo={undo} onDone={() => setUndo(null)} />
+      {menuError && <InfoModal variant="error" title="Couldn't set the alert" message={menuError} onClose={() => setMenuError(null)} />}
     </div>
   )
 }

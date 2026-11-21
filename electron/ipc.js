@@ -1075,6 +1075,8 @@ handle('achievements:removeUnlock', (id) => { achievementsQ.removeUnlock(id); bk
 // A game played on a shared (rented) Steam account: what someone else unlocked there first, so
 // Steam never showed it to you (steamAccounts.othersOnAccount; files only, no network).
 handle('achievements:othersOnAccount', (gameId) => require('./services/steamAccounts').othersOnAccount(gameId))
+// How far along each counted achievement is ("31 / 50"), from Steam's files on this PC.
+handle('achievements:progress', (gameId) => require('./services/steamAccounts').progressFor(Number(gameId)))
 // "I did these too": the ticked ones become yours, like Mark as Unlocked (source manual), dated
 // now and tied to no session (when you got there isn't known), with one toast and the XP check.
 handle('achievements:claim', (gameId, achievementIds) => {
@@ -2179,6 +2181,8 @@ handle('deals:saleMap', () => require('./services/deals').saleMap())
 handle('deals:unseen', () => require('./services/deals').unseen())
 handle('deals:gamePrices', (appid) => require('./services/deals').gamePrices(appid))
 handle('deals:setTarget', (appid, cents, meta) => require('./services/deals').setTarget(appid, cents, meta))
+// Right-click "Tell me at its lowest price": an alert at the deepest discount it has had.
+handle('deals:alertAtLowest', (appid, meta) => require('./services/deals').alertAtLowest(appid, meta))
 // Smart suggestions: the corner card (services/suggestions.js, components/SuggestionCard.jsx).
 handle('suggestions:list', () => require('./services/suggestions').list())
 handle('suggestions:answer', (key, action) => require('./services/suggestions').answer(key, action))
@@ -3287,6 +3291,41 @@ handle('stats:dayActivity', (day, includeHidden = false) => {
   `).all(...dayWindow(day), day)
 
   return { day, totalSeconds, games, achievements, sessions }
+})
+
+// Drill-down for one month (a bar of All time's monthly chart, clickable like the days: the maker
+// wanted the bars clickable like the game page's). `month` is a LOCAL YYYY-MM key. Narrowed by a
+// plain date range first (a couple of days wider for time zones), then the exact local month.
+handle('stats:monthActivity', (month, includeHidden = false) => {
+  const db = require('./db/database').getDb()
+  const hide = includeHidden ? '' : 'AND g.is_hidden = 0'
+  const m = /^(\d{4})-(\d{2})$/.exec(String(month || ''))
+  if (!m) return { month, totalSeconds: 0, games: [], achievements: [], sessions: [] }
+  const from = new Date(Date.UTC(+m[1], +m[2] - 1, 1) - 2 * 86400000).toISOString().slice(0, 10)
+  const to = new Date(Date.UTC(+m[1], +m[2], 1) + 2 * 86400000).toISOString().slice(0, 10)
+  const games = db.prepare(`
+    SELECT g.id, g.name, g.banner_local_path, g.source, g.is_cracked,
+           SUM(s.duration_seconds) AS seconds, COUNT(*) AS sessions
+    FROM sessions s JOIN games g ON g.id = s.game_id
+    WHERE s.ended_at IS NOT NULL AND s.started_at >= ? AND s.started_at < ? AND strftime('%Y-%m', s.started_at, 'localtime') = ? ${hide}
+    GROUP BY g.id ORDER BY seconds DESC
+  `).all(from, to, month)
+  const totalSeconds = games.reduce((a, g) => a + (g.seconds || 0), 0)
+  const achievements = db.prepare(`
+    SELECT a.display_name, a.icon_url, g.name AS game_name, au.unlocked_at
+    FROM achievement_unlocks au
+    JOIN achievements a ON a.id = au.achievement_id
+    JOIN games g ON g.id = a.game_id
+    WHERE au.unlocked_at IS NOT NULL AND au.unlocked_at >= ? AND au.unlocked_at < ? AND strftime('%Y-%m', au.unlocked_at, 'localtime') = ? ${hide}
+    ORDER BY au.unlocked_at DESC LIMIT 30
+  `).all(from, to, month)
+  const sessions = db.prepare(`
+    SELECT s.id, s.duration_seconds, g.name AS game_name, s.started_at
+    FROM sessions s JOIN games g ON g.id = s.game_id
+    WHERE s.ended_at IS NOT NULL AND s.started_at >= ? AND s.started_at < ? AND strftime('%Y-%m', s.started_at, 'localtime') = ? ${hide}
+    ORDER BY s.duration_seconds DESC, s.id ASC LIMIT 8
+  `).all(from, to, month)
+  return { month, totalSeconds, games, achievements, sessions }
 })
 
 // Drill-down for one hour of TODAY (clicked in the 24h Hourly Activity chart).

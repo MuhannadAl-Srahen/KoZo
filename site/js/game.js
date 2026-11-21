@@ -50,11 +50,18 @@
     var base = 50 * (level - 1) * level
     return { level: level, into: total - base, span: 100 * level }
   }
-  var TIERS = [[3, 'Apprentice'], [7, 'Adept'], [12, 'Seasoned'], [18, 'Veteran'], [25, 'Master'], [35, 'Legend'], [45, 'Grandmaster'], [60, 'Mythic']]
+  // A name for every level, as in the app (electron/services/xp.js LEVEL_NAMES); past 60, Mythic II and on.
+  var LEVEL_NAMES = ['Rookie', 'Novice', 'Apprentice', 'Explorer', 'Wanderer', 'Scout', 'Adept', 'Pathfinder', 'Adventurer', 'Challenger',
+    'Contender', 'Seasoned', 'Ranger', 'Tactician', 'Vanguard', 'Gladiator', 'Sentinel', 'Veteran', 'Elite', 'Ace',
+    'Specialist', 'Expert', 'Virtuoso', 'Commander', 'Master', 'Strategist', 'Sharpshooter', 'Conqueror', 'Hero', 'Warden',
+    'Vindicator', 'Titan', 'Mastermind', 'Warmaster', 'Elder', 'Renowned', 'Dreadnought', 'Warlord', 'Champion', 'Legend',
+    'Myth-Forged', 'Paragon', 'Sovereign', 'Ascendant', 'Grandmaster', 'Archon', 'Exalted', 'Phantom', 'Celestial', 'Immortal',
+    'Eternal', 'Starborn', 'Voidwalker', 'Demigod', 'Oracle', 'Transcendent', 'Apex', 'Worldbreaker', 'Godlike', 'Mythic']
   function tierFor(level) {
-    var name = 'Rookie'
-    TIERS.forEach(function (t) { if (level >= t[0]) name = t[1] })
-    return name
+    if (level <= LEVEL_NAMES.length) return LEVEL_NAMES[Math.max(1, level) - 1]
+    var n = level - LEVEL_NAMES.length + 1, out = ''
+    ;[[1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'], [100, 'C'], [90, 'XC'], [50, 'L'], [40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']].forEach(function (r) { while (n >= r[0]) { out += r[1]; n -= r[0] } })
+    return 'Mythic ' + out
   }
 
   // ── Saved on this browser only ──
