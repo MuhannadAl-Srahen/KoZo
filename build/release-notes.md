@@ -1,33 +1,26 @@
-KoZo 1.13.0
+KoZo 1.14.0
 
-KoZo finds its own updates, shows how far along your achievements are, finds cheaper prices at other stores, and Upcoming has one clean calendar.
+KoZo notices your games in seconds, tells you about releases and sales in Windows notifications, and Upcoming and Discounts are easier to use.
 
-New in 1.13.0
-• Achievement progress: an achievement that counts toward a number, like 50 headshots, shows how far along you are on its card and in its window, read from Steam on your PC.
-• Cheaper elsewhere: when another store sells a game for less than Steam charges you, Discounts shows that price and the store, on the card, in its window and on the Prices tab.
-• Right-click in Discounts and Games like this: open it, add it to or take it off your Game List, find games like it, open its Steam page, or Tell me at its lowest price, a price alert at the best price it has had.
-• Upcoming: Steam's calendar is the one view. Tracked and TBA show the same capsules in a grid with each game's name and date, and Tracked counts down to each release on its picture.
-• Activity: under All time, a month's bar opens that month, like a day's bar does.
-• Play Plan: a game in your Library opens its own page.
-• A new title at every level: each level from Rookie to Mythic has its own name, so every level up brings a new one, and your profile shows the name the next level brings. Past level 60 it goes Mythic II, Mythic III and on.
-• Sidebar groups stay: PLAY and DISCOVER always show, also with your own tab order. In Settings, Appearance the tabs are listed under the same titles, and moving a tab past a title puts it in that group.
-• Loading looks like the page: while a page loads it shows the shape of what's coming, like Upcoming's days and games, Play Plan's months, the game page and your year, instead of grey lines, "Loading…" or a blank page.
-• More movement: Upcoming's games come in as a wave across the weeks, and Tracked and TBA bring their cards in one after another. Activity, Profile, Your Year and the Settings tabs bring their cards in too, and chart bars grow. A game's picture in Upcoming zooms when you point at it, like in your Library.
+New in 1.14.0
+• Windows notifications: with no game running, releases, sales and price alerts come as Windows notifications that wait in the Action Center. Click one to open KoZo on that page. During a game they show in KoZo's overlay as before. Turn them off in Settings, General, where you can also send a test.
+• Release reminders: KoZo tells you the day before a game you track comes out, and when its release date is announced, delayed or moved up.
+• Sales on your Game List: a game you want going on sale, or reaching its lowest price ever, is a notification too. Sales come together, at most once a day.
+• Discounts tabs: Deals and My games. Your price alerts and your Game List's sales have their own tab, so the deals start at the top. What's new is marked New, and the Discounts badge says which games it means.
+• Price alerts that can be reached: an alert set below anything Steam sells the game for, or in another country's prices, offers a one-click fix. Tell me at its lowest price never goes below 90% off.
+• Upcoming looks like the rest of KoZo: Tracked and TBA use the same cards as Discounts, Steam, TBA and Tracked are tabs under the title, and there's a search box. A search also finds games on Steam's store, ready to track.
+• Streak freezes: every 7 days played in a row earns a freeze, and a missed day uses one so your streak goes on. You can hold two. Once, you can also repair your last short break from your Profile.
+• Is my copy up to date: click the version beside a game's name to see your copy next to Steam's newest version and patch notes, check again, or open the patch notes and SteamDB. When Steam's news names your version, KoZo says how many updates came after it.
+• Controller: choose, test or record your own button combo that opens KoZo, and how long to hold it, in Settings, Shortcuts. It also tells you when a controller is in DirectInput mode.
+• Where your XP comes from: the Session Complete toast says what its XP was made of, like +23 for playing and +50 for a first hour in a game.
 
-Fixed in 1.13.0
-• KoZo finds a new version by itself again: when you open it, every hour while it runs, and soon after starting even when the internet wasn't there yet. You no longer have to check in Settings.
-• Switching pages is lighter: fewer things move at once, and Profile and Upcoming do less work each time you open them.
-• While a page loads it no longer says something that isn't true yet, like "You aren't tracking any releases yet", "Nothing planned", "Not connected" or "Not set up".
-• A game's window shows its price in your country's money, the same as Discounts, instead of another country's.
-• Upcoming's prices are your country's too.
-• Storage counts each game's whole folder, so sizes are right (Steam games use Steam's own size), and a game in another game's folder is no longer counted twice.
-• A Steam game installed in a folder with a code name, like Need for Speed Unbound in "Excalibur", shows its real name.
-• The window that opens when you click an achievement no longer spills out of its frame.
-• With a white or very light accent color, the chosen button stands out from the others again.
-• Trailers in full screen play sharp, without loading again going in or coming out.
-• A cover you picked stays: opening a game's page no longer puts Steam's cover back.
-• Marking a game Finished opens one window, with the game, your hours and achievements, and the rating.
-• Scan PC picks the right game file for EA games like Need for Speed Unbound, and no longer lists the EA app as a game.
-• With a white accent, the active tab no longer glows over its neighbors.
-• An achievement's web search uses Google.
-• Games with no launcher no longer show a Steam warning on their achievements.
+Fixed in 1.14.0
+• A game is noticed within seconds of starting, also from Steam or a shortcut, and Now Playing shows about 6 seconds later instead of up to a minute.
+• A session is recorded the moment you quit, also for games that run as administrator, where it could take two minutes.
+• An achievement an emulator writes as the game closes is still caught.
+• The controller brings KoZo in front of a game and works from the first press, and with the Xbox button chosen, LB + RB + Menu opens KoZo too. A controller in DirectInput mode moves with its d-pad.
+• The glow of the selected tab on a game's page is no longer cut off.
+• A tracked game with no Steam page opens its Game List entry instead of an empty window.
+• KoZo no longer asks Steam again and again after you play a game that has no achievements.
+• A playthrough note saves when you press Enter.
+• The in-game toast loads a small copy of the game's picture.

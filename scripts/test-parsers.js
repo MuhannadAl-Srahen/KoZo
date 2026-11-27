@@ -224,6 +224,16 @@ console.log('\nbuildCandidates')
   const nx = xpSvc.nextTierInfo(40)
   check("levels: the next level's name", nx.level === 41 && nx.name === 'Myth-Forged', JSON.stringify(nx))
   check('levels: no long dashes in a name', !names.some(n => /[–—]/.test(n)))
+  // What a session's XP was made of (the maker saw "+73 XP" for 23 minutes and asked "???").
+  const base = { playtime: 20597, achievements: 9000, unlocks: 120, streak: 2100, streakDays: 42, finished: 2500, perfect: 300, hours: 900, firstHour: 1200, onPlan: 200 }
+  const ff = xpSvc.gainParts(base, { ...base, playtime: 20620, firstHour: 1250 })
+  check('xp parts: 23 minutes and a first hour say so, play first', JSON.stringify(ff) === JSON.stringify([{ key: 'play', xp: 23, label: 'for playing' }, { key: 'firstHour', xp: 50, label: 'first hour in this game' }]), JSON.stringify(ff))
+  check('xp parts: they add up to the gain', ff.reduce((s, p) => s + p.xp, 0) === 73)
+  const big = xpSvc.gainParts(base, { ...base, playtime: 20657, achievements: 9500, unlocks: 122, hours: 1000, streak: 2150, streakDays: 43 })
+  check('xp parts: achievements counted, a 10-hour milestone named, the streak says its length',
+    big.map(p => `${p.xp} ${p.label}`).join('|') === '60 for playing|500 for 2 achievements|100 10 hours in this game|50 longest streak now 43 days', big.map(p => `${p.xp} ${p.label}`).join('|'))
+  check('xp parts: nothing to split without the parts from before', xpSvc.gainParts(null, base) === null)
+  check('xp parts: no long dashes', !big.concat(ff).some(p => /[–—]/.test(p.label)))
 }
 
 // ── Looking for a new KoZo by itself (the maker had to press Check in Settings) ──
@@ -2222,8 +2232,98 @@ function roundFourTests() {
   check('calendar controls: tag, Early Access, owned and wishlist only', ids({ count: 0, tag: 19 }) === '1,3' && ids({ count: 0, hideEarly: true, hideOwned: true }) === '1,4,5' && ids({ count: 0, wish: 'only' }) === '5')
 }
 
+// ── Sessions, notifications, the controller, streak freezes and versions (1.14) ──
+function roundFiveTests() {
+  console.log('\nsessions, notifications, controller, streak freezes, versions')
+  // Loaded fresh: an earlier test stubs services/xp.js in the require cache.
+  const fresh = (rel) => { const p = require.resolve(path.join(__dirname, '..', 'electron', rel)); delete require.cache[p]; return require(p) }
+
+  // The desktop probe's lines (services/desktopProbe.js).
+  const probe = fresh('services/desktopProbe.js')
+  check('probe: a watched game starting', JSON.stringify(probe.parseLine('S\t4242\tGame.EXE')) === JSON.stringify({ kind: 'start', pid: 4242, exe: 'game.exe' }))
+  check('probe: a session process exiting', probe.parseLine('X\t4242')?.kind === 'exit' && probe.parseLine('X\t4242').pid === 4242)
+  check('probe: controller slots and the wake combo', probe.parseLine('P+0')?.connected === true && probe.parseLine('P-3')?.slot === 3 && probe.parseLine('P-3')?.connected === false && probe.parseLine('WAKE')?.kind === 'WAKE')
+  check('probe: anything else is nothing', probe.parseLine('X\tabc') === null && probe.parseLine('') === null && probe.parseLine('Z\t1') === null)
+  check('probe: one compiled loop that reads stdin and waits on handles', /OpenStandardInput/.test(probe.PS_SCRIPT) && /WaitForSingleObject/.test(probe.PS_SCRIPT) && /CreateToolhelp32Snapshot/.test(probe.PS_SCRIPT) && !/Get-Process -Id \$front/.test(probe.PS_SCRIPT))
+
+  // Controller combos (services/controllerWake.js).
+  const cwk = fresh('services/controllerWake.js')
+  check('controller: the built-in combos', cwk.comboMask('guide') === 0x0400 && cwk.comboMask('viewmenu') === 0x0030 && cwk.comboMask('lbrbmenu') === 0x0310)
+  check('controller: a recorded combo needs two buttons', cwk.comboMask('custom:4352') === 4352 && cwk.comboMask('custom:4096') === 0 && cwk.comboMask('custom:abc') === 0 && cwk.comboMask('nonsense') === 0)
+
+  // Which way news goes (services/notifications.js).
+  const notes = fresh('services/notifications.js')
+  const way = (o) => notes.route({ packaged: true, supported: true, enabled: true, sessionActive: false, ...o })
+  check('notify: a Windows notification with no game running', way({}) === 'os')
+  check('notify: the overlay during a game, in a dev build, or with it off', way({ sessionActive: true }) === 'overlay' && way({ packaged: false }) === 'overlay' && way({ enabled: false }) === 'overlay' && way({ supported: false }) === 'overlay' && way({ packaged: false, devOverride: true }) === 'os')
+
+  // Release dates (services/releaseWatch.js).
+  const rw = fresh('services/releaseWatch.js')
+  check('release dates: the same date written another way says nothing', rw.dateChange('Dec 3, 2026', '3 Dec, 2026') === null && rw.dateChange('June 2027', 'Jun 2027') === null)
+  check('release dates: announced, delayed, moved up, removed',
+    rw.dateChange('Coming soon', 'Dec 3, 2026') === 'announced' && rw.dateChange('Dec 3, 2026', 'Dec 10, 2026') === 'delayed' &&
+    rw.dateChange('Dec 10, 2026', 'Dec 3, 2026') === 'earlier' && rw.dateChange('Dec 3, 2026', 'Coming soon') === 'removed' &&
+    rw.dateChange('2026', '2027') === 'delayed' && rw.dateChange('Dec 3, 2026', '2027') === 'delayed')
+  check('release dates: a vague date narrowed inside itself says nothing', rw.dateChange('2027', 'Q2 2027') === null && rw.dateChange('2027', 'March 2027') === null && rw.dateChange('', 'Dec 3, 2026') === null)
+  check('release dates: a season is its year, never a day', rw.dateSpan('Winter 2026')?.exact === false && rw.releasedTs('Winter 2026') === null && rw.dateSpan('Q1 2027')?.exact === false)
+  const at10 = new Date(2026, 11, 2, 10, 30).getTime()
+  const due = rw.dueReminders([{ id: 1, release_date: 'Dec 3, 2026' }, { id: 2, release_date: '3 Dec, 2026', release_reminded: 1 }, { id: 3, release_date: 'December 2026' }, { id: 4, release_date: 'Dec 4, 2026' }], at10).map(r => r.id)
+  check('reminders: the day before an exact date, once', due.join() === '1', due.join())
+  check('reminders: not before 10 in the morning', rw.dueReminders([{ id: 1, release_date: 'Dec 3, 2026' }], new Date(2026, 11, 2, 9, 0).getTime()).length === 0)
+
+  // Price alerts and sale news (services/deals.js).
+  const dl = fresh('services/deals.js')
+  const hitman = { original: 3299, final: 1319, finalText: '$13.19', pct: 60 }
+  check('prices: a lowest-price alert never goes below 90% off (a key shop\'s low)', dl.lowestTarget(hitman, { lowest: 0.47, steamRetail: 32.99 }) === 329)
+  check('prices: an alert below 90% off gets a fix, others none',
+    dl.alertFixes({ state: 'waiting', target: 47, targetCc: 'JO', price: hitman, info: { lowest: 0.47, steamRetail: 32.99 } }).fix === 329 &&
+    dl.alertFixes({ state: 'waiting', target: 900, targetCc: 'JO', price: hitman, info: null }).fix === null &&
+    dl.alertFixes({ state: 'reached', target: 47, targetCc: 'JO', price: hitman, info: null }).fix === null)
+  check('prices: a US alert moves to this country by the full prices', dl.alertFixes({ state: 'currency', target: 828, targetCc: 'US', price: { original: 1499, final: 1499, finalText: '$14.99' }, info: { steamRetail: 19.99 } }).convert === 621)
+  const sale = (id, pct, low) => ({ appid: id, name: 'G' + id, price: { pct, endsAt: 1 }, low })
+  let st = dl.saleNews([sale(1, 50), sale(2, 75, 'lowest')], null, '2026-11-27')
+  check('sales: the first look only remembers what is on sale', st.sales.length === 0 && st.lows.length === 0)
+  st = dl.saleNews([sale(1, 50), sale(2, 75, 'lowest'), sale(3, 30)], st.next, '2026-11-27')
+  check('sales: a new sale on your list is news', st.sales.map(g => g.appid).join() === '3')
+  let st2 = dl.saleNews([sale(1, 50), sale(2, 75, 'lowest'), sale(3, 30), sale(4, 40, 'lowest')], st.next, '2026-11-27')
+  check('sales: one notice a day for sales, a new lowest price at once', st2.sales.length === 0 && st2.lows.map(g => g.appid).join() === '4')
+  st2 = dl.saleNews([sale(1, 50), sale(2, 75, 'lowest'), sale(3, 30), sale(4, 40, 'lowest')], st2.next, '2026-11-28')
+  check('sales: the one held back comes the next day', st2.sales.map(g => g.appid).join() === '4' && st2.lows.length === 0)
+  check('sales: a sale that ended and starts again is news again', dl.saleNews([sale(1, 60)], { day: null, sales: { 1: '50:1' }, lows: {} }, '2026-11-29').sales.length === 1)
+
+  // Streak freezes (services/xp.js).
+  const xp = fresh('services/xp.js')
+  const range = (a, b) => { const out = []; for (let d = new Date(a + 'T00:00:00Z'); d <= new Date(b + 'T00:00:00Z'); d = new Date(d.getTime() + 864e5)) out.push(d.toISOString().slice(0, 10)); return out }
+  let days = [...range('2026-11-01', '2026-11-10'), ...range('2026-11-12', '2026-11-20')]
+  let sr = xp.streakRuns(days, { since: '2026-11-27', today: '2026-11-27' })
+  check('streak: a break from before freezes changes nothing (no XP moves)', sr.longest === 10 && sr.current === 0 && sr.frozen.length === 0, JSON.stringify(sr))
+  sr = xp.streakRuns(days, { since: '2026-11-01', today: '2026-11-21' })
+  check('streak: 7 days in a row earn a freeze, a missed day uses it', sr.longest === 19 && sr.current === 19 && sr.frozen.join() === '2026-11-11', JSON.stringify(sr))
+  days = [...range('2026-10-01', '2026-10-21'), ...range('2026-10-24', '2026-10-26')]
+  sr = xp.streakRuns(days, { since: '2026-10-01', today: '2026-10-27' })
+  check('streak: two freezes at most, two missed days use both, frozen days add no day', sr.longest === 24 && sr.freezes === 0 && sr.frozen.length === 2, JSON.stringify(sr))
+  days = [...range('2026-10-01', '2026-10-21'), ...range('2026-10-25', '2026-10-26')]
+  sr = xp.streakRuns(days, { since: '2026-10-01', today: '2026-10-27' })
+  check('streak: three missed days break it, the freezes are kept', sr.longest === 21 && sr.current === 2 && sr.freezes === 2, JSON.stringify(sr))
+  days = range('2026-11-10', '2026-11-24')
+  const cand = xp.repairCandidate(days, '2026-11-27')
+  sr = xp.streakRuns(days, { since: '2026-11-27', repairDays: cand, today: '2026-11-27' })
+  check('streak: the repair covers the break going on now', cand?.join() === '2026-11-25,2026-11-26' && sr.current === 15, JSON.stringify({ cand, sr }))
+  check('streak: a long break has no repair', xp.repairCandidate(range('2026-11-01', '2026-11-10'), '2026-11-27') === null)
+  check('streak: today not played yet breaks nothing', xp.streakRuns(range('2026-11-20', '2026-11-26'), { since: '2026-11-27', today: '2026-11-27' }).current === 7)
+
+  // Your copy's version in Steam's news (services/gameVersion.js).
+  const gv = fresh('services/gameVersion.js')
+  const news = [{ title: 'Update 1.0140.0', date: 5, patch: true }, { title: 'Hotfix 1.0131.2', date: 4, patch: true }, { title: 'Patch notes', date: 3, patch: true }, { title: 'Version 1.0130.1 is live', date: 2 }, { title: 'Patch 1.0120', date: 1, patch: true }]
+  check('version: found in older news, the updates after it counted', gv.versionInNews('1.0130.1', news)?.newer === 3 && gv.versionInNews('1.0140', news)?.newer === 0 && gv.versionInNews('9.9', news) === null)
+  check('version: named in the news is a real answer, not "maybe"',
+    gv.versionState({ version: '1.0130.1', date: 1 }, { build: 5, at: 9e12 }, gv.versionInNews('1.0130.1', news)) === 'behind' &&
+    gv.versionState({ version: '1.0130.1', date: 1 }, { build: 5, at: 9e12 }, null) === 'maybe')
+}
+
 ;(async () => {
   roundFourTests()
+  roundFiveTests()
   xpRuleTests()
   settingsPathTests()
   gpuTrimTests()

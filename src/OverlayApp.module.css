@@ -413,3 +413,11 @@
 .toast[data-tone="ultra"] .toastHeader {
   background: linear-gradient(90deg, color-mix(in srgb, var(--tone) 38%, transparent), color-mix(in srgb, #f472b6 14%, transparent));
 }
+
+/* Session Complete: what the XP was for, under the total ("+23 for playing · +50 first hour in this game"). */
+.toastParts {
+  margin-top: 2px;
+  font-size: var(--fs-2xs, 11px);
+  line-height: 1.35;
+  color: var(--text-secondary);
+}

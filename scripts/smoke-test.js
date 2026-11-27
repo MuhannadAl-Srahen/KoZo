@@ -2331,6 +2331,10 @@ app.whenReady().then(async () => {
     // The window takes a game off the Game List too (the maker's ask), and then offers Add again.
     const listDb = require(path.join(root, 'electron', 'db', 'database.js')).getDb()
     require(path.join(root, 'electron', 'db', 'queries', 'gameList.js')).addGameListItem({ steam_app_id: 900001, name: 'Need for Speed™ Heat', status: 'want_to_play' })
+    // Your Game List's sales are on the My games tab (Deals is the default).
+    check('Discounts: Deals is the tab it opens on, and My games is beside it', await ev(`document.querySelector('[data-deals-tab="deals"]')?.getAttribute('aria-selected') === 'true' && !!document.querySelector('[data-deals-tab="mine"]') && !document.querySelector('[data-deals-yours]')`))
+    await ev(`document.querySelector('[data-deals-tab="mine"]').click(); true`); await sleep(600)
+    check('Discounts: My games shows your Game List games on sale, not the deals', await ev(`!!document.querySelector('[data-deals-yours]') && !document.querySelector('[data-deals-grid]') && location.hash.includes('tab=mine')`))
     await ev(`[...document.querySelectorAll('.app-main button[data-gpnav]')].find(b => b.innerText.includes('Need for Speed'))?.click(); true`); await sleep(1200)
     const listBtns = () => ev(`({ remove: !!document.querySelector('[role=dialog] [data-deals-remove]'), add: !!document.querySelector('[role=dialog] [data-deals-add]') })`)
     const onList = await listBtns()
@@ -2341,6 +2345,7 @@ app.whenReady().then(async () => {
     check('Discounts window: then it offers Add to Game List again', offList.add && !offList.remove, JSON.stringify(offList))
     await escape()
     listDb.prepare('DELETE FROM game_list WHERE steam_app_id = 900001').run()
+    await ev(`document.querySelector('[data-deals-tab="deals"]')?.click(); true`); await sleep(300)
     deals.getDeals = realDeals; deals.markSeen = realMark; steamApi.searchGames = realSearch
   }
   }

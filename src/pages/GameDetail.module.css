@@ -215,15 +215,6 @@
   background: color-mix(in srgb, var(--surface-3) 80%, transparent); color: var(--text-secondary);
   border: 1px solid var(--border);
 }
-.versionChip {
-  padding: 3px 10px; border-radius: var(--r-pill); font-size: var(--fs-xs); font-weight: 600; white-space: nowrap;
-  font-variant-numeric: tabular-nums; cursor: default;
-  background: color-mix(in srgb, var(--surface-3) 80%, transparent); color: var(--text-secondary);
-  border: 1px solid var(--border);
-}
-.versionState { font-weight: 700; }
-.versionBehind { background: var(--warning-bg); color: var(--warning); border-color: var(--warning-border-strong); }
-.versionMaybe { color: var(--warning); border-color: var(--warning-border); }
 .crackBadge {
   padding: 3px 10px; border-radius: var(--r-pill); font-size: var(--fs-2xs); font-weight: 700; letter-spacing: 0.08em;
   background: var(--warning-bg); color: var(--warning); border: 1px solid var(--warning-border-strong);
@@ -307,16 +298,27 @@
   position: sticky;
   top: 0;
   z-index: var(--z-sticky);
-  display: flex;
-  align-items: center;
-  gap: var(--sp-6);
   padding: var(--sp-10) 0;
   margin-bottom: var(--sp-16);
   background: var(--bg);
   border-bottom: 1px solid var(--border);
+}
+/* The row scrolls sideways on a narrow window. A scroller clips everything outside its
+   padding box in BOTH directions, which cut the active tab's glow off in a hard line
+   above and below it (the maker's screenshot). Its padding now holds the strongest glow
+   (--glow-room) and the negative margin keeps the tabs exactly where they were; the
+   overhang lets clicks through to whatever is under it. */
+.tabsScroll {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
   overflow-x: auto;
   scrollbar-width: none;
+  padding: var(--glow-room);
+  margin: calc(-1 * var(--glow-room));
+  pointer-events: none;
 }
+.tabsScroll > * { pointer-events: auto; }
 /* Light: the strip lets the page show through, so it doesn't sit there as a gray box. */
 :global(:root[data-theme="light"]) .tabs {
   background: color-mix(in srgb, var(--bg) 80%, transparent);

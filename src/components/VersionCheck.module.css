@@ -1,0 +1,49 @@
+/* The version tag on a game page and its window (components/VersionCheck.jsx). */
+.wrap { position: relative; display: inline-flex; }
+.chip {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 3px 10px; border-radius: var(--r-pill); font: inherit; font-size: var(--fs-xs); font-weight: 600; white-space: nowrap;
+  font-variant-numeric: tabular-nums; cursor: pointer;
+  background: color-mix(in srgb, var(--surface-3) 80%, transparent); color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+.chip:hover { border-color: var(--ab); }
+.state { font-weight: 700; }
+.caret { margin-left: 2px; opacity: 0.7; }
+.behind { background: var(--warning-bg); color: var(--warning); border-color: var(--warning-border-strong); }
+.maybe { color: var(--warning); border-color: var(--warning-border); }
+.current { color: var(--success); }
+
+.panel {
+  position: absolute; top: calc(100% + 8px); left: 0; z-index: var(--z-dropdown, 50);
+  width: min(380px, 86vw);
+  display: flex; flex-direction: column; gap: var(--sp-12);
+  padding: var(--sp-12) var(--sp-16);
+  border-radius: var(--r-card); border: 1px solid var(--border);
+  background: var(--surface-1); box-shadow: var(--elev-3);
+  color: var(--text-secondary); font-size: var(--fs-sm); text-align: left; white-space: normal;
+  text-shadow: none;
+}
+.head { display: flex; align-items: flex-start; gap: var(--sp-8); color: var(--text-primary); font-weight: 600; line-height: 1.4; background: none; border: 0; }
+.head svg { flex-shrink: 0; margin-top: 1px; }
+.head.behind, .head.maybe { color: var(--warning); background: none; }
+.head.current { color: var(--success); }
+
+.rows { display: grid; grid-template-columns: auto 1fr; gap: 6px var(--sp-12); margin: 0; }
+.rows dt { color: var(--text-muted); font-size: var(--fs-xs); padding-top: 2px; white-space: nowrap; }
+.rows dd { margin: 0; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.rows b { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+.rows small { color: var(--text-muted); font-size: var(--fs-xs); }
+.title { overflow-wrap: anywhere; }
+.none { color: var(--text-muted) !important; font-weight: 500 !important; }
+.why { margin: 0; font-size: var(--fs-xs); line-height: 1.5; color: var(--text-secondary); }
+
+.actions { display: flex; flex-wrap: wrap; gap: var(--sp-6); }
+.btn {
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px;
+  border-radius: var(--r-pill); border: 1px solid var(--border); background: var(--surface-2);
+  color: var(--text-primary); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer;
+}
+.btn:hover:not(:disabled) { border-color: var(--ab); color: var(--a); }
+.btn:disabled { opacity: 0.6; cursor: default; }
+.checked { color: var(--text-muted); font-size: var(--fs-2xs); }

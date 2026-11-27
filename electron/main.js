@@ -266,16 +266,31 @@ function getOrCreateMainWindow(afterShow) {
 // refuses a plain focus() from a background app, so the window is briefly
 // made always-on-top and focus is taken explicitly. A controller wake also
 // tells the renderer to start controller navigation right away.
-function showFromAnywhere({ gamepad = false } = {}) {
+//
+// app.focus({ steal: true }) only works on macOS, and Windows often refuses focus() to an
+// app that isn't in front, so the desktop probe (desktopProbe.js FOCUS) brings the window
+// to the front the way Windows allows: by joining the input of the window in front.
+function nativeHandle(win) {
+  try {
+    const h = win.getNativeWindowHandle()
+    return h.length >= 8 ? h.readBigUInt64LE(0).toString() : String(h.readUInt32LE(0))
+  } catch { return null }
+}
+function showFromAnywhere({ gamepad = false, afterShow = null } = {}) {
+  // The page asks for this once it has loaded (a window made from scratch could miss the
+  // event below), see controllerWake.takeWake.
+  if (gamepad) { try { require('./services/controllerWake').setPendingWake({ bigPicture: true }) } catch {} }
   getOrCreateMainWindow((win) => {
     try {
       win.setAlwaysOnTop(true)
-      app.focus({ steal: true })
       win.focus()
-      setTimeout(() => { if (!win.isDestroyed()) win.setAlwaysOnTop(false) }, 400)
+      const hwnd = nativeHandle(win)
+      if (hwnd) require('./services/desktopProbe').focusWindow(hwnd)
+      setTimeout(() => { if (!win.isDestroyed()) win.setAlwaysOnTop(false) }, 600)
     } catch {}
     // A controller wake opens Big Picture (the renderer navigates there).
     if (gamepad) { try { win.webContents.send('gamepad:wake', { bigPicture: true }) } catch {} }
+    if (afterShow) { try { afterShow(win) } catch {} }
   })
 }
 
@@ -459,6 +474,15 @@ Close any program that may be using it and start KoZo again.`)
       if (now === inFront) return
       inFront = now
       try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:inFront', now) } catch {}
+    })
+    // The controller is being used while KoZo is in front: start the page's controller
+    // navigation now. Chromium only lists a pad after a button press while the window
+    // has focus, so it used to need a first press that did nothing.
+    let lastActiveSent = 0
+    require('./services/controllerInput').onInput(() => {
+      if (!inFront || Date.now() - lastActiveSent < 3000) return
+      lastActiveSent = Date.now()
+      try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('gamepad:active', {}) } catch {}
     })
   }
 
@@ -652,4 +676,4 @@ if (!app.isPackaged && typeof process.send === 'function') {
 
 app.on('activate', () => { getOrCreateMainWindow() })
 
-module.exports = { getMainWindow: () => mainWindow, getOrCreateMainWindow }
+module.exports = { getMainWindow: () => mainWindow, getOrCreateMainWindow, showFromAnywhere }

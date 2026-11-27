@@ -19,6 +19,19 @@ function longestStreak(days) {
   return best
 }
 
+// The Profile's rule (services/xp.js streakRuns): a day kept over by a streak freeze or the
+// repair joins the run, so the year's longest streak and the Profile's agree.
+function streakWithFreezes(days) {
+  try {
+    const settingsQ = require('./settings')
+    let repairDays = []
+    try { repairDays = JSON.parse(settingsQ.getSetting('streak_repair_days') || '[]') } catch {}
+    return require('../../services/xp').streakRuns(days, {
+      since: settingsQ.getSetting('streak_freeze_since') || null, repairDays, today: new Date().toLocaleDateString('en-CA'),
+    }).longest
+  } catch { return longestStreak(days) }
+}
+
 // Pure: which month played most (1 to 12), or null if none was played.
 function busiestMonth(months) {
   let best = null
@@ -113,7 +126,7 @@ function yearReview(year, finished = []) {
   return {
     year: Number(year),
     seconds: totals.seconds, sessions: totals.sessions, games: totals.games,
-    days: days.length, streak: longestStreak(days),
+    days: days.length, streak: streakWithFreezes(days),
     topGames, months, busiestMonth: busiestMonth(months), longestSession,
     achievements, rarest,
     finished: finishedThisYear, bestRated,

@@ -10,9 +10,14 @@ const logger = require('./logger')
 
 function ok(data) { return { ok: true, data } }
 function fail(err) {
-  logger.error('IPC error', { message: err.message, stack: err.stack })
+  // An answer meant for the user ("already in your list", a dismissed admin prompt) isn't
+  // a fault: it was logged at ERROR with a stack trace, which buried real errors.
+  if (err?.expected) logger.info('IPC: ' + err.message)
+  else logger.error('IPC error', { message: err.message, stack: err.stack })
   return { ok: false, error: err.message }
 }
+// An Error the user is meant to read, logged as info (see fail).
+function userError(message) { const e = new Error(message); e.expected = true; return e }
 
 // Flag the dataset as changed so auto-backup (if enabled) writes a fresh copy.
 function bk() { try { require('./services/autoBackup').markDirty() } catch {} }
@@ -44,7 +49,7 @@ function handle(channel, fn) {
 // ── Games ────────────────────────────────────────────────────────────────────
 handle('games:list', () => gamesQ.listGamesWithStats())
 handle('games:get', (id) => gamesQ.getGame(id))
-handle('games:version', (id) => require('./services/gameVersion').getVersion(id))
+handle('games:version', (id, opts) => require('./services/gameVersion').getVersion(id, opts || {}))
 // Playthroughs (db/queries/playthroughs.js): playing a game again from the start. Starting
 // one puts the game back to Playing; hours, sessions and achievements stay as they are.
 // XP doesn't move when one starts (the first finish still counts), so no level-up check.
@@ -957,7 +962,7 @@ async function doLaunch(id) {
       const msg = String(err || '').trim()
       logger.warn(`elevated launch failed for "${game.name}": ${msg || 'exit ' + code}`)
       if (/cancell?ed by the user|operation was cancell?ed|1223/i.test(msg)) {
-        throw new Error(
+        throw userError(
           `"${game.name}" needs administrator rights, and the Windows permission prompt was dismissed. ` +
           'Click Play again and choose Yes. If no prompt appears at all, your account may not be allowed to elevate.'
         )
@@ -992,7 +997,7 @@ async function doLaunch(id) {
       // ShellExecute shows the admin prompt itself for exes that ask for it;
       // a dismissed prompt is the user's answer, not a reason to ask again.
       if (/cancell?ed by the user|operation was cancell?ed/i.test(e.message)) {
-        throw new Error(`"${game.name}" needs administrator rights, and the Windows permission prompt was dismissed. Click Play again and choose Yes.`)
+        throw userError(`"${game.name}" needs administrator rights, and the Windows permission prompt was dismissed. Click Play again and choose Yes.`)
       }
       // EACCES/EPERM/EARLY_EXIT all point the same way here: the exe needs
       // admin rights. Fall back to the elevated launch now, and remember it
@@ -1368,6 +1373,7 @@ handle('settings:set', (key, value) => {
   const was = key === 'steam_user_id' ? settingsQ.getSetting(key) : null
   settingsQ.setSetting(key, value)
   if (key === 'pad_wake_combo') require('./services/controllerWake').setCombo(value)
+  if (key === 'pad_wake_hold_ms') require('./services/controllerWake').setHold(value)
   // Another Steam account: nothing learned about the old one (privacy, sync errors) holds.
   if (key === 'steam_user_id' && String(was || '') !== String(value || '')) {
     try { require('./services/steamAccounts').forget(); require('./services/achievementSync').resetAccountState() } catch {}
@@ -1376,6 +1382,12 @@ handle('settings:set', (key, value) => {
   return true
 })
 handle('settings:getAll', () => settingsQ.getAllSettings())
+
+// ── Controller (Settings > Shortcuts; services/controllerWake.js) ───────────
+handle('controller:status', () => require('./services/controllerWake').status())
+handle('controller:test', () => require('./services/controllerWake').test())
+handle('controller:record', (on) => require('./services/controllerWake').record(!!on))
+handle('controller:takeWake', () => require('./services/controllerWake').takeWake())
 
 // ── Active sessions (from process watcher) ───────────────────────────────────
 // Cross-check each entry against the games table so a stale in-memory session
@@ -2179,6 +2191,7 @@ handle('deals:markSeen', () => require('./services/deals').markSeen())
 handle('deals:more', () => require('./services/deals').moreDeals())
 handle('deals:saleMap', () => require('./services/deals').saleMap())
 handle('deals:unseen', () => require('./services/deals').unseen())
+handle('deals:unseenDetails', () => require('./services/deals').unseenDetails())
 handle('deals:gamePrices', (appid) => require('./services/deals').gamePrices(appid))
 handle('deals:setTarget', (appid, cents, meta) => require('./services/deals').setTarget(appid, cents, meta))
 // Right-click "Tell me at its lowest price": an alert at the deepest discount it has had.
@@ -2883,6 +2896,15 @@ handle('overlay:testBreak', () => {
   return true
 })
 
+// Settings > General > Notifications: one notification the way real news would come
+// (services/notifications.js): Windows with no game running, else the overlay.
+handle('notifications:test', async () => {
+  const n = require('./services/notifications')
+  const title = 'KoZo notifications are on'
+  const body = 'Release dates, games you want on sale and price alerts show like this.'
+  return n.notify({ kind: 'test', title, body, open: '/settings?tab=general',
+    overlay: n.overlayNotice({ kind: 'date', header: 'KoZo', title, body }) })
+})
 handle('overlay:test', () => {
   const payload = {
     gameId: 0,
@@ -3416,6 +3438,20 @@ handle('stats:captureCard', async (rect, action, year) => {
 })
 
 handle('stats:xp', () => require('./services/xp').computeXp())
+// Profile: the one-time repair of the last short break in the play streak (services/xp.js
+// repairCandidate). The days become frozen: the streak joins up, they add no XP of their own.
+handle('stats:repairStreak', () => {
+  const xp = require('./services/xp')
+  const days = xp.computeXp().streakRepair
+  if (!days?.length) throw userError("There's no break in your streak that can be repaired right now.")
+  settingsQ.setSetting('streak_repair_days', JSON.stringify(days))
+  settingsQ.setSetting('streak_repair_used', '1')
+  logger.info('streak: repaired', { days })
+  try { require('./services/xpTracker').check({ reason: 'streak_repair' }) } catch {}
+  try { require('./services/autoBackup').markDirty() } catch {}
+  broadcast('game:updated', null)
+  return xp.computeXp()
+})
 handle('stats:xpHistory', (limit) => require('./services/xp').xpHistory(limit || 25))
 handle('stats:badges', () => require('./services/badges').computeBadges())
 

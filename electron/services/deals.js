@@ -398,13 +398,17 @@ function buildAlerts(rows, facts, owned) {
   const cc = country()
   return rows.filter(r => !owned.has(Number(r.appid))).map(r => {
     const id = Number(r.appid), f = facts.get(id), info = lowCache.get(id)?.info || null
+    const state = targetState({ final: f?.price ? f.price.final : null, target: r.target, targetCc: r.targetCc, cc })
+    const { fix, convert } = alertFixes({ state, target: r.target, targetCc: r.targetCc, price: f?.price, info })
+    const money = (c) => (c != null && f?.price?.finalText ? moneyText(c, f.price.finalText) : null)
     return {
       listId: r.id, appid: id, name: f?.name || r.name, hit: !!r.hit,
-      state: targetState({ final: f?.price ? f.price.final : null, target: r.target, targetCc: r.targetCc, cc }),
+      state,
       header: f?.header || null, capsule: f?.capsule || null, portrait: f?.portrait || r.banner_url || null,
       price: f?.price || null, target: r.target,
-      targetText: f?.price?.finalText ? moneyText(r.target, f.price.finalText) : null,
+      targetText: money(r.target),
       lowest: info?.lowest ?? null, lowestDate: info?.lowestDate ?? null,
+      fix, fixText: money(fix), convert, convertText: money(convert),
     }
   }).sort((a, b) => (a.state === 'reached' ? 0 : 1) - (b.state === 'reached' ? 0 : 1) || a.name.localeCompare(b.name))
 }
@@ -422,12 +426,86 @@ function applyAlerts(alerts) {
     try { settings().setSetting('deals_seen', JSON.stringify(seen().filter(k => !gone.has(k)))) } catch {}
   }
   if (fire.length) {
-    try {
-      require('../overlayWindow').sendPriceFlash({
-        games: fire.map(a => ({ name: a.name, artUrl: a.portrait || a.header, priceText: a.price?.finalText || null, targetText: a.targetText })),
-      })
-    } catch (e) { logger.warn('deals: price toast failed', { message: e.message }) }
+    const games = fire.map(a => ({ name: a.name, artUrl: a.portrait || a.header, priceText: a.price?.finalText || null, targetText: a.targetText }))
+    const one = games.length === 1 ? games[0] : null
+    require('./notifications').notify({
+      kind: 'price',
+      title: one ? `${one.name} is at your price` : `${games.length} games reached your price`,
+      body: one ? (one.priceText ? `Now ${one.priceText} on Steam. Your alert was ${one.targetText}.` : 'See it under Discounts.') : listNames(games),
+      artUrl: games[0].artUrl, open: '/deals?tab=mine',
+      overlay: () => require('../overlayWindow').sendPriceFlash({ games }),
+    }).catch(e => logger.warn('deals: price notice failed', { message: e.message }))
   }
+}
+
+function listNames(list, max = 4) {
+  const shown = list.slice(0, max).map(g => g.name).join(', ')
+  return list.length > max ? `${shown} and ${list.length - max} more` : shown
+}
+
+// Pure: which sales on your Game List are news. `yours` = the games you want that are on sale
+// now, `state` = what was said before ({ day, sales: { appid: key }, lows: { appid: key } }, or
+// null the very first time), `today` = the local day. A sale is news once (its key is the
+// discount and its end); new sales are said at most once a day, grouped, and wait for the next
+// day otherwise. A game at its lowest price ever is said once per sale. The first run only
+// remembers what is on sale already: 63 games at once would say nothing useful.
+function saleNews(yours, state, today) {
+  const key = (g) => `${g.price?.pct || 0}:${g.price?.endsAt || ''}`
+  const first = !state
+  const prev = state || { day: null, sales: {}, lows: {} }
+  const next = { day: prev.day, sales: {}, lows: {} }
+  const fresh = [], lows = []
+  for (const g of yours || []) {
+    const id = String(g.appid), k = key(g)
+    if (prev.sales[id] === k) next.sales[id] = k
+    else if (!first) fresh.push(g)
+    else next.sales[id] = k
+    if (g.low === 'lowest') {
+      if (prev.lows[id] !== k && !first) lows.push(g)
+      next.lows[id] = k
+    }
+  }
+  let sales = []
+  if (fresh.length && prev.day !== today) {
+    sales = fresh
+    for (const g of fresh) next.sales[String(g.appid)] = key(g)
+    next.day = today
+  }
+  return { sales, lows, next }
+}
+
+function localDay(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// After a price check: tell the user about new sales on the Game List and new lowest prices.
+function announceSales(yours) {
+  try {
+    let state = null
+    try { state = JSON.parse(settings().getSetting('deals_notified') || 'null') } catch {}
+    const { sales, lows, next } = saleNews(yours, state, localDay())
+    settings().setSetting('deals_notified', JSON.stringify(next))
+    const n = require('./notifications')
+    const art = (g) => g?.header || g?.portrait || null
+    const deal = (g) => `-${g.price.pct}% · ${g.price.finalText}${g.price.originalText ? ` (was ${g.price.originalText})` : ''}`
+    if (lows.length) {
+      const one = lows.length === 1 ? lows[0] : null
+      const title = one ? `${one.name} is at its lowest price ever` : `${lows.length} games on your list are at their lowest price ever`
+      const body = one ? `${deal(one)} on Steam.` : listNames(lows)
+      n.notify({ kind: 'lowest', title, body, artUrl: art(lows[0]), open: '/deals?tab=mine',
+        overlay: n.overlayNotice({ kind: 'lowest', header: 'Lowest price ever', title: one ? one.name : title, body, artUrl: art(lows[0]) }) })
+        .catch(() => {})
+    }
+    const sale = sales.filter(g => !lows.includes(g)).sort((a, b) => (b.price?.pct || 0) - (a.price?.pct || 0))
+    if (sale.length) {
+      const one = sale.length === 1 ? sale[0] : null
+      const title = one ? `${one.name} is on sale` : `${sale.length} games on your list are on sale`
+      const body = one ? `${deal(one)} on Steam.` : listNames(sale)
+      n.notify({ kind: 'sale', title, body, artUrl: art(sale[0]), open: '/deals?tab=mine',
+        overlay: n.overlayNotice({ kind: 'sale', header: 'On sale', title: one ? one.name : title, body, artUrl: art(sale[0]) }) })
+        .catch(() => {})
+    }
+  } catch (e) { logger.warn('deals: sale notice failed', { message: e.message }) }
 }
 
 // After an alert changes: fresh prices for the alerts only, not the whole page.
@@ -513,13 +591,42 @@ function cheaperStore(stores, steamCents) {
   return { store: best.store, price: best.price, cents, save: Math.round((1 - cents / steamCents) * 100), url: best.url }
 }
 
+// Steam's deepest sales are 90% off. CheapShark's lowest ever is the lowest at ANY store (a key
+// shop's bundle price), and CheapShark has no Steam-only low (its deal lookup gives the same
+// number), so alerts set from it could never be reached on Steam: HITMAN's was $0.47 with Steam
+// at $13.19, Celeste's $0.94. No alert from it goes below 90% off.
+const STEAM_DEEPEST = 0.9
+// 90% off, rounded down: exactly 90% off is still reachable.
+function steamFloor(price) { return price?.original ? Math.max(1, Math.floor(price.original * (1 - STEAM_DEEPEST) + 1e-9)) : null }
+
 // Pure: "tell me at its lowest price", in your money. CheapShark's lowest ever is a US price, so its
 // share of Steam's US full price is the deepest discount the game has had; that share of your full
-// price is the alert. In US dollars with no US full price known, the lowest ever itself.
+// price is the alert, never below 90% off (STEAM_DEEPEST). In US dollars with no US full price
+// known, the lowest ever itself, with the same floor.
 function lowestTarget(price, info) {
   if (!price?.original || info?.lowest == null) return null
-  if (info.steamRetail > 0) return Math.max(1, Math.round(price.original * Math.min(1, info.lowest / info.steamRetail)))
-  return isUsd(price.finalText) ? Math.round(info.lowest * 100) : null
+  const floor = steamFloor(price)
+  if (info.steamRetail > 0) return Math.max(floor, Math.round(price.original * Math.min(1, info.lowest / info.steamRetail)))
+  return isUsd(price.finalText) ? Math.max(floor, Math.round(info.lowest * 100)) : null
+}
+
+// Pure: an alert's one-click fixes. `fix`: the alert is below anything Steam sells for (deeper
+// than 90% off), so it can't be reached; the suggestion is the game's lowest price, capped.
+// `convert`: the alert was set in US dollars for the US store and this PC buys in another
+// country; the same share of the full price here (Pacific Drive's stayed "set in another
+// currency" for good). Both null when there's nothing to fix.
+function alertFixes({ state, target, targetCc, price, info }) {
+  const out = { fix: null, convert: null }
+  if (!price?.original) return out
+  if (state === 'currency') {
+    if (targetCc === 'US' && info?.steamRetail > 0 && target != null) {
+      out.convert = Math.max(1, Math.round(target * price.original / Math.round(info.steamRetail * 100)))
+    }
+    return out
+  }
+  const floor = steamFloor(price)
+  if (state === 'waiting' && target != null && target < floor) out.fix = lowestTarget(price, info) ?? floor
+  return out
 }
 
 // One game's prices, for its window: Steam's in this PC's currency, the other
@@ -652,6 +759,7 @@ async function compute() {
   cache = { at: Date.now(), cc: data.cc, data, more: depth }
   saveDisk()
   markNewSales()
+  if (!late) announceSales(view(data).yours)
   if (late) {
     lowRun.then((full) => {
       lows = full
@@ -660,6 +768,8 @@ async function compute() {
       cache = { at: Date.now(), cc: again.cc, data: again, more: cache?.more || depth }
       saveDisk()
       broadcast('deals:updated', view(again))
+      // Said once CheapShark has answered, so a lowest price isn't missed.
+      announceSales(view(again).yours)
     })
   }
   return view(data)
@@ -682,6 +792,16 @@ function unseen() {
   const s = new Set(seen())
   const v = view(cache?.data)
   return [...(v?.yours || []).map(g => g.appid), ...reachedKeys(v)].filter(k => !s.has(k))
+}
+// The same, with names, for the sidebar badge's tooltip and the New pills on the page (the
+// maker saw "a number on the discount but I don't know what game for").
+function unseenDetails() {
+  loadDisk()
+  const s = new Set(seen())
+  const v = view(cache?.data)
+  const sales = (v?.yours || []).filter(g => !s.has(g.appid)).map(g => ({ appid: g.appid, name: g.name }))
+  const reached = (v?.alerts || []).filter(a => a.state === 'reached' && !s.has(alertKey(a.appid))).map(a => ({ appid: a.appid, name: a.name }))
+  return { count: sales.length + reached.length, sales, reached }
 }
 function markNewSales() { broadcast('deals:changed', unseen().length) }
 function markSeen() {
@@ -862,4 +982,6 @@ function start() {
 
 module.exports = { getDeals, moreDeals, saleMap, gamePrices, setTarget, refreshAlerts, lowInfo, markSeen, unseen, start, dealScore, wellReviewed, tasteMatch, tasteVector, forgetTaste, lowState, moneyText, targetState, alertChanges, cursorDone, freshIds,
   listChanged, listState, removeFromList, currentView, ccFromCookies, storeCountry,
-  alertAtLowest, isUsd, cheaperStore, lowestTarget }
+  alertAtLowest, isUsd, cheaperStore, lowestTarget, alertFixes, saleNews, unseenDetails, steamFloor,
+  // For the checks in scripts/: what a price check says, without a store request.
+  announceSales, applyAlerts }

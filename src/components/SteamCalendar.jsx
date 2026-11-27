@@ -3,14 +3,16 @@ import {
   IconBrandSteam, IconBookmark, IconBookmarkFilled, IconCheck,
   IconX, IconCalendarMonth, IconLoader2, IconClock,
   IconHourglass, IconSearch, IconInfoCircle, IconClockHour4, IconSparkles,
-  IconStarFilled,
+  IconStarFilled, IconCalendarEvent, IconCalendarTime, IconCircleCheck, IconCalendar,
 } from '@tabler/icons-react'
 import Modal, { modalStyles as ms } from './ui/Modal'
 import ContextMenu from './ui/ContextMenu'
 import EmptyState from './ui/EmptyState'
 import SteamGameModal from './SteamGameModal'
+import GeneratedCover from './GeneratedCover'
 import { Skeleton, widthAt } from './ui/Skeleton'
-import { parseRelease, storeRelease, countdownTo, localDayKey, monthKey, fmtDate } from '../lib/utils'
+import { parseRelease, storeRelease, countdownTo, localDayKey, monthKey, fmtDate, parseGenres } from '../lib/utils'
+import { matchesSearch } from '../lib/searchRank'
 import useCardZoom from '../lib/useCardZoom'
 import UpcomingHero from './UpcomingHero'
 import { defaultPickMode, filterBuckets, onlyIds, pickDay, popRank, readPickMode, weekRows, calendarShown, calendarDay, calendarKeep, CALENDAR_COUNTS } from '../lib/upcomingPick'
@@ -18,6 +20,7 @@ import SearchableSelect from './ui/SearchableSelect'
 import Switch from './ui/Switch'
 import useNearEnd from '../lib/useNearEnd'
 import s from './SteamCalendar.module.css'
+import u from './UpcomingCard.module.css'
 
 // Steam-style release calendar: popular games coming soon plus the most
 // wishlisted upcoming games (main process: steamApi.getComingSoon), with real
@@ -195,6 +198,48 @@ function releaseText(g) {
   return g.rel?.label || g.release || 'To be announced'
 }
 
+// ── Tracked, TBA and Steam search hits: the Discounts card ──────────────────
+// The maker found Tracked and TBA "not part of the same design" as the rest of KoZo: a bare
+// Steam capsule with loose text under it. This card is Discounts' (components/UpcomingCard
+// .module.css): a surface with the art on top (on wishlist / 1.0 chips, Track in the corner,
+// the countdown at the bottom) and the name, date and tags below it. Both halves open the game.
+function UpcomingCard({ g, renderTrack, onOpen, onMenu, when, whenTone, sub, tags = [], rise }) {
+  return (
+    <div className={u.card} data-cap="wide" data-gpnav
+      data-rise={rise != null ? '' : undefined} style={rise != null ? { '--i': rise } : undefined}
+      onContextMenu={onMenu ? (e) => { e.preventDefault(); onMenu(e, g) } : undefined}>
+      <button type="button" className={u.calCapHit} data-gpclick onClick={() => onOpen(g)} title={g.name}>
+        {/* A Game List row with no Steam page has no art to ask for: a cover made from its name. */}
+        {Number(g.appid) > 0 ? <Cover g={g} wide className={u.art} /> : <span className={u.art}><GeneratedCover name={g.name} /></span>}
+        {(g.onWishlist || g.onList || g.v1 || g.early) && (
+          <span className={u.artChips}>
+            {g.onWishlist ? <span className={u.onArt}><IconStarFilled size={10} /> On wishlist</span>
+              : g.onList ? <span className={u.onArt}><IconBookmarkFilled size={10} /> On your list</span> : null}
+            {(g.v1 || g.early) && <span className={u.onArt}>{g.v1 ? '1.0' : 'Early Access'}</span>}
+          </span>
+        )}
+        {when && <span className={`${u.capWhen} ${whenTone ? u['capWhen_' + whenTone] : ''}`}>{when}</span>}
+      </button>
+      <div className={u.capTrack}>{renderTrack(g, 'icon')}</div>
+      <button type="button" tabIndex={-1} className={u.capCaption} onClick={() => onOpen(g)}>
+        <span className={u.capName} title={g.name}>{g.name}</span>
+        <span className={u.capSub}><IconCalendarEvent size={13} stroke={1.7} /><span>{sub || releaseText(g)}</span></span>
+        {tags.length > 0 && (
+          <span className={u.tags}>
+            {tags.map(t => <span key={t.text} className={`${u.tag} ${t.tone ? u['tag' + t.tone] : ''}`}>{t.text}</span>)}
+          </span>
+        )}
+      </button>
+    </div>
+  )
+}
+
+// A group heading: Discounts' section heading (an accent icon, the label, a count pill).
+function GroupHead({ Icon, label, count }) {
+  return <div className={u.groupHead}><Icon size={15} stroke={1.7} /><span>{label}</span><span className={u.count}>{count}</span></div>
+}
+
+
 // ── Loading: each view's own shape ───────────────────────────────────────────
 // Steam's calendar while it loads: the real weekday names and dates, and in each day box
 // capsules that shimmer, one tall cover or a few wide ones like a loaded day. It used to be six
@@ -231,22 +276,24 @@ function CalendarSkeleton({ head, weeks = 3 }) {
   )
 }
 
-// Tracked and TBA while they load: group headings and a grid of capsules with a name and a line.
+// Tracked and TBA while they load: the group headings and the same cards, shimmering.
 function CapGridSkeleton({ groups = [4, 8] }) {
   let n = 0
   return (
-    <div className={s.tlist} aria-busy="true" aria-label="Loading">
+    <div className={u.list} aria-busy="true" aria-label="Loading">
       {groups.map((count, gi) => (
-        <section key={gi} className={s.tgroup}>
-          <div className={s.groupHead}><Skeleton w={gi ? 64 : 96} h={10} /><Skeleton w={18} h={10} className={s.skCount} /></div>
-          <div className={s.capGrid}>
+        <section key={gi} className={u.group}>
+          <div className={u.groupHead}><Skeleton w={gi ? 64 : 96} h={10} /><Skeleton w={22} h={16} r={8} /></div>
+          <div className={u.grid}>
             {Array.from({ length: count }, () => {
               const i = n++
               return (
-                <div key={i} className={s.skCard}>
-                  <Skeleton h={null} className={s.skCap} />
-                  <Skeleton w={widthAt(['70%', '54%', '78%', '62%'], i)} h={13} />
-                  <Skeleton w={widthAt(['34%', '26%', '40%'], i)} h={10} />
+                <div key={i} className={u.skCard}>
+                  <Skeleton w="100%" h={null} r={0} className={u.skArt} />
+                  <div className={u.skBody}>
+                    <Skeleton w={widthAt(['70%', '54%', '78%', '62%'], i)} h={13} />
+                    <Skeleton w={widthAt(['34%', '26%', '40%'], i)} h={10} />
+                  </div>
                 </div>
               )
             })}
@@ -257,12 +304,11 @@ function CapGridSkeleton({ groups = [4, 8] }) {
   )
 }
 
-// TBA's search, sort and count, while the games load.
+// TBA's sort and count, while the games load.
 function TbaNavSkeleton() {
   return (
-    <div className={s.nav} aria-hidden="true">
-      <Skeleton w={320} h={32} r="var(--r-md)" />
-      <Skeleton w={176} h={32} r="var(--r-md)" />
+    <div className={u.bar} aria-hidden="true">
+      <Skeleton w={214} h={36} r={18} />
       <Skeleton w={170} h={11} />
     </div>
   )
@@ -396,9 +442,10 @@ function useSteamCal() {
   return { data, error, busy, failed, more }
 }
 
-function SteamWeeks({ cal, opts, controls, steamConnected, isTracked, renderTrack, onOpen, onMenu, onMore }) {
+function SteamWeeks({ cal, opts, query = '', controls, steamConnected, isTracked, renderTrack, onOpen, onMenu, onMore }) {
   const { data, error, busy } = cal
-  const shown = useMemo(() => calendarShown(data?.items, opts), [data, opts])
+  // Upcoming's search box: the weeks keep only the games it matches.
+  const shown = useMemo(() => calendarShown(query ? (data?.items || []).filter(it => matchesSearch(it.name, query)) : data?.items, opts), [data, opts, query])
   const byDay = useMemo(() => {
     const m = new Map()
     for (const it of shown) {
@@ -548,15 +595,14 @@ function readCalOpts() {
   }
 }
 
-// ── Tracked: the Steam capsules in a grid ──────────────────────────────────────
-// The maker's pick, after rows, Steam-style boxes and big cards were turned down: the same capsule
-// as the Steam calendar and TBA, its name and date under it and how long until it on the picture,
-// grouped by when it lands. Every card is tracked here, so none gets the tracked ring.
+// ── Tracked: the cards, grouped by when they land ─────────────────────────────
+// Every card is tracked here, so none gets a tracked ring. Out now / This month / Later / Date not
+// announced, how long until it on the picture, the status (when not Upcoming) and genres below.
 const TRACK_GROUPS = [
-  { key: 'out',   label: 'Out now' },
-  { key: 'month', label: 'This month' },
-  { key: 'later', label: 'Later' },
-  { key: 'tba',   label: 'Date not announced' },
+  { key: 'out',   label: 'Out now', Icon: IconCircleCheck },
+  { key: 'month', label: 'This month', Icon: IconCalendarEvent },
+  { key: 'later', label: 'Later', Icon: IconCalendarTime },
+  { key: 'tba',   label: 'Date not announced', Icon: IconHourglass },
 ]
 function trackGroupOf(rel, now) {
   if (rel?.ts == null) return 'tba'
@@ -581,20 +627,29 @@ function statusText(status) {
   return t.charAt(0).toUpperCase() + t.slice(1)
 }
 
-function TrackedView({ entries, cap, infoOf }) {
-  if (!entries.length) return <div className={s.muted}>You aren't tracking any releases yet. Press Track on a game in the calendar, and KoZo tells you the day it comes out.</div>
+function TrackedView({ entries, card, infoOf, searching }) {
+  if (!entries.length) {
+    return searching ? null : (
+      <EmptyState Icon={IconBookmark} title="You aren't tracking any releases yet"
+        desc="Press Track on a game in the calendar, in TBA or in a search, and KoZo tells you the day before it comes out and the day it does." />
+    )
+  }
   const now = Date.now()
   const groups = new Map(TRACK_GROUPS.map(gr => [gr.key, []]))
   for (const g of entries) groups.get(trackGroupOf(g.rel, now)).push(g)
+  let n = 0
   return (
-    <div className={s.tlist} data-tracked data-fade="">
-      {TRACK_GROUPS.filter(gr => groups.get(gr.key).length).map((gr, gi) => (
-        <section key={gr.key} className={s.tgroup} data-track-group={gr.key}>
-          <div className={s.groupHead}><span>{gr.label}</span><span className={s.groupCount}>{groups.get(gr.key).length}</span></div>
-          <div className={s.capGrid}>
-            {groups.get(gr.key).map((g, j) => {
+    <div className={u.list} data-tracked data-fade="">
+      {TRACK_GROUPS.filter(gr => groups.get(gr.key).length).map((gr) => (
+        <section key={gr.key} className={u.group} data-track-group={gr.key}>
+          <GroupHead Icon={gr.Icon} label={gr.label} count={groups.get(gr.key).length} />
+          <div className={u.grid}>
+            {groups.get(gr.key).map((g) => {
               const chip = trackChip(g.rel, now)
-              return cap(g, { tracked: false, when: chip?.text || null, whenTone: chip?.tone, sub: [releaseText(g), statusText(infoOf(g)?.status)].filter(Boolean).join(' · '), rise: gi * 2 + j < 16 ? gi * 2 + j : null })
+              const status = statusText(infoOf(g)?.status)
+              const tags = [status && { text: status, tone: 'Status' }, ...(g.genres || []).slice(0, 3).map(t => ({ text: t }))].filter(Boolean)
+              const i = n++
+              return card(g, { when: chip?.text || null, whenTone: chip?.tone, sub: releaseText(g), tags, rise: i < 16 ? i : null })
             })}
           </div>
         </section>
@@ -603,19 +658,19 @@ function TrackedView({ entries, cap, infoOf }) {
   )
 }
 
-// ── TBA view: every game without a day or month, searchable ─────────────────
+// ── TBA: every game without a day or month ───────────────────────────────────
+// The page's search box filters it (`later` arrives filtered); more come in as the end nears,
+// like every other list (it had a Show more button).
 const TBA_PAGE = 60
-function TbaView({ later, cap }) {
-  const [q, setQ] = useState('')
+function TbaView({ later, card, query }) {
   const [sort, setSort] = useState('wish')
   const [limit, setLimit] = useState(TBA_PAGE)
-  const filtered = later
-    .filter(g => !q.trim() || g.name.toLowerCase().includes(q.trim().toLowerCase()))
-    .sort((a, b) => (sort === 'name'
-      ? a.name.localeCompare(b.name)
-      : (a.wishRank ?? 1e9) - (b.wishRank ?? 1e9) || a.name.localeCompare(b.name)))
-  const shown = filtered.slice(0, limit)
-  // Group by announced year ("2026", "2027"); the rest is "To be announced".
+  useEffect(() => { setLimit(TBA_PAGE) }, [query, sort])
+  const sorted = [...later].sort((a, b) => (sort === 'name'
+    ? a.name.localeCompare(b.name)
+    : (a.wishRank ?? 1e9) - (b.wishRank ?? 1e9) || a.name.localeCompare(b.name)))
+  const shown = sorted.slice(0, limit)
+  // Grouped by announced year ("2026", "2027"); the rest is "To be announced".
   const groups = new Map()
   for (const g of shown) {
     const y = g.rel?.ts != null ? String(new Date(g.rel.ts).getFullYear()) : 'To be announced'
@@ -623,39 +678,34 @@ function TbaView({ later, cap }) {
     groups.get(y).push(g)
   }
   const order = [...groups.keys()].sort((a, b) => (a === 'To be announced') - (b === 'To be announced') || a.localeCompare(b))
+  const endRef = useRef(null)
+  useNearEnd(endRef, () => setLimit(l => l + TBA_PAGE), { enabled: sorted.length > limit, key: `${limit}:${sorted.length}` })
+  let n = 0
   return (
-    <>
-      <div className={s.nav} data-fade="">
-        <div className={`${s.tbaSearch} hasRing`}>
-          <IconSearch size={14} />
-          <input value={q} onChange={e => { setQ(e.target.value); setLimit(TBA_PAGE) }} placeholder="Search undated games" aria-label="Search undated games" />
+    <div className={u.list} data-tba>
+      <div className={u.bar} data-fade="">
+        <div className={u.seg} role="radiogroup" aria-label="Sort undated games">
+          {[['wish', 'Most wishlisted'], ['name', 'A to Z']].map(([k, label]) => (
+            <button key={k} type="button" role="radio" aria-checked={sort === k} className={`${u.segBtn} ${sort === k ? u.segOn : ''}`} onClick={() => setSort(k)}>{label}</button>
+          ))}
         </div>
-        <div className={s.viewToggle}>
-          <button className={`${s.viewBtn} ${sort === 'wish' ? s.viewBtnActive : ''}`} onClick={() => setSort('wish')}>Most wishlisted</button>
-          <button className={`${s.viewBtn} ${sort === 'name' ? s.viewBtnActive : ''}`} onClick={() => setSort('name')}>A to Z</button>
-        </div>
-        <span className={s.muted}>{filtered.length} game{filtered.length !== 1 ? 's' : ''} without a release date</span>
+        <span className={u.muted}>{sorted.length} game{sorted.length !== 1 ? 's' : ''} without a release date{query ? ` match “${query}”` : ''}</span>
       </div>
-      {/* Over 200 games: a full-width grid of capsules with their names reads better than rows. */}
-      <div className={s.tlist} data-fade="">
-        {order.map((y, gi) => (
-          <section key={y} className={s.tgroup}>
-            <div className={s.groupHead}><span>{y}</span><span className={s.groupCount}>{groups.get(y).length}</span></div>
-            <div className={s.capGrid}>{groups.get(y).map((g, j) => cap(g, { when: null, rise: gi * 2 + j < 16 ? gi * 2 + j : null }))}</div>
-          </section>
-        ))}
-      </div>
-      {filtered.length > limit && (
-        <button className={s.textBtn} style={{ alignSelf: 'center' }} onClick={() => setLimit(l => l + TBA_PAGE)}>
-          Show more ({filtered.length - limit} left)
-        </button>
-      )}
-      {!filtered.length && <div className={s.muted}>Nothing matches.</div>}
-    </>
+      {order.map((y) => (
+        <section key={y} className={u.group} data-tba-group={y}>
+          <GroupHead Icon={y === 'To be announced' ? IconHourglass : IconCalendar} label={y} count={groups.get(y).length} />
+          <div className={u.grid}>
+            {groups.get(y).map((g) => { const i = n++; return card(g, { when: null, sub: releaseText(g), rise: i < 16 ? i : null }) })}
+          </div>
+        </section>
+      ))}
+      {sorted.length > limit && <div ref={endRef} className={u.endRow} />}
+      {!sorted.length && !query && <div className={u.muted}>No undated games in what Steam lists right now.</div>}
+    </div>
   )
 }
 
-export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], trackedLoaded = true, onTrack, onUntrack, onWant }) {
+export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], trackedLoaded = true, onTrack, onUntrack, onWant, view: viewProp = 'steam', query = '', onCounts, onOpenListRow }) {
   const [games, setGames]     = useState(() => calendarCache?.games || [])
   const [art, setArt]         = useState(() => calendarCache?.art || {})
   // App ids whose art request finished (found or not); the rest show a shimmer.
@@ -663,12 +713,9 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], t
   const [pages, setPages]     = useState(() => calendarCache?.pages || { soon: 0, wishlist: 0 })
   const [loading, setLoading] = useState(!calendarCache)
   const [error, setError]     = useState(null)
-  const [view, setView]       = useState(() => {
-    try { const v = localStorage.getItem('kozo:calendar:view'); return VIEW_KEYS.has(v) ? v : 'steam' } catch { return 'steam' }   // Strip, Week and Month are gone
-  })
-  // Steam, TBA or Tracked, remembered. It went with Strip, Week and Month, and every click on
-  // those three buttons threw (the maker: "I can't click anywhere").
-  const setViewMode = (v) => { setView(v); try { localStorage.setItem('kozo:calendar:view', v) } catch {} }
+  // Steam, TBA or Tracked: chosen by the page's tabs (pages/Upcoming.jsx), which remember it.
+  const view = VIEW_KEYS.has(viewProp) ? viewProp : 'steam'
+  const q = String(query || '').trim()
   const [picks, setPicks] = useState(() => picksCache)   // steamApi.getPicks: { picks: { appid: { pct, because } }, sources, names }
   useEffect(() => {
     window.kozo?.api?.steam?.picks?.()
@@ -886,17 +933,22 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], t
       capsule: r.banner_url,
       rel: storeRelease(appid ? art[appid]?.release : null, r.release_date),
       art: appid ? (art[appid] || (artTried.has(appid) ? {} : null)) : {},
+      genres: parseGenres(r),
     }
   }).sort((a, b) => (a.rel.ts ?? 9e15) - (b.rel.ts ?? 9e15)), [trackedRows, art, artTried])
+  // Upcoming's search box, on each view.
+  const trackedShown = useMemo(() => (q ? trackedEntries.filter(g => matchesSearch(g.name, q)) : trackedEntries), [trackedEntries, q])
+  const laterShown = useMemo(() => (q ? buckets.later.filter(g => matchesSearch(g.name, q)) : buckets.later), [buckets, q])
+  const shownQ = useMemo(() => (q ? onlyIds(shown, new Set(shown.all.filter(g => matchesSearch(g.name, q)).map(g => Number(g.appid)))) : shown), [shown, q])
 
   const todayKey = localDayKey(new Date())
   // Steam view: a rolling run of release days from today, like the store's
   // calendar (no month paging; "Show later days" reaches further).
   const steamHorizon = localDayKey(new Date(Date.now() + steamDays * DAY_MS))
-  const steamRun = [...shown.byDay.entries()]
+  const steamRun = [...shownQ.byDay.entries()]
     .filter(([k]) => k >= todayKey && k <= steamHorizon)
     .sort(([a], [b]) => a.localeCompare(b))
-  const steamHasLater = [...shown.byDay.keys()].some(k => k > steamHorizon)
+  const steamHasLater = [...shownQ.byDay.keys()].some(k => k > steamHorizon)
   const canLoadMore = pages.soon < MAX_PAGES || pages.wishlist < MAX_PAGES
   // Endless scrolling: reaching the end shows later days, and once the loaded
   // games run out, asks Steam for the next pages of both feeds.
@@ -934,12 +986,48 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], t
 
   const infoOf = (g) => byAppId.get(Number(g.appid)) || (g._listId ? { id: g._listId, watch: true } : null)
   const openMenu = (e, g) => setMenu({ x: e.clientX, y: e.clientY, g })
+  // A tracked game with no Steam page (a Game List row only) opens its Game List window: its
+  // Steam window asked Steam for "list-227" and showed nothing (log: status 400).
+  const openGame = (g) => {
+    if (g._listId && !(Number(g.appid) > 0)) { onOpenListRow?.(g._listId); return }
+    setDetail(g)
+  }
+  // Upcoming's search also asks Steam's store, a moment after typing stops: a game you look for
+  // that isn't on the page can be opened and tracked from here.
+  const [hits, setHits] = useState(null)          // null = not searched
+  const [hitsBusy, setHitsBusy] = useState(false)
+  useEffect(() => {
+    if (q.length < 2) { setHits(null); setHitsBusy(false); return undefined }
+    let alive = true
+    setHitsBusy(true)
+    const t = setTimeout(async () => {
+      const res = await window.kozo?.api?.steam?.search?.(q)
+      if (!alive) return
+      setHitsBusy(false)
+      setHits(res?.ok ? (res.data || []) : [])
+    }, 350)
+    return () => { alive = false; clearTimeout(t) }
+  }, [q])
+  const steamHits = useMemo(() => {
+    if (!hits?.length) return []
+    const onPage = new Set([...allGames.map(g => Number(g.appid)), ...trackedEntries.map(g => Number(g.appid)), ...(cal.data?.items || []).map(it => Number(it.appid))])
+    return hits.filter(h => Number(h.steam_app_id) > 0 && !onPage.has(Number(h.steam_app_id))).slice(0, 8).map(h => {
+      const id = Number(h.steam_app_id)
+      const a = art[id] || null
+      return {
+        appid: id, name: h.name, release: null, capsule: h.header_image || h.capsule || null,
+        art: a || { header: h.header_image || null, capsule: h.capsule || h.header_image || null },
+        rel: storeRelease(a?.release, null),
+      }
+    })
+  }, [hits, allGames, trackedEntries, cal.data, art])
+
   // Right-click on any release (every layout, shelves and the day popup).
   function menuItems(g) {
     const info = infoOf(g)
     const tracked = isTracked(g)
     return [
-      { label: 'Details', Icon: IconInfoCircle, onClick: () => setDetail(g) },
+      { label: 'Details', Icon: IconInfoCircle, onClick: () => openGame(g) },
       tracked
         ? { label: 'Untrack release', Icon: IconBookmarkFilled, color: 'var(--a)', onClick: () => untrack(g) }
         : { label: 'Track release', Icon: IconBookmark, onClick: () => track(g) },
@@ -954,30 +1042,27 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], t
   )
   // The one card (CapCard) with this page's Track, menu and details.
   const cap = (g, extra = {}) => (
-    <CapCard key={g.appid} g={g} tracked={isTracked(g)} renderTrack={renderTrack} onOpen={setDetail} onMenu={openMenu} {...extra} />
+    <CapCard key={g.appid} g={g} tracked={isTracked(g)} renderTrack={renderTrack} onOpen={openGame} onMenu={openMenu} {...extra} />
   )
+  // Tracked, TBA and Steam search hits: the Discounts-style card.
+  const card = (g, extra = {}) => (
+    <UpcomingCard key={g.appid} g={g} renderTrack={renderTrack} onOpen={openGame} onMenu={openMenu} {...extra} />
+  )
+  // The page's tabs show how many each view has, or how many match while searching.
+  const tbaCount = loading && !haveGames ? null : laterShown.length
+  const trackedCount = trackedLoaded ? trackedShown.length : null
+  const steamCount = useMemo(() => {
+    if (!q) return null
+    if (cal.data) return calendarShown((cal.data.items || []).filter(it => matchesSearch(it.name, q)), calOpts).length
+    return shownQ.all.length
+  }, [q, cal.data, calOpts, shownQ])
+  useEffect(() => { onCounts?.({ steam: steamCount, tba: tbaCount, tracked: trackedCount }) }, [steamCount, tbaCount, trackedCount])
 
   return (
     <div className={s.wrap} style={zoomStyle}>
-      {/* Top bar: the layout picker, the TBA shelf, and loading more games */}
-      <div className={s.nav} data-zoom-ignore="">
-        <div className={s.viewToggle} role="tablist" aria-label="Calendar layout">
-          {VIEWS.map(v => (
-            <button key={v.key} role="tab" aria-selected={view === v.key}
-              className={`${s.viewBtn} ${view === v.key ? s.viewBtnActive : ''}`} onClick={() => setViewMode(v.key)}>
-              <v.Icon size={14} /> {v.label}
-            </button>
-          ))}
-          {/* One group with the Steam view: three loose buttons in two styles looked like two bars. */}
-          <button role="tab" aria-selected={view === 'tba'} className={`${s.viewBtn} ${view === 'tba' ? s.viewBtnActive : ''}`} onClick={() => setViewMode('tba')}
-            title="Games without a release date">
-            <IconHourglass size={14} /> TBA {!(loading && !haveGames) && <span className={s.tbaCount}>{buckets.later.length}</span>}
-          </button>
-          <button role="tab" aria-selected={view === 'tracked'} className={`${s.viewBtn} ${view === 'tracked' ? s.viewBtnActive : ''}`} onClick={() => setViewMode('tracked')}
-            title="Releases you track">
-            <IconBookmarkFilled size={14} /> Tracked {trackedLoaded && <span className={s.tbaCount}>{trackedEntries.length}</span>}
-          </button>
-        </div>
+      {/* The fallback layout's top bar (Steam's calendar didn't load): which games, and loading.
+          Steam / TBA / Tracked are the page's tabs (pages/Upcoming.jsx). */}
+      {view === 'steam' && !steamWeeks && <div className={s.nav} data-zoom-ignore="">
         {view === 'steam' && !steamWeeks && (
           <div className={s.viewToggle} role="radiogroup" aria-label="Which games">
             {steamCal && (
@@ -1005,15 +1090,15 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], t
           </span>
         )}
         {loading && !steamWeeks && <IconLoader2 size={15} className="spin" />}
-      </div>
+      </div>}
 
       {steamWeeks && (
-        <SteamWeeks cal={cal} opts={calOpts} controls={controls} steamConnected={!!steamCal || steamKnown} isTracked={isTracked} renderTrack={renderTrack}
-          onOpen={setDetail} onMenu={openMenu} onMore={openMore} />
+        <SteamWeeks cal={cal} opts={calOpts} query={q} controls={controls} steamConnected={!!steamCal || steamKnown} isTracked={isTracked} renderTrack={renderTrack}
+          onOpen={openGame} onMenu={openMenu} onMore={openMore} />
       )}
 
-      {haveGames && view === 'steam' && !steamWeeks && (
-        <UpcomingHero games={shown.all} isTracked={isTracked} onOpen={setDetail} renderTrack={renderTrack} />
+      {haveGames && view === 'steam' && !steamWeeks && !q && (
+        <UpcomingHero games={shown.all} isTracked={isTracked} onOpen={openGame} renderTrack={renderTrack} />
       )}
 
       {!steamWeeks && view === 'steam' && controls}
@@ -1023,12 +1108,12 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], t
       )}
       {/* Loading: each view's own shape, never lines or an empty page. */}
       {loading && !haveGames && view === 'steam' && !steamWeeks && <CalendarSkeleton />}
-      {loading && !haveGames && view === 'tba' && <><TbaNavSkeleton /><CapGridSkeleton groups={[4, 8]} /></>}
+      {loading && !haveGames && view === 'tba' && <div className={u.list}><TbaNavSkeleton /><CapGridSkeleton groups={[4, 8]} /></div>}
 
       {haveGames && picksPending && view === 'steam' && !steamWeeks && <CalendarSkeleton />}
       {haveGames && !picksPending && view === 'steam' && !steamWeeks && (
         <SteamView days={steamRun} todayKey={todayKey} lastKey={todayKey} dayPick={dayPick} picked={pickMode === 'like' || pickMode === 'steam'} isTracked={isTracked}
-          renderTrack={renderTrack} onOpen={setDetail} onMenu={openMenu} onMore={openMore} empty={steamHasLater ? '' : emptyText} />
+          renderTrack={renderTrack} onOpen={openGame} onMenu={openMenu} onMore={openMore} empty={steamHasLater ? '' : emptyText} />
       )}
       {hasSentinel && (
         <div ref={sentinelRef} className={s.moreRow}>
@@ -1040,8 +1125,16 @@ export default function SteamCalendar({ byAppId = new Map(), trackedRows = [], t
             : <span>That is everything Steam lists as coming soon</span>}
         </div>
       )}
-      {view === 'tracked' && (trackedLoaded ? <TrackedView entries={trackedEntries} cap={cap} infoOf={infoOf} /> : <CapGridSkeleton groups={[3, 4]} />)}
-      {haveGames && view === 'tba' && <TbaView later={buckets.later} cap={cap} />}
+      {view === 'tracked' && (trackedLoaded ? <TrackedView entries={trackedShown} card={card} infoOf={infoOf} searching={!!q} /> : <CapGridSkeleton groups={[3, 4]} />)}
+      {haveGames && view === 'tba' && <TbaView later={laterShown} card={card} query={q} />}
+      {q.length >= 2 && (hitsBusy || hits) && (
+        <section className={u.group} data-upcoming-steam>
+          <div className={u.groupHead}><IconBrandSteam size={15} stroke={1.7} /><span>On Steam</span>{hitsBusy && <IconLoader2 size={13} className="spin" />}</div>
+          {steamHits.length > 0
+            ? <div className={u.grid}>{steamHits.map(g => card(g, { when: null, sub: 'Open it for its release date' }))}</div>
+            : !hitsBusy && <p className={u.muted}>Steam found nothing else for “{q}”.</p>}
+        </section>
+      )}
 
       {dayOpen && (
         <Modal title={dayOpen.label} icon={<IconCalendarMonth size={17} stroke={1.6} />} onClose={() => setDayOpen(null)} width={1080}>

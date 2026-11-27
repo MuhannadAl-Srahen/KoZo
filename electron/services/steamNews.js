@@ -131,11 +131,12 @@ function shapeNews(items) {
   })
 }
 
-async function getNews(appid) {
+// `force`: the game page's "Check again" (gameVersion), which must not get a 3-hour-old answer.
+async function getNews(appid, { force = false } = {}) {
   const id = Number(appid)
   if (!(id > 0)) return []
   const hit = cache.get(id)
-  if (hit && Date.now() - hit.at < TTL) return hit.items
+  if (!force && hit && Date.now() - hit.at < TTL) return hit.items
   try {
     const r = await require('axios').get('https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/', {
       timeout: 15000,

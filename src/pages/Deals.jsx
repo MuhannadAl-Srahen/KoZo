@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   IconDiscount2, IconRefresh, IconThumbUp, IconTrendingDown, IconClock, IconBuildingStore, IconPlus, IconCheck,
   IconSparkles, IconListCheck, IconBrandSteam, IconBell, IconSearch, IconX, IconLoader2, IconTrash,
@@ -18,13 +18,17 @@ import CardSizeSlider from '../components/ui/CardSizeSlider'
 import { timeAgo } from '../lib/utils'
 import useNearEnd from '../lib/useNearEnd'
 import { keepShown } from '../lib/endless'
+import { matchesSearch } from '../lib/searchRank'
 import s from './Deals.module.css'
+import t from '../styles/pillTabs.module.css'
 
-// Discount games: Steam's sales ranked for YOU (services/deals.js). Your
-// Game List games on sale come first; every deal has a deal score (discount,
-// reviews and how close it is to what you play), and CheapShark's price
-// history says when a price is the lowest ever (or only looks like a sale).
-// A game's window has a Prices tab: other stores and a price alert.
+// Discount games: Steam's sales ranked for YOU (services/deals.js). Two tabs (`?tab=`): Deals
+// (the default: every deal with a deal score from the discount, reviews and how close it is to
+// what you play) and My games (your price alerts and your Game List games on sale). My games
+// used to sit above the deals, and 63 of the maker's games pushed the deals far down the page.
+// CheapShark's price history says when a price is the lowest ever (or only looks like a sale).
+// A game's window has a Prices tab: other stores and a price alert. Things new since the last
+// look at My games carry a New pill there, and its tab says how many.
 
 const FILTERS = [
   { key: 'all',    label: 'All' },
@@ -46,14 +50,6 @@ const CHUNK = 24
 
 let dealsCache = null   // module cache: a revisit paints at once
 
-// Search: "need for speed" finds "Need for Speed™ Most Wanted" (marks and punctuation ignored).
-function searchKey(v) {
-  return String(v || '').toLowerCase().replace(/[™®©:'’".,!?\-–—_/()[\]]/g, ' ').replace(/\s+/g, ' ').trim()
-}
-function matchesSearch(name, term) {
-  const k = searchKey(term)
-  return !k || searchKey(name).includes(k)
-}
 
 // "Prices for Jordan": the country Steam's store prices this PC for (services/deals.js).
 function regionName(cc) {
@@ -83,7 +79,7 @@ function endsIn(ts) {
 // Another store's price under yours, in US dollars: shown instead of Steam's (the maker's call).
 const usd = (n) => `$${Number(n).toFixed(2)}`
 
-function DealCard({ g, i, us, alert, onOpen, onMenu }) {
+function DealCard({ g, i, us, isNew, onOpen, onMenu }) {
   const ends = endsIn(g.price?.endsAt)
   const taste = tasteWord(g.match)
   const low = lowestLine(g.lowest, g.lowestDate, us)
@@ -116,6 +112,7 @@ function DealCard({ g, i, us, alert, onOpen, onMenu }) {
           {ends && <span className={s.ends}><IconClock size={12} /> {ends}</span>}
         </div>
         <div className={s.badges}>
+          {isNew && <span className={`${s.badge} ${s.badgeNew}`} data-deal-new>New</span>}
           {g.low === 'lowest' && <span className={`${s.badge} ${s.badgeLow}`}><IconTrendingDown size={12} /> Lowest price ever</span>}
           {g.low === 'near' && <span className={`${s.badge} ${s.badgeNear}`}><IconTrendingDown size={12} /> Near its lowest</span>}
           {g.low === 'above' && <span className={`${s.badge} ${s.badgeAbove}`} title="This game has been cheaper before">Was cheaper before</span>}
@@ -129,28 +126,51 @@ function DealCard({ g, i, us, alert, onOpen, onMenu }) {
 }
 
 function alertText(a) {
-  if (a.state === 'currency') return 'Set in another currency. Open it to set it again.'
+  if (a.state === 'currency') {
+    return a.convertText
+      ? `Set for the US store. Here the same sale is about ${a.convertText}.`
+      : 'Set in another currency. Open it to set it again.'
+  }
   if (!a.price) return 'Steam gave no price just now.'
   return `Now ${a.price.finalText}, your alert is ${a.targetText}`
 }
 
-function AlertRow({ a, us, onOpen }) {
+// One price alert. Two fixes sit beside it when it can never fire: a price below anything
+// Steam sells it for (the old "lowest ever" came from any store, a key shop's bundle price),
+// and an alert set in the US store's dollars on a PC that buys elsewhere.
+function AlertRow({ a, us, isNew, onOpen, onFix }) {
   const low = lowestLine(a.lowest, a.lowestDate, us)
   const art = a.header || a.capsule
+  const [busy, setBusy] = useState(false)
+  const fixCents = a.fix ?? a.convert ?? null
+  async function fix() {
+    setBusy(true)
+    try { await onFix(a, fixCents) } finally { setBusy(false) }
+  }
   return (
-    <button type="button" className={`${s.alertRow} ${a.state === 'reached' ? s.alertReached : ''}`} data-gpnav onClick={() => onOpen(a)}>
-      <span className={s.alertArt}>
-        {art ? <img src={art} alt="" loading="lazy" decoding="async" /> : <GeneratedCover name={a.name} compact />}
-      </span>
-      <span className={s.alertBody}>
-        <span className={s.alertTop}>
-          <span className={s.alertName} title={a.name}>{a.name}</span>
-          {a.state === 'reached' && <span className={`${s.badge} ${s.badgeLow}`}><IconCheck size={12} /> At your price</span>}
+    <div className={`${s.alertRow} ${a.state === 'reached' ? s.alertReached : ''}`} data-gpnav data-deal-alert={a.appid}>
+      <button type="button" className={s.alertMain} data-gpclick onClick={() => onOpen(a)}>
+        <span className={s.alertArt}>
+          {art ? <img src={art} alt="" loading="lazy" decoding="async" /> : <GeneratedCover name={a.name} compact />}
         </span>
-        <span className={s.alertLine}>{alertText(a)}</span>
-        {low && <span className={s.alertLow}>{low}</span>}
-      </span>
-    </button>
+        <span className={s.alertBody}>
+          <span className={s.alertTop}>
+            <span className={s.alertName} title={a.name}>{a.name}</span>
+            {isNew && <span className={`${s.badge} ${s.badgeNew}`}>New</span>}
+            {a.state === 'reached' && <span className={`${s.badge} ${s.badgeLow}`}><IconCheck size={12} /> At your price</span>}
+          </span>
+          <span className={s.alertLine}>{alertText(a)}</span>
+          {a.fix != null
+            ? <span className={s.alertWarn}>Steam never goes that low: its sales stop at about 90% off.</span>
+            : low && <span className={s.alertLow}>{low}</span>}
+        </span>
+      </button>
+      {fixCents != null && (
+        <button type="button" className={s.alertFix} disabled={busy} onClick={fix} data-deal-alert-fix>
+          {busy ? <IconLoader2 size={13} className="spin" /> : null} Set to {a.fix != null ? a.fixText : a.convertText}
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -207,6 +227,15 @@ export default function Deals() {
   const [hitsBusy, setHitsBusy] = useState(false)
   const searchRef = useRef(null)
   const zoomStyle = useCardZoom('deals', 'grid', { grid: 260 }, { min: 200, max: 440 })
+  // Deals | My games. In the address (?tab=mine) so a notification can open My games.
+  const [params, setParams] = useSearchParams()
+  const tab = params.get('tab') === 'mine' ? 'mine' : 'deals'
+  const setTab = (k) => setParams(k === 'mine' ? { tab: 'mine' } : {}, { replace: true })
+  // What was new when the page opened (deals:unseenDetails), for the New pills. My games
+  // counts as seen once it's shown, not when the page opens: the badge used to vanish the
+  // moment Discounts opened, before anyone could see which games it meant.
+  const [fresh, setFresh] = useState(null)       // { sales: Set, reached: Set }
+  const [mineViewed, setMineViewed] = useState(false)
 
   function load(force = false) {
     if (force) setRefreshing(true)
@@ -218,10 +247,18 @@ export default function Deals() {
   }
 
   useEffect(() => {
-    load().then(() => window.kozo?.api?.deals?.markSeen?.())
+    load().then(() => window.kozo?.api?.deals?.unseenDetails?.()).then(r => {
+      const d = r?.ok ? r.data : null
+      setFresh({ sales: new Set((d?.sales || []).map(g => Number(g.appid))), reached: new Set((d?.reached || []).map(g => Number(g.appid))) })
+    })
     const off = window.kozo?.events?.onDealsUpdated?.((d) => { dealsCache = d; setData(d) })
     return () => { try { off?.() } catch {} }
   }, [])
+  useEffect(() => {
+    if (tab !== 'mine' || !fresh || !data) return
+    setMineViewed(true)
+    window.kozo?.api?.deals?.markSeen?.()
+  }, [tab, fresh, data])
 
   const sorted = useMemo(() => {
     let list = data?.deals || []
@@ -326,6 +363,11 @@ export default function Deals() {
     if (r.error) setMenuError(r.error)
     else setUndo(r.undo)
   }
+  // An alert's one-click fix (AlertRow): the main process sends deals:updated afterwards.
+  async function fixAlert(a, cents) {
+    const r = await window.kozo?.api?.deals?.setTarget?.(a.appid, cents)
+    if (!r?.ok) setMenuError(r?.error || "Couldn't change the alert.")
+  }
 
   const searching = !!query.trim()
   const yours = (data?.yours || []).filter(g => matchesSearch(g.name, query))
@@ -335,6 +377,16 @@ export default function Deals() {
   const listed = new Set([...(data?.deals || []), ...(data?.yours || []), ...(data?.alerts || [])].map(g => Number(g.appid)))
   const steamHits = (hits || []).filter(h => !listed.has(Number(h.steam_app_id))).slice(0, 8)
   const reachedCount = alerts.filter(a => a.state === 'reached').length
+  const isNewSale = (g) => !!fresh?.sales.has(Number(g.appid))
+  const isNewAlert = (a) => !!fresh?.reached.has(Number(a.appid))
+  const newMine = mineViewed ? 0 : (fresh ? yours.filter(isNewSale).length + alerts.filter(isNewAlert).length : 0)
+  // While searching every section shows (a match can be in either tab); the tabs count matches.
+  const showDeals = searching || tab === 'deals'
+  const showMine = searching || tab === 'mine'
+  const tabs = [
+    { key: 'deals', label: 'Deals', Icon: IconDiscount2, count: data ? deals.length : null },
+    { key: 'mine', label: 'My games', Icon: IconListCheck, count: data ? yours.length + alerts.length : null, fresh: newMine },
+  ]
   return (
     <div className={s.page}>
       <div className={s.toolbar}>
@@ -363,32 +415,47 @@ export default function Deals() {
         </button>
       </div>
 
+      <div className={t.tabRow}>
+        <div className={t.tabs} role="tablist" aria-label="Discounts">
+          {tabs.map(x => (
+            <button key={x.key} type="button" role="tab" aria-selected={tab === x.key} data-deals-tab={x.key}
+              className={`${t.tab} ${tab === x.key ? t.tabOn : ''} ${searching && x.count === 0 ? t.tabNone : ''}`}
+              onClick={() => setTab(x.key)}>
+              <x.Icon size={14} stroke={1.7} /> {x.label}
+              {x.count != null && <span className={t.tabCount}>{x.count}</span>}
+              {x.fresh > 0 && <span className={t.tabNew} title={`${x.fresh} new since you last looked`}>{x.fresh} new</span>}
+            </button>
+          ))}
+        </div>
+        {searching && <span className={s.updated}>Showing matches from both tabs</span>}
+      </div>
+
       <div className={s.content}>
         {error && !data ? (
           <EmptyState Icon={IconDiscount2} title="Couldn't load the sales" desc={error} action={{ label: 'Try again', Icon: IconRefresh, onClick: () => load(true) }} />
         ) : (
           <>
-            {!searching && data?.taste?.length > 0 && (
+            {!searching && showDeals && data?.taste?.length > 0 && (
               <div className={s.taste}>
                 <IconSparkles size={14} /> Ranked for you: you play a lot of
                 {data.taste.map(t => <span key={t} className={s.tasteChip}>{t}</span>)}
               </div>
             )}
 
-            {alerts.length > 0 && (
-              <section className={s.section}>
+            {showMine && alerts.length > 0 && (
+              <section className={s.section} data-deals-alerts>
                 <div className={s.sectionHead}>
                   <IconBell size={15} /> Price alerts
                   <span className={s.count}>{reachedCount > 0 ? `${reachedCount} at your price` : alerts.length}</span>
                 </div>
                 <div className={s.alerts}>
-                  {alerts.map(a => <AlertRow key={a.appid} a={a} us={us} onOpen={(x) => openWindow({ ...x, mine: true }, 'prices')} />)}
+                  {alerts.map(a => <AlertRow key={a.appid} a={a} us={us} isNew={isNewAlert(a)} onFix={fixAlert} onOpen={(x) => openWindow({ ...x, mine: true }, 'prices')} />)}
                 </div>
               </section>
             )}
 
             {/* Your Game List games on sale: the reason to open this page. While searching, only with a match. */}
-            {(!searching || yours.length > 0) && <section className={s.section}>
+            {showMine && (!searching || yours.length > 0) && <section className={s.section} data-deals-yours>
               <div className={s.sectionHead}>
                 <IconListCheck size={15} /> On your Game List
                 {yours.length > 0 && <span className={s.count}>{yours.length} on sale</span>}
@@ -401,12 +468,12 @@ export default function Deals() {
                 </p>
               ) : (
                 <div className={s.grid} style={zoomStyle}>
-                  {yours.map((g, i) => <DealCard key={g.appid} g={g} i={i} us={us} onOpen={openWindow} onMenu={openMenu} />)}
+                  {yours.map((g, i) => <DealCard key={g.appid} g={g} i={i} us={us} isNew={isNewSale(g)} onOpen={openWindow} onMenu={openMenu} />)}
                 </div>
               )}
             </section>}
 
-            <section className={s.section}>
+            {showDeals && <section className={s.section}>
               <div className={s.sectionHead}>
                 <IconDiscount2 size={15} /> Best deals for you
                 {data && <span className={s.count}>{deals.length}{canFetch ? '+' : ''}</span>}
@@ -447,7 +514,7 @@ export default function Deals() {
                   )}
                 </>
               )}
-            </section>
+            </section>}
 
             {searching && (hitsBusy || hits) && (
               <section className={s.section} data-deals-steam>

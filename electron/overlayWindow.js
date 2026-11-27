@@ -216,9 +216,12 @@ function sendSessionEnded(data)   { _send('sessionEnd:overlay',      data) }
 function sendUnknownGame(data)    { _send('unknownGame:overlay',      data) }
 // Play was pressed, the watched file never started, and another window is in front.
 function sendLaunchMiss(data)     { _send('launchMiss:overlay',       data) }
-// "It's out now" for a tracked upcoming game. The overlay is the app's ONLY
-// notification surface (§6) — never a native Notification.
+// "It's out now" for a tracked upcoming game. With no game running this goes out as a
+// Windows notification instead (services/notifications.js decides, never both).
 function sendReleaseFlash(data)   { _send('release:overlay',          data) }
+// Other news during a game (a release reminder, a new date, a sale): { kind, header, title,
+// body, artPath, artUrl }, drawn by OverlayApp's NoticeToast.
+function sendNotice(data)         { _send('notice:overlay',           data) }
 // A game reached the price the user set (services/deals.js).
 function sendPriceFlash(data)     { _send('price:overlay',            data) }
 // Settings > Tracking > Break reminder.
@@ -290,4 +293,4 @@ function applyAccent(hex) {
 
 // getWindow lets ipc.js tell the overlay apart from the main window (e.g. to
 // focus the main window when an overlay notification is clicked).
-module.exports = { getOrCreate, warm, getWindow: () => _win, sendAchievements, sendSessionStarted, sendStatusFlash, sendLevelUp, sendSessionEnded, sendUnknownGame, sendLaunchMiss, sendReleaseFlash, sendPriceFlash, sendBreakReminder, sendBadge, hideOverlay, markReady, setInteractive, applyAccent }
+module.exports = { getOrCreate, warm, getWindow: () => _win, sendAchievements, sendSessionStarted, sendStatusFlash, sendLevelUp, sendSessionEnded, sendUnknownGame, sendLaunchMiss, sendReleaseFlash, sendPriceFlash, sendNotice, sendBreakReminder, sendBadge, hideOverlay, markReady, setInteractive, applyAccent }

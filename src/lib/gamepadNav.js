@@ -15,8 +15,9 @@
 // or dialog is open only its controls count. The ring is the `data-gpfocus`
 // attribute (not a class: React rewrites className on re-render and would drop
 // it); real mouse or keyboard input hides it and the hint bar. Polling runs
-// ONLY after the first `gamepadconnected` (or a controller wake combo from the
-// main process), and pauses while the window is hidden or unfocused.
+// ONLY after the first `gamepadconnected`, a controller wake combo, or the main
+// process seeing the controller used while KoZo is in front (`gamepad:active`),
+// and pauses while the window is hidden or unfocused.
 
 const POLL_MS = 90
 const FIRST_REPEAT_MS = 350
@@ -50,6 +51,14 @@ function connected() {
   try {
     return Array.from(navigator.getGamepads?.() || []).some(g => g && g.connected)
   } catch { return false }
+}
+
+// The pad to read. One controller can be listed twice (its X-input side with Chromium's
+// standard layout, and its DirectInput side with its own), and reading the second one
+// made every button do the wrong thing. A standard layout wins.
+function pickPad() {
+  const pads = Array.from(navigator.getGamepads?.() || []).filter(g => g && g.connected)
+  return pads.find(g => g.mapping === 'standard') || pads[0] || null
 }
 
 // The hint bar (components/GamepadHints.jsx) follows this.
@@ -241,12 +250,28 @@ function moveFocus(dir) {
   if (dir === 'left' && document.querySelectorAll('[role="menu"]').length > 1) pressEscape()
 }
 
+// A DirectInput pad (no standard layout) reports its d-pad as one "hat" axis, usually the
+// 10th: -1 up, -0.43 right, 0.14 down, 0.71 left, and about 1.29 when nothing is pressed.
+function hatDirection(v) {
+  if (typeof v !== 'number' || v > 1.05 || v < -1.05) return null
+  const steps = [[-1, 'up'], [-0.714, 'up'], [-0.428, 'right'], [-0.142, 'right'], [0.142, 'down'], [0.428, 'down'], [0.714, 'left'], [1, 'left']]
+  let best = null, gap = 0.1
+  for (const [at, dir] of steps) { const d = Math.abs(v - at); if (d < gap) { gap = d; best = dir } }
+  return best
+}
+
 function readDirection(gp) {
   const b = gp.buttons
-  if (b[12]?.pressed) return 'up'
-  if (b[13]?.pressed) return 'down'
-  if (b[14]?.pressed) return 'left'
-  if (b[15]?.pressed) return 'right'
+  // Chromium says '' for a pad without the standard layout ('standard' otherwise).
+  if (gp.mapping !== '') {
+    if (b[12]?.pressed) return 'up'
+    if (b[13]?.pressed) return 'down'
+    if (b[14]?.pressed) return 'left'
+    if (b[15]?.pressed) return 'right'
+  } else {
+    const hat = hatDirection(gp.axes?.[9])
+    if (hat) return hat
+  }
   const x = gp.axes?.[0] ?? 0
   const y = gp.axes?.[1] ?? 0
   if (Math.abs(x) >= Math.abs(y)) {
@@ -347,7 +372,7 @@ function scrollBy(dy) {
 }
 
 function poll() {
-  const gp = Array.from(navigator.getGamepads?.() || []).find(g => g && g.connected)
+  const gp = pickPad()
   if (!gp) return
   syncScope()
 
@@ -439,10 +464,12 @@ export function initGamepadNav({ navigate, onBigPicture }) {
   // controller stays connected; no reason to poll for navigation nobody can
   // see. Pause on hide/blur, resume on show/focus (only if a pad is there).
   const onHidden = () => stopPolling()
+  // A pad seen once keeps polling on every return to the window, even before Chromium
+  // lists it again (it lists a pad only after a button press with the window in front).
   const onVisible = () => {
-    if (!_padSeen || !connected()) return
+    if (!_padSeen) return
     // A button still held from before the switch must not fire again.
-    const gp = Array.from(navigator.getGamepads?.() || []).find(g => g && g.connected)
+    const gp = pickPad()
     startPolling()
     if (gp) _prevButtons = gp.buttons.map(x => !!x?.pressed)
   }
@@ -451,13 +478,26 @@ export function initGamepadNav({ navigate, onBigPicture }) {
     else onHidden()
   }
   // The wake combo held while KoZo was in the tray (main process): the pad is
-  // certainly there, so start driving at once.
-  const offWake = window.kozo?.events?.onGamepadWake?.((info) => {
+  // certainly there, so start driving at once. It comes as an event, and the page also
+  // asks for it once loaded (a window created by the wake can miss the event), so the
+  // second one within a few seconds is ignored.
+  let lastWakeAt = 0
+  const onWake = (info) => {
+    if (Date.now() - lastWakeAt < 3000) return
+    lastWakeAt = Date.now()
     _padSeen = true
     if (info?.bigPicture) onBigPicture?.()
     startPolling()
     setActive(true)
     setTimeout(() => { if (!_focused) moveFocus('down') }, 300)
+  }
+  const offWake = window.kozo?.events?.onGamepadWake?.(onWake)
+  window.kozo?.api?.controller?.takeWake?.().then(r => { if (r?.ok && r.data) onWake(r.data) }).catch(() => {})
+  // The main process saw the controller being used while KoZo is in front (desktop probe):
+  // start polling now instead of waiting for Chromium's first gamepadconnected.
+  const offActive = window.kozo?.events?.onGamepadActive?.(() => {
+    _padSeen = true
+    if (document.visibilityState === 'visible') startPolling()
   })
 
   window.addEventListener('gamepadconnected', onConnect)
@@ -477,6 +517,7 @@ export function initGamepadNav({ navigate, onBigPicture }) {
     clearFocus()
     _navigate = null
     offWake?.()
+    offActive?.()
     window.removeEventListener('gamepadconnected', onConnect)
     window.removeEventListener('gamepaddisconnected', onDisconnect)
     window.removeEventListener('mousemove', onMouseMove)

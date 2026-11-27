@@ -192,7 +192,12 @@ function computeXp() {
     GROUP BY a.game_id HAVING total > 0 AND got >= total
   `).all()) { perfectXp += perfectBonus(g.total); perfectCount++ }
 
-  // Distinct local play days → current + longest streak.
+  // Distinct local play days → current + longest streak (with streak freezes, streakRuns).
+  const settingsQ = require('../db/queries/settings')
+  const freezeSince = settingsQ.getSetting('streak_freeze_since') || null
+  let repairDays = []
+  try { repairDays = JSON.parse(settingsQ.getSetting('streak_repair_days') || '[]') } catch {}
+  const repairUsed = settingsQ.getSetting('streak_repair_used') === '1'
   const dayKey = [ended.n, ended.last, ended.s, ended.lastEnd, new Date().getTimezoneOffset()].join('|')
   if (playDays.key !== dayKey) {
     playDays = {
@@ -205,25 +210,15 @@ function computeXp() {
   }
   const dayRows = playDays.days
 
-  const daySet = new Set(dayRows)
-  const dayMs = 86400000
-  const toUTC = (s) => { const [y, m, d] = s.split('-').map(Number); return Date.UTC(y, m - 1, d) }
-  let longestStreak = 0, run = 0, prev = null
-  for (const d of dayRows) {
-    if (prev != null && toUTC(d) - prev === dayMs) run++
-    else run = 1
-    if (run > longestStreak) longestStreak = run
-    prev = toUTC(d)
-  }
-  // Current streak: count back from today (or yesterday) while days are present.
+  // Current streak: today not played yet is fine if the run reaches yesterday (or a freeze
+  // covers the days between).
   const todayStr = new Date().toLocaleDateString('en-CA')   // YYYY-MM-DD local
-  let currentStreak = 0
-  let cursor = toUTC(todayStr)
-  if (!daySet.has(todayStr)) cursor -= dayMs   // a gap today is OK if you played yesterday
-  while (true) {
-    const key = new Date(cursor).toISOString().slice(0, 10)
-    if (daySet.has(key)) { currentStreak++; cursor -= dayMs } else break
-  }
+  const streaks = streakRuns(dayRows, { since: freezeSince, repairDays, today: todayStr })
+  const longestStreak = streaks.longest
+  const currentStreak = streaks.current
+  // The one-time repair (Profile): the last break, if it is short and recent, and not frozen.
+  const repair = repairUsed ? null : repairCandidate(dayRows, todayStr)
+  const streakRepair = repair && repair.every(d => !streaks.frozen.includes(d)) ? repair : null
 
   // Finished games — a deliberate milestone. Two places can mark a game finished:
   //   • the library (games.completion_status = 'finished'), and
@@ -302,13 +297,123 @@ function computeXp() {
     perfectCount,                          // games with every achievement unlocked
     currentStreak,
     longestStreak,
+    streakFreezes: streaks.freezes,        // held now (at most FREEZE_MAX)
+    freezeToNext: streaks.toNext,          // days played in a row until the next one
+    frozenDays: streaks.frozen,            // the days a freeze (or the repair) kept the streak over
+    streakRepair,                          // the days the one-time repair would cover, or null
     playDays: dayRows.length,
     unlockCount,
     finishedCount: finishedCount + firstFinishes,
     replayCount,                           // playthroughs finished again
     milestones: { hours: hourMilestones, explored, onPlan },
+    // The total in its parts, with the counts that name them (xpTracker keeps it beside the total,
+    // so a session's "+73 XP" can say what it was made of: gainParts).
+    parts: {
+      playtime: playtimeXp, achievements: unlockXp, unlocks: unlockCount, streak: streakXp, streakDays: longestStreak,
+      finished: finishedXp, perfect: perfectXp, hours: hourMilestoneXp, firstHour: explored * XP_PER_EXPLORED, onPlan: onPlan * XP_ON_PLAN,
+    },
     rules: RULES,                          // every way to earn XP, for "How XP works"
   }
+}
+
+// ── Streak freezes ─────────────────────────────────────────────────────────────
+// The maker: "if I miss a day streak is there a way that I can get it back". Every 7 days played
+// in a row earns a freeze (at most 2 held); a break of N days is bridged when N freezes are held,
+// and the run goes on. A frozen day keeps the streak alive but isn't a day played: it adds no
+// XP and no day to the count. Only days from `since` (the setting streak_freeze_since, the day
+// this came to KoZo) earn or use freezes, so no past streak, and no XP, changed by itself. On
+// top, one repair for the last break (repairCandidate; the setting streak_repair_days, chosen
+// on the Profile): those days count as frozen wherever they are.
+const FREEZE_EVERY = 7
+const FREEZE_MAX = 2
+const REPAIR_MAX_GAP = 2
+const REPAIR_WITHIN_DAYS = 30
+const DAY = 86400000
+// UTC day numbers: a local day can be 23 or 25 hours long.
+const dayNum = (s) => { const [y, m, d] = String(s).split('-').map(Number); return Math.round(Date.UTC(y, m - 1, d) / DAY) }
+const dayStr = (n) => new Date(n * DAY).toISOString().slice(0, 10)
+
+// Pure. days: local 'YYYY-MM-DD' days played. Returns the longest and current run (days played),
+// the freezes held now, the days kept over by a freeze or the repair, and how many more days in a
+// row earn the next freeze.
+function streakRuns(days, { since = null, repairDays = [], today } = {}) {
+  const played = [...new Set((days || []).filter(Boolean))].sort().map(dayNum)
+  const t = dayNum(today || new Date().toLocaleDateString('en-CA'))
+  const from = since ? dayNum(since) : Infinity
+  const repaired = new Set((repairDays || []).map(dayNum))
+  let longest = 0, run = 0, freezes = 0, earn = 0, prev = null
+  const frozen = []
+  // A break bridged: every day of it repaired, or from `since` and covered by freezes held.
+  const bridge = (gap) => {
+    const need = gap.filter(k => !repaired.has(k))
+    if (need.some(k => k < from) || need.length > freezes) return false
+    freezes -= need.length
+    frozen.push(...gap)
+    return true
+  }
+  for (const n of played) {
+    if (n > t) break
+    if (prev != null && n - prev > 1) {
+      const gap = []
+      for (let k = prev + 1; k < n; k++) gap.push(k)
+      if (!bridge(gap)) { run = 0; earn = 0 }
+    }
+    run++
+    if (n >= from && ++earn >= FREEZE_EVERY) { earn = 0; freezes = Math.min(FREEZE_MAX, freezes + 1) }
+    if (run > longest) longest = run
+    prev = n
+  }
+  // The break going on now. Today not played yet doesn't break anything; the days before it do,
+  // unless they are bridged (the freezes they take are shown as used).
+  let current = 0
+  if (prev != null) {
+    const gap = []
+    for (let k = prev + 1; k < t; k++) gap.push(k)
+    if (!gap.length || bridge(gap)) current = run
+  }
+  return { longest, current, freezes, frozen: frozen.map(dayStr).sort(), toNext: FREEZE_EVERY - earn }
+}
+
+// Pure: the days of the last break, when the one-time repair can cover them: 1 or 2 days, ended
+// within the last 30. The last break is the one going on now (days since the last day played,
+// today not counted), else the one before the latest run. null when there is none or it's longer.
+function repairCandidate(days, today) {
+  const played = [...new Set((days || []).filter(Boolean))].sort().map(dayNum)
+  if (!played.length) return null
+  const t = dayNum(today || new Date().toLocaleDateString('en-CA'))
+  const gap = []
+  const last = played[played.length - 1]
+  for (let k = last + 1; k < t; k++) gap.push(k)
+  if (!gap.length) {
+    for (let i = played.length - 1; i > 0; i--) {
+      if (played[i] - played[i - 1] > 1) { for (let k = played[i - 1] + 1; k < played[i]; k++) gap.push(k); break }
+    }
+  }
+  if (!gap.length || gap.length > REPAIR_MAX_GAP) return null
+  if (t - gap[gap.length - 1] > REPAIR_WITHIN_DAYS) return null
+  return gap.map(dayStr)
+}
+
+// Pure: what a gain in XP was made of, from the parts before and after, largest first after the
+// play itself. The session message said only "23m 47s played, +73 XP earned", and 23 minutes is
+// 23 XP: the other 50 were Feeding Frenzy 2's first hour (the maker: "???").
+const HOURS_BY_XP = Object.fromEntries(HOUR_MILESTONES.map(m => [m.xp, m.hours]))
+function gainParts(before, after) {
+  if (!before || !after) return null
+  const d = (k) => Math.max(0, (after[k] || 0) - (before[k] || 0))
+  const n = d('unlocks')
+  const hourXp = d('hours')
+  const list = [
+    { key: 'play', xp: d('playtime'), label: 'for playing' },
+    { key: 'achievements', xp: d('achievements'), label: n === 1 ? 'for an achievement' : `for ${n || 'new'} achievements` },
+    { key: 'firstHour', xp: d('firstHour'), label: 'first hour in this game' },
+    { key: 'hours', xp: hourXp, label: HOURS_BY_XP[hourXp] ? `${HOURS_BY_XP[hourXp]} hours in this game` : 'hours in this game' },
+    { key: 'streak', xp: d('streak'), label: `longest streak now ${after.streakDays || 0} days` },
+    { key: 'finished', xp: d('finished'), label: 'for finishing' },
+    { key: 'perfect', xp: d('perfect'), label: 'for 100%' },
+    { key: 'onPlan', xp: d('onPlan'), label: 'finished in its planned month' },
+  ].filter(p => p.xp > 0)
+  return [...list.filter(p => p.key === 'play'), ...list.filter(p => p.key !== 'play').sort((a, b) => b.xp - a.xp)]
 }
 
 // Recent XP events — derived from the same tables the XP formula reads, so the
@@ -360,4 +465,4 @@ function xpHistory(limit = 25) {
   return rows.filter(r => r.xp > 0).slice(0, limit)
 }
 
-module.exports = { computeXp, xpHistory, levelForXp, tierForLevel, nextTierInfo, xpForUnlock, rarityOf, perfectBonus, RARITY_XP, XP_RULES, RULES }
+module.exports = { computeXp, xpHistory, levelForXp, tierForLevel, nextTierInfo, xpForUnlock, rarityOf, perfectBonus, RARITY_XP, XP_RULES, RULES, gainParts, streakRuns, repairCandidate, FREEZE_EVERY, FREEZE_MAX }

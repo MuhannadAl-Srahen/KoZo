@@ -134,14 +134,29 @@ export default function Sidebar() {
     const off = window.kozo?.events?.onReleasesChanged?.((list) => setNewReleases((list || []).length))
     return () => { alive = false; off?.() }
   }, [])
-  // Game List games newly on sale (services/deals.js) → badge on "Discounts".
+  // Game List games newly on sale and price alerts reached (services/deals.js) → badge on
+  // "Discounts". Its tooltip names them: the maker saw "a number on the discount but I don't
+  // know what game for".
   const [newDeals, setNewDeals] = useState(0)
+  const [dealNames, setDealNames] = useState(null)
   useEffect(() => {
     let alive = true
-    window.kozo?.api?.deals?.unseen?.().then(res => { if (alive && res?.ok) setNewDeals((res.data || []).length) })
-    const off = window.kozo?.events?.onDealsChanged?.((n) => setNewDeals(Number(n) || 0))
+    const load = () => window.kozo?.api?.deals?.unseenDetails?.().then(res => {
+      if (!alive || !res?.ok) return
+      setNewDeals(res.data.count || 0)
+      setDealNames(res.data)
+    })
+    load()
+    const off = window.kozo?.events?.onDealsChanged?.((n) => { setNewDeals(Number(n) || 0); load() })
     return () => { alive = false; off?.() }
   }, [])
+  const dealsTitle = (() => {
+    const list = (arr) => arr.slice(0, 6).map(g => g.name).join(', ') + (arr.length > 6 ? ` and ${arr.length - 6} more` : '')
+    const parts = []
+    if (dealNames?.reached?.length) parts.push(`At your price: ${list(dealNames.reached)}`)
+    if (dealNames?.sales?.length) parts.push(`New on sale from your Game List: ${list(dealNames.sales)}`)
+    return parts.join('\n') || `${newDeals} new on Discounts`
+  })()
   const [xp, setXp] = useState(null)
   const location = useLocation()
 
@@ -302,7 +317,7 @@ export default function Sidebar() {
                 <span className={s.navBadge} title={`${newReleases} tracked game${newReleases !== 1 ? 's' : ''} just released`}>{newReleases}</span>
               )}
               {path === '/deals' && newDeals > 0 && (
-                <span className={s.navBadge} title={`${newDeals} game${newDeals !== 1 ? 's' : ''} on your Game List just went on sale`}>{newDeals}</span>
+                <span className={s.navBadge} title={dealsTitle}>{newDeals}</span>
               )}
             </NavLink>
           </React.Fragment>
