@@ -6,6 +6,16 @@
 
 export const normName = (n) => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '')
 
+// A page's own search box (Discounts, Upcoming): "need for speed" finds "Need for Speed™ Most
+// Wanted" (marks and punctuation ignored, words kept apart).
+export function searchKey(v) {
+  return String(v || '').toLowerCase().replace(/[™®©:'’".,!?\-–—_/()[\]]/g, ' ').replace(/\s+/g, ' ').trim()
+}
+export function matchesSearch(name, term) {
+  const k = searchKey(term)
+  return !k || searchKey(name).includes(k)
+}
+
 // 4 exact, 3 starts with the query, 2 contains it, 1 shares the first word, 0 other.
 export function matchScore(query, name) {
   const q = normName(query), n = normName(name)

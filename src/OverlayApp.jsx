@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { IconAward, IconTrophy, IconPlayerPlay, IconClock, IconDeviceGamepad2, IconSparkles, IconArrowBigUpLines, IconPlus, IconCalendarEvent, IconTag, IconCoffee } from '@tabler/icons-react'
+import { IconAward, IconTrophy, IconPlayerPlay, IconClock, IconDeviceGamepad2, IconSparkles, IconArrowBigUpLines, IconPlus, IconCalendarEvent, IconTag, IconCoffee, IconTrendingDown } from '@tabler/icons-react'
 import { applyAccent } from './context/AccentColorContext'
 import { fileUrl } from './lib/utils'
 import { playAchievement, playLevelUp, playSessionStart, playSessionEnd, playRelease, playPrice, playBreak, playQuestion, playBadge, holdAudio, releaseAudio } from './lib/sounds'
@@ -11,7 +11,9 @@ import s from './OverlayApp.module.css'
 function ToastArt({ artPath, artUrl, className }) {
   const [stage, setStage] = useState(artPath ? 'local' : (artUrl ? 'remote' : 'none'))
   if (stage === 'none') return null
-  const src = stage === 'local' ? fileUrl(artPath) : artUrl
+  // The thumb is 40 x 54: the card-size copy (services/cardCovers.js), not the full banner
+  // decoded over a running game (a 2.4 s overlay freeze followed a "Now Playing" toast).
+  const src = stage === 'local' ? fileUrl(artPath, null, { card: true }) : artUrl
   return (
     <img
       className={`${s.toastArt} ${className || ''}`}
@@ -265,7 +267,9 @@ function LevelUpToast({ toast, onDismiss }) {
 
 function SessionEndToast({ toast, onDismiss }) {
   const { leaving, close, hoverId } = useAutoClose(onDismiss, 6000)
-  const { gameName, durationSeconds, gainedXp, toNextLevel } = toast
+  const { gameName, durationSeconds, gainedXp, toNextLevel, xpParts } = toast
+  // Only worth a line when it isn't just the play time (then the first line says it all).
+  const parts = Array.isArray(xpParts) && xpParts.some(p => p.key !== 'play') ? xpParts : null
   return (
     <div className={`${s.toast} ${s.sessionToast} ${leaving ? s.toastOut : s.toastIn}`}
       {...toneProps('end')} {...toastInteractions(close, leaving, hoverId)}>
@@ -286,6 +290,11 @@ function SessionEndToast({ toast, onDismiss }) {
           <div className={s.toastDesc}>
             {flashTime(durationSeconds || 0)} played · +{gainedXp} XP earned
           </div>
+          {parts && (
+            <div className={s.toastParts} data-xp-parts="">
+              {parts.map(p => `+${p.xp} ${p.label}`).join(' · ')}
+            </div>
+          )}
           {toNextLevel != null && (
             <div className={s.toastGame}>Only {toNextLevel} XP to the next level!</div>
           )}
@@ -534,6 +543,38 @@ function PriceToast({ toast, onDismiss }) {
   )
 }
 
+// Other news that reaches a game (services/notifications.js; outside a game it is a Windows
+// notification): a release tomorrow, a new release date, games on your list on sale, a new
+// lowest price. { kind, header, title, body, artPath, artUrl }.
+const NOTICE_ICONS = { reminder: IconCalendarEvent, date: IconCalendarEvent, sale: IconTag, lowest: IconTrendingDown }
+function NoticeToast({ toast, onDismiss }) {
+  const { leaving, close, hoverId } = useAutoClose(onDismiss, 10000)
+  const Icon = NOTICE_ICONS[toast.kind] || IconCalendarEvent
+  const hasArt = toast.artPath || toast.artUrl
+  return (
+    <div className={`${s.toast} ${s.releaseToast} ${leaving ? s.toastOut : s.toastIn}`}
+      {...toneProps(toast.kind === 'sale' || toast.kind === 'lowest' ? 'price' : 'release')} {...toastInteractions(close, leaving, hoverId)}>
+      <div className={s.toastHeader}>
+        <Icon size={11} stroke={2} style={{ color: 'var(--a)', flexShrink: 0 }} />
+        <span className={s.toastHeaderText}>{toast.header}</span>
+      </div>
+      <div className={s.toastBody}>
+        {hasArt
+          ? <ToastArt key={toast.artPath || toast.artUrl} artPath={toast.artPath} artUrl={toast.artUrl} className={s.liveGlow} />
+          : (
+            <div className={`${s.toastIcon} ${s.releaseIcon}`}>
+              <Icon size={22} stroke={1.5} style={{ color: 'var(--a)' }} />
+            </div>
+          )}
+        <div className={s.toastInfo}>
+          <div className={s.toastName}>{toast.title}</div>
+          {toast.body && <div className={s.toastDesc}>{toast.body}</div>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // Settings > Tracking > Break reminder. No chime: this one can wait.
 function BreakToast({ toast, onDismiss }) {
   const { leaving, close, hoverId } = useAutoClose(onDismiss, 9000)
@@ -694,6 +735,13 @@ export default function OverlayApp() {
       setToasts(q => capToasts([...q, { id: ++nextId.current, type: 'price', ...data }]))
     })
 
+    // Other news (a release tomorrow, a new date, a sale, a new lowest price).
+    on(window.kozo?.events?.onNoticeOverlay, (data) => {
+      if (!data?.title) return
+      if (data.kind === 'sale' || data.kind === 'lowest') playPrice(); else playRelease()
+      setToasts(q => capToasts([...q, { id: ++nextId.current, type: 'notice', ...data }]))
+    })
+
     // Break reminder. Never two at once.
     on(window.kozo?.events?.onBreakOverlay, (data) => {
       playBreak()
@@ -760,6 +808,8 @@ export default function OverlayApp() {
           ? <ReleaseToast    key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
           : t.type === 'price'
           ? <PriceToast      key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
+          : t.type === 'notice'
+          ? <NoticeToast     key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
           : t.type === 'break'
           ? <BreakToast      key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
           : t.type === 'badge'

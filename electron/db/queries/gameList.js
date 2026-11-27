@@ -82,7 +82,7 @@ function addGameListItem(data) {
        OR lower(name) = lower(@name)
     LIMIT 1
   `).get({ steam_app_id: data.steam_app_id ?? null, name: data.name || '' })
-  if (existing) throw new Error('This game is already in your list.')
+  if (existing) { const e = new Error('This game is already in your list.'); e.expected = true; throw e }
   const result = getDb().prepare(`
     INSERT INTO game_list (game_id, steam_app_id, name, banner_url, category_id, status, rating, genres, release_date)
     VALUES (@game_id, @steam_app_id, @name, @banner_url, @category_id, @status, @rating, @genres, @release_date)

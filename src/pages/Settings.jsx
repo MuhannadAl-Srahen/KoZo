@@ -263,10 +263,85 @@ function GeneralTab() {
         <Message msg={startupMsg} />
       </section>
 
+      <NotificationsSection />
+
       <SuggestionsSection />
+
+      <ControllerShortcutSection />
 
       <GraphicsSection />
     </div>
+  )
+}
+
+// Release, sale and price news (services/notifications.js). The Windows switch is the
+// setting `os_notifications` (on unless '0'); during a game the overlay is used anyway.
+let osNotifyCache = null
+function NotificationsSection() {
+  const [on, setOn] = useState(osNotifyCache ?? true)
+  const [sent, setSent] = useState(null)   // 'os' | 'overlay' | null
+  useEffect(() => {
+    window.kozo?.api?.settings?.get?.('os_notifications').then(r => {
+      if (r?.ok) { osNotifyCache = r.data !== '0'; setOn(osNotifyCache) }
+    })
+  }, [])
+  function toggle(v) {
+    setOn(v)
+    osNotifyCache = v
+    setSent(null)
+    window.kozo?.api?.settings?.set('os_notifications', v ? '1' : '0')
+  }
+  async function test() {
+    const r = await window.kozo?.api?.notifications?.test?.()
+    setSent(r?.ok ? r.data : 'overlay')
+  }
+  return (
+    <section className={s.section} data-settings-notifications>
+      <div className={s.sectionHeader}>
+        <IconBell size={15} stroke={1.6} />
+        <span>Notifications</span>
+      </div>
+      <p className={s.sectionDesc}>
+        KoZo tells you when a game you track is out tomorrow, comes out or gets a new date, when a game on your
+        Game List goes on sale or hits its lowest price, and when a price alert is reached.
+      </p>
+      <div className={s.toggleList}>
+        <ToggleRow
+          label="Windows notifications"
+          desc="With no game running, news comes as a Windows notification that waits in the Action Center; click it to open KoZo there. During a game it shows as KoZo's overlay instead."
+          checked={on}
+          onChange={toggle}
+        />
+      </div>
+      <div className={s.padTools}>
+        <button type="button" className={s.testBtn} onClick={test} data-notify-test>
+          <IconBell size={13} stroke={1.8} /> Send a test notification
+        </button>
+        <span className={s.padToolNote} aria-live="polite">
+          {sent === 'os' && 'Sent as a Windows notification.'}
+          {sent === 'overlay' && (on
+            ? 'Shown as KoZo\'s overlay in the corner: Windows notifications come from the installed KoZo when no game is running.'
+            : 'Shown as KoZo\'s overlay in the corner.')}
+        </span>
+      </div>
+    </section>
+  )
+}
+
+// The controller combo lives in Settings > Shortcuts; a row here so it can be found.
+function ControllerShortcutSection() {
+  const [, setParams] = useSearchParams()
+  return (
+    <section className={s.section}>
+      <div className={s.sectionHeader}>
+        <IconDeviceGamepad2 size={15} stroke={1.6} />
+        <span>Controller</span>
+      </div>
+      <div className={s.padTools} style={{ marginTop: 0 }}>
+        <span className={s.padToolNote}>Choose, test or record the button combo that opens KoZo from anywhere, and see whether your controller is connected.</span>
+        <button type="button" className={s.testBtn} onClick={() => setParams({ tab: 'shortcuts' })}>Controller settings</button>
+      </div>
+    </section>
   )
 }
 
@@ -464,7 +539,7 @@ const PAD_GROUPS = [
     [['D-pad', 'L stick'], 'Move between cards, buttons and tabs'],
     [['R stick'], 'Scroll the page or the open dialog'],
     [['LB', 'RB'], 'Previous / next page in the sidebar'],
-    [['LT', 'RT'], 'Previous / next tab inside the page (Play Plan views, Activity)'],
+    [['LT', 'RT'], 'Previous / next tab inside the page (Play Plan views, Activity, Upcoming, Discounts)'],
   ] },
   { title: 'Doing things', rows: [
     [['A'], 'Select: open the game, press the button, type in the field'],
@@ -482,6 +557,21 @@ const WAKE_COMBOS = [
   { value: 'viewmenu', label: 'View + Menu', keys: ['View + Menu'] },
   { value: 'off',      label: 'Off', keys: null },
 ]
+const WAKE_HOLDS = [
+  { value: 500, label: '½ second' },
+  { value: 1000, label: '1 second' },
+  { value: 2000, label: '2 seconds' },
+]
+// XInput's button bits, in the order a combo is written.
+const PAD_BITS = [
+  [0x0100, 'LB'], [0x0200, 'RB'], [0x0020, 'View'], [0x0010, 'Menu'], [0x0400, 'Xbox'],
+  [0x1000, 'A'], [0x2000, 'B'], [0x4000, 'X'], [0x8000, 'Y'],
+  [0x0001, 'Up'], [0x0002, 'Down'], [0x0004, 'Left'], [0x0008, 'Right'], [0x0040, 'LS'], [0x0080, 'RS'],
+]
+function padNames(mask) { return PAD_BITS.filter(([bit]) => mask & bit).map(([, n]) => n) }
+function customMask(v) { const m = /^custom:(\d+)$/.exec(String(v || '')); return m ? Number(m[1]) : 0 }
+function bitCount(m) { let n = 0; while (m) { n += m & 1; m >>>= 1 } return n }
+function holdWords(ms) { return ms === 500 ? 'half a second' : ms === 2000 ? '2 seconds' : 'a second' }
 let wakeComboCache = null
 const PAD_COLORS = { A: '#3fb950', B: '#f85149', X: '#4493f8', Y: '#e3b341' }
 
@@ -513,59 +603,151 @@ function PadKeys({ keys }) {
   )
 }
 
-// Whether a controller is connected right now (Chromium only lists a pad
-// after a button press, so "not seen" tells you to press one).
-function usePadName() {
-  const [name, setName] = useState(null)
+// Which controller is there, from two places: Windows' X-input slots (the desktop probe in
+// the main process, which sees a pad with KoZo in the tray too) and Chromium's list (which
+// only lists a pad after a button press, and tells a DirectInput pad by its layout). A pad
+// only Chromium sees, without the standard layout, is in DirectInput mode: KoZo's wake
+// combo can't read it and its buttons may be laid out differently.
+function usePadStatus() {
+  const [slots, setSlots] = useState([])
+  const [chrome, setChrome] = useState(null)   // { name, standard }
   useEffect(() => {
+    window.kozo?.api?.controller?.status?.().then(r => { if (r?.ok) setSlots(r.data.slots || []) })
+    const offSlots = window.kozo?.events?.onControllerSlots?.(v => setSlots(v || []))
     const read = () => {
-      const gp = Array.from(navigator.getGamepads?.() || []).find(g => g && g.connected)
-      setName(gp ? gp.id.replace(/\s*\(.*$/, '') || 'Controller' : null)
+      const pads = Array.from(navigator.getGamepads?.() || []).filter(g => g && g.connected)
+      const gp = pads.find(g => g.mapping === 'standard') || pads[0]
+      setChrome(gp ? { name: gp.id.replace(/\s*\(.*$/, '') || 'Controller', standard: gp.mapping === 'standard' } : null)
     }
     read()
     window.addEventListener('gamepadconnected', read)
     window.addEventListener('gamepaddisconnected', read)
     const t = setInterval(read, 2000)
     return () => {
+      offSlots?.()
       window.removeEventListener('gamepadconnected', read)
       window.removeEventListener('gamepaddisconnected', read)
       clearInterval(t)
     }
   }, [])
-  return name
+  if (slots.length) return { on: true, text: `${chrome?.standard ? chrome.name : 'Controller'} connected (X-input, slot ${slots[0] + 1})` }
+  if (chrome && !chrome.standard) return { on: false, warn: true, text: `${chrome.name} is in DirectInput mode` }
+  if (chrome) return { on: true, text: `${chrome.name} connected` }
+  return { on: false, text: 'No controller seen yet. Press any button on it.' }
 }
 
 function WakeComboPicker() {
   const [combo, setCombo] = useState(wakeComboCache || 'guide')
+  const [hold, setHold] = useState(1000)
+  const [test, setTest] = useState(null)       // null | 'waiting' | 'ok' | 'none'
+  const [rec, setRec] = useState(null)         // null | { held, steadySince } | { saved }
+  const testTimer = useRef(null)
+  const recRef = useRef(null)
+  recRef.current = rec
+  const recording = !!rec && rec.saved == null
+
   useEffect(() => {
     window.kozo?.api?.settings?.get?.('pad_wake_combo').then(r => {
-      if (r?.ok && WAKE_COMBOS.some(c => c.value === r.data)) { wakeComboCache = r.data; setCombo(r.data) }
+      if (r?.ok && r.data && (WAKE_COMBOS.some(c => c.value === r.data) || customMask(r.data))) { wakeComboCache = r.data; setCombo(r.data) }
     })
+    window.kozo?.api?.settings?.get?.('pad_wake_hold_ms').then(r => {
+      const v = Number(r?.data)
+      if (r?.ok && WAKE_HOLDS.some(h => h.value === v)) setHold(v)
+    })
+    const offTest = window.kozo?.events?.onControllerWakeTest?.(() => {
+      clearTimeout(testTimer.current)
+      setTest('ok')
+    })
+    return () => { offTest?.(); clearTimeout(testTimer.current); window.kozo?.api?.controller?.record?.(false) }
   }, [])
+
   function pick(v) {
     setCombo(v)
     wakeComboCache = v
     window.kozo?.api?.settings?.set('pad_wake_combo', v)
   }
-  const cur = WAKE_COMBOS.find(c => c.value === combo)
+
+  // Recording: the buttons held right now (the probe sends each change); the same two or
+  // more held for 2 seconds are saved as the combo.
+  useEffect(() => {
+    if (!recording) return undefined
+    const off = window.kozo?.events?.onControllerButtons?.((mask) => {
+      setRec(r => (r && r.saved == null) ? { held: mask, steadySince: Date.now() } : r)
+    })
+    const t = setInterval(() => {
+      const r = recRef.current
+      if (r && r.saved == null && bitCount(r.held) >= 2 && Date.now() - r.steadySince >= 2000) {
+        window.kozo?.api?.controller?.record?.(false)
+        pick(`custom:${r.held}`)
+        setRec({ saved: r.held })
+      }
+    }, 200)
+    return () => { off?.(); clearInterval(t) }
+  }, [recording])
+
+  function pickHold(v) {
+    setHold(v)
+    window.kozo?.api?.settings?.set('pad_wake_hold_ms', String(v))
+  }
+  function startTest() {
+    setRec(null)
+    setTest('waiting')
+    window.kozo?.api?.controller?.test?.()
+    clearTimeout(testTimer.current)
+    testTimer.current = setTimeout(() => setTest(t => t === 'waiting' ? 'none' : t), 20000)
+  }
+  function startRecord() {
+    setTest(null)
+    setRec({ held: 0, steadySince: Date.now() })
+    window.kozo?.api?.controller?.record?.(true)
+  }
+  function stopRecord() {
+    setRec(null)
+    window.kozo?.api?.controller?.record?.(false)
+  }
+
+  const custom = customMask(combo)
+  const options = custom
+    ? [...WAKE_COMBOS.slice(0, 3), { value: combo, label: padNames(custom).join(' + ') }, WAKE_COMBOS[3]]
+    : WAKE_COMBOS
+  const keys = custom ? [padNames(custom).join(' + ')] : WAKE_COMBOS.find(c => c.value === combo)?.keys
   return (
-    <div className={s.shortcutGroup}>
-      <div className={s.shortcutGroupTitle}>From anywhere</div>
-      <Segmented label="Open KoZo with" value={combo} options={WAKE_COMBOS} onChange={pick} wrap />
+    <div className={s.shortcutGroup} data-wake-combo>
+      <div className={s.shortcutGroupTitle}>Open KoZo from anywhere</div>
+      <Segmented label="Open KoZo with" value={combo} options={options} onChange={pick} wrap />
+      {combo !== 'off' && <Segmented label="Hold it for" value={hold} options={WAKE_HOLDS} onChange={pickHold} />}
       <div className={s.shortcutList}>
         <div className={s.shortcutRow}>
-          {cur.keys ? <PadKeys keys={cur.keys} /> : <span className={s.shortcutKeys}><kbd className={s.padKey}>Off</kbd></span>}
+          {keys ? <PadKeys keys={keys} /> : <span className={s.shortcutKeys}><kbd className={s.padKey}>Off</kbd></span>}
           <span className={s.shortcutWhat}>
-            {cur.keys
-              ? 'Hold for a second: bring KoZo up in Big Picture, even from the tray or a game'
+            {keys
+              ? `Hold for ${holdWords(hold)}: bring KoZo up in Big Picture, even from the tray or a game`
               : "The controller can't open KoZo from the tray. Ctrl + Shift + K still works"}
           </span>
         </div>
       </div>
+      <div className={s.padTools}>
+        {combo !== 'off' && !recording && (
+          <button type="button" className={s.testBtn} onClick={startTest} disabled={test === 'waiting'} data-wake-test>
+            Test it
+          </button>
+        )}
+        {!recording && <button type="button" className={s.testBtn} onClick={startRecord} data-wake-record>Record my own combo</button>}
+        {recording && <button type="button" className={s.testBtn} onClick={stopRecord}>Cancel</button>}
+        <span className={s.padToolNote} aria-live="polite">
+          {recording && (rec.held
+            ? <>Holding <b>{padNames(rec.held).join(' + ')}</b>{bitCount(rec.held) < 2 ? ': add one more button' : ': keep holding…'}</>
+            : 'Press and hold two or more buttons together for 2 seconds')}
+          {rec && rec.saved != null && <>Saved: <b>{padNames(rec.saved).join(' + ')}</b>. Hold it for {holdWords(hold)} to open KoZo.</>}
+          {!rec && test === 'waiting' && `Hold your combo now, for ${holdWords(hold)}…`}
+          {!rec && test === 'ok' && <span className={s.padToolOk}>✓ KoZo heard it. From the tray or a game, this opens Big Picture.</span>}
+          {!rec && test === 'none' && 'Nothing came through. Check the controller is connected and in X-input mode, or record another combo.'}
+        </span>
+      </div>
       {combo === 'guide' && (
         <p className={s.sectionDescQuiet}>
           A quick press of the Xbox button still opens Windows Game Bar; holding it opens KoZo.
-          If your controller doesn't report the Xbox button, LB + RB + Menu works instead.
+          LB + RB + Menu always works too, for controllers that don't report the Xbox button.
         </p>
       )}
     </div>
@@ -573,7 +755,7 @@ function WakeComboPicker() {
 }
 
 function ShortcutsTab() {
-  const pad = usePadName()
+  const pad = usePadStatus()
   return (
     <div className={s.tabContent}>
       <section className={s.section}>
@@ -600,11 +782,19 @@ function ShortcutsTab() {
         <div className={s.sectionHeader}>
           <IconDeviceGamepad2 size={15} stroke={1.6} />
           <span>Controller</span>
-          <span className={`${s.padStatus} ${pad ? s.padOn : ''}`}>
-            <span className={s.padDot} /> {pad ? `${pad} connected` : 'No controller seen yet. Press any button on it.'}
+          <span className={`${s.padStatus} ${pad.on ? s.padOn : ''} ${pad.warn ? s.padWarn : ''}`} data-pad-status>
+            <span className={s.padDot} /> {pad.text}
           </span>
         </div>
         <p className={s.sectionDesc}>An Xbox controller (or any controller Windows sees as one) drives every page and Big Picture. A ring shows where you are; moving the mouse hides it.</p>
+        {pad.warn && (
+          <p className={s.padWarnNote}>
+            KoZo reads controllers in X-input mode. Switch yours over: on most controllers hold the Home (or Mode)
+            button for about 5 seconds, or move its X / D switch to X. In DirectInput mode the buttons may do the wrong
+            thing and the combo below can't open KoZo.
+          </p>
+        )}
+        <WakeComboPicker />
         {PAD_GROUPS.map(g => (
           <div key={g.title} className={s.shortcutGroup}>
             <div className={s.shortcutGroupTitle}>{g.title}</div>
@@ -618,7 +808,6 @@ function ShortcutsTab() {
             </div>
           </div>
         ))}
-        <WakeComboPicker />
       </section>
     </div>
   )

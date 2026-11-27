@@ -137,6 +137,11 @@ function runMigrations() {
     try { db.exec('ALTER TABLE game_list ADD COLUMN price_target_cents INTEGER') } catch (_) {}
     try { db.exec('ALTER TABLE game_list ADD COLUMN price_target_cc TEXT') } catch (_) {}
     try { db.exec('ALTER TABLE game_list ADD COLUMN price_target_hit INTEGER DEFAULT 0') } catch (_) {}
+    // releaseWatch's "out tomorrow" reminder, once per release date (a new date clears it).
+    try { db.exec('ALTER TABLE game_list ADD COLUMN release_reminded INTEGER DEFAULT 0') } catch (_) {}
+    // Streak freezes (services/xp.js streakRuns) count from the day they came to KoZo, so no
+    // past streak (and no XP) changes by itself. Written once.
+    try { db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('streak_freeze_since', date('now', 'localtime'))").run() } catch (_) {}
     // A .bat / .cmd / .lnk that starts the game (cracked copies often ship
     // one). Play runs it; exe_name stays the process KoZo watches for playtime.
     try { db.exec('ALTER TABLE games ADD COLUMN launch_file TEXT') } catch (_) {}

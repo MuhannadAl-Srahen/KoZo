@@ -20,11 +20,17 @@ function readLast() {
   } catch { return { total: null, level: null } }
 }
 
-function writeLast(total, level) {
+function writeLast(total, level, parts) {
   try {
     settingsQ().setSetting('xp_last_total', String(total))
     settingsQ().setSetting('xp_last_level', String(level))
+    if (parts) settingsQ().setSetting('xp_last_parts', JSON.stringify(parts))
   } catch {}
+}
+// The parts of the total last written (xp.js parts), so a gain can be explained. Null before the
+// first write with parts (an older version wrote only the total).
+function readLastParts() {
+  try { const v = JSON.parse(settingsQ().getSetting('xp_last_parts') || 'null'); return v && typeof v === 'object' ? v : null } catch { return null }
 }
 
 // Advance ONLY the level baseline, leaving the XP total where it was. Used by
@@ -56,13 +62,14 @@ function check({ reason = 'unknown', gameName = null, artPath = null, artUrl = n
   }
 
   const last = readLast()
+  const lastParts = readLastParts()
   // `consumeGain: false` advances only the level baseline. The mid-session poll
   // runs every 5 minutes and used to rewrite xp_last_total each time, so by the
   // time endSession asked for the session's XP the baseline was at most five
   // minutes old: a two-hour session reported "+3 XP". Worse, idle time is
   // subtracted from the row only at session end, so the total could fall below
   // the baseline, `gained` clamped to 0, and the summary toast never appeared.
-  if (consumeGain || last.total == null || last.level == null) writeLast(xp.totalXp, xp.level)
+  if (consumeGain || last.total == null || last.level == null) writeLast(xp.totalXp, xp.level, xp.parts)
   else writeLevelOnly(xp.level)
 
   // Badges earned since the last look (services/badges.js): one toast each, at most three.
@@ -99,7 +106,14 @@ function check({ reason = 'unknown', gameName = null, artPath = null, artUrl = n
     broadcast('xp:levelup', payload)
   }
 
-  return { gained, totalXp: xp.totalXp, level: xp.level, tier: xp.tier, leveledUp, toNextLevel: xp.toNextLevel, nextTier: xp.nextTier }
+  // What the gain was made of ("+23 for playing", "+50 first hour in this game"), only when the
+  // parts add up to it (a baseline from before parts were kept can't be split).
+  let parts = null
+  try {
+    const p = require('./xp').gainParts(lastParts, xp.parts)
+    if (p && p.reduce((sum, x) => sum + x.xp, 0) === gained) parts = p
+  } catch {}
+  return { gained, parts, totalXp: xp.totalXp, level: xp.level, tier: xp.tier, leveledUp, toNextLevel: xp.toNextLevel, nextTier: xp.nextTier }
 }
 
 // XP changed without anything being earned now (another PC's library came in): move the
@@ -107,7 +121,7 @@ function check({ reason = 'unknown', gameName = null, artPath = null, artUrl = n
 function rebase() {
   try {
     const xp = require('./xp').computeXp()
-    writeLast(xp.totalXp, xp.level)
+    writeLast(xp.totalXp, xp.level, xp.parts)
     require('./badges').markAllSeen(xp)
   } catch (e) {
     logger.warn('xpTracker: rebase failed', { message: e.message })

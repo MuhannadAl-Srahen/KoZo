@@ -19,7 +19,7 @@ contextBridge.exposeInMainWorld('kozo', {
     games: {
       list: () => ipcRenderer.invoke('games:list'),
       get: (id) => ipcRenderer.invoke('games:get', id),
-      version: (id) => ipcRenderer.invoke('games:version', id),
+      version: (id, opts) => ipcRenderer.invoke('games:version', id, opts),
       useCopy: (id, file) => ipcRenderer.invoke('games:useCopy', id, file),
       playthroughs: (id) => ipcRenderer.invoke('games:playthroughs', id),
       newPlaythrough: (id, opts) => ipcRenderer.invoke('games:newPlaythrough', id, opts),
@@ -193,6 +193,7 @@ contextBridge.exposeInMainWorld('kozo', {
       hourActivity: (hour, includeHidden) => ipcRenderer.invoke('stats:hourActivity', hour, includeHidden),
       monthActivity: (month, includeHidden) => ipcRenderer.invoke('stats:monthActivity', month, includeHidden),
       xp: () => ipcRenderer.invoke('stats:xp'),
+      repairStreak: () => ipcRenderer.invoke('stats:repairStreak'),
       xpHistory: (limit) => ipcRenderer.invoke('stats:xpHistory', limit),
       badges: () => ipcRenderer.invoke('stats:badges'),
       years: () => ipcRenderer.invoke('stats:years'),
@@ -234,6 +235,7 @@ contextBridge.exposeInMainWorld('kozo', {
       markSeen: () => ipcRenderer.invoke('deals:markSeen'),
       saleMap: () => ipcRenderer.invoke('deals:saleMap'),
       unseen: () => ipcRenderer.invoke('deals:unseen'),
+      unseenDetails: () => ipcRenderer.invoke('deals:unseenDetails'),
       gamePrices: (appid) => ipcRenderer.invoke('deals:gamePrices', appid),
       setTarget: (appid, cents, meta) => ipcRenderer.invoke('deals:setTarget', appid, cents, meta),
       alertAtLowest: (appid, meta) => ipcRenderer.invoke('deals:alertAtLowest', appid, meta),
@@ -311,6 +313,15 @@ contextBridge.exposeInMainWorld('kozo', {
       setGpu: (on) => ipcRenderer.invoke('app:setGpu', on),
       relaunch: () => ipcRenderer.invoke('app:relaunch'),
     },
+    notifications: {
+      test: () => ipcRenderer.invoke('notifications:test'),
+    },
+    controller: {
+      status: () => ipcRenderer.invoke('controller:status'),
+      test: () => ipcRenderer.invoke('controller:test'),
+      record: (on) => ipcRenderer.invoke('controller:record', on),
+      takeWake: () => ipcRenderer.invoke('controller:takeWake'),
+    },
     discord: {
       status: () => ipcRenderer.invoke('discord:status'),
       apply: () => ipcRenderer.invoke('discord:apply'),
@@ -334,6 +345,10 @@ contextBridge.exposeInMainWorld('kozo', {
     const pass = (cb, payload) => cb(payload)
     return {
       onGamepadWake: sub('gamepad:wake', pass),
+      onGamepadActive: sub('gamepad:active', pass),
+      onControllerSlots: sub('controller:slots', pass),
+      onControllerButtons: sub('controller:buttons', pass),
+      onControllerWakeTest: sub('controller:wakeTest', pass),
       onLaunchersFound: sub('launchers:found', pass),
       onSessionDiscarded: sub('session:discarded', pass),
       onSessionStarted: sub('session:started', pass),
@@ -359,6 +374,7 @@ contextBridge.exposeInMainWorld('kozo', {
       onLaunchMissOverlay: sub('launchMiss:overlay', pass),
       onReleaseOverlay: sub('release:overlay', pass),
       onPriceOverlay: sub('price:overlay', pass),
+      onNoticeOverlay: sub('notice:overlay', pass),
       onBreakOverlay: sub('break:overlay', pass),
       onXpOverlay: sub('xp:overlay', pass),
       onBadgeOverlay: sub('badge:overlay', pass),

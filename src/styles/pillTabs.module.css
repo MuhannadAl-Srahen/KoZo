@@ -1,0 +1,66 @@
+/* Page tabs under the toolbar, the same pill row as the Library's and the Game List's
+   (Library.module.css .tabRow): used by Discounts (Deals / My games) and Upcoming
+   (Steam / TBA / Tracked). One row that scrolls sideways when the window is narrow,
+   never a second row over the cards. The selected tab has a ring, not a glow, so the
+   sideways scroller can't cut anything off. */
+.tabRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  flex-shrink: 0;
+  padding: var(--sp-10) var(--gutter);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.tabs {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--r-pill);
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tab:hover { color: var(--text-primary); }
+.tab svg { color: var(--text-muted); flex-shrink: 0; }
+.tabOn {
+  background: var(--surface-3);
+  color: var(--text-primary);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a) 55%, transparent);
+}
+.tabOn svg { color: var(--a); }
+/* While searching: a tab with no match. */
+.tabNone { opacity: 0.5; }
+.tabCount { font-size: var(--fs-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+/* New things behind a tab (Discounts' My games). */
+.tabNew {
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--a);
+  color: var(--accent-ink);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+}

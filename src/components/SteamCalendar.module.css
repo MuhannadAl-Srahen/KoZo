@@ -202,8 +202,8 @@
   height: 30px;
   border-radius: 50%;
   border-color: rgba(255, 255, 255, 0.18);
-  background: rgba(10, 10, 18, 0.82);
-  color: #fff;
+  background: var(--scrim-chip);
+  color: var(--on-art);
 }
 .trackOn, .trackOn:hover { background: var(--a); border-color: var(--a); color: var(--accent-ink); }
 .trackOn:hover { filter: brightness(1.1); }

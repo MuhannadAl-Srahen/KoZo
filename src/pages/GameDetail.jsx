@@ -29,6 +29,7 @@ import SteamGameModal, { StoreSections } from '../components/SteamGameModal'
 import AchImg from '../components/ui/AchImg'
 import { GamesLikeGrid } from './GamesLike'
 import GameNews, { NewsHeadlines } from '../components/GameNews'
+import VersionCheck from '../components/VersionCheck'
 import { useAppearance } from '../context/AppearanceContext'
 import { useSteamArt } from '../lib/steamArt'
 import s from './GameDetail.module.css'
@@ -43,13 +44,6 @@ const EMU_SILENT_SEC = 20 * 60
 // decides "unlocked" — the real id arrives with the reload its game:updated
 // broadcast triggers. Mirrors the sentinel AchievementModal patches with.
 const OPTIMISTIC_UNLOCK_ID = -1
-
-// The version tag beside a game's name. No entry = nothing can be said about it.
-const VERSION_LOOK = {
-  behind: { label: 'Update out', className: (css) => css.versionBehind },
-  maybe: { label: 'May be outdated', className: (css) => css.versionMaybe },
-  current: { label: 'Up to date', className: () => '' },
-}
 
 // ── 30-day chart (Overview, Sessions) ──────────────────────────────────────
 // Local day buckets: started_at is UTC, so a prefix match would credit
@@ -230,7 +224,13 @@ function PlaythroughNote({ gameId, p, onSaved }) {
   const [editing, setEditing] = useState(false)
   const [text, setText] = useState(p.note || '')
   useEffect(() => { if (!editing) setText(p.note || '') }, [p.note, editing])
+  // Enter saves by itself: it used to only take the focus away and let the blur save, and a box
+  // that never had the focus (the window wasn't in front) saved nothing. Once per edit.
+  const saved = useRef(false)
+  const edit = () => { saved.current = false; setEditing(true) }
   async function save() {
+    if (saved.current) return
+    saved.current = true
     setEditing(false)
     if ((text || '').trim() === (p.note || '')) return
     const r = await window.kozo?.api?.games?.playthroughNote?.(gameId, p.number, text)
@@ -243,14 +243,14 @@ function PlaythroughNote({ gameId, p, onSaved }) {
         onChange={e => setText(e.target.value)}
         onBlur={save}
         onKeyDown={e => {
-          if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur() }
-          if (e.key === 'Escape') { e.stopPropagation(); setText(p.note || ''); setEditing(false) }
+          if (e.key === 'Enter') { e.preventDefault(); save() }
+          if (e.key === 'Escape') { e.stopPropagation(); saved.current = true; setText(p.note || ''); setEditing(false) }
         }} />
     )
   }
   return p.note
-    ? <button type="button" className={s.ptNote} onClick={() => setEditing(true)} title="Edit the note" data-pt-note={p.number}><IconPencil size={11} stroke={1.8} /> {p.note}</button>
-    : <button type="button" className={s.ptNoteAdd} onClick={() => setEditing(true)} data-pt-note-add={p.number}><IconPencil size={11} stroke={1.8} /> Add a note</button>
+    ? <button type="button" className={s.ptNote} onClick={edit} title="Edit the note" data-pt-note={p.number}><IconPencil size={11} stroke={1.8} /> {p.note}</button>
+    : <button type="button" className={s.ptNoteAdd} onClick={edit} data-pt-note-add={p.number}><IconPencil size={11} stroke={1.8} /> Add a note</button>
 }
 
 function PlaythroughsCard({ gameId, list, sessions, onNote }) {
@@ -1181,10 +1181,11 @@ export default function GameDetail() {
         </span>
       )}
       {copyVersion && (
-        <span className={`${s.versionChip} ${VERSION_LOOK[copyVersion.state]?.className(s) || ''}`} title={copyVersion.hint} data-game-version={copyVersion.state}>
-          {copyVersion.text}
-          {VERSION_LOOK[copyVersion.state] && <span className={s.versionState}> · {VERSION_LOOK[copyVersion.state].label}</span>}
-        </span>
+        // The tag opens a window that says how KoZo knows, with Check again, the patch notes
+        // and SteamDB (components/VersionCheck.jsx).
+        <VersionCheck v={copyVersion}
+          onCheck={async () => { const r = await window.kozo?.api?.games?.version?.(game.id, { force: true }); if (r?.ok && r.data) setCopyVersion(r.data) }}
+          onNews={TABS.some(t => t.key === 'news') ? () => setTab('news') : null} />
       )}
     </div>
   )
@@ -1407,7 +1408,7 @@ export default function GameDetail() {
 
         <div className={s.frame}>
           {/* Tabs (sticky while the page scrolls) */}
-          <div className={s.tabs} role="tablist">
+          <div className={s.tabs}><div className={s.tabsScroll} role="tablist">
             {TABS.map(t => (
               <button key={t.key} role="tab" aria-selected={shownTab === t.key}
                 className={`${s.tab} ${shownTab === t.key ? s.tabActive : ''}`} onClick={() => setTab(t.key)}>
@@ -1416,7 +1417,7 @@ export default function GameDetail() {
                 {t.count != null && <span className={s.tabCount}>{t.count}</span>}
               </button>
             ))}
-          </div>
+          </div></div>
 
           <div className={s.body}>
             {/* Tab content (keyed, so switching tabs plays the same entrance) */}

@@ -1,0 +1,182 @@
+/* Upcoming's Tracked and TBA cards (SteamCalendar.jsx UpcomingCard): the Discounts card's
+   shape, so Upcoming looks like the rest of KoZo (the maker: "literally not part of the same
+   design"). It used to be a bare Steam capsule with loose text under it, square chips and
+   hard-coded colors. The Steam calendar itself keeps Steam's own capsule look.
+   Class names calCapHit, capCaption, capName and capWhen are what the smoke test looks for. */
+
+.grid {
+  display: grid;
+  gap: var(--sp-12);
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 260px), 1fr));
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: var(--r-card);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.card:hover,
+.card:focus-within {
+  border-color: var(--border-accent-soft);
+  box-shadow: var(--elev-2), var(--glow-1);
+}
+
+/* The picture: opens the game. */
+.calCapHit {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 616 / 353;
+  padding: 0;
+  border: 0;
+  background: var(--surface-3);
+  cursor: pointer;
+  overflow: hidden;
+  color: inherit;
+}
+.art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.35s var(--ease-out); }
+:global(html[data-motion="heavy"]) .card:hover .art { transform: scale(1.04); }
+
+/* Chips on the picture: opaque plates, readable over any art (controls .chipOnArt). */
+.artChips { position: absolute; left: 8px; top: 8px; right: 48px; display: flex; flex-wrap: wrap; gap: 4px; pointer-events: none; }
+.onArt {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: var(--scrim-chip);
+  color: var(--on-art);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.capWhen {
+  composes: onArt;
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 3px 9px;
+  font-size: var(--fs-xs);
+}
+.capWhen_out { background: var(--success); border-color: transparent; color: var(--accent-ink); }
+.capWhen_soon { background: var(--a); border-color: transparent; color: var(--accent-ink); }
+
+/* Track, top right on the picture. */
+.capTrack { position: absolute; top: 8px; right: 8px; z-index: 1; }
+
+/* The words: also open the game. */
+.capCaption {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 12px 12px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.capName {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.capSub {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.capSub svg { flex-shrink: 0; color: var(--text-muted); }
+.capSub span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.tags:empty { display: none; }
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  color: var(--text-muted);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.tagStatus { background: var(--ad); color: var(--a); }
+.tagWish { background: color-mix(in srgb, var(--warning) 14%, transparent); color: var(--warning); }
+
+/* Groups (Out now / This month / Later / Date not announced; TBA's years): the Discounts
+   section heading, an accent icon, the label and a count pill. The label and the number stay
+   the heading's whole text (the smoke test reads "This month1"). */
+.list { display: flex; flex-direction: column; gap: var(--sp-20); }
+.group { display: flex; flex-direction: column; gap: var(--sp-12); }
+.groupHead {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+.groupHead svg { color: var(--a); flex-shrink: 0; }
+.count {
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  color: var(--text-muted);
+  letter-spacing: 0;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+
+/* TBA's sort, Discounts' segmented pills. */
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-10); }
+.seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: var(--r-pill); background: var(--surface-1); border: 1px solid var(--border); }
+.segBtn {
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.segBtn:hover { color: var(--text-primary); }
+.segOn { background: color-mix(in srgb, var(--a) 18%, transparent); color: var(--a); }
+.muted { font-size: var(--fs-sm); color: var(--text-muted); }
+.endRow { min-height: 1px; }
+
+/* Loading: the same cards, shimmering. */
+.skCard {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: var(--r-card);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+}
+.skArt { aspect-ratio: 616 / 353; }
+.skBody { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; }

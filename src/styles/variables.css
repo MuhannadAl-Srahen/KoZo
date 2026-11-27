@@ -171,6 +171,10 @@
   --glow-1: 0 0 20px -6px color-mix(in srgb, var(--a) 45%, transparent);
   --glow-2: 0 0 34px -6px color-mix(in srgb, var(--a) 62%, transparent);
   --glow-live: 0 0 18px -4px color-mix(in srgb, var(--green) 55%, transparent);
+  /* How far --glow-1 reaches past its element at its strongest (Appearance > Glow >
+     Strong: 30px blur - 4px spread). A sideways scroller holding a glowing control
+     needs this much padding, or the glow is cut off in a line (GameDetail .tabsScroll). */
+  --glow-room: 28px;
   --border-accent-soft: color-mix(in srgb, var(--a) 30%, transparent);
   --surface-accent: color-mix(in srgb, var(--a) 5%, var(--surface-2));
   --text-accent-bright: color-mix(in srgb, var(--a) 70%, #fff);

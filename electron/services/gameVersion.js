@@ -290,13 +290,17 @@ async function readLocal(game) {
   const watched = exact && !require('./pcScanner').isHelperExe(path.basename(exact)) ? exact : null
   const exes = [watched, shipping].filter(Boolean)
   const folders = [...new Set([dir, ...exes.map(x => path.dirname(x))])]
-  const built = emulatorBuild(folders) || manifestBuild(dir, game.steam_app_id)
-  let version = null
+  const emu = emulatorBuild(folders)
+  const built = emu || manifestBuild(dir, game.steam_app_id)
+  let version = null, versionFrom = null
   for (const x of exes) {
     version = exeVersion(readExeVersion(x))
-    if (version) break
+    if (version) { versionFrom = 'the game file'; break }
   }
-  if (!version) version = versionInFolder(path.basename(dir)) || versionInFolder(path.basename(path.dirname(dir)))
+  if (!version) {
+    version = versionInFolder(path.basename(dir)) || versionInFolder(path.basename(path.dirname(dir)))
+    if (version) versionFrom = 'the folder name'
+  }
   // The biggest exe is the game itself: a launcher's date can be any time.
   let fileDate = null, biggest = -1
   for (const x of exes) {
@@ -311,7 +315,12 @@ async function readLocal(game) {
     const others = (await findCopies(dir, path.basename(watched), watched)).map(file => ({ file, created: createdAt(file) })).filter(o => o.created)
     newerCopy = pickNewerCopy({ file: watched, created: createdAt(watched) }, others)
   }
-  return { version, build: built?.build || null, date: built?.date || fileDate || null, newerCopy }
+  return {
+    version, versionFrom,
+    build: built?.build || null, buildFrom: built ? (emu ? 'the emulator settings' : "Steam's install record") : null,
+    date: built?.date || fileDate || null, dateFrom: built?.date ? (emu ? 'the emulator settings' : "Steam's install record") : fileDate ? 'the game file' : null,
+    newerCopy,
+  }
 }
 
 // ── What Steam has ──────────────────────────────────────────────────────────
@@ -321,6 +330,18 @@ function versionInTitle(title) {
   const t = String(title || '')
   const m = t.match(/\b(?:v|ver\.?|version|update|patch|hotfix|build)\s*(\d+(?:\.\d+)+)/i) || t.match(/\b(\d+\.\d+\.\d+(?:\.\d+)?)\b/)
   return m ? m[1] : null
+}
+
+// Pure: your copy's version among ALL of Steam's news (patch notes, and news with a version in
+// the title), not only the newest few (newsFacts). Found: how many updates came after it, and
+// when it was out. The maker's "v1.0130.1 · May be outdated" could only compare dates; when
+// Steam's news names the version, the answer is certain.
+function versionInNews(version, items) {
+  if (!version) return null
+  const notes = (items || []).filter(n => n.patch || versionInTitle(n.title)).sort((a, b) => (b.date || 0) - (a.date || 0))
+  const i = notes.findIndex(n => { const v = versionInTitle(n.title); return v && compareVersions(v, version) === 0 })
+  if (i < 0) return null
+  return { newer: i, since: notes[i].date || null, title: notes[i].title, newest: notes[0] ? { title: notes[0].title, at: notes[0].date || null, url: notes[0].url || null } : null }
 }
 
 // Pure: what the newest patch notes say. Only the newest few count: an old number on a
@@ -352,17 +373,23 @@ async function fetchBuild(appid) {
   return { build, at: at > 0 ? at * 1000 : null }
 }
 
-async function latestOnSteam(appid) {
+// `force`: the game page's "Check again", past both caches.
+async function latestOnSteam(appid, { force = false } = {}) {
   const id = Number(appid)
   if (!(id > 0)) return null
   const hit = latestCache.get(id)
-  if (hit && Date.now() - hit.at < TTL) return hit.latest
-  const [built, news] = await Promise.all([
+  if (!force && hit && Date.now() - hit.at < TTL) return hit.latest
+  const [built, items] = await Promise.all([
     within(fetchBuild(id), WAIT_MS),
-    within(require('./steamNews').getNews(id).then(newsFacts), WAIT_MS),
+    within(require('./steamNews').getNews(id, { force }), WAIT_MS),
   ])
-  if (!built && !news) return hit?.latest || null   // keep the last answer
-  const latest = { build: built?.build || null, at: built?.at || news?.at || null, version: news?.version || null }
+  const news = items ? newsFacts(items) : null
+  if (!built && !news && !items?.length) return hit?.latest || null   // keep the last answer
+  const latest = {
+    build: built?.build || null, at: built?.at || news?.at || null, version: news?.version || null,
+    // Kept small: the titles and dates are all versionInNews needs.
+    news: (items || []).map(n => ({ title: n.title, date: n.date, patch: n.patch, url: n.url })),
+  }
   latestCache.set(id, { at: Date.now(), latest })
   if (latestCache.size > MAX_CACHED) latestCache.delete(latestCache.keys().next().value)
   return latest
@@ -383,10 +410,12 @@ function compareVersions(a, b) {
 // Pure. Builds and version numbers can be compared for certain ('behind', 'current').
 // Dates can't: an update may not touch the exe, and a copy from another store has its own
 // dates. So a date only ever says 'maybe', and never that a copy is up to date.
-function versionState(local, latest) {
+// `inNews` (versionInNews): Steam's news names your version, so updates after it are certain.
+function versionState(local, latest, inNews = null) {
   if (!local || !latest) return 'unknown'
   if (local.build && latest.build) return local.build >= latest.build ? 'current' : 'behind'
   if (local.version && latest.version) return compareVersions(local.version, latest.version) >= 0 ? 'current' : 'behind'
+  if (inNews) return inNews.newer > 0 ? 'behind' : 'current'
   if (local.date && latest.at && latest.at > local.date + 3 * DAY) return 'maybe'
   return 'unknown'
 }
@@ -394,14 +423,14 @@ function versionState(local, latest) {
 const fullDate = (ms) => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 
 // Pure: what the page shows. Null when there's nothing to say about this copy.
-function versionSummary(local, latest) {
+function versionSummary(local, latest, inNews = null) {
   if (!local) return null
   const text = local.version ? `v${local.version}`
     : local.build ? `Build ${local.build}`
       : local.date ? `Files from ${new Date(local.date).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}`
         : null
   if (!text) return null
-  const state = versionState(local, latest)
+  const state = versionState(local, latest, inNews)
   const mine = local.version ? `version ${local.version}` : local.build ? `build ${local.build}` : "no version number in its files"
   const lines = [`Your copy: ${mine}${local.date ? `, from ${fullDate(local.date)}` : ''}.`]
   if (latest) {
@@ -409,26 +438,41 @@ function versionSummary(local, latest) {
     const when = latest.at ? `updated ${fullDate(latest.at)}` : null
     if (theirs || when) lines.push(`Steam: ${[theirs, when].filter(Boolean).join(', ')}.`)
   }
+  if (inNews && !(local.build && latest?.build) && !(local.version && latest?.version)) {
+    lines.push(inNews.newer > 0
+      ? `Steam's news names your version${inNews.since ? ` (${fullDate(inNews.since)})` : ''}, and ${inNews.newer} update${inNews.newer === 1 ? '' : 's'} came after it.`
+      : `Steam's newest patch notes name your version${inNews.since ? ` (${fullDate(inNews.since)})` : ''}.`)
+  }
   if (state === 'maybe') lines.push('This only compares dates, and a copy from another store can differ.')
   return { text, state, hint: lines.join(' ') }
 }
 
-async function getVersion(gameId) {
+// The tag and, for its window on the game page, everything it was decided from.
+// `force`: "Check again", past the caches.
+async function getVersion(gameId, { force = false } = {}) {
   const game = require('../db/queries/games').getGame(gameId)
   if (!game) return null
   const local = await readLocal(game)
   if (!local) return null
   let latest = null
-  try { latest = await latestOnSteam(game.steam_app_id) }
+  try { latest = await latestOnSteam(game.steam_app_id, { force }) }
   catch (e) { logger.warn('gameVersion: Steam check failed', { message: e.message }) }
-  const summary = versionSummary(local, latest)
-  if (!local.newerCopy) return summary
-  return { ...(summary || {}), newerCopy: local.newerCopy }
+  const inNews = versionInNews(local.version, latest?.news)
+  const summary = versionSummary(local, latest, inNews)
+  const details = summary ? {
+    appid: Number(game.steam_app_id) || null,
+    checkedAt: Date.now(),
+    local: { version: local.version, versionFrom: local.versionFrom, build: local.build, buildFrom: local.buildFrom, date: local.date, dateFrom: local.dateFrom },
+    latest: latest ? { version: latest.version, build: latest.build, at: latest.at, newest: (latest.news || []).find(n => n.patch) || null } : null,
+    inNews,
+  } : null
+  if (!local.newerCopy) return summary && { ...summary, details }
+  return { ...(summary || {}), details, newerCopy: local.newerCopy }
 }
 
 module.exports = {
   getVersion, readLocal, latestOnSteam, readExeVersion,
   parseVersionBlock, cleanVersion, exeVersion, buildFromBranches, buildFromManifest, versionInFolder,
-  versionInTitle, newsFacts, compareVersions, versionState, versionSummary,
+  versionInTitle, newsFacts, compareVersions, versionState, versionSummary, versionInNews,
   loaderTargetFromIni, loaderTarget, pickNewerCopy,
 }

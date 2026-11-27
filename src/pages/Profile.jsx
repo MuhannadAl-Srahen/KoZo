@@ -6,7 +6,7 @@ import {
   IconLoader2, IconTrash, IconCircleCheckFilled, IconChevronRight,
   IconUser, IconFlag, IconChartBar, IconCategory, IconPlus,
   IconAward,
-  IconRepeat, IconTargetArrow, IconInfoCircle,
+  IconRepeat, IconTargetArrow, IconInfoCircle, IconSnowflake,
 } from '@tabler/icons-react'
 import { fileUrl, formatPlaytime, getBannerBg, timeAgo, localDayKey } from '../lib/utils'
 import { useAccentColor } from '../context/AccentColorContext'
@@ -233,6 +233,34 @@ function milestoneSub(m) {
   return n ? `${n} reached` : 'none yet'
 }
 
+// The one-time repair of the last short break in the play streak (services/xp.js
+// repairCandidate). The maker: "if I miss a day streak is there a way that I can get it back".
+function StreakRepair({ days, onDone }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const when = days.map(d => new Date(d + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })).join(' and ')
+  async function repair() {
+    setBusy(true); setError(null)
+    const r = await window.kozo?.api?.stats?.repairStreak?.()
+    setBusy(false)
+    if (r?.ok) onDone?.()
+    else setError(r?.error || "Couldn't repair the streak.")
+  }
+  return (
+    <div className={s.streakRepair} data-streak-repair>
+      <IconSnowflake size={18} stroke={1.7} className={s.streakRepairIcon} />
+      <div className={s.streakRepairText}>
+        <strong>You missed {when}.</strong>
+        <span>Use your one-time streak repair: {days.length === 1 ? 'that day counts' : 'those days count'} as frozen and your streak joins back up. It adds no XP for the missed {days.length === 1 ? 'day' : 'days'} themselves.</span>
+        {error && <span className={s.streakRepairError}>{error}</span>}
+      </div>
+      <button type="button" className={s.streakRepairBtn} onClick={repair} disabled={busy}>
+        {busy ? <IconLoader2 size={14} className="spin" /> : <IconSnowflake size={14} stroke={1.8} />} Repair my streak
+      </button>
+    </div>
+  )
+}
+
 // Every way to earn XP, from electron/services/xp.js RULES, so it can't drift from the math.
 function XpGuide({ rules, onClose }) {
   const rows = [
@@ -243,6 +271,7 @@ function XpGuide({ rules, onClose }) {
     { Icon: IconRepeat, color: TINT_GAMES, title: 'Play it again', text: `Start a new playthrough from the game's page and finish it: another ${rules.finish} XP, once you've played at least ${rules.replayMinHours} hour${rules.replayMinHours === 1 ? '' : 's'} of it.` },
     { Icon: IconTargetArrow, color: TINT_SESS, title: 'Milestones', text: `Hours in one game: ${rules.hourMilestones.map(m => `${m.hours}h +${m.xp}`).join(', ')}. Every game you play for an hour: +${rules.explored}. A game finished in the month Play Plan had it for: +${rules.onPlan}.` },
     { Icon: IconFlame, color: TINT_FIRE, title: 'Streaks', text: `${rules.streakDay} XP for each day of your longest run of days played in a row.` },
+    { Icon: IconSnowflake, color: 'var(--info)', title: 'Streak freezes', text: 'Every 7 days played in a row earns a freeze (you can hold 2). Miss a day and a freeze keeps your streak going by itself; a frozen day adds no XP of its own. Once, you can also repair a short break from your Profile.' },
   ]
   return (
     <Modal title="How XP works" icon={<IconInfoCircle size={17} stroke={1.6} />} width={560} onClose={onClose}>
@@ -673,6 +702,7 @@ export default function Profile() {
                     {xp && <span className={s.heroTier}>{xp.tier}</span>}
                     <span><IconCalendar size={12} stroke={1.8} /> Since {memberSince(createdAt)}</span>
                     {xp?.currentStreak > 0 && <span><IconFlame size={12} stroke={1.8} style={{ color: TINT_FIRE }} /> {xp.currentStreak} day streak</span>}
+                    {xp?.streakFreezes > 0 && <span title="Streak freezes: a missed day uses one and the streak goes on"><IconSnowflake size={12} stroke={1.8} style={{ color: 'var(--info)' }} /> {xp.streakFreezes} freeze{xp.streakFreezes === 1 ? '' : 's'}</span>}
                   </div>
                 )}
               </div>
@@ -813,8 +843,14 @@ export default function Profile() {
                         </div>
                         <div className={s.xpStreakSub}>streak</div>
                         <div className={s.xpStreakSub}>best {xp.longestStreak}d</div>
+                        <div className={s.xpFreeze} data-streak-freezes
+                          title={`Streak freezes held: a missed day uses one and the streak goes on. ${xp.freezeToNext ?? 7} more day${(xp.freezeToNext ?? 7) === 1 ? '' : 's'} in a row earn${(xp.freezeToNext ?? 7) === 1 ? 's' : ''} the next (you can hold 2).`}>
+                          <IconSnowflake size={12} stroke={1.8} /> {xp.streakFreezes ?? 0}
+                        </div>
                       </div>
                     </div>
+
+                    {xp.streakRepair?.length > 0 && <StreakRepair days={xp.streakRepair} onDone={refreshStats} />}
 
                     <div className={s.xpBreakdown}>
                       {[

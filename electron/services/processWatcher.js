@@ -340,12 +340,19 @@ function sendToRenderer(channel, data) {
   })
 }
 
+// How long a game must keep running before its session starts. 5 s: a session under a
+// minute is dropped anyway (endSession) and undoSessionStart puts its status back, so a
+// longer wait only made "Now Playing" late. The old keys (`detection_sensitivity`, 10 on
+// the maker's PC, and the 15 s `detection_sensitivity_seconds`) had no control left in
+// Settings, so they are no longer read.
+const DEFAULT_CONFIRM_SEC = 5
 function getSensitivitySeconds() {
-  const val = settingsQ.getSetting('detection_sensitivity')
-            ?? settingsQ.getSetting('detection_sensitivity_seconds')
-  const parsed = parseInt(val)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 15
+  const parsed = parseInt(settingsQ.getSetting('detect_confirm_sec'))
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CONFIRM_SEC
 }
+// Unknown programs (the "is this a game?" prompt) keep the old 15 s: that one should
+// never ask about an installer seen for a moment.
+const UNKNOWN_CONFIRM_MS = 15000
 
 async function getRunningProcesses() {
   // ps-list is pure ESM since v8 — must be loaded via dynamic import() from CJS.
@@ -366,10 +373,17 @@ const PS_LIST_TIMEOUT_MS = 15000
 // 0 is the documented way to test existence (works on Windows too, via libuv).
 // This is what lets lightTick() avoid ps-list's helper-process spawn on most
 // ticks (see below).
-function isPidAlive(pid) {
-  if (!pid) return false
-  try { process.kill(pid, 0); return true }
-  catch (e) { return e.code === 'EPERM' }  // exists, just not signalable by us
+//
+// 'unknown' = EPERM. On Windows libuv opens the process asking for terminate rights,
+// which a game running as administrator refuses, so it says EPERM while the game runs
+// AND after it has exited if anything still holds a handle to it. That used to count as
+// alive, so such a session (Onimusha, NFS Heat with run as admin) only ended at the next
+// full scan, a minute or two after quitting. The desktop probe's exit report (X) covers
+// it now; without the probe, an unknown answer makes the full scan come sooner.
+function pidState(pid) {
+  if (!pid) return 'dead'
+  try { process.kill(pid, 0); return 'alive' }
+  catch (e) { return e.code === 'EPERM' ? 'unknown' : 'dead' }
 }
 
 // Gap > sleep threshold → the OS was suspended. Don't count the suspended
@@ -520,10 +534,15 @@ async function lightTick() {
   if (capSessionsForSleepGap(gapMs, prevTickAt)) return
 
   for (const [gameId, session] of [...activeSessions]) {
-    if (!isPidAlive(session.pid)) {
-      endSession(gameId, session)
-      continue
+    const state = pidState(session.pid)
+    if (state === 'dead') {
+      // A full scan decides: a game that restarted under a new process (a launcher stub
+      // handing over to the real exe) keeps its session there instead of ending it.
+      logger.info('processWatcher: game process gone', { gameId, pid: session.pid })
+      requestScan(0)
+      return
     }
+    session._pidUnknown = state === 'unknown'
     // The heartbeat only reads name/art off the row, which never changes
     // mid-session in practice — cache it briefly instead of re-reading every
     // 5s tick. The full tick() below always passes a fresh row.
@@ -563,9 +582,11 @@ async function tick() {
   // First-seen PID per exe name — lets lightTick() confirm liveness later
   // without spawning anything (see isPidAlive).
   const procByName      = new Map()
+  const nameByPid       = new Map()
   for (const p of procList) {
     const n = (p.name || '').toLowerCase()
     if (n && !procByName.has(n)) procByName.set(n, p)
+    if (p.pid) nameByPid.set(p.pid, n)
   }
   const games           = gamesQ.listGames()
   const knownGameIds    = new Set(games.map(g => g.id))
@@ -717,7 +738,11 @@ async function tick() {
       // lightTick()'s liveness check stays correct even if the game restarted
       // under a new PID without an intervening session end.
       const s = activeSessions.get(game.id)
-      s.pid = procByName.get(exeLower)?.pid || s.pid
+      // Keep the process the probe is watching while it still runs as this exe; a game
+      // with several processes of one name must not hop between them every scan.
+      const keep = s.pid && nameByPid.get(s.pid) === exeLower
+      const pid = keep ? s.pid : (procByName.get(exeLower)?.pid || s.pid)
+      if (pid !== s.pid) { s.pid = pid; s._pidUnknown = false; s._probeBlind = false }
       s._gameRow = game            // this scan already read a fresh row
       s._gameRowAt = now
       heartbeatSession(game, s, gapMs, now)
@@ -760,6 +785,10 @@ async function tick() {
   }
   if (clearedDetecting && activeSessions.size === 0 && detectingGames.size === 0) emitter.emit('idle')
 
+  // The probe watches for these exes starting and for the sessions' processes exiting.
+  try { require('./desktopProbe').setWatchNames(games.map(g => g.exe_name)) } catch {}
+  syncProbeWatch()
+
   // Starts or stops the desktop probe as settings turn its features on and off.
   require('./desktopProbe').refresh()
 
@@ -781,7 +810,7 @@ async function tick() {
     unknownExeBuffer.set(name, buf)
     // Same duration-not-sighting-count rule as game detection above, so a
     // one-off installer seen on a single idle scan is never marked evaluated.
-    if (buf.count >= 2 && now - buf.firstSeen >= sensitivityMs) candidates.push(proc)
+    if (buf.count >= 2 && now - buf.firstSeen >= UNKNOWN_CONFIRM_MS) candidates.push(proc)
   }
 
   // Check candidate paths via ONE batched PowerShell call (never one spawn per
@@ -830,6 +859,7 @@ async function tick() {
 function endSession(gameId, session, forcedEndAt) {
   if (!activeSessions.has(gameId)) return  // idempotent — guard against double-end
   activeSessions.delete(gameId)
+  syncProbeWatch()
   detectionBuffer.delete(gameId)
   midSessionSyncAt.delete(gameId)
   xpCheckAt.delete(gameId)
@@ -837,7 +867,8 @@ function endSession(gameId, session, forcedEndAt) {
   // usually fixed between sessions, and the session-end sync below is exactly
   // where we want to find out.
   syncParked.delete(gameId)
-  try { require('./crackWatcher').unwatchGame(gameId) } catch {}
+  // The emulator file watcher stays a few seconds more for a last write (crackWatcher.finishGame).
+  try { require('./crackWatcher').finishGame(gameId) } catch {}
   try { require('./steamStatsWatcher').unwatchGame(gameId) } catch {}
 
   // Idle/AFK seconds accumulated during the session are NOT playtime.
@@ -933,6 +964,7 @@ function endSession(gameId, session, forcedEndAt) {
         artUrl: game?.banner_url || null,
         durationSeconds: ended?.duration_seconds || 0,
         gainedXp: xp.gained,
+        xpParts: xp.parts || null,
         level: xp.level,
         leveledUp: xp.leveledUp,
         // Nudge only when the next level is genuinely close — not spam.
@@ -957,9 +989,16 @@ function endSession(gameId, session, forcedEndAt) {
     setImmediate(() => {
       require('./steamStatsWatcher').scanGameOnce(gid, endedSession?.id).catch(() => {})
     })
-    const runSync = () => { try { require('./achievementSync').syncAfterSession(gid, endedSession?.id) } catch {} }
-    setImmediate(runSync)
-    for (const sec of [20, 45, 90, 150, 240]) setTimeout(runSync, sec * 1000)
+    // One after another, and no more once Steam's answer can't change (no achievements
+    // for this game, a private profile): Feeding Frenzy 2 asked six times per session.
+    const RETRY_AT_SEC = [0, 20, 45, 90, 150, 240]
+    const runSync = async (i) => {
+      let r = null
+      try { r = await require('./achievementSync').syncAfterSession(gid, endedSession?.id) } catch {}
+      if (r?.error && PERMANENT_SYNC_REASONS.has(r.error)) return
+      if (i + 1 < RETRY_AT_SEC.length) setTimeout(() => runSync(i + 1), (RETRY_AT_SEC[i + 1] - RETRY_AT_SEC[i]) * 1000)
+    }
+    setImmediate(() => runSync(0))
   }
 }
 
@@ -1007,26 +1046,66 @@ let ticksSinceFullScan = 0
 // skipped so it can't clobber the nudge's pending bring-forward timer.
 let tickGen = 0
 
+// Without the probe's exit report, a session whose process answers EPERM (a game run as
+// administrator) can't be checked by the free PID test, so the full scan comes every
+// 3rd tick (15 s) for it instead of every 12th.
+const FULL_SCAN_EVERY_TICKS_BLIND = 3
+function sessionsNeedScans() {
+  let probe = false
+  try { probe = require('./desktopProbe').isRunning() } catch {}
+  for (const s of activeSessions.values()) {
+    if (s._pidUnknown && (!probe || s._probeBlind)) return true
+  }
+  return false
+}
+
+// When the next tick should come. A launch being confirmed gets its tick at the moment
+// its confirmation time is up, not at the next 5 s step.
+function nextDelay(now = Date.now()) {
+  const busy = activeSessions.size > 0 || detectingGames.size > 0
+  if (busy) lastActivityAt = now
+  if (!busy) return now - lastActivityAt > DEEP_IDLE_AFTER_MS ? POLL_DEEP_IDLE_MS : POLL_IDLE_MS
+  if (detectionBuffer.size) {
+    const confirmMs = getSensitivitySeconds() * 1000
+    let due = Infinity
+    for (const b of detectionBuffer.values()) due = Math.min(due, b.firstSeen + confirmMs)
+    // Overdue (only a full scan confirms, and one is coming): the normal pace, never a burst.
+    const wait = due - now + 50
+    if (Number.isFinite(due) && wait > 0) return Math.max(250, Math.min(POLL_MS, wait))
+  }
+  return POLL_MS
+}
+
+// One full scan at a time: the probe's reports, a nudge and the regular schedule can
+// all ask for one, and two scans must never interleave.
+let scanInFlight = null
+async function fullScan() {
+  while (scanInFlight) { try { await scanInFlight } catch {} }
+  ticksSinceFullScan = 0
+  const p = tick()
+  scanInFlight = p
+  try { await p } finally { if (scanInFlight === p) scanInFlight = null }
+}
+
 function scheduleNextTick() {
   // Fast cadence while a session is live OR a launch is mid-confirmation
   // (detectingGames non-empty) — a just-launched game still gets checked at
   // 5s so its session starts on time even though full idle scans back off.
-  const busy = activeSessions.size > 0 || detectingGames.size > 0
-  if (busy) lastActivityAt = Date.now()
-  const delay = busy ? POLL_MS
-    : (Date.now() - lastActivityAt > DEEP_IDLE_AFTER_MS ? POLL_DEEP_IDLE_MS : POLL_IDLE_MS)
+  const delay = nextDelay()
   const gen = ++tickGen
   clearTimeout(pollTimer)
   pollTimer = setTimeout(async () => {
     if (gen !== tickGen) return   // superseded by a nudge or a newer schedule
     try {
-      const useLight = activeSessions.size > 0 && ticksSinceFullScan < FULL_SCAN_EVERY_TICKS - 1
+      const every = sessionsNeedScans() ? FULL_SCAN_EVERY_TICKS_BLIND : FULL_SCAN_EVERY_TICKS
+      // A launch being confirmed (a second game while one plays) needs the full scan: the light
+      // tick only checks the running sessions, and the confirming tick would find nothing.
+      const useLight = activeSessions.size > 0 && detectionBuffer.size === 0 && ticksSinceFullScan < every - 1
       if (useLight) {
         ticksSinceFullScan++
         await lightTick()
       } else {
-        ticksSinceFullScan = 0
-        await tick()
+        await fullScan()
       }
     } catch (err) {
       logger.error('processWatcher tick error', { message: err.message })
@@ -1045,20 +1124,58 @@ function scheduleNextTick() {
 // Bring the next full scan forward — called right after the user hits Play.
 // Without it a launch from inside KoZo can wait out the whole 20s idle poll
 // before "Now Playing" lights up, which reads as the app not noticing.
-function nudge() {
+function nudge() { requestScan(2000) }
+
+// A full scan after `delayMs`, replacing whatever tick was pending. Used by nudge() and by
+// the desktop probe's reports.
+function requestScan(delayMs = 0) {
   lastActivityAt = Date.now()   // back to the normal idle cadence
   if (!pollTimer || paused) return
   const gen = ++tickGen   // supersede whatever is pending OR in flight
   clearTimeout(pollTimer)
   pollTimer = setTimeout(async () => {
     if (gen !== tickGen) return
-    // This IS the full scan, so the counter restarts here — leaving it high made
-    // the next scheduled tick spawn fastlist.exe again seconds later, right while
+    // This IS the full scan, so the counter restarts here (fullScan) — leaving it high
+    // made the next scheduled tick spawn fastlist.exe again seconds later, right while
     // the freshly-launched game is loading.
-    ticksSinceFullScan = 0
-    try { await tick() } catch (err) { logger.error('processWatcher nudge error', { message: err.message }) }
+    try { await fullScan() } catch (err) { logger.error('processWatcher scan error', { message: err.message }) }
     if (gen === tickGen) scheduleNextTick()
-  }, 2000)
+  }, delayMs)
+}
+
+// Tell the desktop probe which processes to watch for an exit.
+function syncProbeWatch() {
+  try { require('./desktopProbe').setWatchPids([...activeSessions.values()].map(s => s.pid).filter(Boolean)) } catch {}
+}
+
+// The probe saw a library game's exe start (desktopProbe `S`). A game already in a
+// session only started another process of itself: its exit report covers that.
+function onProcessSeen(exe) {
+  if (paused) return
+  const name = String(exe || '').toLowerCase()
+  for (const s of activeSessions.values()) {
+    if (String(s.exe_name || '').toLowerCase() === name) return
+  }
+  logger.info('processWatcher: game started', { exe: name })
+  requestScan(300)
+}
+
+// The probe saw a watched process exit (desktopProbe `X`). The scan ends the session, or
+// moves it to the game's next process if the game is still running under another one.
+function onProcessExit(pid) {
+  if (paused) return
+  for (const [gameId, s] of activeSessions) {
+    if (s.pid === pid) {
+      logger.info('processWatcher: game process exited', { gameId, pid })
+      requestScan(0)
+      return
+    }
+  }
+}
+
+// The probe can't open this session's process (desktopProbe `U`): the scans must notice its end.
+function onProcessUnwatchable(pid) {
+  for (const s of activeSessions.values()) if (s.pid === pid) s._probeBlind = true
 }
 
 function start() {
@@ -1305,7 +1422,7 @@ async function listRunningProcesses() {
 }
 
 module.exports = {
-  start, stop, pause, resume, nudge,
+  start, stop, pause, resume, nudge, onProcessSeen, onProcessExit, onProcessUnwatchable, nextDelay,
   getActiveSessions, getDetectingGames, isPaused,
   isSessionActive, onIdle, onIdleTick, runWhenIdle, clearSyncParking,
   onChange, onUnknownProcess,

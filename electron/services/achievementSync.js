@@ -543,7 +543,8 @@ async function syncAfterSession(gameId, sessionId) {
     recordSyncError(gameId, result.error)
     if (result.error) {
       logger.warn(`syncAfterSession: ${result.error} for ${game.name}`)
-      return
+      // Said back so processWatcher stops its retries when the answer won't change.
+      return { error: result.error }
     }
     const steamUnlocks = result.unlocks
     if (!steamUnlocks.length) return

@@ -96,6 +96,8 @@
 .badges:empty { display: none; }
 .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: var(--r-pill); font-size: var(--fs-2xs); font-weight: 700; }
 .badgeLow { background: color-mix(in srgb, var(--success) 16%, transparent); color: var(--success); }
+/* New since the last look at My games (the sidebar badge's games). */
+.badgeNew { background: var(--a); color: var(--accent-ink); }
 .badgeNear { background: color-mix(in srgb, var(--a) 14%, transparent); color: var(--a); }
 .badgeAbove { background: var(--surface-3); color: var(--text-muted); }
 .badgeStore { background: color-mix(in srgb, var(--warning) 14%, transparent); color: var(--warning); }
@@ -123,6 +125,21 @@
 .alertTop .alertName { flex: 0 1 auto; min-width: 0; }
 .alertLine, .alertLow { white-space: normal; overflow: visible; }
 .alertRow .badge { flex-shrink: 0; white-space: nowrap; }
+/* The row is a box holding its click (alertMain) and, when the alert can't fire, a fix. */
+.alertRow { cursor: default; flex-wrap: wrap; }
+.alertMain {
+  display: flex; align-items: center; gap: var(--sp-10); flex: 1 1 220px; min-width: 0;
+  padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.alertWarn { font-size: var(--fs-xs); color: var(--warning); line-height: 1.35; }
+.alertFix {
+  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; margin-left: auto;
+  height: 28px; padding: 0 12px; border-radius: var(--r-pill);
+  border: 1px solid color-mix(in srgb, var(--a) 45%, var(--border)); background: var(--ad); color: var(--a);
+  font: inherit; font-size: var(--fs-xs); font-weight: 700; cursor: pointer; white-space: nowrap;
+}
+.alertFix:hover:not(:disabled) { filter: brightness(1.1); }
+.alertFix:disabled { opacity: 0.6; cursor: default; }
 
 
 @keyframes dealUp { from { opacity: 0; transform: translateY(12px); } }

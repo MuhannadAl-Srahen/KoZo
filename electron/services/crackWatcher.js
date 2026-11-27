@@ -1476,6 +1476,29 @@ async function runDeepScan(gameId) {
   }
 }
 
+// The session ended (processWatcher.endSession). The desktop probe ends it about 0.3 s after the
+// game exits, so a file an emulator writes in the game's last second (or as it shuts down) could
+// still be in scheduleScan's debounce, which unwatchGame cancels: that unlock would wait for the
+// next catch-up. The watcher stays a few seconds more, one last look, then it stops, unless the
+// game is running again by then. The scan stamps "now" (just after the session), which places
+// it in that session like any live unlock.
+const FINISH_GRACE_MS = 6000
+function finishGame(gameId) {
+  if (!fileWatchers.has(gameId) && !scanDebounce.has(gameId)) return
+  const playingAgain = () => {
+    try {
+      const pw = require('./processWatcher')
+      return pw.getActiveSessions().has(gameId) || pw.getDetectingGames().has(gameId)
+    } catch { return false }
+  }
+  setTimeout(() => {
+    if (playingAgain()) return
+    scanGameForCrackAchievements(gameId, { fresh: true, allowWalk: false })
+      .catch(e => logger.warn(`crackWatcher: last scan failed for game ${gameId}`, { message: e.message }))
+      .finally(() => { if (!playingAgain()) unwatchGame(gameId) })
+  }, FINISH_GRACE_MS)
+}
+
 function unwatchGame(gameId) {
   const w = fileWatchers.get(gameId)
   if (w) { try { w.close() } catch {} ; fileWatchers.delete(gameId) }
@@ -1500,7 +1523,7 @@ function stopWatching() {
 module.exports = {
   startWatching, stopWatching,
   scanGameForCrackAchievements, scanAllCrackedGames, scanActiveSessions,
-  watchGame, unwatchGame,
+  watchGame, unwatchGame, finishGame,
   buildCandidates, readEmuConfigAppIds, detectEmulator, diagnoseGame, myDocsDir,
   inspectGoldberg, enableGoldbergAchievements, deepScanForAppIds, collectCandidates,
   // Pure parsers — exported for the standalone test script (scripts/test-parsers.js)

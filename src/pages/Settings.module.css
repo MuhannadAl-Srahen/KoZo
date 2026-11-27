@@ -956,6 +956,23 @@
 .padDot { width: 8px; height: 8px; border-radius: 50%; background: var(--neutral-border); }
 .padOn { color: var(--success); }
 .padOn .padDot { background: var(--success); box-shadow: 0 0 8px var(--success); }
+.padWarn { color: var(--warning); }
+.padWarn .padDot { background: var(--warning); }
+.padWarnNote {
+  margin: 0 0 var(--sp-12);
+  padding: var(--sp-10) var(--sp-12);
+  border-radius: var(--r-input);
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+  background: var(--warning-bg);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+/* Test it / Record my own combo, with what's happening beside them */
+.padTools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-8); margin-top: var(--sp-10); }
+.padToolNote { flex: 1 1 240px; min-width: 0; font-size: var(--fs-sm); color: var(--text-secondary); }
+.padToolNote b { color: var(--text-primary); font-weight: 600; }
+.padToolOk { color: var(--success); font-weight: 500; }
 .shortcutWhat { font-size: var(--fs-sm); color: var(--text-secondary); }
 
 /* ── Game saves (Backups tab) ─────────────────────────────────── */

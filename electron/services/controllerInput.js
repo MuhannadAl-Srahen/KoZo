@@ -8,11 +8,19 @@
 // trigger pulled, or a stick past a deadzone, so stick drift doesn't count.
 
 let lastInputAt = 0
+const listeners = new Set()
 
-function noteInput() { lastInputAt = Date.now() }
+function noteInput() {
+  lastInputAt = Date.now()
+  for (const cb of listeners) { try { cb() } catch {} }
+}
+
+// main.js: controller input while KoZo is in front starts the page's controller
+// navigation, with no first press needed.
+function onInput(cb) { listeners.add(cb); return () => listeners.delete(cb) }
 
 // Milliseconds since the controller was last used. Infinity = not seen yet, so
 // callers fall back to the keyboard and mouse idle time.
 function msSinceInput() { return lastInputAt ? Date.now() - lastInputAt : Infinity }
 
-module.exports = { noteInput, msSinceInput }
+module.exports = { noteInput, msSinceInput, onInput }
